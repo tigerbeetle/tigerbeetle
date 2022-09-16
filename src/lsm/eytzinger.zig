@@ -132,7 +132,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
         /// If the target key is present in values, the returned slice is guaranteed to contain it.
         /// May return a slice of length one if an exact result is found.
         /// May return a slice of length zero if the key is definitely not in values.
-        /// Otherwise, the caller will likely want to preform a binary search on the result.
+        /// Otherwise, the caller will likely want to perform a binary search on the result.
         /// TODO examine the generated machine code for this function
         pub fn search_values(
             comptime Key: type,

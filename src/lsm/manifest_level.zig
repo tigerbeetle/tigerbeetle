@@ -23,8 +23,8 @@ pub fn ManifestLevelType(
     return struct {
         const Self = @This();
 
-        const Keys = SegmentedArray(Key, NodePool, table_count_max);
-        const Tables = SegmentedArray(TableInfo, NodePool, table_count_max);
+        pub const Keys = SegmentedArray(Key, NodePool, table_count_max);
+        pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max);
 
         /// The maximum key of each key node in the keys segmented array.
         /// This is the starting point of our tiered lookup approach.
@@ -95,6 +95,7 @@ pub fn ManifestLevelType(
 
             var absolute_index = level.absolute_index_for_insert(tables[0].key_max);
 
+            // TODO use absolute_index_for_insert each time instead of iterating forward?
             var i: usize = 0;
             while (i < tables.len) : (i += 1) {
                 const table = &tables[i];
@@ -121,7 +122,7 @@ pub fn ManifestLevelType(
 
         /// Return the index at which to insert a new table given the table's key_max.
         /// Requires all metadata/indexes to be valid.
-        fn absolute_index_for_insert(level: Self, key_max: Key) u32 {
+        pub fn absolute_index_for_insert(level: Self, key_max: Key) u32 {
             const root = level.root_keys();
             if (root.len == 0) {
                 assert(level.keys.len() == 0);

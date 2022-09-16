@@ -9,7 +9,7 @@ const math = std.math;
 
 /// Returns the index of the key either exactly equal to the target key or, if there is no exact
 /// match, the next greatest key.
-/// Doesn't preform the extra key comparison to determine if the match is exact
+/// Doesn't perform the extra key comparison to determine if the match is exact.
 pub fn binary_search_values_raw(
     comptime Key: type,
     comptime Value: type,
@@ -27,7 +27,7 @@ pub fn binary_search_values_raw(
         const mid = offset + half;
 
         // This trick seems to be what's needed to get llvm to emit branchless code for this,
-        // a ternay-style if expression was generated as a jump here for whatever reason.
+        // a ternary-style if expression was generated as a jump here for whatever reason.
         const next_offsets = [_]usize{ offset, mid };
         offset = next_offsets[@boolToInt(compare_keys(key_from_value(&values[mid]), key) == .lt)];
 
