@@ -304,38 +304,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
-        /// Moves the table at the address/checksum pair from one level to another.
-        /// Unlike `update_tables`, this avoids leaving the same TableInfo with different snapshots
-        /// in both levels by removing it from level_a before inserting to level_b.
-        pub fn move_table(
-            manifest: *Manifest,
-            level_a: u8,
-            level_b: u8,
-            snapshot: u64,
-            address: u64,
-            checksum: u128,
-        ) void {
-            assert(level_a < config.lsm_levels);
-            assert(level_b < config.lsm_levels);
-            assert(level_a + 1 == level_b);
-
-            const table_info: TableInfo = blk: {
-                _ = address;
-                _ = checksum;
-                break :blk @panic("TODO(Joran): lookup using address/checksum");
-            };
-
-            const tables = [_]TableInfo{table_info};
-            manifest.levels[level_a].remove_tables(manifest.node_pool, &.{snapshot}, &tables);
-            manifest.levels[level_b].insert_tables(manifest.node_pool, &tables);
-
-            // Appends move changes to the manifest log. (A move is only recorded as an insert).
-            for (tables) |*table| {
-                const log_level = @intCast(u7, level_b);
-                manifest.manifest_log.insert(log_level, table);
-            }
-        }
-
         pub fn remove_invisible_tables(
             manifest: *Manifest,
             level: u8,
