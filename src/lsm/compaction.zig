@@ -55,7 +55,7 @@ pub fn CompactionType(
         );
 
         const MergeStreamSelector = struct {
-            fn peek(compaction: *Compaction, stream_id: u32) ?Key {
+            fn peek(compaction: *const Compaction, stream_id: u32) ?Key {
                 return switch (stream_id) {
                     0 => compaction.iterator_a.peek(),
                     1 => compaction.iterator_b.peek(),
@@ -73,12 +73,7 @@ pub fn CompactionType(
 
             /// Returns true if stream A has higher precedence than stream B.
             /// This is used to deduplicate values across streams.
-            ///
-            /// This assumes that all overlapping tables in level A at the time the compaction was
-            /// started are included in the compaction. If this is not the case, the older table
-            /// in a pair of overlapping tables could be left in level A and shadow the newer table
-            /// in level B, resulting in data loss/invalid data.
-            fn precedence(compaction: *Compaction, stream_a: u32, stream_b: u32) bool {
+            fn precedence(compaction: *const Compaction, stream_a: u32, stream_b: u32) bool {
                 _ = compaction;
                 assert(stream_a + stream_b == 1);
 

@@ -14,11 +14,11 @@ pub fn KWayMergeIterator(
     comptime k_max: u32,
     /// Peek the next key in the stream identified by stream_index.
     /// For example, peek(stream_index=2) returns user_streams[2][0].
-    comptime stream_peek: fn (context: *Context, stream_index: u32) ?Key,
+    comptime stream_peek: fn (context: *const Context, stream_index: u32) ?Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
     /// Returns true if stream A has higher precedence than stream B.
     /// This is used to deduplicate values across streams.
-    comptime stream_precedence: fn (context: *Context, a: u32, b: u32) bool,
+    comptime stream_precedence: fn (context: *const Context, a: u32, b: u32) bool,
 ) type {
     return struct {
         const Self = @This();
@@ -204,7 +204,7 @@ fn TestContext(comptime k_max: u32) type {
             return math.order(a, b);
         }
 
-        fn stream_peek(context: *Self, stream_index: u32) ?u32 {
+        fn stream_peek(context: *const Self, stream_index: u32) ?u32 {
             const stream = context.streams[stream_index];
             if (stream.len == 0) return null;
             return stream[0].key;
@@ -216,7 +216,7 @@ fn TestContext(comptime k_max: u32) type {
             return stream[0];
         }
 
-        fn stream_precedence(context: *Self, a: u32, b: u32) bool {
+        fn stream_precedence(context: *const Self, a: u32, b: u32) bool {
             _ = context;
 
             // Higher streams have higher precedence
