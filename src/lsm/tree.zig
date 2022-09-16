@@ -405,9 +405,9 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         //
         // A full compaction phase is denoted as a bar or measure, using terms from music notation.
         // Each measure consists of `lsm_batch_multiple` beats or "compaction ticks" of work.
-        // A compaction beat is started asynchronously with `compact_io` which takes a callback.
-        // After `compact_io` is called, `compact_cpu` should be called to enable pipelining.
-        // The compaction beat completes when the `compact_io` callback is invoked.
+        // A compaction beat is started asynchronously with `compact_tick` which takes a callback.
+        // After `compact_tick` is called, `compact_cpu` should be called to enable pipelining.
+        // The compaction beat completes when the `compact_tick` callback is invoked.
         //
         // A measure is split in half according to the "first" down beat and "middle" down beat.
         // The first half of the measure compacts even levels while the latter compacts odd levels.
@@ -699,7 +699,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
             assert(tree.compaction_callback != null);
 
-            // compact_done() is called after all compact_io_tick()'s complete.
+            // compact_done() is called after all compact_tick()'s complete.
             // This function can be triggered asynchronously or by compact_cpu() below.
             tree.compaction_io_pending -= 1;
             if (tree.compaction_io_pending == 0) tree.compact_done();
@@ -815,14 +815,14 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback != null);
 
-            // Invoke the compact_io() callback after the manifest compacts at the end of the beat.
+            // Invoke the compact_tick() callback after the manifest compacts at the end of the beat.
             const callback = tree.compaction_callback.?;
             tree.compaction_callback = null;
             callback(tree);
         }
 
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
-            // Assert no outstanding compact_io() work..
+            // Assert no outstanding compact_tick() work..
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
 
@@ -1029,8 +1029,7 @@ pub fn main() !void {
     _ = tree.put;
     _ = tree.remove;
     _ = tree.lookup;
-    _ = tree.compact_io;
-    _ = tree.compact_cpu;
+    _ = tree.compact_tick;
 
     _ = Tree.Manifest.LookupIterator.next;
     _ = tree.manifest;
