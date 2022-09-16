@@ -20,13 +20,17 @@ const usage = fmt.comptimePrint(
     \\
     \\  tigerbeetle start --addresses=<addresses> <path>
     \\
+    \\  tigerbeetle version [--version]
+    \\
     \\Commands:
     \\
-    \\  format  Create a TigerBeetle replica data file at <path>.
-    \\          The --cluster and --replica arguments are required.
-    \\          Each TigerBeetle replica must have its own data file.
+    \\  format   Create a TigerBeetle replica data file at <path>.
+    \\           The --cluster and --replica arguments are required.
+    \\           Each TigerBeetle replica must have its own data file.
     \\
-    \\  start   Run a TigerBeetle replica from the data file at <path>.
+    \\  start    Run a TigerBeetle replica from the data file at <path>.
+    \\
+    \\  version  Print the TigerBeetle build version and the compile-time config values.
     \\
     \\Options:
     \\
@@ -48,6 +52,9 @@ const usage = fmt.comptimePrint(
     \\        will be used.
     \\        "addresses[i]" corresponds to replica "i".
     \\
+    \\  --verbose
+    \\        Print compile-time configuration along with the build version.
+    \\
     \\Examples:
     \\
     \\  tigerbeetle format --cluster=7 --replica=0 7_0.tigerbeetle
@@ -59,6 +66,8 @@ const usage = fmt.comptimePrint(
     \\  tigerbeetle start --addresses=3003,3001,3002 7_2.tigerbeetle
     \\
     \\  tigerbeetle start --addresses=192.168.0.1,192.168.0.2,192.168.0.3 7_0.tigerbeetle
+    \\
+    \\  tigerbeetle version --verbose
     \\
 , .{
     .default_address = config.address,
@@ -78,11 +87,15 @@ pub const Command = union(enum) {
         memory: u64,
         path: [:0]const u8,
     },
+    version: struct {
+        verbose: bool,
+    },
 
     pub fn deinit(command: Command, allocator: std.mem.Allocator) void {
         var args_allocated = switch (command) {
             .format => |cmd| cmd.args_allocated,
             .start => |cmd| cmd.args_allocated,
+            .version => return,
         };
 
         for (args_allocated.items) |arg| allocator.free(arg);
@@ -98,6 +111,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var replica: ?[]const u8 = null;
     var addresses: ?[]const u8 = null;
     var memory: ?[]const u8 = null;
+    var verbose: ?bool = null;
 
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
@@ -111,7 +125,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     assert(did_skip);
 
     const raw_command = try (args.next(allocator) orelse
-        fatal("no command provided, expected 'start' or 'format'", .{}));
+        fatal("no command provided, expected 'start', 'format', or 'version'", .{}));
     defer allocator.free(raw_command);
 
     if (mem.eql(u8, raw_command, "-h") or mem.eql(u8, raw_command, "--help")) {
@@ -119,7 +133,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         os.exit(0);
     }
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
-        fatal("unknown command '{s}', expected 'start' or 'format'", .{raw_command});
+        fatal("unknown command '{s}', expected 'start', 'format', or 'version'", .{raw_command});
 
     while (args.next(allocator)) |parsed_arg| {
         const arg = try parsed_arg;
@@ -133,6 +147,8 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
             addresses = parse_flag("--addresses", arg);
         } else if (mem.startsWith(u8, arg, "--memory")) {
             memory = parse_flag("--memory", arg);
+        } else if (mem.eql(u8, arg, "--verbose")) {
+            verbose = true;
         } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
             os.exit(0);
@@ -146,9 +162,21 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     }
 
     switch (command) {
+        .version => {
+            if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
+            if (memory != null) fatal("--memory: supported only by 'start' command", .{});
+            if (cluster != null) fatal("--cluster: supported only by 'format' command", .{});
+            if (replica != null) fatal("--replica: supported only by 'format' command", .{});
+            if (path != null) fatal("unexpected path", .{});
+
+            return Command{
+                .version = .{ .verbose = verbose orelse false },
+            };
+        },
         .format => {
             if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
             if (memory != null) fatal("--memory: supported only by 'start' command", .{});
+            if (verbose != null) fatal("--verbose: supported only by 'version' command", .{});
 
             return Command{
                 .format = .{
@@ -162,6 +190,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         .start => {
             if (cluster != null) fatal("--cluster: supported only by 'format' command", .{});
             if (replica != null) fatal("--replica: supported only by 'format' command", .{});
+            if (verbose != null) fatal("--verbose: supported only by 'version' command", .{});
 
             return Command{
                 .start = .{
