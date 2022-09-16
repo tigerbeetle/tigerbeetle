@@ -547,7 +547,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(values_count > 0);
 
             const level_b: u8 = 0;
-            const table: ?*const Manifest.TableInfo = null;
+            const table_a: ?*const Manifest.TableInfo = null;
             const range = tree.manifest.compaction_range(
                 level_b,
                 tree.table_immutable.key_min(),
@@ -569,10 +569,10 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
             tree.compaction_table_immutable.start(
                 tree.grid,
-                table,
-                range,
-                snapshot,
                 &tree.manifest,
+                snapshot,
+                range,
+                table_a,
                 level_b,
                 .{ .table = &tree.table_immutable },
             );
@@ -601,10 +601,10 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
             context.compaction.start(
                 tree.grid,
-                table_range.table,
-                table_range.range,
-                snapshot,
                 &tree.manifest,
+                snapshot,
+                table_range.range,
+                table_range.table,
                 context.level_b,
                 .{
                     .grid = tree.grid,

@@ -102,8 +102,8 @@ pub fn CompactionType(
         iterator_a: IteratorA,
         iterator_b: IteratorB,
 
-        merge_status: Status,
-        merge_iterator: MergeIterator,
+        merge_done: bool,
+        merge_iterator: ?MergeIterator,
 
         table_builder: Table.Builder,
         index: BlockWrite,
@@ -150,8 +150,8 @@ pub fn CompactionType(
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
 
-                .merge_status = .idle,
-                .merge_iterator = undefined, // Assigned by start()
+                .merge_done = false,
+                .merge_iterator = null,
 
                 .table_builder = table_builder,
                 .index = .{},
@@ -191,6 +191,7 @@ pub fn CompactionType(
             assert(compaction.status == .idle);
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
+            assert(!compaction.merge_done and compaction.merge_iterator == null);
 
             assert(range.table_count > 0);
             assert(level_b < config.lsm_levels);
@@ -211,8 +212,8 @@ pub fn CompactionType(
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
 
-                .merge_status = .idle,
-                .merge_iterator = undefined,
+                .merge_done = false,
+                .merge_iterator = null,
 
                 .table_builder = compaction.table_builder,
                 .index = compaction.index,
@@ -266,7 +267,7 @@ pub fn CompactionType(
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
-            assert(compaction.merge_status != .done);
+            assert(!compaction.merge_done);
 
             // Tables discovered by iterator_b that are visible
             compaction.queue_manifest_update(&compaction.update_level_b, table);
@@ -289,7 +290,7 @@ pub fn CompactionType(
         ) void {
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
-            assert(compaction.merge_status != .done);
+            assert(!compaction.merge_done);
 
             assert(buffer == &compaction.update_level_b or buffer == &compaction.insert_level_b);
             if (buffer.full()) compaction.apply_manifest_updates(buffer);
@@ -302,7 +303,7 @@ pub fn CompactionType(
         fn apply_manifest_updates(compaction: *Compaction, buffer: *TableInfoBuffer) void {
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
-            assert(compaction.merge_status != .done);
+            assert(!compaction.merge_done);
 
             assert(buffer == &compaction.update_level_b or buffer == &compaction.insert_level_b);
 
@@ -325,8 +326,8 @@ pub fn CompactionType(
         pub fn compact_tick(compaction: *Compaction, callback: Callback) void {
             assert(compaction.status == .processing);
             assert(compaction.callback == null);
-            assert(compaction.merge_status != .done);
             assert(compaction.io_pending == 0);
+            assert(!compaction.merge_done);
 
             compaction.callback = callback;
             
@@ -375,7 +376,7 @@ pub fn CompactionType(
         fn io_start(compaction: *Compaction) void {
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
-            assert(compaction.merge_status != .done);
+            assert(!compaction.merge_done);
 
             compaction.io_pending += 1;
         }
@@ -383,8 +384,8 @@ pub fn CompactionType(
         fn io_finish(compaction: *Compaction) void {
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
-            assert(compaction.merge_status != .done);
             assert(compaction.io_pending > 0);
+            assert(!compaction.merge_done);
 
             compaction.io_pending -= 1;
             if (compaction.io_pending == 0) compaction.cpu_merge_start();
@@ -393,22 +394,20 @@ pub fn CompactionType(
         fn cpu_merge_start(compaction: *Compaction) void {
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
-            assert(compaction.merge_status != .done);
             assert(compaction.io_pending == 0);
+            assert(!compaction.merge_done);
 
             // Create the merge iterator only when we can peek() from the read iterators.
             // This happens after IO for the first reads complete.
-            if (compaction.merge_status == .idle) {
+            if (compaction.merge_iterator == null) {
                 compaction.merge_iterator = MergeIterator.init(compaction, k, .ascending);
-                compaction.merge_status = .processing;
             }
 
-            assert(compaction.merge_status == .processing);
             assert(!compaction.data.ready);
             assert(!compaction.filter.ready);
             assert(!compaction.index.ready);
 
-            if (!compaction.merge_iterator.empty()) {
+            if (!compaction.merge_iterator.?.empty()) {
                 compaction.cpu_merge();
             } else {
                 compaction.cpu_merge_finish();
@@ -427,10 +426,10 @@ pub fn CompactionType(
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
             assert(compaction.io_pending == 0);
+            assert(!compaction.merge_done);
 
             // Ensure there are values to merge and that is it safe to do so.
-            assert(compaction.merge_status == .processing);
-            assert(!compaction.merge_iterator.empty());
+            assert(!compaction.merge_iterator.?.empty());
             assert(!compaction.data.ready);
             assert(!compaction.filter.ready);
             assert(!compaction.index.ready);
@@ -438,7 +437,7 @@ pub fn CompactionType(
             // Build up the data/filter/index blocks with values merged from the read iterators.
             var tombstones_dropped: u32 = 0;
             while (!compaction.table_builder.data_block_full()) {
-                const value = compaction.merge_iterator.pop() orelse break;
+                const value = compaction.merge_iterator.?.pop() orelse break;
                 if (compaction.drop_tombstones and tombstone(&value)) {
                     tombstones_dropped += 1;
                 } else {
@@ -466,7 +465,7 @@ pub fn CompactionType(
                 compaction.data.ready = true;
 
                 // The merge iterator having pending values should mean the data block is full.
-                if (!compaction.merge_iterator.empty()) {
+                if (!compaction.merge_iterator.?.empty()) {
                     const values_used = Table.data_block_values_used(compaction.data.block).len;
                     assert(values_used == Table.data.value_count_max);
                 }
@@ -475,7 +474,7 @@ pub fn CompactionType(
             // Finalize the filter block if it (or the index block) are full or if there's no more values.
             if (compaction.table_builder.filter_block_full() or
                 compaction.table_builder.index_block_full() or
-                compaction.merge_iterator.empty())
+                compaction.merge_iterator.?.empty())
             blk: {
                 // An empty filter block means all the values read were tombstones that were dropped.
                 if (compaction.table_builder.filter_block_empty()) {
@@ -497,7 +496,7 @@ pub fn CompactionType(
 
             // Finalize the index block if it's full or if there's no more values.
             if (compaction.table_builder.index_block_full() or
-                compaction.merge_iterator.empty())
+                compaction.merge_iterator.?.empty())
             blk: {
                 // An empty index block means all the values read were tombstones that were dropped.
                 if (compaction.table_builder.index_block_empty()) {
@@ -526,10 +525,10 @@ pub fn CompactionType(
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
             assert(compaction.io_pending == 0);
+            assert(!compaction.merge_done);
 
             // Ensure merging is truly finished.
-            assert(compaction.merge_status == .processing);
-            assert(compaction.merge_iterator.empty());
+            assert(compaction.merge_iterator.?.empty());
             assert(!compaction.data.ready);
             assert(!compaction.filter.ready);
             assert(!compaction.index.ready);
@@ -556,7 +555,8 @@ pub fn CompactionType(
             }
 
             // Finally, mark Compaction as officially complete and ready to be reset().
-            compaction.merge_status = .done;
+            compaction.merge_iterator = null;
+            compaction.merge_done = true;
             compaction.status = .done;
         }
 
@@ -564,14 +564,14 @@ pub fn CompactionType(
             assert(compaction.status == .done);
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
-            assert(compaction.merge_status == .done);
+            assert(compaction.merge_done);
 
             // Double check that manifest updates have been applied.
             assert(compaction.update_level_b.drain().len == 0);
             assert(compaction.insert_level_b.drain().len == 0);
 
             compaction.status = .idle;
-            compaction.merge_status = .idle;
+            compaction.merge_done = false;
         }
     };
 }
