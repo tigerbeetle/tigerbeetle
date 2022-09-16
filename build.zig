@@ -4,12 +4,23 @@ const builtin = @import("builtin");
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
 
     {
         const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
         tigerbeetle.setTarget(target);
         tigerbeetle.setBuildMode(mode);
         tigerbeetle.install();
+
+        // The "tigerbeetle version" command includes the build-time commit hash.
+        const options = b.addOptions();
+        if (git_commit(allocator)) |commit| {
+            options.addOption(?[]const u8, "git_commit", commit[0..]);
+        } else {
+            options.addOption(?[]const u8, "git_commit", null);
+        }
+        tigerbeetle.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = tigerbeetle.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -212,4 +223,21 @@ pub fn build(b: *std.build.Builder) void {
         const step = b.step(benchmark.name, "Benchmark " ++ benchmark.description);
         step.dependOn(&run_cmd.step);
     }
+}
+
+fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
+    const exec_result = std.ChildProcess.exec(.{
+        .allocator = allocator,
+        .argv = &.{ "git", "rev-parse", "--verify", "HEAD" },
+    }) catch return null;
+    defer allocator.free(exec_result.stdout);
+    defer allocator.free(exec_result.stderr);
+
+    // +1 for trailing newline.
+    if (exec_result.stdout.len != 40 + 1) return null;
+    if (exec_result.stderr.len != 0) return null;
+
+    var output: [40]u8 = undefined;
+    std.mem.copy(u8, &output, exec_result.stdout[0..40]);
+    return output;
 }

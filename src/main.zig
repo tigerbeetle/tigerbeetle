@@ -5,6 +5,7 @@ const mem = std.mem;
 const os = std.os;
 const log = std.log.scoped(.main);
 
+const build_options = @import("tigerbeetle_build_options");
 const config = @import("config.zig");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
@@ -45,6 +46,7 @@ pub fn main() !void {
     switch (parse_args) {
         .format => |*args| try Command.format(allocator, args.cluster, args.replica, args.path),
         .start => |*args| try Command.start(&arena, args.addresses, args.memory, args.path),
+        .version => |*args| try Command.version(allocator, args.verbose),
     }
 }
 
@@ -172,5 +174,31 @@ const Command = struct {
             replica.tick();
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
+    }
+
+    pub fn version(allocator: mem.Allocator, verbose: bool) !void {
+        _ = allocator;
+
+        var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
+        const stdout = stdout_buffer.writer();
+        try stdout.writeAll("TigerBeetle version experimental\n");
+
+        if (verbose) {
+            try std.fmt.format(stdout, "\ngit_commit=\"{s}\"\n", .{ build_options.git_commit orelse "?" });
+            inline for (std.meta.declarations(config)) |config_field| {
+                if (config_field.is_pub) {
+                    const value = @field(config, config_field.name);
+                    if (@typeInfo(@TypeOf(value)) == .Pointer) {
+                        try std.fmt.format(stdout, "{s}=\"{s}\"\n", .{
+                            config_field.name,
+                            std.fmt.fmtSliceEscapeLower(value),
+                        });
+                    } else {
+                        try std.fmt.format(stdout, "{s}={}\n", .{ config_field.name, value });
+                    }
+                }
+            }
+        }
+        try stdout_buffer.flush();
     }
 };
