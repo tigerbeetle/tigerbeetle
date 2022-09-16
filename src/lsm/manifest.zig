@@ -54,11 +54,21 @@ pub fn TableInfoType(comptime Table: type) type {
             assert(table.address != 0);
             assert(table.snapshot_min < table.snapshot_max);
             assert(snapshot <= snapshot_latest);
-                
+            
+            // Snapshots are no longer as unique as they were before,
+            // with Compaction and the like committing to snapshots "in the past" / before current op.
+            //
+            // For example, Compaction may update the snapshot_max of tables during removal to make 
+            // them invisible. It will also scan for tables that are invisible with the same snapshot.
+            //
+            // We can then relax this range check to be 
+            // - inclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
+            // - exclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
+            
             // assert(snapshot != table.snapshot_min);
             // assert(snapshot != table.snapshot_max);
 
-            return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
+            return table.snapshot_min <= snapshot and snapshot < table.snapshot_max;
         }
 
         pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
