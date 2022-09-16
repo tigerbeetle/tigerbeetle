@@ -65,7 +65,21 @@ pub fn build(b: *std.build.Builder) void {
         step.dependOn(&run_cmd.step);
     }
 
-    { 
+    {
+        const benchmark = b.addExecutable(
+            "benchmark_manifest_level",
+            "src/lsm/manifest_level_benchmark.zig",
+        );
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(.ReleaseSafe);
+        benchmark.setMainPkgPath("src/");
+        const run_cmd = benchmark.run();
+
+        const step = b.step("benchmark_manifest_level", "Benchmark ManifestLevel search");
+        step.dependOn(&run_cmd.step);
+    }
+
+    {
         const tb_client = b.addStaticLibrary("tb_client", "src/c/tb_client.zig");
         tb_client.setMainPkgPath("src");
         tb_client.setTarget(target);

@@ -6,6 +6,7 @@ const mem = std.mem;
 const meta = std.meta;
 
 const div_ceil = @import("../util.zig").div_ceil;
+const binary_search_values_raw = @import("binary_search.zig").binary_search_values_raw;
 
 const Direction = @import("direction.zig").Direction;
 
@@ -25,7 +26,7 @@ pub fn SegmentedArray(
         // We can't use @divExact() here as we store TableInfo structs of various sizes in this
         // data structure. This means that there may be padding at the end of the node.
         pub const node_capacity = blk: {
-            const max = NodePool.node_size / @sizeOf(T);
+            const max = @divFloor(NodePool.node_size, @sizeOf(T));
 
             // We require that the node is evenly divisible by 2 to simplify our code
             // that splits/joins nodes at the midpoint.
@@ -679,6 +680,52 @@ pub fn SegmentedArray(
                 },
             }
         }
+
+        pub fn search(
+            array: *const Self,
+            comptime Key: type,
+            comptime key_from_value: fn (*const T) callconv(.Inline) Key,
+            comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+            key: Key,
+        ) Cursor {
+            if (array.node_count == 0) {
+                return .{
+                    .node = 0,
+                    .relative_index = 0,
+                };
+            }
+
+            var offset: usize = 0;
+            var length: usize = array.node_count;
+            while (length > 1) {
+                const half = length / 2;
+                const mid = offset + half;
+
+                const node = &array.nodes[mid].?[0];
+                // This trick seems to be what's needed to get llvm to emit branchless code for this,
+                // a ternary-style if expression was generated as a jump here for whatever reason.
+                const next_offsets = [_]usize{ offset, mid };
+                offset = next_offsets[@boolToInt(compare_keys(key_from_value(node), key) == .lt)];
+
+                length -= half;
+            }
+
+            const node = array.node_elements(@intCast(u32, offset));
+            const relative_index = binary_search_values_raw(Key, T, key_from_value, compare_keys, node, key);
+            if (offset + 1 == array.node_count or
+                relative_index < array.count(@intCast(u32, offset)))
+            {
+                return .{
+                    .node = @intCast(u32, offset),
+                    .relative_index = relative_index,
+                };
+            } else {
+                return .{
+                    .node = @intCast(u32, offset + 1),
+                    .relative_index = 0,
+                };
+            }
+        }
     };
 }
 
@@ -686,6 +733,10 @@ fn TestContext(
     comptime T: type,
     comptime node_size: u32,
     comptime element_count_max: u32,
+    comptime Key: type,
+    comptime key_from_value: fn (*const T) callconv(.Inline) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    comptime element_order: enum { sorted, unsorted },
 ) type {
     return struct {
         const Self = @This();
@@ -769,21 +820,39 @@ fn TestContext(
 
             if (count_free == 0) return;
 
-            var buffer: [TestArray.node_capacity * 3]T = undefined;
+            switch (element_order) {
+                .unsorted => {
+                    var buffer: [TestArray.node_capacity * 3]T = undefined;
+                    const count_max = @minimum(count_free, TestArray.node_capacity * 3);
+                    const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
+                    context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
 
-            const count_max = @minimum(count_free, TestArray.node_capacity * 3);
-            const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
-            context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
+                    assert(context.reference.items.len <= element_count_max);
+                    const index = context.random.uintAtMostBiased(u32, reference_len);
 
-            assert(context.reference.items.len <= element_count_max);
-            const index = context.random.uintAtMostBiased(u32, reference_len);
+                    context.array.insert_elements(&context.pool, index, buffer[0..count]);
 
-            context.array.insert_elements(&context.pool, index, buffer[0..count]);
+                    // TODO the standard library could use an AssumeCapacity variant of this.
+                    context.reference.insertSlice(index, buffer[0..count]) catch unreachable;
 
-            // TODO the standard library could use an AssumeCapacity variant of this.
-            context.reference.insertSlice(index, buffer[0..count]) catch unreachable;
+                    context.inserts += count;
+                },
+                .sorted => {
+                    var value: T = undefined;
+                    context.random.bytes(mem.asBytes(&value));
 
-            context.inserts += count;
+                    // TODO fast-insert using cursor
+                    const cursor = context.array.search(Key, key_from_value, compare_keys, key_from_value(&value));
+                    const index = if (context.reference.items.len == 0) 0
+                        else binary_search_values_raw(Key, T, key_from_value, compare_keys, context.reference.items, key_from_value(&value));
+                    try testing.expectEqual(index, context.array.absolute_index_for_cursor(cursor));
+
+                    context.array.insert_elements(&context.pool, index, &.{value});
+                    context.reference.insertSlice(index, &.{value}) catch unreachable; // TODO insertSlice not needed, just insert
+
+                    context.inserts += 1;
+                },
+            }
 
             try context.verify();
         }
@@ -931,20 +1000,37 @@ test "SegmentedArray" {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    // TODO Import this type from lsm/tree.zig.
-    const TableInfo = extern struct {
-        checksum: u128,
-        key_min: u128,
-        key_max: u128,
+    const Key = @import("composite_key.zig").CompositeKey(u64);
+    const TableType = @import("table.zig").TableType;
+    const TableInfoType = @import("manifest.zig").TableInfoType;
+    const TableInfo = TableInfoType(TableType(
+        Key,
+        Key.Value,
+        Key.compare_keys,
+        Key.key_from_value,
+        Key.sentinel_key,
+        Key.tombstone,
+        Key.tombstone_from_key,
+    ));
 
-        address: u64,
+    const CompareInt = struct {
+        inline fn compare_keys(a: u32, b: u32) std.math.Order {
+            return std.math.order(a, b);
+        }
 
-        /// Set to the current snapshot tick on creation.
-        snapshot_min: u64,
-        /// Initially math.maxInt(u64) on creation, set to the current
-        /// snapshot tick on deletion.
-        snapshot_max: u64,
-        flags: u64 = 0,
+        inline fn key_from_value(value: *const u32) u32 {
+            return value.*;
+        }
+    };
+
+    const CompareTable = struct {
+        inline fn compare_keys(a: u64, b: u64) std.math.Order {
+            return std.math.order(a, b);
+        }
+
+        inline fn key_from_value(value: *const TableInfo) u64 {
+            return value.address;
+        }
     };
 
     comptime {
@@ -979,19 +1065,25 @@ test "SegmentedArray" {
         Options{ .element_type = TableInfo, .node_size = 512, .element_count_max = 1024 },
         Options{ .element_type = TableInfo, .node_size = 1024, .element_count_max = 1024 },
     }) |options| {
-        const Context = TestContext(
-            options.element_type,
-            options.node_size,
-            options.element_count_max,
-        );
+        inline for (.{ .sorted, .unsorted }) |order| {
+            const Context = TestContext(
+                options.element_type,
+                options.node_size,
+                options.element_count_max,
+                if (options.element_type == u32) u32 else u64,
+                if (options.element_type == u32) CompareInt.key_from_value else CompareTable.key_from_value,
+                if (options.element_type == u32) CompareInt.compare_keys else CompareTable.compare_keys,
+                order,
+            );
 
-        var context = try Context.init(random);
-        defer context.deinit();
+            var context = try Context.init(random);
+            defer context.deinit();
 
-        try context.run();
+            try context.run();
 
-        if (options.node_size % @sizeOf(options.element_type) != 0) tested_padding = true;
-        if (Context.TestArray.node_capacity == 2) tested_node_capacity_min = true;
+            if (options.node_size % @sizeOf(options.element_type) != 0) tested_padding = true;
+            if (Context.TestArray.node_capacity == 2) tested_node_capacity_min = true;
+        }
     }
 
     assert(tested_padding);
