@@ -177,13 +177,14 @@ pub fn CompactionType(
             compaction.iterator_a.deinit(allocator);
         }
 
+        /// table_a is null when level A is 0.
         pub fn start(
             compaction: *Compaction,
             grid: *Grid,
-            table: ?*const TableInfo,
-            range: Manifest.CompactionRange,
-            snapshot: u64,
             manifest: *Manifest,
+            snapshot: u64,
+            range: Manifest.CompactionRange,
+            table_a: ?*const TableInfo,
             level_b: u8,
             iterator_a_context: IteratorA.Context,
         ) void {
@@ -191,11 +192,12 @@ pub fn CompactionType(
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
 
-            assert(level_b < config.lsm_levels);
             assert(range.table_count > 0);
+            assert(level_b < config.lsm_levels);
+            assert((table_a == null) == (level_b == 0));
 
-            // Any level may choose to drop tombstones, but the last level must do so 
-            // as it would have nowhere else to move/compact the tables to.
+            // Levels may choose to drop tombstones if keys aren't included in the lower levels.
+            // This invariant is always true for the last level as it doesn't have any lower ones.
             const drop_tombstones = manifest.compaction_must_drop_tombstones(level_b, range);
             assert(drop_tombstones or level_b < config.lsm_levels - 1);
 
@@ -219,15 +221,17 @@ pub fn CompactionType(
 
                 .manifest = manifest,
                 .level_b = level_b,
-                .remove_level_a = if (table) |level_a_table| level_a_table.* else null,
+                .remove_level_a = if (table_a) |table| table.* else null,
                 .update_level_b = compaction.update_level_b,
                 .insert_level_b = compaction.insert_level_b,
             };
 
-            // TODO: reset TableBuilder if needed
             assert(!compaction.index.ready);
             assert(!compaction.filter.ready);
             assert(!compaction.data.ready);
+
+            // TODO Implement manifest.move_table() optimization if there's only range.table_count == 1.
+            // This would do update_tables + insert_tables inline without going through the iterators.
 
             const iterator_b_context = .{
                 .grid = grid,
