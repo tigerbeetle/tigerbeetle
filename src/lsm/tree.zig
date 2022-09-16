@@ -618,8 +618,9 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(tree.compaction_io_pending <= 2 + tree.compaction_table.len);
             assert(tree.compaction_callback != null);
 
-            // Always start one io_pending that is resolved right after
-            // to handle the case of no level or immutable table being ticked for compaction
+            // Always start one fake io_pending that is resolved right after
+            // to handle the case where this compaction tick triggers no IO.
+            // (For example, ticking the immutable table, or level B is already done).
             tree.compaction_io_pending += 1;
             defer tree.compact_tick_done();
 
