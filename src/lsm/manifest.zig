@@ -313,8 +313,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         ) void {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
-
-            const direction = .ascending;
+            
+            // Scan and queue tables for removal in descending order to avoid
+            // buffer flushes which update the manifest_level invalidating subsequent iterator entries.
+            const direction = .descending;
             const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
 
@@ -337,13 +339,17 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 manifest.manifest_log.remove(log_level, table);
 
                 if (buffer.full()) {
-                    manifest_level.remove_tables(manifest.node_pool, &snapshots, buffer.drain());
+                    const tables: []TableInfo = buffer.drain();
+                    std.mem.reverse(TableInfo, tables); // remove_tables() expects ascending order
+                    manifest_level.remove_tables(manifest.node_pool, &snapshots, tables);
                 }
+
                 buffer.push(table);
             }
             
             const tables = buffer.drain();
             if (tables.len > 0) {
+                std.mem.reverse(TableInfo, tables); // remove_tables() expects ascending order
                 manifest_level.remove_tables(manifest.node_pool, &snapshots, tables);
             }
         }
