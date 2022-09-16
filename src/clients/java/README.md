@@ -1,6 +1,6 @@
 # tigerbeetle-java
 
-[TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) client for Java
+[TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) client for Java.
 
 
 ## Pre-built package
@@ -51,7 +51,7 @@ batch.add(account1);
 // Blocking usage:
 // Submit the batch and waits for reply
 CreateAccountsResult[] errors = client.createAccounts(batch);
-if (results.length > 0)
+if (errors.length > 0)
     throw new Exception("Unexpected createAccount results");
 ```
 
