@@ -3,7 +3,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
-const meta = std.meta;
 
 const div_ceil = @import("../util.zig").div_ceil;
 const binary_search_values_raw = @import("binary_search.zig").binary_search_values_raw;
@@ -19,6 +18,29 @@ pub fn SegmentedArray(
     comptime T: type,
     comptime NodePool: type,
     comptime element_count_max: u32,
+) type {
+    return SegmentedArrayType(T, NodePool, element_count_max, null, {}, {});
+}
+
+pub fn SortedSegmentedArray(
+    comptime T: type,
+    comptime NodePool: type,
+    comptime element_count_max: u32,
+    comptime Key: type,
+    comptime key_from_value: fn (*const T) callconv(.Inline) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+) type {
+    return SegmentedArrayType(T, NodePool, element_count_max, Key, key_from_value, compare_keys);
+}
+
+fn SegmentedArrayType(
+    comptime T: type,
+    comptime NodePool: type,
+    comptime element_count_max: u32,
+    // Set when the SegmentedArray is ordered:
+    comptime Key: ?type,
+    comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.Inline) K) else void,
+    comptime compare_keys: if (Key) |K| (fn (K, K) callconv(.Inline) math.Order) else void,
 ) type {
     return struct {
         const Self = @This();
@@ -89,7 +111,34 @@ pub fn SegmentedArray(
             allocator.free(array.indexes);
         }
 
-        pub fn insert_elements(
+        pub usingnamespace if (Key) |_| struct {
+            /// Returns the absolute index of the element being inserted.
+            pub fn insert_element(
+                array: *Self,
+                node_pool: *NodePool,
+                element: T,
+            ) u32 {
+                const cursor = array.search(key_from_value(&element));
+                const absolute_index = array.absolute_index_for_cursor(cursor);
+                array.insert_elements_at_absolute_index(node_pool, absolute_index, &[_]T{element});
+                return absolute_index;
+            }
+        } else struct {
+            pub fn insert_elements(
+                array: *Self,
+                node_pool: *NodePool,
+                absolute_index: u32,
+                elements: []const T,
+            ) void {
+                return array.insert_elements_at_absolute_index(
+                    node_pool,
+                    absolute_index,
+                    elements,
+                );
+            }
+        };
+
+        fn insert_elements_at_absolute_index(
             array: *Self,
             node_pool: *NodePool,
             absolute_index: u32,
@@ -256,6 +305,7 @@ pub fn SegmentedArray(
             assert(array.indexes[node] == array.indexes[node + 1]);
         }
 
+        // TODO As an optimization, have a remove() function that can target a cursor.
         pub fn remove_elements(
             array: *Self,
             node_pool: *NodePool,
@@ -608,6 +658,34 @@ pub fn SegmentedArray(
             }
         };
 
+        pub fn iterator_from_cursor(
+            array: *const Self,
+            /// First element of iteration.
+            cursor: Cursor,
+            direction: Direction,
+        ) Iterator {
+            if (array.node_count == 0) {
+                assert(cursor.node == 0);
+                assert(cursor.relative_index == 0);
+
+                return Iterator{
+                    .array = array,
+                    .direction = direction,
+                    .cursor = .{ .node = 0, .relative_index = 0 },
+                    .done = true,
+                };
+            } else {
+                assert(cursor.node < array.node_count);
+                assert(cursor.relative_index < array.count(cursor.node));
+                return .{
+                    .array = array,
+                    .direction = direction,
+                    .cursor = cursor,
+                };
+            }
+        }
+
+        // TODO remove in favor if iterator_from_cursor()?
         pub fn iterator(
             array: *const Self,
             /// Absolute index to start iteration at.
@@ -681,51 +759,70 @@ pub fn SegmentedArray(
             }
         }
 
-        pub fn search(
-            array: *const Self,
-            comptime Key: type,
-            comptime key_from_value: fn (*const T) callconv(.Inline) Key,
-            comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
-            key: Key,
-        ) Cursor {
-            if (array.node_count == 0) {
-                return .{
-                    .node = 0,
-                    .relative_index = 0,
-                };
+        pub usingnamespace if (Key) |K| struct {
+            /// Returns a cursor to the index of the key either exactly equal to the target key or,
+            /// if there is no exact match, the next greatest key.
+            pub fn search(
+                array: *const Self,
+                key: K,
+            ) Cursor {
+                if (array.node_count == 0) {
+                    return .{
+                        .node = 0,
+                        .relative_index = 0,
+                    };
+                }
+
+                var offset: usize = 0;
+                var length: usize = array.node_count;
+                while (length > 1) {
+                    const half = length / 2;
+                    const mid = offset + half;
+
+                    const node = &array.nodes[mid].?[0];
+                    // This trick seems to be what's needed to get llvm to emit branchless code for this,
+                    // a ternary-style if expression was generated as a jump here for whatever reason.
+                    const next_offsets = [_]usize{ offset, mid };
+                    offset = next_offsets[@boolToInt(compare_keys(key_from_value(node), key) == .lt)];
+
+                    length -= half;
+                }
+
+                // Unlike a normal binary search, don't increment the offset when "key" is higher
+                // than the element — "round down" to the previous node.
+                // This guarantees that the node result is never "== node_count".
+                //
+                // (If there are two adjacent nodes starting with keys A and C, and we search B,
+                // we want to pick the A node.)
+                const node = @intCast(u32, offset);
+                assert(node < array.node_count);
+
+                const relative_index = binary_search_values_raw(
+                    K,
+                    T,
+                    key_from_value,
+                    compare_keys,
+                    array.node_elements(node),
+                    key,
+                );
+
+                // Follow the same rule as absolute_index_for_cursor:
+                // only return relative_index==array.count() at the last node.
+                if (node + 1 < array.node_count and
+                    relative_index == array.count(node))
+                {
+                    return .{
+                        .node = node + 1,
+                        .relative_index = 0,
+                    };
+                } else {
+                    return .{
+                        .node = node,
+                        .relative_index = relative_index,
+                    };
+                }
             }
-
-            var offset: usize = 0;
-            var length: usize = array.node_count;
-            while (length > 1) {
-                const half = length / 2;
-                const mid = offset + half;
-
-                const node = &array.nodes[mid].?[0];
-                // This trick seems to be what's needed to get llvm to emit branchless code for this,
-                // a ternary-style if expression was generated as a jump here for whatever reason.
-                const next_offsets = [_]usize{ offset, mid };
-                offset = next_offsets[@boolToInt(compare_keys(key_from_value(node), key) == .lt)];
-
-                length -= half;
-            }
-
-            const node = array.node_elements(@intCast(u32, offset));
-            const relative_index = binary_search_values_raw(Key, T, key_from_value, compare_keys, node, key);
-            if (offset + 1 == array.node_count or
-                relative_index < array.count(@intCast(u32, offset)))
-            {
-                return .{
-                    .node = @intCast(u32, offset),
-                    .relative_index = relative_index,
-                };
-            } else {
-                return .{
-                    .node = @intCast(u32, offset + 1),
-                    .relative_index = 0,
-                };
-            }
-        }
+        } else struct {};
     };
 }
 
@@ -749,7 +846,10 @@ fn TestContext(
 
         // Test overaligned nodes to catch compile errors for missing @alignCast()
         const TestPool = NodePool(node_size, 2 * @alignOf(T));
-        const TestArray = SegmentedArray(T, TestPool, element_count_max);
+        const TestArray = switch (element_order) {
+            .sorted => SortedSegmentedArray(T, TestPool, element_count_max, Key, key_from_value, compare_keys),
+            .unsorted => SegmentedArray(T, TestPool, element_count_max),
+        };
 
         random: std.rand.Random,
 
@@ -820,39 +920,33 @@ fn TestContext(
 
             if (count_free == 0) return;
 
+            var buffer: [TestArray.node_capacity * 3]T = undefined;
+            const count_max = @minimum(count_free, TestArray.node_capacity * 3);
+            const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
+            context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
+
+            assert(context.reference.items.len <= element_count_max);
+
             switch (element_order) {
                 .unsorted => {
-                    var buffer: [TestArray.node_capacity * 3]T = undefined;
-                    const count_max = @minimum(count_free, TestArray.node_capacity * 3);
-                    const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
-                    context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
-
-                    assert(context.reference.items.len <= element_count_max);
                     const index = context.random.uintAtMostBiased(u32, reference_len);
 
                     context.array.insert_elements(&context.pool, index, buffer[0..count]);
-
                     // TODO the standard library could use an AssumeCapacity variant of this.
                     context.reference.insertSlice(index, buffer[0..count]) catch unreachable;
-
-                    context.inserts += count;
                 },
                 .sorted => {
-                    var value: T = undefined;
-                    context.random.bytes(mem.asBytes(&value));
-
-                    // TODO fast-insert using cursor
-                    const cursor = context.array.search(Key, key_from_value, compare_keys, key_from_value(&value));
-                    const index = if (context.reference.items.len == 0) 0
-                        else binary_search_values_raw(Key, T, key_from_value, compare_keys, context.reference.items, key_from_value(&value));
-                    try testing.expectEqual(index, context.array.absolute_index_for_cursor(cursor));
-
-                    context.array.insert_elements(&context.pool, index, &.{value});
-                    context.reference.insertSlice(index, &.{value}) catch unreachable; // TODO insertSlice not needed, just insert
-
-                    context.inserts += 1;
+                    for (buffer[0..count]) |value| {
+                        const index_actual = context.array.insert_element(&context.pool, value);
+                        const index_expect = context.reference_index(key_from_value(&value));
+                       // const index_expect = if (context.reference.items.len == 0) 0
+                       //     else binary_search_values_raw(Key, T, key_from_value, compare_keys, context.reference.items, key_from_value(&value));
+                        context.reference.insert(index_expect, value) catch unreachable;
+                        try std.testing.expectEqual(index_expect, index_actual);
+                    }
                 },
             }
+            context.inserts += count;
 
             try context.verify();
         }
@@ -934,7 +1028,30 @@ fn TestContext(
                 try testing.expectEqual(@as(?*const T, null), it.next());
             }
 
-            try testing.expectEqual(context.reference.items.len, context.array.len());
+            {
+                var it = context.array.iterator(0, 0, .ascending);
+                for (context.reference.items) |_| {
+                    try testing.expect(std.meta.eql(
+                        it.cursor,
+                        context.array.cursor_for_absolute_index(
+                            context.array.absolute_index_for_cursor(it.cursor),
+                        ),
+                    ));
+                    _ = it.next();
+                }
+                try testing.expect(it.next() == null);
+                try testing.expect(it.done);
+            }
+
+            if (element_order == .sorted) {
+                for (context.reference.items) |*expect, i| {
+                    if (i == 0) continue;
+                    try testing.expect(compare_keys(
+                        key_from_value(&context.reference.items[i - 1]),
+                        key_from_value(expect),
+                    ) != .gt);
+                }
+            }
 
             if (context.array.len() == 0) {
                 try testing.expectEqual(@as(u32, 0), context.array.node_count);
@@ -989,6 +1106,38 @@ fn TestContext(
                     try testing.expect(context.array.count(i) >=
                         @divExact(TestArray.node_capacity, 2));
                 }
+            }
+            if (element_order == .sorted) try context.verify_search();
+        }
+
+        fn verify_search(context: *Self) !void {
+            var queries: [20]Key = undefined;
+            context.random.bytes(mem.sliceAsBytes(&queries));
+
+            // Test min/max exceptional values on different SegmentedArray shapes.
+            queries[0] = 0;
+            queries[1] = math.maxInt(Key);
+
+            for (queries) |query| {
+                try testing.expectEqual(
+                    context.reference_index(query),
+                    context.array.absolute_index_for_cursor(context.array.search(query)),
+                );
+            }
+        }
+
+        fn reference_index(context: *const Self, key: Key) u32 {
+            if (context.reference.items.len == 0) {
+                return 0;
+            } else {
+                return binary_search_values_raw(
+                    Key,
+                    T,
+                    key_from_value,
+                    compare_keys,
+                    context.reference.items,
+                    key,
+                );
             }
         }
     };

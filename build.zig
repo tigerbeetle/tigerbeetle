@@ -67,15 +67,15 @@ pub fn build(b: *std.build.Builder) void {
 
     {
         const benchmark = b.addExecutable(
-            "benchmark_manifest_level",
-            "src/lsm/manifest_level_benchmark.zig",
+            "benchmark_segmented_array",
+            "src/lsm/segmented_array_benchmark.zig",
         );
         benchmark.setTarget(target);
         benchmark.setBuildMode(.ReleaseSafe);
         benchmark.setMainPkgPath("src/");
         const run_cmd = benchmark.run();
 
-        const step = b.step("benchmark_manifest_level", "Benchmark ManifestLevel search");
+        const step = b.step("benchmark_segmented_array", "Benchmark SegmentedArray search");
         step.dependOn(&run_cmd.step);
     }
 
