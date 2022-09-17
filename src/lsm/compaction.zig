@@ -20,7 +20,6 @@ pub fn CompactionType(
     const Key = Table.Key;
     const Value = Table.Value;
     const tombstone = Table.tombstone;
-    const compare_keys = Table.compare_keys;
 
     return struct {
         const Compaction = @This();
@@ -36,7 +35,6 @@ pub fn CompactionType(
 
         const Manifest = ManifestType(Table, Storage);
         const TableInfo = Manifest.TableInfo;
-        const TableInfoBuffer = TableInfo.BufferType(.ascending);
 
         const IteratorA = IteratorAType(Table, Storage);
         const IteratorB = LevelIteratorType(Table, Storage);
@@ -113,8 +111,6 @@ pub fn CompactionType(
         manifest: *Manifest,
         level_b: u8,
         remove_level_a: ?TableInfo,
-        update_level_b: TableInfoBuffer,
-        insert_level_b: TableInfoBuffer,
 
         pub fn init(allocator: mem.Allocator) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
@@ -125,19 +121,6 @@ pub fn CompactionType(
 
             var table_builder = try Table.Builder.init(allocator);
             errdefer table_builder.deinit(allocator);
-
-            // The average number of tables involved in a compaction is the 1 table from level A,
-            // plus the growth_factor number of tables from level B, plus 1 on either side,
-            // since the overlap may not be perfectly aligned to table boundaries.
-            // However, the worst case number of tables may approach all tables in level B,
-            // since key ranges may be skewed and not evenly distributed across a level.
-            const table_buffer_count_max = 1 + config.lsm_growth_factor + 2;
-
-            var update_level_b = try TableInfoBuffer.init(allocator, table_buffer_count_max);
-            errdefer update_level_b.deinit(allocator);
-
-            var insert_level_b = try TableInfoBuffer.init(allocator, table_buffer_count_max);
-            errdefer insert_level_b.deinit(allocator);
 
             return Compaction{
                 // Assigned by start()
@@ -162,15 +145,10 @@ pub fn CompactionType(
                 .manifest = undefined,
                 .level_b = undefined,
                 .remove_level_a = null,
-                .update_level_b = update_level_b,
-                .insert_level_b = insert_level_b,
             };
         }
 
         pub fn deinit(compaction: *Compaction, allocator: mem.Allocator) void {
-            compaction.insert_level_b.deinit(allocator);
-            compaction.update_level_b.deinit(allocator);
-
             compaction.table_builder.deinit(allocator);
 
             compaction.iterator_b.deinit(allocator);
@@ -193,8 +171,6 @@ pub fn CompactionType(
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done and compaction.merge_iterator == null);
 
-            // table from level a + tables from level b 
-            assert(range.table_count <= 1 + compaction.update_level_b.array.len);
             assert(range.table_count > 0);
 
             assert(level_b < config.lsm_levels);
@@ -226,8 +202,6 @@ pub fn CompactionType(
                 .manifest = manifest,
                 .level_b = level_b,
                 .remove_level_a = if (table_a) |table| table.* else null,
-                .update_level_b = compaction.update_level_b,
-                .insert_level_b = compaction.insert_level_b,
             };
 
             assert(!compaction.index.writable);
@@ -273,7 +247,8 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
 
             // Tables discovered by iterator_b that are visible
-            compaction.queue_manifest_update(&compaction.update_level_b, table);
+            var table_copy = table.*;
+            compaction.manifest.update_table(compaction.level_b, compaction.snapshot, &table_copy);
 
             // Release the table's block addresses in the Grid as it will be made invisible.
             // This is safe; iterator_b makes a copy of the block before calling us.
@@ -281,49 +256,6 @@ pub fn CompactionType(
             for (Table.index_data_addresses_used(index_block)) |address| grid.release(address);
             for (Table.index_filter_addresses_used(index_block)) |address| grid.release(address);
             grid.release(Table.index_block_address(index_block));
-        }
-
-        /// Enqueues the table to be applied to the manifest on the given table buffer.
-        /// If the buffer is `update_level_b`, the table will be provided to `update_tables`.
-        /// If the buffer is `insert_level_b`, the table will be provided to `insert_tables`.
-        fn queue_manifest_update(
-            compaction: *Compaction,
-            buffer: *TableInfoBuffer,
-            table: *const TableInfo,
-        ) void {
-            assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(!compaction.merge_done);
-
-            assert(buffer == &compaction.update_level_b or buffer == &compaction.insert_level_b);
-            assert(!buffer.full());
-            buffer.push(table);
-        }
-        
-        /// Drains all enqueued tables from the given buffer and applies them to the manifest.
-        /// If the buffer is `update_level_b`, the table will be provided to `update_tables`.
-        /// If the buffer is `insert_level_b`, the table will be provided to `insert_tables`.
-        fn apply_manifest_updates(compaction: *Compaction, buffer: *TableInfoBuffer) void {
-            assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(!compaction.merge_done);
-
-            assert(buffer == &compaction.update_level_b or buffer == &compaction.insert_level_b);
-
-            const tables: []TableInfo = buffer.drain();
-            if (tables.len == 0) return;
-
-            // Double check that the queued tables are in the compaction's key range.
-            for (tables) |table| {
-                assert(compare_keys(compaction.range.key_min, table.key_max) != .gt);
-                assert(compare_keys(compaction.range.key_max, table.key_min) != .lt);
-            }
-
-            if (buffer == &compaction.update_level_b) {
-                compaction.manifest.update_tables(compaction.level_b, compaction.snapshot, tables);
-            } else {
-                compaction.manifest.insert_tables(compaction.level_b, tables);
-            }
         }
 
         pub fn compact_tick(compaction: *Compaction, callback: Callback) void {
@@ -485,20 +417,17 @@ pub fn CompactionType(
             if (compaction.table_builder.index_block_full() or
                 (merge_iterator.empty() and !compaction.table_builder.index_block_empty()))
             {
-                // Finish the merged table and queue it for insertion.
                 const table = compaction.table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .address = compaction.grid.acquire(),
                     .snapshot_min = compaction.snapshot,
                 });
+                compaction.manifest.insert_table(compaction.level_b, &table);
 
                 // Mark the finished index block as writable for the next compact_tick() call.
                 compaction.index.block = compaction.table_builder.index_block;
                 assert(!compaction.index.writable);
                 compaction.index.writable = true;
-
-                // Enqueue the merged table to be inserted to level_b
-                compaction.queue_manifest_update(&compaction.insert_level_b, &table);
             }
         }
 
@@ -521,18 +450,14 @@ pub fn CompactionType(
             assert(compaction.iterator_b.buffered_all_values());
             assert(compaction.iterator_b.peek() == null);
 
-            // Apply any pending manifest changes queued up during the merge.
-            compaction.apply_manifest_updates(&compaction.update_level_b);
-            compaction.apply_manifest_updates(&compaction.insert_level_b);
-
             // Remove the level_a table if it was provided given it's now been merged into level_b.
             // TODO: Release the grid blocks associated with level_a as well
             if (compaction.level_b != 0) {
                 const level_a = compaction.level_b - 1;
 
                 if (compaction.remove_level_a) |*level_a_table| {
-                    const tables = @as(*[1]TableInfo, level_a_table);
-                    compaction.manifest.update_tables(level_a, compaction.snapshot, tables);
+                    compaction.manifest.update_table(level_a, compaction.snapshot, level_a_table);
+                    assert(level_a_table.snapshot_max == compaction.snapshot);
                 }
             }
 
@@ -547,10 +472,6 @@ pub fn CompactionType(
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(compaction.merge_done);
-
-            // Double check that manifest updates have been applied.
-            assert(compaction.update_level_b.drain().len == 0);
-            assert(compaction.insert_level_b.drain().len == 0);
 
             compaction.status = .idle;
             compaction.merge_done = false;
