@@ -38,12 +38,13 @@ jobs:
         ./scripts/install.sh
 
     - name: Build
+      if: ${{ github.event_name == 'pull_request' }}
       working-directory: src/tigerbeetle-java
       run: mvn -B package --file pom.xml
 
-    - name: Publish
+    - name: Build and publish
       if: ${{ github.event_name == 'push' }}
       working-directory: src/tigerbeetle-java
-      run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml
+      run: mvn -B deploy --file pom.xml -s $GITHUB_WORKSPACE/settings.xml
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
