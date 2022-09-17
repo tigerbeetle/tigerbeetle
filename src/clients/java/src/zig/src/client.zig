@@ -128,11 +128,11 @@ const RequestReflection = struct {
             // it is ok here, since the ByteBuffer is always used as readonly here
             var erased = @intToPtr(*anyopaque, @ptrToInt(value.ptr));
             var local_ref = env.newDirectByteBuffer(erased, value.len) catch {
-                // We can't throw an exception here, since this function is called from the native callback.
-                std.log.err("JNI: Error allocating a new direct ByteBuffer len={}", .{value.len});
+                // Cannot allocate a ByteBuffer, it's likely the JVM has run out of resources
+                // Printing the buffer size here just to help diagnosing how much memory was required
                 env.describeException();
-                assert(false);
-                unreachable;
+                std.log.err("JNI: Error allocating a new direct ByteBuffer len={}", .{value.len});
+                @panic("JNI: Error allocating a new direct ByteBuffer");
             };
 
             assert(local_ref != null);
@@ -150,52 +150,11 @@ const RequestReflection = struct {
                 jui.jvalue.toJValue(@bitCast(jui.jlong, @ptrToInt(packet))),
                 jui.jvalue.toJValue(@bitCast(jui.jbyte, packet.status)),
             },
-        ) catch |err| {
+        ) catch {
             // The "endRequest" method isn't expected to throw any exception,
             // We can't rethrow here, since this function is called from the native callback.
-            std.log.err("JNI: Error calling endRequest method {s}.", .{@errorName(err)});
             env.describeException();
-            assert(false);
-        };
-    }
-};
-
-/// Reflection helper and cache for the com.tigerbeetle.AssertionError class
-const AssertionErrorReflection = struct {
-    var class_obj: jui.jclass = null;
-
-    pub fn load(env: *jui.JNIEnv) !void {
-
-        // Asserting we are not initialized yet
-        assert(class_obj == null);
-
-        class_obj = class: {
-            var local_ref = try env.findClass("com/tigerbeetle/AssertionError");
-            assert(local_ref != null);
-            defer env.deleteReference(.local, local_ref);
-
-            break :class try env.newReference(.global, local_ref);
-        };
-
-        assert(class_obj != null);
-    }
-
-    pub fn unload(env: *jui.JNIEnv) void {
-        env.deleteReference(.global, class_obj);
-
-        class_obj = null;
-    }
-
-    /// Throws a new com.tigerbeetle.AssertionError
-    /// Note that we can only throw an exception when the caller is the Java side,
-    /// never when a function is called from the native callback
-    pub fn throw(env: *jui.JNIEnv, message: [:0]const u8) void {
-        env.throwNew(class_obj, message) catch |err| {
-            // This is an indication that something unrrecorveable hapened
-            std.log.err("JNI: Error throwing a new AssertionError {s}", .{@errorName(err)});
-            std.log.err("{s}", .{message});
-            env.describeException();
-            assert(false);
+            @panic("JNI: Error calling endRequest method.");
         };
     }
 };
@@ -209,17 +168,15 @@ const JNIClient = struct {
 
         try ClientReflection.load(env);
         try RequestReflection.load(env);
-        try AssertionErrorReflection.load(env);
 
         return @bitCast(jui.jint, jni_version);
     }
 
     /// On JVM unloads this library
     fn on_unload(vm: *jui.JavaVM) !void {
-        var env = try vm.getEnv(jni_version);
+        _ = vm;
         ClientReflection.unload();
         RequestReflection.unload();
-        AssertionErrorReflection.unload(env);
     }
 
     /// JNI Client.clientInit native implementation
@@ -279,20 +236,16 @@ const JNIClient = struct {
         // Holds a global reference to prevent GC during the callback
         var global_ref = env.newReference(.global, request_obj) catch {
             // NewGlobalRef fails only when the JVM runs out of memory
-            std.log.err("JNI: Error creating a global reference.", .{});
-            assert(false);
-            unreachable;
+            @panic("JNI: Error creating a global reference.");
         };
 
         assert(global_ref != null);
         errdefer env.deleteReference(.global, global_ref);
 
         var buffer = RequestReflection.buffer(env, request_obj) orelse {
-            // It is unexpeted to the buffer be null here
+            // It is unexpected to the buffer be null here
             // The java side must allocate a new buffer prior to invoking "submit".
-            // This exception is going to be handled by the Java caller.
-            AssertionErrorReflection.throw(env, "Request buffer cannot be null.");
-            return;
+            @panic("JNI: Request buffer cannot be null.");
         };
 
         packet.operation = RequestReflection.operation(env, request_obj);
@@ -318,10 +271,8 @@ const JNIClient = struct {
 
         var jvm = @intToPtr(*jui.JavaVM, context);
         var env = jvm.attachCurrentThreadAsDaemon() catch |err| {
-            // We can't throw an exception here, since this function is called from the native callback.
-            std.log.err("JNI: Error attaching the native thread as daemon {s}.", .{@errorName(err)});
-            assert(false);
-            unreachable;
+            std.log.err("JNI: Error {s} attaching the native thread as daemon.", .{@errorName(err)});
+            @panic("JNI: Error attaching the native thread as daemon.");
         };
 
         // Retrieves the request instance, and drops the GC reference
@@ -348,10 +299,7 @@ const JNIClient = struct {
         var packet = packet_list.pop() orelse {
             // It is unexpeted to packet_list be empty.
             // The java side must syncronize how many threads call this function.
-            // This exception is going to be handled by the Java caller.
-            // Returning undefined is ok here, since the return value will be discarded anyway.
-            AssertionErrorReflection.throw(env, "Packet list cannot be empty.");
-            return undefined;
+            @panic("JNI fatal error: Packet list cannot be empty.");
         };
 
         ClientReflection.set_packet_list(env, client_obj, packet_list);
