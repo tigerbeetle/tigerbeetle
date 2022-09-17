@@ -185,7 +185,7 @@ public final class Account {
     /**
      * Amount of pending debits.
      * <p>
-     * Must be always interpreted as a positive integer.
+     * Must always be interpreted as a positive integer.
      *
      * @return A 64-bits integer
      */
@@ -200,7 +200,7 @@ public final class Account {
     /**
      * Amount of non-pending debits.
      * <p>
-     * Must be always interpreted as a positive integer.
+     * Must always be interpreted as a positive integer.
      *
      * @return A 64-bits integer
      */
@@ -215,7 +215,7 @@ public final class Account {
     /**
      * Amount of pending credits.
      * <p>
-     * Must be always interpreted as a positive integer.
+     * Must always be interpreted as a positive integer.
      *
      * @return A 64-bits integer
      */
@@ -230,7 +230,7 @@ public final class Account {
     /**
      * Amount of non-pending credits.
      * <p>
-     * Must be always interpreted as a positive integer.
+     * Must always be interpreted as a positive integer.
      *
      * @return A 64-bits integer
      */
