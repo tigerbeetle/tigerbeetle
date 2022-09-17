@@ -98,7 +98,7 @@ public final class Client implements AutoCloseable {
 
     public Account lookupAccount(UUID uuid) throws RequestException {
         var batch = new UUIDsBatch(1);
-        batch.Add(uuid);
+        batch.add(uuid);
 
         Account[] results = lookupAccounts(batch);
         if (results.length == 0) {
@@ -164,7 +164,7 @@ public final class Client implements AutoCloseable {
 
     public Transfer lookupTransfer(UUID uuid) throws RequestException {
         var batch = new UUIDsBatch(1);
-        batch.Add(uuid);
+        batch.add(uuid);
 
         Transfer[] results = lookupTransfers(batch);
         if (results.length == 0) {

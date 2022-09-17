@@ -25,7 +25,7 @@ public final class TransfersBatch extends Batch {
         }
     }
 
-    TransfersBatch(ByteBuffer buffer) throws RequestException {
+    TransfersBatch(ByteBuffer buffer) {
 
         super(buffer);
 

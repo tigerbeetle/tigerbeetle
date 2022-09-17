@@ -25,7 +25,7 @@ public final class AccountsBatch extends Batch {
         }
     }
 
-    AccountsBatch(ByteBuffer buffer) throws RequestException {
+    AccountsBatch(ByteBuffer buffer) {
 
         super(buffer);
 

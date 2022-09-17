@@ -90,6 +90,47 @@ public class AccountsBatchTest {
         assertAccounts(account2, getAccount2);
     }
 
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testSetIndexOutOfBounds() {
+
+        AccountsBatch batch = new AccountsBatch(1);
+        batch.set(1, account1);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testSetIndexNegative() {
+
+        AccountsBatch batch = new AccountsBatch(1);
+        batch.set(-1, account1);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testSetNull() {
+
+        AccountsBatch batch = new AccountsBatch(1);
+        batch.set(0, null);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testGetIndexOutOfBounds() {
+
+        AccountsBatch batch = new AccountsBatch(1);
+        batch.get(1);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testGetIndexNegative() {
+
+        AccountsBatch batch = new AccountsBatch(1);
+        batch.get(-1);
+        assert false; // Should be unreachable
+    }
+
     @Test
     public void testAdd() {
 
@@ -116,7 +157,7 @@ public class AccountsBatchTest {
     }
 
     @Test
-    public void testSet() {
+    public void testGetAndSet() {
 
         AccountsBatch batch = new AccountsBatch(2);
         assertEquals(0, batch.getLenght());
@@ -167,7 +208,7 @@ public class AccountsBatchTest {
     }
 
     @Test
-    public void testToArray() throws RequestException {
+    public void testToArray() {
 
         AccountsBatch batch = new AccountsBatch(dummyStream.position(0));
         assertEquals(2, batch.getLenght());
@@ -176,6 +217,23 @@ public class AccountsBatchTest {
         assertEquals(2, array.length);
         assertAccounts(account1, array[0]);
         assertAccounts(account2, array[1]);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testInvalidBuffer() {
+
+        // Invalid size
+        var invalidBuffer =
+                ByteBuffer.allocate((Account.Struct.SIZE * 2) - 1).order(ByteOrder.LITTLE_ENDIAN);
+
+        var batch = new AccountsBatch(invalidBuffer);
+        assert batch == null; // Should be unreachable
+    }
+
+    @Test
+    public void testBufferLen() {
+        var batch = new AccountsBatch(dummyStream.position(0));
+        assertEquals(dummyStream.capacity(), batch.getBufferLen());
     }
 
     private static void assertAccounts(Account account1, Account account2) {

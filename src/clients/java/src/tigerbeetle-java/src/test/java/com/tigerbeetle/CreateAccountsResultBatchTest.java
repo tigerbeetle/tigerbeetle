@@ -29,7 +29,7 @@ public class CreateAccountsResultBatchTest {
     }
 
     @Test
-    public void testGet() throws RequestException {
+    public void testGet() {
 
         CreateAccountsResultBatch batch = new CreateAccountsResultBatch(dummyStream.position(0));
         assertEquals(batch.getLenght(), 2);
@@ -43,8 +43,24 @@ public class CreateAccountsResultBatchTest {
         assertResults(result2, getResult2);
     }
 
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testGetIndexOutOfBounds() {
+
+        CreateAccountsResultBatch batch = new CreateAccountsResultBatch(dummyStream.position(0));
+        batch.get(3);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testGetIndexNegative() {
+
+        CreateAccountsResultBatch batch = new CreateAccountsResultBatch(dummyStream.position(0));
+        batch.get(-1);
+        assert false; // Should be unreachable
+    }
+
     @Test
-    public void testToArray() throws RequestException {
+    public void testToArray() {
 
         CreateAccountsResultBatch batch = new CreateAccountsResultBatch(dummyStream.position(0));
         assertEquals(batch.getLenght(), 2);
@@ -53,6 +69,23 @@ public class CreateAccountsResultBatchTest {
         assertEquals(array.length, 2);
         assertResults(result1, array[0]);
         assertResults(result2, array[1]);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testInvalidBuffer() {
+
+        // Invalid size
+        var invalidBuffer = ByteBuffer.allocate((CreateAccountsResult.Struct.SIZE * 2) - 1)
+                .order(ByteOrder.LITTLE_ENDIAN);
+
+        var batch = new CreateAccountsResultBatch(invalidBuffer);
+        assert batch == null; // Should be unreachable
+    }
+
+    @Test
+    public void testBufferLen() {
+        var batch = new CreateAccountsResultBatch(dummyStream.position(0));
+        assertEquals(dummyStream.capacity(), batch.getBufferLen());
     }
 
     private static void assertResults(CreateAccountsResult result1, CreateAccountsResult result2) {
