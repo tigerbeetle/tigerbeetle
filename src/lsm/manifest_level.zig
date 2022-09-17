@@ -11,6 +11,7 @@ const binary_search_keys_raw = binary_search.binary_search_keys_raw;
 
 const Direction = @import("direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
+const SortedSegmentedArray = @import("segmented_array.zig").SortedSegmentedArray;
 const SegmentedArrayCursor = @import("segmented_array.zig").Cursor;
 
 pub fn ManifestLevelType(
@@ -23,19 +24,20 @@ pub fn ManifestLevelType(
     return struct {
         const Self = @This();
 
-        pub const Keys = SegmentedArray(Key, NodePool, table_count_max);
+        pub const Keys = SortedSegmentedArray(
+            Key,
+            NodePool,
+            table_count_max,
+            Key,
+            struct {
+                inline fn key_from_value(value: *const Key) Key {
+                    return value.*;
+                }
+            }.key_from_value,
+            compare_keys,
+        );
+
         pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max);
-
-        /// The maximum key of each key node in the keys segmented array.
-        /// This is the starting point of our tiered lookup approach.
-        /// Only the first keys.node_count elements are valid.
-        root_keys_array: *[Keys.node_count_max]Key,
-
-        /// This is the index of the first table node that might contain the TableInfo
-        /// corresponding to a given key node. This allows us to skip table nodes which cannot
-        /// contain the target TableInfo when searching for the TableInfo with a given absolute
-        /// index. Only the first keys.node_count elements are valid.
-        root_table_nodes_array: *[Keys.node_count_max]u32,
 
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
@@ -48,12 +50,6 @@ pub fn ManifestLevelType(
         table_count_visible: u32 = 0,
 
         pub fn init(allocator: mem.Allocator) !Self {
-            var root_keys_array = try allocator.create([Keys.node_count_max]Key);
-            errdefer allocator.destroy(root_keys_array);
-
-            var root_table_nodes_array = try allocator.create([Keys.node_count_max]u32);
-            errdefer allocator.destroy(root_table_nodes_array);
-
             var keys = try Keys.init(allocator);
             errdefer keys.deinit(allocator, null);
 
@@ -61,192 +57,40 @@ pub fn ManifestLevelType(
             errdefer tables.deinit(allocator, null);
 
             return Self{
-                .root_keys_array = root_keys_array,
-                .root_table_nodes_array = root_table_nodes_array,
                 .keys = keys,
                 .tables = tables,
             };
         }
 
         pub fn deinit(level: *Self, allocator: mem.Allocator, node_pool: *NodePool) void {
-            allocator.destroy(level.root_keys_array);
-            allocator.destroy(level.root_table_nodes_array);
             level.keys.deinit(allocator, node_pool);
             level.tables.deinit(allocator, node_pool);
         }
 
         /// Inserts an ordered batch of tables into the level, then rebuilds the indexes.
-        pub fn insert_tables(level: *Self, node_pool: *NodePool, tables: []const TableInfo) void {
-            assert(tables.len > 0);
+        pub fn insert_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
             assert(level.keys.len() == level.tables.len());
 
-            {
-                var a = tables[0];
-                assert(compare_keys(a.key_min, a.key_max) != .gt);
-                for (tables[1..]) |b| {
-                    assert(compare_keys(b.key_min, b.key_max) != .gt);
-                    assert(compare_keys(a.key_max, b.key_min) == .lt);
-                    a = b;
-                }
-            }
+            const absolute_index = level.keys.insert_element(node_pool, table.key_max);
+            assert(absolute_index < level.keys.len());
+            level.tables.insert_elements(node_pool, absolute_index, &[_]TableInfo{table.*});
 
-            // Inserting multiple tables all at once is tricky due to duplicate keys via snapshots.
-            // We therefore insert tables one by one, and then rebuild the indexes.
-
-            var absolute_index = level.absolute_index_for_insert(tables[0].key_max);
-
-            // TODO use absolute_index_for_insert each time instead of iterating forward?
-            var i: usize = 0;
-            while (i < tables.len) : (i += 1) {
-                const table = &tables[i];
-
-                // Increment absolute_index until the key_max at absolute_index is greater than
-                // or equal to table.key_max. This is the index we want to insert the table at.
-                if (absolute_index < level.keys.len()) {
-                    var it = level.keys.iterator(absolute_index, 0, .ascending);
-                    while (it.next()) |key_max| : (absolute_index += 1) {
-                        if (compare_keys(key_max.*, table.key_max) != .lt) break;
-                    }
-                }
-
-                level.keys.insert_elements(node_pool, absolute_index, &[_]Key{table.key_max});
-                level.tables.insert_elements(node_pool, absolute_index, tables[i..][0..1]);
-
-                if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
-            }
+            if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
 
             assert(level.keys.len() == level.tables.len());
-
-            level.rebuild_root();
         }
 
-        /// Return the index at which to insert a new table given the table's key_max.
-        /// Requires all metadata/indexes to be valid.
-        pub fn absolute_index_for_insert(level: Self, key_max: Key) u32 {
-            const root = level.root_keys();
-            if (root.len == 0) {
-                assert(level.keys.len() == 0);
-                assert(level.tables.len() == 0);
-                return 0;
-            }
-
-            const key_node = binary_search_keys_raw(Key, compare_keys, root, key_max);
-            assert(key_node <= level.keys.node_count);
-            if (key_node == level.keys.node_count) {
-                assert(level.keys.len() == level.tables.len());
-                return level.keys.len();
-            }
-
-            const keys = level.keys.node_elements(key_node);
-            const relative_index = binary_search_keys_raw(Key, compare_keys, keys, key_max);
-
-            // The key must be less than or equal to the maximum key of this key node since the
-            // first binary search checked this exact condition.
-            assert(relative_index < keys.len);
-
-            return level.keys.absolute_index_for_cursor(.{
-                .node = key_node,
-                .relative_index = relative_index,
-            });
-        }
-
-        /// Rebuilds the root_keys and root_table_nodes arrays based on the current state of the
-        /// keys and tables segmented arrays.
-        fn rebuild_root(level: *Self) void {
-            assert(level.keys.len() == level.tables.len());
-
-            {
-                mem.set(Key, level.root_keys_array, undefined);
-                var key_node: u32 = 0;
-                while (key_node < level.keys.node_count) : (key_node += 1) {
-                    level.root_keys_array[key_node] = level.keys.node_last_element(key_node);
-                }
-            }
-
-            if (config.verify and level.keys.node_count > 1) {
-                var a = level.root_keys_array[0];
-                for (level.root_keys_array[1..level.keys.node_count]) |b| {
-                    assert(compare_keys(a, b) != .gt);
-                    a = b;
-                }
-            }
-
-            {
-                mem.set(u32, level.root_table_nodes_array, undefined);
-                var key_node: u32 = 0;
-                var table_node: u32 = 0;
-                while (key_node < level.keys.node_count) : (key_node += 1) {
-                    const key_node_first_key = level.keys.node_elements(key_node)[0];
-
-                    // While the key_max of the table node is less than the first key_max of the
-                    // key_node, increment table_node.
-                    while (table_node < level.tables.node_count) : (table_node += 1) {
-                        const table_node_table_max = level.tables.node_last_element(table_node);
-                        const table_node_key_max = table_node_table_max.key_max;
-                        if (compare_keys(table_node_key_max, key_node_first_key) != .lt) {
-                            break;
-                        }
-                    } else {
-                        // Assert that we found the appropriate table_node and hit the break above.
-                        unreachable;
-                    }
-
-                    level.root_table_nodes_array[key_node] = table_node;
-                }
-            }
-
-            if (config.verify and level.keys.node_count > 1) {
-                var a = level.root_table_nodes_array[0];
-                for (level.root_table_nodes_array[1..level.keys.node_count]) |b| {
-                    assert(a <= b);
-                    a = b;
-                }
-            }
-
-            if (config.verify) {
-                // Assert that the first key in each key node is in the range of the table
-                // directly mapped to by root_table_nodes_array.
-                for (level.root_table_nodes_array[0..level.keys.node_count]) |table_node, i| {
-                    const key_node = @intCast(u32, i);
-                    const key_node_first_key = level.keys.node_elements(key_node)[0];
-
-                    const table_node_key_min = level.tables.node_elements(table_node)[0].key_min;
-                    const table_node_key_max = level.tables.node_last_element(table_node).key_max;
-
-                    assert(compare_keys(table_node_key_min, table_node_key_max) != .gt);
-
-                    assert(compare_keys(key_node_first_key, table_node_key_min) != .lt);
-                    assert(compare_keys(key_node_first_key, table_node_key_max) != .gt);
-                }
-            }
-        }
-
-        /// Set snapshot_max for the given tables in the ManifestLevel.
-        /// The tables slice must be sorted by table min/max key.
-        /// The tables slice is mutable so that this function can update their snapshots.
-        /// Asserts that the tables currently have snapshot_max of math.maxInt(u64).
-        /// Asserts that all tables in the ManifestLevel in the key range tables[0].key_min
-        /// to tables[tables.len - 1].key_max are present in the tables slice.
-        pub fn set_snapshot_max(level: *Self, snapshot: u64, tables: []TableInfo) void {
+        /// Set snapshot_max for the given table in the ManifestLevel.
+        /// The table is mutable so that this function can update its snapshot_max.
+        /// Asserts that the table currently has snapshot_max of math.maxInt(u64).
+        pub fn set_snapshot_max(level: *Self, snapshot: u64, table: *TableInfo) void {
             assert(snapshot < lsm.snapshot_latest);
-            assert(tables.len > 0);
-            assert(level.table_count_visible >= tables.len);
+            assert(table.snapshot_max == math.maxInt(u64));
 
-            {
-                var a = tables[0];
-                assert(compare_keys(a.key_min, a.key_max) != .gt);
-                for (tables[1..]) |b| {
-                    assert(compare_keys(b.key_min, b.key_max) != .gt);
-                    assert(compare_keys(a.key_max, b.key_min) == .lt);
-                    a = b;
-                }
-            }
-
-            const key_min = tables[0].key_min;
-            const key_max = tables[tables.len - 1].key_max;
+            const key_min = table.key_min;
+            const key_max = table.key_max;
             assert(compare_keys(key_min, key_max) != .gt);
 
-            var i: u32 = 0;
             var it = level.iterator(
                 .visible,
                 @as(*const [1]u64, &lsm.snapshot_latest),
@@ -254,140 +98,53 @@ pub fn ManifestLevelType(
                 KeyRange{ .key_min = key_min, .key_max = key_max },
             );
 
-            while (it.next()) |table_const| : (i += 1) {
-                // This const cast is safe as we know that the memory pointed to is in fact
-                // mutable. That is, the table is not in the .text or .rodata section. We do this
-                // to avoid duplicating the iterator code in order to expose only a const iterator
-                // in the public API.
-                const table = @intToPtr(*TableInfo, @ptrToInt(table_const));
-                assert(table.equal(&tables[i]));
+            const level_table_const = it.next().?;
+            // This const cast is safe as we know that the memory pointed to is in fact
+            // mutable. That is, the table is not in the .text or .rodata section. We do this
+            // to avoid duplicating the iterator code in order to expose only a const iterator
+            // in the public API.
+            const level_table = @intToPtr(*TableInfo, @ptrToInt(level_table_const));
+            assert(level_table.equal(table));
+            assert(level_table.snapshot_max == math.maxInt(u64));
 
-                assert(table.snapshot_max == math.maxInt(u64));
-                table.snapshot_max = snapshot;
-            }
+            level_table.snapshot_max = snapshot;
+            table.snapshot_max = snapshot;
 
-            // Don't forget to update the original tables provided.
-            for (tables) |*table| {
-                table.snapshot_max = snapshot;
-            }
-
-            assert(i == tables.len);
-            level.table_count_visible -= @intCast(u32, tables.len);
+            assert(it.next() == null);
+            level.table_count_visible -= 1;
         }
 
-        /// Remove the given tables from the ManifestLevel, asserting that they are not visible
+        /// Remove the given table from the ManifestLevel, asserting that it is not visible
         /// by any snapshot in snapshots or by lsm.snapshot_latest.
-        /// The tables slice must be sorted by table min/max key.
-        /// Asserts that all tables in the ManifestLevel in the key range tables[0].key_min
-        /// to tables[tables.len - 1].key_max and not visible by any snapshot are present in
-        /// the tables slice.
-        pub fn remove_tables(
+        pub fn remove_table(
             level: *Self,
             node_pool: *NodePool,
             snapshots: []const u64,
-            tables: []const TableInfo,
+            table: *const TableInfo,
         ) void {
-            assert(tables.len > 0);
             assert(level.keys.len() == level.tables.len());
-            assert(level.keys.len() - level.table_count_visible >= tables.len);
-
-            {
-                var a = tables[0];
-                assert(compare_keys(a.key_min, a.key_max) != .gt);
-                for (tables[1..]) |b| {
-                    assert(compare_keys(b.key_min, b.key_max) != .gt);
-                    assert(compare_keys(a.key_max, b.key_min) == .lt);
-                    a = b;
-                }
-            }
-
-            const key_min = tables[0].key_min;
-            const key_max = tables[tables.len - 1].key_max;
             // The batch may contain a single table, with a single key, i.e. key_min == key_max:
-            assert(compare_keys(key_min, key_max) != .gt);
+            assert(compare_keys(table.key_min, table.key_max) != .gt);
 
-            var absolute_index = level.absolute_index_for_remove(key_min);
+            // Use `key_min` for both ends of the iterator; we are looking for a single table.
+            const cursor_start = level.iterator_start(table.key_min, table.key_min, .ascending).?;
+            var absolute_index = level.keys.absolute_index_for_cursor(cursor_start);
 
-            {
-                var it = level.tables.iterator(absolute_index, 0, .ascending);
-                while (it.next()) |table| : (absolute_index += 1) {
-                    if (table.invisible(snapshots)) {
-                        assert(table.equal(&tables[0]));
-                        break;
-                    }
-                } else {
-                    unreachable;
-                }
-            }
+            // TODO Optimize start node
+            var it = level.tables.iterator(absolute_index, 0, .ascending);
+            while (it.next()) |level_table| : (absolute_index += 1) {
+                if (level_table.invisible(snapshots)) {
+                    assert(level_table.equal(table));
 
-            var i: u32 = 0;
-            var safety_counter: u32 = 0;
-            outer: while (safety_counter < tables.len) : (safety_counter += 1) {
-                var it = level.tables.iterator(absolute_index, 0, .ascending);
-                inner: while (it.next()) |table| : (absolute_index += 1) {
-                    if (table.invisible(snapshots)) {
-                        assert(table.equal(&tables[i]));
-
-                        const table_key_max = table.key_max;
-                        level.keys.remove_elements(node_pool, absolute_index, 1);
-                        level.tables.remove_elements(node_pool, absolute_index, 1);
-                        i += 1;
-
-                        switch (compare_keys(table_key_max, key_max)) {
-                            .lt => break :inner,
-                            .eq => break :outer,
-                            // We require the key_min/key_max to be exact, so the last table
-                            // matching the snapshot must have the provided key_max.
-                            .gt => unreachable,
-                        }
-                    } else {
-                        // We handle the first table to be removed specially before this main loop
-                        // in order to check for an exact key_min match.
-                        assert(i > 0);
-                    }
-                } else {
-                    unreachable;
+                    level.keys.remove_elements(node_pool, absolute_index, 1);
+                    level.tables.remove_elements(node_pool, absolute_index, 1);
+                    break;
                 }
             } else {
                 unreachable;
             }
-            assert(i == tables.len);
-            // The loop will never terminate naturally, only through the `break :outer`, which
-            // means the +1 here is required as the continue safety_counter += 1 continue
-            // expression isn't run on the last iteration of the loop.
-            assert(safety_counter + 1 == tables.len);
 
             assert(level.keys.len() == level.tables.len());
-
-            level.rebuild_root();
-        }
-
-        /// Return the index of the first table that could have the given key_min.
-        /// Requires all metadata/indexes to be valid.
-        fn absolute_index_for_remove(level: Self, key_min: Key) u32 {
-            const root = level.root_keys();
-            assert(root.len > 0);
-
-            const key_node = binary_search_keys_raw(Key, compare_keys, root, key_min);
-            assert(key_node < level.keys.node_count);
-
-            const keys = level.keys.node_elements(key_node);
-            assert(keys.len > 0);
-
-            const relative_index = binary_search_keys_raw(Key, compare_keys, keys, key_min);
-            assert(relative_index < keys.len);
-
-            return level.keys.absolute_index_for_cursor(level.iterator_start_boundary(
-                .{
-                    .node = key_node,
-                    .relative_index = relative_index,
-                },
-                .ascending,
-            ));
-        }
-
-        inline fn root_keys(level: Self) []Key {
-            return level.root_keys_array[0..level.keys.node_count];
         }
 
         pub const Visibility = enum {
@@ -418,7 +175,10 @@ pub fn ManifestLevelType(
                     if (level.iterator_start(range.key_min, range.key_max, direction)) |start| {
                         break :blk level.tables.iterator(
                             level.keys.absolute_index_for_cursor(start),
-                            level.iterator_start_table_node_for_key_node(start.node, direction),
+                            switch (direction) {
+                                .ascending => 0,
+                                .descending => level.tables.node_count - 1,
+                            },
                             direction,
                         );
                     } else {
@@ -433,12 +193,7 @@ pub fn ManifestLevelType(
                     switch (direction) {
                         .ascending => break :blk level.tables.iterator(0, 0, direction),
                         .descending => {
-                            const last = level.tables.last();
-                            break :blk level.tables.iterator(
-                                level.tables.absolute_index_for_cursor(last),
-                                last.node,
-                                .descending,
-                            );
+                            break :blk level.tables.iterator_from_cursor(level.tables.last(), .descending);
                         },
                     }
                 }
@@ -503,7 +258,7 @@ pub fn ManifestLevelType(
                                 // Unlike in the ascending case, it is not guaranteed that
                                 // table.key_min is less than or equal to key_range.key_max on the
                                 // first iteration as only the key_max of a table is stored in our
-                                // root/key nodes. On subsequent iterations this check will always
+                                // key nodes. On subsequent iterations this check will always
                                 // be false.
                                 if (compare_keys(table.key_min, key_range.key_max) == .gt) {
                                     continue;
@@ -529,6 +284,7 @@ pub fn ManifestLevelType(
         /// Returns the table segmented array cursor at which iteration should be started.
         /// May return null if there is nothing to iterate because we know for sure that the key
         /// range is disjoint with the tables stored in this level.
+        ///
         /// However, the cursor returned is not guaranteed to be in range for the query as only
         /// the key_max is stored in the index structures, not the key_min, and only the start
         /// bound for the given direction is checked here.
@@ -539,48 +295,34 @@ pub fn ManifestLevelType(
             direction: Direction,
         ) ?SegmentedArrayCursor {
             assert(compare_keys(key_min, key_max) != .gt);
+            assert(level.keys.len() == level.tables.len());
 
-            const root = level.root_keys();
-            if (root.len == 0) {
-                assert(level.keys.len() == 0);
-                assert(level.tables.len() == 0);
-                return null;
-            }
+            if (level.keys.len() == 0) return null;
 
-            const key = switch (direction) {
+            // Ascending:  Find the first table where table.key_max ≤ iterator.key_min.
+            // Descending: Find the first table where table.key_max ≤ iterator.key_max.
+            const target = level.keys.search(switch (direction) {
                 .ascending => key_min,
                 .descending => key_max,
-            };
+            });
+            assert(target.node <= level.keys.node_count);
 
-            const key_node = binary_search_keys_raw(Key, compare_keys, root, key);
-            assert(key_node <= level.keys.node_count);
-            if (key_node == level.keys.node_count) {
-                switch (direction) {
+            if (level.keys.absolute_index_for_cursor(target) == level.keys.len()) {
+                return switch (direction) {
                     // The key_min of the target range is greater than the key_max of the last
                     // table in the level and we are ascending, so this range matches no tables
                     // on this level.
-                    .ascending => return null,
+                    .ascending => null,
                     // The key_max of the target range is greater than the key_max of the last
                     // table in the level and we are descending, so we need to start iteration
                     // at the last table in the level.
-                    .descending => return level.keys.last(),
-                }
+                    .descending => level.keys.last(),
+                };
+            } else {
+                // Multiple tables in the level may share a key.
+                // Scan to the edge so that the iterator will cover them all.
+                return level.iterator_start_boundary(target, direction);
             }
-
-            const keys = level.keys.node_elements(key_node);
-            const relative_index = binary_search_keys_raw(Key, compare_keys, keys, key);
-
-            // The key must be less than or equal to the maximum key of this key node since the
-            // first binary search checked this exact condition.
-            assert(relative_index < keys.len);
-
-            return level.iterator_start_boundary(
-                .{
-                    .node = key_node,
-                    .relative_index = relative_index,
-                },
-                direction,
-            );
         }
 
         /// This function exists because there may be tables in the level with the same
@@ -590,13 +332,9 @@ pub fn ManifestLevelType(
             key_cursor: SegmentedArrayCursor,
             direction: Direction,
         ) SegmentedArrayCursor {
-            var reverse = level.keys.iterator(
-                level.keys.absolute_index_for_cursor(key_cursor),
-                key_cursor.node,
-                direction.reverse(),
-            );
-
+            var reverse = level.keys.iterator_from_cursor(key_cursor, direction.reverse());
             assert(meta.eql(reverse.cursor, key_cursor));
+
             // This cursor will always point to a key equal to start_key.
             var adjusted = reverse.cursor;
             const start_key = reverse.next().?.*;
@@ -616,28 +354,6 @@ pub fn ManifestLevelType(
             assert(compare_keys(start_key, level.keys.element_at_cursor(adjusted)) == .eq);
 
             return adjusted;
-        }
-
-        inline fn iterator_start_table_node_for_key_node(
-            level: Self,
-            key_node: u32,
-            direction: Direction,
-        ) u32 {
-            assert(key_node < level.keys.node_count);
-
-            switch (direction) {
-                .ascending => return level.root_table_nodes_array[key_node],
-                .descending => {
-                    if (key_node + 1 < level.keys.node_count) {
-                        // Since the corresponding node in root_table_nodes_array is a lower bound,
-                        // we must add one to make it an upper bound when descending.
-                        return level.root_table_nodes_array[key_node + 1];
-                    } else {
-                        // However, if we are at the last key node, then return the last table node.
-                        return level.tables.node_count - 1;
-                    }
-                },
-            }
         }
     };
 }
@@ -815,7 +531,9 @@ pub fn TestContext(
                 }
             }
 
-            context.level.insert_tables(&context.pool, buffer[0..count]);
+            for (buffer[0..count]) |*table| {
+                context.level.insert_table(&context.pool, table);
+            }
 
             for (buffer[0..count]) |table| {
                 const index = blk: {
@@ -938,11 +656,9 @@ pub fn TestContext(
             }
 
             if (tables.items.len > 0) {
-                context.level.remove_tables(
-                    &context.pool,
-                    snapshots,
-                    tables.items,
-                );
+                for (tables.items) |*table| {
+                    context.level.remove_table(&context.pool, snapshots, table);
+                }
             }
         }
 
@@ -958,7 +674,10 @@ pub fn TestContext(
 
             const snapshot = context.take_snapshot();
 
-            context.level.set_snapshot_max(snapshot, context.reference.items[index..][0..count]);
+            for (context.reference.items[index..][0..count]) |*table| {
+                context.level.set_snapshot_max(snapshot, table);
+            }
+
             for (context.snapshot_tables.slice()) |tables| {
                 for (tables.items) |*table| {
                     for (context.reference.items[index..][0..count]) |modified| {
@@ -998,11 +717,13 @@ pub fn TestContext(
                 }
 
                 if (to_remove.items.len > 0) {
-                    context.level.remove_tables(
-                        &context.pool,
-                        context.snapshots.slice(),
-                        to_remove.items,
-                    );
+                    for (to_remove.items) |*table| {
+                        context.level.remove_table(
+                            &context.pool,
+                            context.snapshots.slice(),
+                            table,
+                        );
+                    }
                 }
             }
 
