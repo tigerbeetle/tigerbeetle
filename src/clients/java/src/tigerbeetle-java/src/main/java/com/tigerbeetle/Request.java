@@ -9,7 +9,7 @@ import java.util.concurrent.TimeoutException;
 
 abstract class Request<T> implements Future<T[]> {
 
-    protected final static class Operations {
+    final static class Operations {
         public final static byte CREATE_ACCOUNTS = 3;
         public final static byte CREATE_TRANSFERS = 4;
         public final static byte LOOKUP_ACCOUNTS = 5;
@@ -30,7 +30,13 @@ abstract class Request<T> implements Future<T[]> {
     // This request must finish either with a result or an exception
     private Object result;
 
-    protected Request(Client client, byte operation, Batch batch) throws IllegalArgumentException {
+    protected Request(Client client, byte operation, Batch batch) {
+
+        if (client == null)
+            throw new NullPointerException("Client cannot be null");
+        if (batch == null)
+            throw new NullPointerException("Batch cannot be null");
+
         this.client = client;
         this.operation = operation;
         this.requestLen = batch.getLenght();
@@ -47,9 +53,8 @@ abstract class Request<T> implements Future<T[]> {
         client.submit(this);
     }
 
-    // Used only by the JNI side
-    @SuppressWarnings("unused")
-    private void endRequest(byte receivedOperation, ByteBuffer buffer, long packet, byte status) {
+    // Used by the JNI side
+    void endRequest(byte receivedOperation, ByteBuffer buffer, long packet, byte status) {
 
         // This method is called from the JNI side, on the tb_client thread
         // We CAN'T throw any exception here, any event must be stored and

@@ -1,7 +1,6 @@
 package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.UUID;
 import org.junit.Test;

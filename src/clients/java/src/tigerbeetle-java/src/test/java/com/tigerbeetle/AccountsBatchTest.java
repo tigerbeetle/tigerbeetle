@@ -75,7 +75,7 @@ public class AccountsBatchTest {
     }
 
     @Test
-    public void testGet() throws RequestException {
+    public void testGet() {
 
         AccountsBatch batch = new AccountsBatch(dummyStream.position(0));
         assertEquals(2, batch.getLenght());

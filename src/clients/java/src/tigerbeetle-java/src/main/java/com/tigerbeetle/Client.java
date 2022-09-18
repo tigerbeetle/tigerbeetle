@@ -26,16 +26,75 @@ public final class Client implements AutoCloseable {
     private long packetsHead;
     private long packetsTail;
 
+    /**
+     * Initializes an instance of TigerBeetle client. This class is thread-safe and for optimal
+     * performance, a single instance should be shared between multiple concurrent tasks.
+     * <p>
+     * Multiple clients can be instantiated in case of connecting to more than one TigerBeetle
+     * cluster.
+     *
+     * @param clusterID
+     * @param replicaAddresses
+     * @param maxConcurrency
+     *
+     * @throws InitializationException If TigerBeetle an error occurred initializing this client.
+     *         See {@link InitializationException.Status} for more details.
+     *
+     * @throws IllegalArgumentException
+     *         <p>
+     *         If {@code clusterID} is negative.
+     *         <p>
+     *         If {@code replicaAddresses} is null, empty or presented in incorrect format.
+     *         <p>
+     *         If {@code maxConcurrency} is zero or negative.
+     */
+    public Client(int clusterID, String[] replicaAddresses, int maxConcurrency) {
+        this(clusterID, maxConcurrency);
+
+        if (replicaAddresses == null || replicaAddresses.length == 0)
+            throw new IllegalArgumentException("Invalid replica addresses");
+
+        var joiner = new StringJoiner(",");
+        for (var address : replicaAddresses) {
+            joiner.add(address);
+        }
+
+        int status = clientInit(clusterID, joiner.toString(), maxConcurrency);
+
+        if (status == InitializationException.Status.INVALID_ADDRESS)
+            throw new IllegalArgumentException("Replica addresses format is invalid.");
+
+        if (status != 0)
+            throw new InitializationException(status);
+    }
+
+
+    /**
+     * Initializes an instance of TigerBeetle client. This class is thread-safe and for optimal
+     * performance, a single instance should be shared between multiple concurrent tasks.
+     * <p>
+     * Multiple clients can be instantiated in case of connecting to more than one TigerBeetle
+     * cluster.
+     *
+     * @param clusterID
+     * @param replicaAddresses
+     *
+     * @throws InitializationException If TigerBeetle an error occurred initializing this client.
+     *         See {@link InitializationException.Status} for more details.
+     *
+     * @throws IllegalArgumentException
+     *         <p>
+     *         If {@code clusterID} is negative.
+     *         <p>
+     *         If {@code replicaAddresses} is null, empty or presented in incorrect format.
+     */
     public Client(int clusterID, String[] replicaAddresses) {
         this(clusterID, replicaAddresses, DEFAULT_MAX_CONCURRENCY);
     }
 
-    public Client(int clusterID, String[] replicaAddresses, int maxConcurrency) {
+    Client(int clusterID, int maxConcurrency) {
         if (clusterID < 0)
             throw new IllegalArgumentException("ClusterID must be positive");
-
-        if (replicaAddresses == null || replicaAddresses.length == 0)
-            throw new IllegalArgumentException("Invalid replica addresses");
 
         // Cap the maximum amount of packets
         if (maxConcurrency <= 0)
@@ -45,20 +104,7 @@ public final class Client implements AutoCloseable {
             maxConcurrency = 4096;
         }
 
-        var joiner = new StringJoiner(",");
-        for (var address : replicaAddresses) {
-            joiner.add(address);
-        }
-
         this.clusterID = clusterID;
-        int status = clientInit(clusterID, joiner.toString(), maxConcurrency);
-
-        if (status == InitializationException.Status.INVALID_ADDRESS)
-            throw new IllegalArgumentException("Replica addresses format is invalid.");
-
-        if (status != 0)
-            throw new InitializationException(status);
-
         this.maxConcurrency = maxConcurrency;
         this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
     }

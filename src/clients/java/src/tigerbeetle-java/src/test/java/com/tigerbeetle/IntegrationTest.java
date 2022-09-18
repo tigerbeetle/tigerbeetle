@@ -420,41 +420,6 @@ public class IntegrationTest {
         }
     }
 
-    /**
-     * This test asserts that a client disconnected from any replica can handle timeouts correctly
-     *
-     * @throws Throwable
-     */
-    @Ignore
-    @Test
-    public void testTimeoutClient() throws Throwable {
-
-        try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
-
-                var errors = client.createAccounts(new Account[] {account1, account2});
-                Assert.assertTrue(errors.length == 0);
-
-                // Closes the server, disconnecting the client
-                server.close();
-
-                // Client will submit a request, but it is not going to complete
-                @SuppressWarnings("unused")
-                var accounts =
-                        client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
-
-                // It is not expceted to lookupAccounts to finish
-                Assert.assertTrue(false);
-
-            } catch (Throwable any) {
-                throw any;
-            }
-
-        } catch (Throwable any) {
-            throw any;
-        }
-    }
-
     private static void assertAccounts(Account account1, Account account2) {
         assertEquals(account1.getId(), account2.getId());
         assertEquals(account1.getUserData(), account2.getUserData());

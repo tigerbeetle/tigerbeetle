@@ -158,8 +158,8 @@ public final class Account {
     /**
      * Gets the behavior during transfers.
      *
+     * @return A 16-bits unsigned integer bit mask
      * @see com.tigerbeetle.AccountFlags
-     * @param code A 16-bits unsigned integer bit mask.
      */
     public int getFlags() {
         return flags;

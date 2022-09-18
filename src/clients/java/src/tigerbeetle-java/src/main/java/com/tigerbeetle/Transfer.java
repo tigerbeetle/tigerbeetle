@@ -173,8 +173,8 @@ public final class Transfer {
      * <p>
      * May be zero, null values are converted to zero.
      *
-     * @param userData An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
-     *        unique 128-bit integer.
+     * @param pendingId An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any
+     *        other unique 128-bit integer.
      */
     public void setPendingId(UUID pendingId) {
         if (pendingId == null) {
@@ -254,7 +254,7 @@ public final class Transfer {
      * Gets the behavior during transfers.
      *
      * @see com.tigerbeetle.TransferFlags
-     * @param code A 16-bits unsigned integer bit mask.
+     * @return A 16-bits unsigned integer bit mask.
      */
     public int getFlags() {
         return flags;

@@ -74,7 +74,7 @@ public class TransfersBatchTest {
     }
 
     @Test
-    public void testGet() throws RequestException {
+    public void testGet() {
 
         TransfersBatch batch = new TransfersBatch(dummyStream.position(0));
         assertEquals(2, batch.getLenght());
