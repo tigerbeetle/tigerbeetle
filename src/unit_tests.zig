@@ -19,5 +19,6 @@ test {
 
     // TODO Add remaining unit tests from lsm namespace.
     _ = @import("lsm/forest.zig");
+    _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/segmented_array.zig");
 }
