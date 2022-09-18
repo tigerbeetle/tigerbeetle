@@ -130,8 +130,7 @@ pub fn ManifestLevelType(
             const cursor_start = level.iterator_start(table.key_min, table.key_min, .ascending).?;
             var absolute_index = level.keys.absolute_index_for_cursor(cursor_start);
 
-            // TODO Optimize start node
-            var it = level.tables.iterator(absolute_index, 0, .ascending);
+            var it = level.tables.iterator_from_index(absolute_index, .ascending);
             while (it.next()) |level_table| : (absolute_index += 1) {
                 if (level_table.invisible(snapshots)) {
                     assert(level_table.equal(table));
@@ -173,12 +172,8 @@ pub fn ManifestLevelType(
                     assert(compare_keys(range.key_min, range.key_max) != .gt);
 
                     if (level.iterator_start(range.key_min, range.key_max, direction)) |start| {
-                        break :blk level.tables.iterator(
+                        break :blk level.tables.iterator_from_index(
                             level.keys.absolute_index_for_cursor(start),
-                            switch (direction) {
-                                .ascending => 0,
-                                .descending => level.tables.node_count - 1,
-                            },
                             direction,
                         );
                     } else {
@@ -191,7 +186,7 @@ pub fn ManifestLevelType(
                     }
                 } else {
                     switch (direction) {
-                        .ascending => break :blk level.tables.iterator(0, 0, direction),
+                        .ascending => break :blk level.tables.iterator_from_index(0, direction),
                         .descending => {
                             break :blk level.tables.iterator_from_cursor(level.tables.last(), .descending);
                         },

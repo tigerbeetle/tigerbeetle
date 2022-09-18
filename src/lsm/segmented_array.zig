@@ -6,7 +6,7 @@ const mem = std.mem;
 
 const div_ceil = @import("../util.zig").div_ceil;
 const binary_search_values_raw = @import("binary_search.zig").binary_search_values_raw;
-
+const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 const Direction = @import("direction.zig").Direction;
 
 pub const Cursor = struct {
@@ -305,7 +305,6 @@ fn SegmentedArrayType(
             assert(array.indexes[node] == array.indexes[node + 1]);
         }
 
-        // TODO As an optimization, have a remove() function that can target a cursor.
         pub fn remove_elements(
             array: *Self,
             node_pool: *NodePool,
@@ -586,27 +585,31 @@ fn SegmentedArrayType(
             assert(absolute_index < element_count_max);
             assert(absolute_index <= array.len());
 
-            var node: u32 = 0;
-            while (node + 1 < array.node_count and
-                absolute_index >= array.indexes[node + 1])
-            {
-                node += 1;
-            }
-            assert(node < array.node_count);
+            const result = binary_search_keys(u32, struct {
+                inline fn compare(a: u32, b: u32) math.Order {
+                    return math.order(a, b);
+                }
+            }.compare, array.indexes[0..array.node_count], absolute_index);
 
-            const relative_index = absolute_index - array.indexes[node];
-
-            if (node == array.node_count - 1) {
-                // Insertion may target the index one past the end of the array.
-                assert(relative_index <= array.count(node));
+            if (result.exact) {
+                return .{
+                    .node = result.index,
+                    .relative_index = 0,
+                };
             } else {
-                assert(relative_index < array.count(node));
+                const node = result.index - 1;
+                const relative_index = absolute_index - array.indexes[node];
+                if (node == array.node_count - 1) {
+                    // Insertion may target the index one past the end of the array.
+                    assert(relative_index <= array.count(node));
+                } else {
+                    assert(relative_index < array.count(node));
+                }
+                return .{
+                    .node = node,
+                    .relative_index = relative_index,
+                };
             }
-
-            return .{
-                .node = node,
-                .relative_index = relative_index,
-            };
         }
 
         pub const Iterator = struct {
@@ -677,6 +680,7 @@ fn SegmentedArrayType(
             } else {
                 assert(cursor.node < array.node_count);
                 assert(cursor.relative_index < array.count(cursor.node));
+
                 return .{
                     .array = array,
                     .direction = direction,
@@ -685,20 +689,16 @@ fn SegmentedArrayType(
             }
         }
 
-        // TODO remove in favor if iterator_from_cursor()?
-        pub fn iterator(
+        pub fn iterator_from_index(
             array: *const Self,
-            /// Absolute index to start iteration at.
+            /// First element of iteration.
             absolute_index: u32,
-            /// The start node allows us to skip over nodes as an optimization.
-            /// If ascending start from the first element of the start node and ascend.
-            /// If descending start from the last element of the start node and descend.
-            start_node: u32,
             direction: Direction,
         ) Iterator {
+            assert(absolute_index < element_count_max);
+
             if (array.node_count == 0) {
                 assert(absolute_index == 0);
-                assert(start_node == 0);
 
                 return Iterator{
                     .array = array,
@@ -706,56 +706,14 @@ fn SegmentedArrayType(
                     .cursor = .{ .node = 0, .relative_index = 0 },
                     .done = true,
                 };
-            }
+            } else {
+                assert(absolute_index < array.len());
 
-            assert(start_node < array.node_count);
-            assert(absolute_index < element_count_max);
-            assert(absolute_index < array.indexes[array.node_count]);
-
-            switch (direction) {
-                .ascending => {
-                    assert(absolute_index >= array.indexes[start_node]);
-
-                    var node = start_node;
-                    while (node + 1 < array.node_count and
-                        absolute_index >= array.indexes[node + 1])
-                    {
-                        node += 1;
-                    }
-                    assert(node < array.node_count);
-
-                    const relative_index = absolute_index - array.indexes[node];
-                    assert(relative_index < array.count(node));
-
-                    return .{
-                        .array = array,
-                        .direction = direction,
-                        .cursor = .{
-                            .node = node,
-                            .relative_index = relative_index,
-                        },
-                    };
-                },
-                .descending => {
-                    assert(absolute_index < array.indexes[start_node + 1]);
-
-                    var node = start_node;
-                    while (node > 0 and absolute_index < array.indexes[node]) {
-                        node -= 1;
-                    }
-
-                    const relative_index = absolute_index - array.indexes[node];
-                    assert(relative_index < array.count(node));
-
-                    return .{
-                        .array = array,
-                        .direction = direction,
-                        .cursor = .{
-                            .node = node,
-                            .relative_index = relative_index,
-                        },
-                    };
-                },
+                return Iterator{
+                    .array = array,
+                    .direction = direction,
+                    .cursor = array.cursor_for_absolute_index(absolute_index),
+                };
             }
         }
 
@@ -993,7 +951,7 @@ fn TestContext(
                 for (context.reference.items) |i| std.debug.print("{}, ", .{i});
 
                 std.debug.print("\nactual: ", .{});
-                var it = context.array.iterator(0, 0, .ascending);
+                var it = context.array.iterator_from_index(0, .ascending);
                 while (it.next()) |i| std.debug.print("{}, ", .{i.*});
                 std.debug.print("\n", .{});
             }
@@ -1001,7 +959,7 @@ fn TestContext(
             try testing.expectEqual(context.reference.items.len, context.array.len());
 
             {
-                var it = context.array.iterator(0, 0, .ascending);
+                var it = context.array.iterator_from_index(0, .ascending);
 
                 for (context.reference.items) |expect| {
                     const actual = it.next() orelse return error.TestUnexpectedResult;
@@ -1011,9 +969,8 @@ fn TestContext(
             }
 
             {
-                var it = context.array.iterator(
+                var it = context.array.iterator_from_index(
                     @intCast(u32, context.reference.items.len) -| 1,
-                    context.array.last().node,
                     .descending,
                 );
 
@@ -1029,18 +986,14 @@ fn TestContext(
             }
 
             {
-                var it = context.array.iterator(0, 0, .ascending);
-                for (context.reference.items) |_| {
+                for (context.reference.items) |_, i| {
                     try testing.expect(std.meta.eql(
-                        it.cursor,
-                        context.array.cursor_for_absolute_index(
-                            context.array.absolute_index_for_cursor(it.cursor),
+                        i,
+                        context.array.absolute_index_for_cursor(
+                            context.array.cursor_for_absolute_index(@intCast(u32, i)),
                         ),
                     ));
-                    _ = it.next();
                 }
-                try testing.expect(it.next() == null);
-                try testing.expect(it.done);
             }
 
             if (element_order == .sorted) {
@@ -1059,45 +1012,6 @@ fn TestContext(
 
             for (context.array.nodes[context.array.node_count..]) |node| {
                 try testing.expectEqual(@as(?*[TestArray.node_capacity]T, null), node);
-            }
-
-            if (context.reference.items.len > 0) {
-                const reference_len = @intCast(u32, context.reference.items.len);
-                const index = context.random.uintLessThanBiased(u32, reference_len);
-                const cursor = context.array.cursor_for_absolute_index(index);
-
-                {
-                    const start_node = context.random.uintAtMostBiased(u32, cursor.node);
-
-                    var it = context.array.iterator(index, start_node, .ascending);
-
-                    for (context.reference.items[index..]) |expect| {
-                        const actual = it.next() orelse return error.TestUnexpectedResult;
-                        try testing.expectEqual(expect, actual.*);
-                    }
-                    try testing.expectEqual(@as(?*const T, null), it.next());
-                }
-
-                {
-                    const start_node = cursor.node + context.random.uintAtMostBiased(
-                        u32,
-                        context.array.node_count - 1 - cursor.node,
-                    );
-                    assert(start_node >= cursor.node);
-                    assert(start_node < context.array.node_count);
-
-                    var it = context.array.iterator(index, start_node, .descending);
-
-                    var i = index + 1;
-                    while (i > 0) {
-                        i -= 1;
-
-                        const expect = context.reference.items[i];
-                        const actual = it.next() orelse return error.TestUnexpectedResult;
-                        try testing.expectEqual(expect, actual.*);
-                    }
-                    try testing.expectEqual(@as(?*const T, null), it.next());
-                }
             }
 
             {
