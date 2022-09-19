@@ -184,7 +184,7 @@ const Command = struct {
         try stdout.writeAll("TigerBeetle version experimental\n");
 
         if (verbose) {
-            try std.fmt.format(stdout, "\ngit_commit=\"{s}\"\n", .{ build_options.git_commit orelse "?" });
+            try std.fmt.format(stdout, "\ngit_commit=\"{s}\"\n", .{build_options.git_commit orelse "?"});
             inline for (std.meta.declarations(config)) |config_field| {
                 if (config_field.is_pub) {
                     const value = @field(config, config_field.name);

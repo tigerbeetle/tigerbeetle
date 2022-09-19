@@ -64,7 +64,7 @@ test "copy_left" {
 
     for (a) |*v, i| v.* = i;
     copy_left(.exact, usize, a[0..6], a[2..]);
-    try std.testing.expect(std.mem.eql(usize, a, &.{2, 3, 4, 5, 6, 7, 6, 7}));
+    try std.testing.expect(std.mem.eql(usize, a, &.{ 2, 3, 4, 5, 6, 7, 6, 7 }));
 }
 
 pub inline fn copy_right(
@@ -90,7 +90,7 @@ test "copy_right" {
 
     for (a) |*v, i| v.* = i;
     copy_right(.exact, usize, a[2..], a[0..6]);
-    try std.testing.expect(std.mem.eql(usize, a, &.{0, 1, 0, 1, 2, 3, 4, 5}));
+    try std.testing.expect(std.mem.eql(usize, a, &.{ 0, 1, 0, 1, 2, 3, 4, 5 }));
 }
 
 pub inline fn copy_disjoint(
