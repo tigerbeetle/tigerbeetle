@@ -66,25 +66,6 @@ pub const transfers_max = switch (deployment_environment) {
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const transfers_pending_max = transfers_max;
 
-// TODO Move these to a separate "internal computed constants" file.
-// 128 == @sizeOf(Header)
-const message_body_accounts = @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Account));
-const message_body_transfers = @divFloor(message_size_max - 128, @sizeOf(tigerbeetle.Transfer));
-
-/// The maximum number of objects that may be changed by a commit.
-/// See `Groove.init`'s `commit_count_max` for more detail.
-// *2 because creating a transfer will update 2 accounts.
-pub const commit_count_max_accounts = 2 * message_body_accounts;
-// *2 because creating a post/void-transfer queries the post/void transfer and the pending transfer.
-pub const commit_count_max_transfers = 2 * message_body_transfers;
-pub const commit_count_max_posted = message_body_transfers;
-
-// *2 to fetch a transfer's debit/credit accounts.
-pub const prefetch_count_max_accounts = 2 * message_body_accounts;
-// *2 to fetch pending and post/void transfer.
-pub const prefetch_count_max_transfers = 2 * message_body_transfers;
-pub const prefetch_count_max_posted = message_body_transfers;
-
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
 /// We need this limit to allocate space for copies of batch headers at the start of the journal.
@@ -255,7 +236,7 @@ pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size
 pub const lsm_trees = 30;
 
 /// The number of levels in an LSM tree.
-/// Higher levels increases read amplification, but increase total storage capacity.
+/// A higher number of levels increases read amplification, as well as total storage capacity.
 pub const lsm_levels = 7;
 
 /// The number of tables at level i (0≤i<lsm_levels) is `pow(lsm_growth_factor, i+1)`.
@@ -374,10 +355,6 @@ comptime {
 
     // The LSM tree uses half-measures to balance compaction.
     assert(lsm_batch_multiple % 2 == 0);
-
-    assert(commit_count_max_accounts > 0);
-    assert(commit_count_max_transfers > 0);
-    assert(commit_count_max_posted > 0);
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.

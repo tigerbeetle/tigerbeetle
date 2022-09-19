@@ -120,6 +120,24 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
         pub const Options = struct {
             /// The maximum number of keys that may be committed per batch.
+            ///
+            /// In general, the commit count max for a field depends on the field's object —
+            /// how many objects might be changed by a batch:
+            ///   (config.message_size_max - sizeOf(vsr.header))
+            /// For example, there are at most 8191 transfers in a batch.
+            /// So commit_count_max=8191 for transfer objects and indexes.
+            ///
+            /// However, if a transfer is ever mutated, then this will double commit_count_max
+            /// since the old index might need to be removed, and the new index inserted.
+            ///
+            /// A way to see this is by looking at the state machine. If a transfer is inserted,
+            /// how many accounts and transfer put/removes will be generated?
+            ///
+            /// This also means looking at the state machine operation that will generate the
+            /// most put/removes in the worst case.
+            /// For example, create_accounts will put at most 8191 accounts.
+            /// However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
+            /// some of these accounts may exist, requiring a remove/put to update the index.
             commit_count_max: u32,
         };
 
@@ -130,6 +148,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             value_cache: ?*ValueCache,
             options: Options,
         ) !Tree {
+            assert(options.commit_count_max > 0);
+
             var table_mutable = try TableMutable.init(allocator, options.commit_count_max);
             errdefer table_mutable.deinit(allocator);
 

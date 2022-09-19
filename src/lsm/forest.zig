@@ -55,12 +55,6 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         },
     });
 
-    //const AllGrooveOptions = std.enums.EnumFieldStruct(
-    //    std.meta.FieldEnum(@TypeOf(groove_config)),
-    //    GrooveOptions,
-    //    null,
-    //);
-
     return struct {
         const Forest = @This();
 
@@ -72,6 +66,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             checkpoint,
             open,
         };
+
+        pub const Options = AllGrooveOptions;
 
         join_op: ?JoinOp = null,
         join_pending: usize = 0,
@@ -85,7 +81,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             allocator: mem.Allocator,
             grid: *Grid,
             node_count: u32,
-            // (e.g.) .{ .transfers = .{ .cache_size = 128, .commit_count_max = n }, .accounts = same }
+            // (e.g.) .{ .transfers = .{ .cache_size = 128, … }, .accounts = … }
             all_groove_options: AllGrooveOptions,
         ) !Forest {
             // NodePool must be allocated to pass in a stable address for the Grooves.
