@@ -193,8 +193,9 @@ pub fn CompactionType(
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done and compaction.merge_iterator == null);
 
+            // table from level a + tables from level b 
+            assert(range.table_count <= 1 + compaction.update_level_b.array.len);
             assert(range.table_count > 0);
-            assert(range.table_count <= compaction.update_level_b.array.len);
 
             assert(level_b < config.lsm_levels);
             assert((table_a == null) == (level_b == 0));
