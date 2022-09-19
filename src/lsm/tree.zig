@@ -721,7 +721,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 assert(tree.compaction_table_immutable.status == .idle);
             } else {
                 switch (tree.compaction_table_immutable.status) {
-                    .idle => {}, // wasn't started for this half measure
+                    .idle => assert(tree.table_immutable.free), // wasn't started for this half measure
                     .processing => still_compacting = true,
                     .done => {
                         tree.compaction_table_immutable.reset();
