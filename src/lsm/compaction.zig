@@ -194,6 +194,8 @@ pub fn CompactionType(
             assert(!compaction.merge_done and compaction.merge_iterator == null);
 
             assert(range.table_count > 0);
+            assert(range.table_count <= compaction.update_level_b.array.len);
+
             assert(level_b < config.lsm_levels);
             assert((table_a == null) == (level_b == 0));
 
@@ -293,7 +295,7 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
 
             assert(buffer == &compaction.update_level_b or buffer == &compaction.insert_level_b);
-            if (buffer.full()) compaction.apply_manifest_updates(buffer);
+            assert(!buffer.full());
             buffer.push(table);
         }
         
