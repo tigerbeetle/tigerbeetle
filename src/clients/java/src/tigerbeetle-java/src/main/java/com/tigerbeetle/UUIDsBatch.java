@@ -5,7 +5,7 @@ import java.util.UUID;
 
 public class UUIDsBatch extends Batch {
 
-    static final class Struct {
+    interface Struct {
         public static final int SIZE = 16;
     }
 

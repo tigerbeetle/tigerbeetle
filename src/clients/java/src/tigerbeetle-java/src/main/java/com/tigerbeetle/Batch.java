@@ -6,20 +6,26 @@ import java.util.UUID;
 
 public abstract class Batch {
 
+    // We require little-endian architectures everywhere for efficient network
+    // deserialization:
+    private final static ByteOrder BYTE_ORDER = ByteOrder.LITTLE_ENDIAN;
+
     private final ByteBuffer buffer;
 
     protected Batch(int bufferCapacity) {
-        this(ByteBuffer.allocateDirect(bufferCapacity));
+
+        if (bufferCapacity < 0)
+            throw new IllegalArgumentException("Buffer capacity cannot be negative");
+
+        this.buffer = ByteBuffer.allocateDirect(bufferCapacity).order(BYTE_ORDER);
     }
 
     protected Batch(ByteBuffer buffer) {
 
         if (buffer == null)
-            throw new IllegalArgumentException("buffer");
+            throw new NullPointerException("buffer");
 
-        // We require little-endian architectures everywhere for efficient network
-        // deserialization:
-        this.buffer = buffer.order(ByteOrder.LITTLE_ENDIAN);
+        this.buffer = buffer.order(BYTE_ORDER);
     }
 
     public ByteBuffer getBuffer() {

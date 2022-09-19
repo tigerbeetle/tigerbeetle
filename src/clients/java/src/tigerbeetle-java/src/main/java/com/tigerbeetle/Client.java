@@ -40,19 +40,20 @@ public final class Client implements AutoCloseable {
      * @throws InitializationException If TigerBeetle an error occurred initializing this client.
      *         See {@link InitializationException.Status} for more details.
      *
-     * @throws IllegalArgumentException
-     *         <p>
-     *         If {@code clusterID} is negative.
-     *         <p>
-     *         If {@code replicaAddresses} is null, empty or presented in incorrect format.
-     *         <p>
-     *         If {@code maxConcurrency} is zero or negative.
+     * @throws IllegalArgumentException If {@code clusterID} is negative.
+     * @throws IllegalArgumentException If {@code replicaAddresses} is empty or presented in
+     *         incorrect format.
+     * @throws NullPointerException If {@code replicaAddresses} is null.
+     * @throws IllegalArgumentException If {@code maxConcurrency} is zero or negative.
      */
     public Client(int clusterID, String[] replicaAddresses, int maxConcurrency) {
         this(clusterID, maxConcurrency);
 
+        if (replicaAddresses == null)
+            throw new NullPointerException("Replica addresses cannot be null");
+
         if (replicaAddresses == null || replicaAddresses.length == 0)
-            throw new IllegalArgumentException("Invalid replica addresses");
+            throw new IllegalArgumentException("Empty replica addresses");
 
         var joiner = new StringJoiner(",");
         for (var address : replicaAddresses) {
@@ -82,11 +83,10 @@ public final class Client implements AutoCloseable {
      * @throws InitializationException If TigerBeetle an error occurred initializing this client.
      *         See {@link InitializationException.Status} for more details.
      *
-     * @throws IllegalArgumentException
-     *         <p>
-     *         If {@code clusterID} is negative.
-     *         <p>
-     *         If {@code replicaAddresses} is null, empty or presented in incorrect format.
+     * @throws IllegalArgumentException If {@code clusterID} is negative.
+     * @throws IllegalArgumentException If {@code replicaAddresses} is empty or presented in
+     *         incorrect format.
+     * @throws NullPointerException If {@code replicaAddresses} is null.
      */
     public Client(int clusterID, String[] replicaAddresses) {
         this(clusterID, replicaAddresses, DEFAULT_MAX_CONCURRENCY);

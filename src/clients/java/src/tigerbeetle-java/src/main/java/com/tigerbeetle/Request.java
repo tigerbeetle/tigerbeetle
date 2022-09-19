@@ -9,7 +9,7 @@ import java.util.concurrent.TimeoutException;
 
 abstract class Request<T> implements Future<T[]> {
 
-    final static class Operations {
+    interface Operations {
         public final static byte CREATE_ACCOUNTS = 3;
         public final static byte CREATE_TRANSFERS = 4;
         public final static byte LOOKUP_ACCOUNTS = 5;
@@ -61,6 +61,7 @@ abstract class Request<T> implements Future<T[]> {
         // handled from the user's thread on the completion.
 
         Object result = null;
+
         if (receivedOperation != operation) {
 
             result = new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
@@ -77,6 +78,10 @@ abstract class Request<T> implements Future<T[]> {
         } else if (status != RequestException.Status.OK) {
 
             result = new RequestException(status);
+
+        } else if (isDone()) {
+
+            result = new AssertionError("This request has already been completed");
 
         } else {
 

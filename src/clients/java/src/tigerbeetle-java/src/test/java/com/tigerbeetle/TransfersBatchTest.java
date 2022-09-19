@@ -73,6 +73,17 @@ public class TransfersBatchTest {
         dummyStream.putLong(900); // Timestamp
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void testConstructorWithNegativeCapacity() {
+        new TransfersBatch(-1);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConstructorWithNullBuffer() {
+        ByteBuffer buffer = null;
+        new TransfersBatch(buffer);
+    }
+
     @Test
     public void testGet() {
 

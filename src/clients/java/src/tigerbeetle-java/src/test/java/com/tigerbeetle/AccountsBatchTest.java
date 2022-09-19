@@ -74,6 +74,17 @@ public class AccountsBatchTest {
         dummyStream.putLong(99); // Timestamp
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void testConstructorWithNegativeCapacity() {
+        new AccountsBatch(-1);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConstructorWithNullBuffer() {
+        ByteBuffer buffer = null;
+        new AccountsBatch(buffer);
+    }
+
     @Test
     public void testGet() {
 

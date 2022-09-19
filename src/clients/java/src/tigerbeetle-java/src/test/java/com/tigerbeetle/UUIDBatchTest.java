@@ -28,6 +28,17 @@ public class UUIDBatchTest {
         dummyStream.putLong(200).putLong(2000); // Item 2
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void testConstructorWithNegativeCapacity() {
+        new UUIDsBatch(-1);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConstructorWithNullBuffer() {
+        ByteBuffer buffer = null;
+        new UUIDsBatch(buffer);
+    }
+
     @Test
     public void testAdd() {
 

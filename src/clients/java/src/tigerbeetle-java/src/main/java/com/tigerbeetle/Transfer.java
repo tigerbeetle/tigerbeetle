@@ -5,7 +5,7 @@ import java.util.UUID;
 
 public final class Transfer {
 
-    static final class Struct {
+    interface Struct {
         public static final int SIZE = 128;
         public static final byte[] RESERVED = new byte[16];
     }

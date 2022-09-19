@@ -28,6 +28,12 @@ public class CreateTransfersResultBatchTest {
         dummyStream.putInt(1).putInt(36); // Item 1 - ExceedsDebits
     }
 
+    @Test(expected = NullPointerException.class)
+    public void testConstructorWithNullBuffer() {
+        ByteBuffer buffer = null;
+        new CreateTransfersResultBatch(buffer);
+    }
+
     @Test
     public void testGet() {
 

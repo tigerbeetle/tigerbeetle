@@ -10,7 +10,7 @@ import java.util.UUID;
  */
 public final class Account {
 
-    static final class Struct {
+    interface Struct {
         public static final int SIZE = 128;
         public static final byte[] RESERVED = new byte[48];
     }
