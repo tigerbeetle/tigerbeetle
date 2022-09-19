@@ -4,8 +4,9 @@ import java.nio.ByteBuffer;
 import java.util.UUID;
 
 /**
- * TigerBeetle uses fixed-size data structures to represent all data, including accounts. Account
- * fields cannot be changed by the user after creation. However, debits and credits fields are
+ * Account.
+ * <p>
+ * Fields cannot be changed by the user after creation. However, debits and credits fields are
  * modified by TigerBeetle as transfers happen to and from the account.
  */
 public final class Account {
@@ -123,7 +124,7 @@ public final class Account {
      * <p>
      * Example: 1 for USD and 2 for EUR.
      *
-     * @param ledger A 32-bit integer defined by the user
+     * @param ledger A 32-bit integer defined by the user.
      */
     public void setLedger(int ledger) {
         this.ledger = ledger;
@@ -158,7 +159,7 @@ public final class Account {
     /**
      * Gets the behavior during transfers.
      *
-     * @return A 16-bits unsigned integer bit mask
+     * @return A 16-bits unsigned integer bit mask.
      * @see com.tigerbeetle.AccountFlags
      */
     public int getFlags() {
@@ -172,7 +173,7 @@ public final class Account {
      * credits.
      *
      * @see com.tigerbeetle.AccountFlags
-     * @param flags A 16-bits unsigned integer bit mask
+     * @param flags A 16-bits unsigned integer bit mask.
      * @throws IllegalArgumentException if flags is negative or greater than 65535.
      */
     public void setFlags(int flags) {
@@ -187,7 +188,7 @@ public final class Account {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer
+     * @return A 64-bits integer.
      */
     public long getDebitsPending() {
         return debitsPending;
@@ -202,7 +203,7 @@ public final class Account {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer
+     * @return A 64-bits integer.
      */
     public long getDebitsPosted() {
         return debitsPosted;
@@ -217,7 +218,7 @@ public final class Account {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer
+     * @return A 64-bits integer.
      */
     public long getCreditsPending() {
         return creditsPending;
@@ -232,7 +233,7 @@ public final class Account {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer
+     * @return A 64-bits integer.
      */
     public long getCreditsPosted() {
         return creditsPosted;
@@ -247,7 +248,7 @@ public final class Account {
      * <p>
      * UNIX timestamp in nanoseconds.
      *
-     * @return A 64-bits integer
+     * @return A 64-bits integer.
      */
     public long getTimestamp() {
         return timestamp;

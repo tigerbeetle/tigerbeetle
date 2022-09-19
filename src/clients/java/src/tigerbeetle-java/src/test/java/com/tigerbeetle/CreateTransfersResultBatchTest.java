@@ -9,7 +9,7 @@ import java.nio.ByteOrder;
 import org.junit.Test;
 
 /**
- * Asserts the memory interpretation from/to a binary stream
+ * Asserts the memory interpretation from/to a binary stream.
  */
 public class CreateTransfersResultBatchTest {
 

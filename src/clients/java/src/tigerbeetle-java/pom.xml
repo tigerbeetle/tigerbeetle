@@ -103,6 +103,10 @@
               <exclude>com/tigerbeetle/RequestException.class</exclude>
               <exclude>com/tigerbeetle/AssertionError.class</exclude>
 
+              <!-- Excluding JNILoader platform specifics -->
+              <exclude>com/tigerbeetle/JNILoader$OS.class</exclude>
+              <exclude>com/tigerbeetle/JNILoader$Arch.class</exclude>
+
               <!-- Excluding the benchmark -->
               <exclude>Benchmark.class</exclude>
             </excludes>

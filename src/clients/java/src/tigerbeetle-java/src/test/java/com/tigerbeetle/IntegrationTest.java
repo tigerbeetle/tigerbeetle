@@ -19,7 +19,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 /**
- * Integration tests using a tigerbeetle instance
+ * Integration tests using a tigerbeetle instance.
  */
 public class IntegrationTest {
 
@@ -815,7 +815,7 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that parallel threads will respect client's maxConcurrency,
+     * This test asserts that parallel threads will respect client's maxConcurrency.
      *
      * @throws Throwable
      */
@@ -874,7 +874,7 @@ public class IntegrationTest {
     /**
      * This test asserts that client.close() will wait for all ongoing request to complete And new
      * threads trying to submit a request after the client was closed will fail with
-     * IllegalStateException
+     * IllegalStateException.
      *
      * @throws Throwable
      */

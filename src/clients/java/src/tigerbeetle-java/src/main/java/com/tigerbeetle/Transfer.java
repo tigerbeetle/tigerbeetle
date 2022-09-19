@@ -302,7 +302,7 @@ public final class Transfer {
      * <p>
      * UNIX timestamp in nanoseconds.
      *
-     * @return A 64-bits integer;
+     * @return A 64-bits integer.
      */
     public long getTimestamp() {
         return timestamp;
