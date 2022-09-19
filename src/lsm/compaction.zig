@@ -431,31 +431,25 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
 
             // Ensure there are values to merge and that is it safe to do so.
-            assert(!compaction.merge_iterator.?.empty());
+            const merge_iterator = &compaction.merge_iterator.?;
+            assert(!merge_iterator.empty());
             assert(!compaction.data.writable);
             assert(!compaction.filter.writable);
             assert(!compaction.index.writable);
 
-            // Build up the data/filter/index blocks with values merged from the read iterators.
-            var tombstones_dropped: u32 = 0;
+            // Build up a data block with values merged from the read iterators.
+            // This skips tombstone values if compaction was started with the intent to drop them.
             while (!compaction.table_builder.data_block_full()) {
-                const value = compaction.merge_iterator.?.pop() orelse break;
-                if (compaction.drop_tombstones and tombstone(&value)) {
-                    tombstones_dropped += 1;
-                } else {
-                    compaction.table_builder.data_block_append(&value);
-                }
+                const value = merge_iterator.pop() orelse break;
+                if (compaction.drop_tombstones and tombstone(&value)) continue;
+                compaction.table_builder.data_block_append(&value);
             }
 
-            // Finalize the data block and prepare it to be written out.
-            blk: {
-                // An empty data block means all the values read were tombstones that were dropped.
-                if (compaction.table_builder.data_block_empty()) {
-                    assert(compaction.drop_tombstones);
-                    assert(tombstones_dropped > 0);
-                    break :blk;
-                }
-
+            // Finalize the data block if it's full or if it contains pending values when there's 
+            // no more left to merge.
+            if (compaction.table_builder.data_block_full() or 
+                (merge_iterator.empty() and !compaction.table_builder.data_block_empty())
+            ) {
                 compaction.table_builder.data_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .address = compaction.grid.acquire(),
@@ -465,26 +459,13 @@ pub fn CompactionType(
                 compaction.data.block = compaction.table_builder.data_block;
                 assert(!compaction.data.writable);
                 compaction.data.writable = true;
-
-                // The merge iterator having pending values should mean the data block is full.
-                if (!compaction.merge_iterator.?.empty()) {
-                    const values_used = Table.data_block_values_used(compaction.data.block).len;
-                    assert(values_used == Table.data.value_count_max);
-                }
             }
 
-            // Finalize the filter block if it (or the index block) are full or if there's no more values.
-            if (compaction.table_builder.filter_block_full() or
-                compaction.table_builder.index_block_full() or
-                compaction.merge_iterator.?.empty())
-            blk: {
-                // An empty filter block means all the values read were tombstones that were dropped.
-                if (compaction.table_builder.filter_block_empty()) {
-                    assert(compaction.drop_tombstones);
-                    assert(tombstones_dropped > 0);
-                    break :blk;
-                }
-
+            // Finalize the filter block if it's full or if it contains pending data blocks
+            // when there's no more merged values to fill them.
+            if (compaction.table_builder.filter_block_full() or 
+                (merge_iterator.empty() and !compaction.table_builder.filter_block_empty())
+            ) {
                 compaction.table_builder.filter_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .address = compaction.grid.acquire(),
@@ -496,29 +477,25 @@ pub fn CompactionType(
                 compaction.filter.writable = true;
             }
 
-            // Finalize the index block if it's full or if there's no more values.
+            // Finalize the index block if it's full or if it contains pending data blocks
+            // when there's no more merged values to fill them.
             if (compaction.table_builder.index_block_full() or
-                compaction.merge_iterator.?.empty())
-            blk: {
-                // An empty index block means all the values read were tombstones that were dropped.
-                if (compaction.table_builder.index_block_empty()) {
-                    assert(compaction.drop_tombstones);
-                    assert(tombstones_dropped > 0);
-                    break :blk;
-                }
-
+                (merge_iterator.empty() and !compaction.table_builder.index_block_empty())
+            ) {
                 // Finish the merged table and queue it for insertion.
                 const table = compaction.table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .address = compaction.grid.acquire(),
                     .snapshot_min = compaction.snapshot,
                 });
-                compaction.queue_manifest_update(&compaction.insert_level_b, &table);
 
                 // Mark the finished index block as writable for the next compact_tick() call.
                 compaction.index.block = compaction.table_builder.index_block;
                 assert(!compaction.index.writable);
                 compaction.index.writable = true;
+
+                // Enqueue the merged table to be inserted to level_b
+                compaction.queue_manifest_update(&compaction.insert_level_b, &table);
             }
         }
 
