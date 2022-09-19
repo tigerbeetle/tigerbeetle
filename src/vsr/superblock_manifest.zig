@@ -35,8 +35,8 @@ pub const Manifest = struct {
     compaction_set: std.AutoHashMapUnmanaged(u64, void),
 
     pub const TableExtent = struct {
-        block: u64, // ManifestLog block address
-        entry: u32, // index within the ManifestLog Label/TableInfo arrays
+        block: u64, // ManifestLog block address.
+        entry: u32, // Index within the ManifestLog Label/TableInfo arrays.
     };
 
     pub fn init(

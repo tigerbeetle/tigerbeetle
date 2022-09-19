@@ -12,15 +12,15 @@ const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
-const BlockOperation = @import("grid.zig").BlockOperation;
+const BlockType = @import("grid.zig").BlockType;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 
 /// A table is a set of blocks:
 ///
-/// * Index block (1)
-/// * Filter blocks (at most `filter_block_count_max`)
-///   Each filter block summarizes the keys for several adjacent (in terms of key range) data blocks.
-/// * Data blocks (at most `data_block_count_max`)
+/// * Index block (exactly 1)
+/// * Filter blocks (at least one, at most `filter_block_count_max`)
+///   Each filter block summarizes the keys for several adjacent (in terms of key) data blocks.
+/// * Data blocks (at least one, at most `data_block_count_max`)
 ///   Store the actual keys/values, along with a small index of the keys to optimize lookups.
 ///
 ///
@@ -33,6 +33,7 @@ const TableInfoType = @import("manifest.zig").TableInfoType;
 /// * `size` is the block size excluding padding.
 ///
 /// Index block schema:
+/// │ vsr.Header                   │ operation=BlockType.index
 /// │ vsr.Header                   │ commit=filter_block_count,
 /// │                              │ request=data_block_count,
 /// │                              │ timestamp=snapshot_min
@@ -44,12 +45,12 @@ const TableInfoType = @import("manifest.zig").TableInfoType;
 /// │ […]u8{0}                     │ padding (to end of block)
 ///
 /// Filter block schema:
-/// │ vsr.Header │
+/// │ vsr.Header │ operation=BlockType.filter
 /// │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
 /// │            │   `filter_data_block_count_max` data blocks.
 ///
 /// Data block schema:
-/// │ vsr.Header               │
+/// │ vsr.Header               │ operation=BlockType.data
 /// │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
 /// │ [≤value_count_max]Value  │ At least one value (no empty tables).
 /// │ […]u8{0}                 │ padding (to end of block)
@@ -221,7 +222,7 @@ pub fn TableType(
             assert(table_block_count <= table_block_count_max);
 
             break :layout .{
-                // The number of keys per data block.
+                // The number of keys in the Eytzinger layout per data block.
                 .block_key_count = block_key_count,
                 // The number of bytes used by the keys in the data block.
                 .block_key_layout_size = block_key_layout_size,
@@ -446,8 +447,8 @@ pub fn TableType(
         pub const Builder = struct {
             const TableInfo = TableInfoType(Table);
 
-            key_min: Key = undefined, // inclusive
-            key_max: Key = undefined, // inclusive
+            key_min: Key = undefined, // Inclusive.
+            key_max: Key = undefined, // Inclusive.
 
             index_block: BlockPtr,
             filter_block: BlockPtr,
@@ -582,7 +583,7 @@ pub fn TableType(
                     .request = @intCast(u32, values.len),
                     .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
                     .command = .block,
-                    .operation = BlockOperation.data.operation(),
+                    .operation = BlockType.data.operation(),
                 };
 
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
@@ -634,7 +635,7 @@ pub fn TableType(
                     .op = options.address,
                     .size = block_size - filter.padding_size,
                     .command = .block,
-                    .operation = BlockOperation.filter.operation(),
+                    .operation = BlockType.filter.operation(),
                 };
 
                 const body = builder.filter_block[@sizeOf(vsr.Header)..header.size];
@@ -699,7 +700,7 @@ pub fn TableType(
                     .timestamp = options.snapshot_min,
                     .size = index.size,
                     .command = .block,
-                    .operation = BlockOperation.index.operation(),
+                    .operation = BlockType.index.operation(),
                 };
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();

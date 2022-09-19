@@ -101,8 +101,8 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
         pub const Context = struct {
             grid: *Grid,
-            address: u64, // table index block address
-            checksum: u128, // table index block checksum
+            address: u64, // Table index block address.
+            checksum: u128, // Table index block checksum.
             index_block_callback: ?IndexBlockCallback = null,
         };
 

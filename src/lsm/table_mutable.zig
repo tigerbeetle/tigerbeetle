@@ -54,8 +54,8 @@ pub fn TableMutableType(comptime Table: type) type {
             // If the key is already present in the hash map, the old key will not be overwritten
             // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
             // level getOrPut() API and manually overwrite the old key.
-            const gop = table.values.getOrPutAssumeCapacity(value.*);
-            gop.key_ptr.* = value.*;
+            const upsert = table.values.getOrPutAssumeCapacity(value.*);
+            upsert.key_ptr.* = value.*;
 
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
@@ -65,8 +65,8 @@ pub fn TableMutableType(comptime Table: type) type {
             // If the key is already present in the hash map, the old key will not be overwritten
             // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
             // level getOrPut() API and manually overwrite the old key.
-            const gop = table.values.getOrPutAssumeCapacity(value.*);
-            gop.key_ptr.* = tombstone_from_key(key_from_value(value));
+            const upsert = table.values.getOrPutAssumeCapacity(value.*);
+            upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
 
             assert(table.values.count() <= table.value_count_max);
         }

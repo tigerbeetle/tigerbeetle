@@ -46,7 +46,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         },
     });
 
-    const AllGrooveOptions = @Type(.{
+    const _GroovesOptions = @Type(.{
         .Struct = .{
             .layout = .Auto,
             .fields = groove_options_fields,
@@ -67,7 +67,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             open,
         };
 
-        pub const Options = AllGrooveOptions;
+        pub const GroovesOptions = _GroovesOptions;
 
         join_op: ?JoinOp = null,
         join_pending: usize = 0,
@@ -82,7 +82,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             grid: *Grid,
             node_count: u32,
             // (e.g.) .{ .transfers = .{ .cache_size = 128, … }, .accounts = … }
-            all_groove_options: AllGrooveOptions,
+            grooves_options: GroovesOptions,
         ) !Forest {
             // NodePool must be allocated to pass in a stable address for the Grooves.
             const node_pool = try allocator.create(NodePool);
@@ -104,7 +104,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             inline for (std.meta.fields(Grooves)) |groove_field| {
                 const groove = &@field(grooves, groove_field.name);
                 const Groove = @TypeOf(groove.*);
-                const groove_options: Groove.Options = @field(all_groove_options, groove_field.name);
+                const groove_options: Groove.Options = @field(grooves_options, groove_field.name);
 
                 groove.* = try Groove.init(
                     allocator,

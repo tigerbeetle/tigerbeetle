@@ -239,8 +239,12 @@ pub const lsm_trees = 30;
 /// A higher number of levels increases read amplification, as well as total storage capacity.
 pub const lsm_levels = 7;
 
-/// The number of tables at level i (0≤i<lsm_levels) is `pow(lsm_growth_factor, i+1)`.
-/// A higher growth factor increases write amplification, but decreases read amplification.
+/// The number of tables at level i (0 ≤ i < lsm_levels) is `pow(lsm_growth_factor, i+1)`.
+/// A higher growth factor increases write amplification (by increasing the number of tables in
+/// level B that overlap a table in level A in a compaction), but decreases read amplification (by
+/// reducing the height of the tree and thus the number of levels that must be probed). Since read
+/// amplification can be optimized more easily (with filters and caching), we target a growth
+/// factor of 8 for lower write amplification rather than the more typical growth factor of 10.
 pub const lsm_growth_factor = 8;
 
 /// The maximum key size for an LSM tree in bytes.

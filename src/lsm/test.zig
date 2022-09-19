@@ -29,7 +29,7 @@ const Environment = struct {
 
     const node_count = 1024;
     const cache_size = 2 * 1024 * 1024;
-    const forest_options: Forest.Options = StateMachine.forest_options(.{
+    const forest_options = StateMachine.forest_options(.{
         .lsm_forest_node_count = undefined, // ignored by StateMachine.forest_options()
         .cache_size_accounts = cache_size,
         .cache_size_transfers = cache_size,

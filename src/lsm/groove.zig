@@ -423,8 +423,6 @@ pub fn GrooveType(
         pub const IndexTreesOptions = IndexTreesOptions;
 
         pub const Options = struct {
-            /// The cache size is meant to be computed based on the left over available memory
-            /// that tigerbeetle was given to allocate from CLI arguments.
             /// TODO Improve unit in this name to make more clear what should be passed.
             /// For example, is this a size in bytes or a count in objects? It's a count in objects,
             /// but the name poorly reflects this.
