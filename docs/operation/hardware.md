@@ -37,9 +37,9 @@ A cluster preserves durability (surviving, detecting and repairing
 corruption of any data file) provided that the cluster remains
 available.
 
-A cluster will correctly remain unavailable only once too many machine
+A cluster will correctly remain unavailable if too many machine
 failures have occurred to preserve data. In other words, TigerBeetle
-is designed to operate correctly or else to shutdown safely if safe
+is designed to operate correctly or else to shut down safely if safe
 operation with respect to strict serializability is no longer possible
 due to permanent data loss.
 
