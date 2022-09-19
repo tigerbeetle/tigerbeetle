@@ -203,8 +203,8 @@ pub fn ManifestLevelType(
         };
 
         pub const KeyRange = struct {
-            key_min: Key, // inclusive
-            key_max: Key, // inclusive
+            key_min: Key, // Inclusive.
+            key_max: Key, // Inclusive.
         };
 
         pub fn iterator(

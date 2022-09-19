@@ -31,11 +31,11 @@ const vsr = @import("../vsr.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("grid.zig").GridType;
-const BlockOperation = @import("grid.zig").BlockOperation;
+const BlockType = @import("grid.zig").BlockType;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 /// ManifestLog block schema:
-/// │ vsr.Header                  │
+/// │ vsr.Header                  │ operation=BlockType.manifest
 /// │ [entry_count_max]Label      │ level index, insert|remove
 /// │ [≤entry_count_max]TableInfo │
 /// │ […]u8{0}                    │ padding (to end of block)
@@ -578,7 +578,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // Zero unused tables, and padding:
             mem.set(u8, block[header.size..], 0);
 
-            header.operation = BlockOperation.manifest.operation();
+            header.operation = BlockType.manifest.operation();
             header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
             header.set_checksum();
 
@@ -598,7 +598,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         fn verify_block(block: BlockPtrConst, checksum: ?u128, address: ?u64) void {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            assert(BlockOperation.from(header.operation) == .manifest);
+            assert(BlockType.from(header.operation) == .manifest);
 
             if (config.verify) {
                 assert(header.valid_checksum());
@@ -650,6 +650,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // Encode the smaller type first because this will be multiplied by entry_count_max.
             const labels_size = entry_count_max * @sizeOf(Label);
             assert(labels_size == labels_size_max);
+            assert((@sizeOf(vsr.Header) + labels_size) % @alignOf(TableInfo) == 0);
             const tables_size = entry_count * @sizeOf(TableInfo);
 
             return @sizeOf(vsr.Header) + labels_size + tables_size;

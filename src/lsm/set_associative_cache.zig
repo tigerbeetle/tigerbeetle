@@ -19,8 +19,7 @@ pub const Layout = struct {
     value_alignment: ?u29 = null,
 };
 
-/// An n-way set-associative cache may store each Value in one of n locations.
-/// The Value's possible locations are determined by its Key.
+/// Each Key is associated with a set of n consecutive ways (or slots) that may contain the Value.
 pub fn SetAssociativeCache(
     comptime Key: type,
     comptime Value: type,
@@ -90,8 +89,10 @@ pub fn SetAssociativeCache(
         sets: u64,
 
         /// A short, partial hash of a Key, corresponding to a Value.
-        /// Because the tag is short, collisions are possible:
+        /// Because the tag is small, collisions are possible:
         /// `tag(v₁) = tag(v₂)` does not imply `v₁ = v₂`.
+        /// However, most of the time, where the tag differs, a full key comparison can be avoided.
+        /// Since tags are 16-32x smaller than keys, they can also be kept hot in cache.
         tags: []Tag,
 
         /// When the corresponding Count is zero, the Value is absent.
@@ -105,12 +106,18 @@ pub fn SetAssociativeCache(
         ///
         counts: PackedUnsignedIntegerArray(Count),
 
-        /// Each set has a Clock: a counter that cycles between each of the set's members (i.e. ways).
-        /// The clock ensures that entries are not evicted more/less often depending on their index
-        /// within `values`.
+        /// Each set has a Clock: a counter that cycles between each of the set's ways (i.e. slots).
         ///
         /// On cache write, entries are checked for occupancy (or eviction) beginning from the
         /// clock's position, wrapping around.
+        ///
+        /// The algorithm implemented is "CLOCK Nth-Chance" — each way has more than one bit,
+        /// to give ways more than one chance before eviction.
+        ///
+        /// * A similar algorithm called "RRIParoo" is described in
+        ///   "Kangaroo: Caching Billions of Tiny Objects on Flash".
+        /// * For more general information on CLOCK algorithms, see:
+        ///   https://en.wikipedia.org/wiki/Page_replacement_algorithm.
         clocks: PackedUnsignedIntegerArray(Clock),
 
         pub fn init(allocator: mem.Allocator, value_count_max: u64) !Self {

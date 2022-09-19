@@ -1,4 +1,4 @@
-//! Compaction moves and merges a table's values into the next level.
+//! Compaction moves or merges a table's values into the next level.
 //!
 //!
 //! Compaction overview:
@@ -16,9 +16,10 @@
 //! 3. Create an iterator from the sort-merge of table A and the concatenation of tables B.
 //!    If the same key exists in level A and B, take A's and discard B's. †
 //!
-//! 4. Collect the sort-merge iterator into a sequence of new tables.
+//! 4. Write the sort-merge iterator into a sequence of new tables on disk.
 //!
-//! 5. Update the old level-B tables in the Manifest with their new `snapshot_max`.
+//! 5. Update the old level-B tables in the Manifest with their new `snapshot_max` so that they
+//!    become invisible to subsequent read transactions.
 //!
 //! 6. Insert the new level-B tables into the Manifest.
 //!
@@ -36,7 +37,6 @@ const log = std.log.scoped(.compaction);
 const config = @import("../config.zig");
 
 const GridType = @import("grid.zig").GridType;
-const BlockOperation = @import("grid.zig").BlockOperation;
 const ManifestType = @import("manifest.zig").ManifestType;
 const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
 const TableIteratorType = @import("table_iterator.zig").TableIteratorType;

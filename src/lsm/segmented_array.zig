@@ -10,13 +10,14 @@ const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 const Direction = @import("direction.zig").Direction;
 
 /// A "segmented array" is an array with efficient (amortized) random-insert/remove operations.
+/// Also known as an "unrolled linked list": https://en.wikipedia.org/wiki/Unrolled_linked_list
 ///
-/// The structure consists of an arraylist of "nodes". Each node is a non-empty array of T.
+/// The structure consists of an array list of "nodes". Each node is a non-empty array of T.
 /// When a node fills, it is split into two adjacent, partially-full nodes.
 /// When a node empties, it is joined with a nearby node.
 ///
 /// An absolute index is offset from the start of the segmented array.
-/// A relative index is offset from the start of the node.
+/// A relative index is offset from the start of a node.
 pub fn SegmentedArray(
     comptime T: type,
     comptime NodePool: type,

@@ -122,7 +122,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             /// The maximum number of keys that may be committed per batch.
             ///
             /// In general, the commit count max for a field depends on the field's object —
-            /// how many objects might be changed by a batch:
+            /// how many objects might be inserted/updated/removed by a batch:
             ///   (config.message_size_max - sizeOf(vsr.header))
             /// For example, there are at most 8191 transfers in a batch.
             /// So commit_count_max=8191 for transfer objects and indexes.
@@ -459,8 +459,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         //
         //  - (third) down beat of the measure:
         //      * assert: no compactions are currently running.
-        //      * start odd level compactions if there's any tables to compact.
-        //      * compact immutable table if it contains any sorted values (could be empty).
+        //      * start odd level compactions if there are any tables to compact, and only if we must.
+        //      * compact the immutable table if it contains any sorted values (it could be empty).
         //
         //  - (fourth) last beat of the measure:
         //      * finish ticking running odd-level and immutable table compactions.

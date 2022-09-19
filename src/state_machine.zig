@@ -888,7 +888,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             return self.forest.grooves.posted.get(pending_id);
         }
 
-        pub fn forest_options(options: Options) Forest.Options {
+        pub fn forest_options(options: Options) Forest.GroovesOptions {
             const batch_accounts_max = @intCast(u32, @divFloor(
                 options.message_body_size_max,
                 @sizeOf(Account),

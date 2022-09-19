@@ -716,6 +716,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (superblock.free_set.highest_address_acquired()) |address| {
                 staging.size += address * config.block_size;
             }
+            assert(staging.size >= data_file_size_min);
             assert(staging.size <= staging.size_max);
 
             staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
@@ -1148,7 +1149,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock manifest lost");
             } else {
-                log.debug("open: read_manifest: broken copy={}", .{ context.copy });
+                log.debug("open: read_manifest: corrupt copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_manifest(context);
             }
@@ -1213,7 +1214,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock free set lost");
             } else {
-                log.debug("open: read_free_set: broken copy={}", .{ context.copy });
+                log.debug("open: read_free_set: corrupt copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_free_set(context);
             }
@@ -1283,7 +1284,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock client table lost");
             } else {
-                log.debug("open: read_client_table: broken copy={}", .{ context.copy });
+                log.debug("open: read_client_table: corrupt copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_client_table(context);
             }

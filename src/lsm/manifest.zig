@@ -38,8 +38,8 @@ pub fn TableInfoType(comptime Table: type) type {
         /// This value is set to the current snapshot tick on table deletion.
         snapshot_max: u64 = math.maxInt(u64),
 
-        key_min: Key, // inclusive
-        key_max: Key, // inclusive
+        key_min: Key, // Inclusive.
+        key_max: Key, // Inclusive.
 
         comptime {
             assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
