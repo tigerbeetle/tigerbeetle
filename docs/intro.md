@@ -33,7 +33,7 @@ check out the language-specific docs:
 
 # Reference
 
-When you need to know the details about accounts and transfers, check out:
+To understand TigerBeetle's data model, see:
 
 * [Accounts](./reference/accounts)
 * [Transfers](./reference/transfers)
