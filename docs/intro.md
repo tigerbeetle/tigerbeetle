@@ -24,8 +24,8 @@ Once you've got a TigerBeetle server, check out:
 
 # Clients
 
-When you're ready to start integrating with TigerBeetle in your
-application, check out the language-specific docs:
+When you're ready to integrate your application with TigerBeetle,
+check out the language-specific docs:
 
 * [Node](./clients/node)
 * [Java](./clients/java)
