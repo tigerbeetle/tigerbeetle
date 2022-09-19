@@ -5007,51 +5007,67 @@ pub fn ReplicaType(
                         assert(!self.do_view_change_quorum);
                         assert(message.header.view == self.view);
                         assert(message.header.replica == self.replica);
+                        assert(message.header.replica != replica);
                     },
                     .view_change => {
                         assert(self.start_view_change_quorum);
                         assert(self.do_view_change_quorum);
                         assert(message.header.view == self.view);
                         assert(message.header.replica == self.replica);
+                        assert(message.header.replica != replica);
                     },
                     else => unreachable,
                 },
                 .recovery => {
                     assert(self.status == .recovering);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                     assert(message.header.context == self.recovery_nonce);
                 },
                 .recovery_response => {
                     assert(self.status == .normal);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .headers => {
                     assert(self.status == .normal or self.status == .view_change);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .ping, .pong => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .commit => {
                     assert(self.status == .normal);
                     assert(self.leader());
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
+                },
+                .request_start_view => {
+                    assert(message.header.view >= self.view);
+                    assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
+                    assert(self.leader_index(message.header.view) == replica);
                 },
                 .request_headers => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .request_prepare => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .nack_prepare => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                     assert(self.leader_index(self.view) == replica);
                 },
                 else => {
