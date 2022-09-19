@@ -450,8 +450,8 @@ pub fn CompactionType(
             // Finalize the data block if it's full or if it contains pending values when there's 
             // no more left to merge.
             if (compaction.table_builder.data_block_full() or 
-                (merge_iterator.empty() and !compaction.table_builder.data_block_empty())
-            ) {
+                (merge_iterator.empty() and !compaction.table_builder.data_block_empty()))
+            {
                 compaction.table_builder.data_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .address = compaction.grid.acquire(),
@@ -466,8 +466,8 @@ pub fn CompactionType(
             // Finalize the filter block if it's full or if it contains pending data blocks
             // when there's no more merged values to fill them.
             if (compaction.table_builder.filter_block_full() or 
-                (merge_iterator.empty() and !compaction.table_builder.filter_block_empty())
-            ) {
+                (merge_iterator.empty() and !compaction.table_builder.filter_block_empty()))
+            {
                 compaction.table_builder.filter_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .address = compaction.grid.acquire(),
@@ -482,8 +482,8 @@ pub fn CompactionType(
             // Finalize the index block if it's full or if it contains pending data blocks
             // when there's no more merged values to fill them.
             if (compaction.table_builder.index_block_full() or
-                (merge_iterator.empty() and !compaction.table_builder.index_block_empty())
-            ) {
+                (merge_iterator.empty() and !compaction.table_builder.index_block_empty()))
+            {
                 // Finish the merged table and queue it for insertion.
                 const table = compaction.table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
