@@ -13,31 +13,14 @@ const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../storage.zig").Storage;
 const IO = @import("../io.zig").IO;
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 
 const GridType = @import("grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
-const ForestType = @import("forest.zig").ForestType;
+const Forest = StateMachine.Forest;
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
-const Forest = ForestType(Storage, .{
-    .accounts = GrooveType(
-        Storage,
-        Account,
-        .{
-            .ignored = &[_][]const u8{ "reserved", "flags" },
-            .derived = .{},
-        },
-    ),
-    .transfers = GrooveType(
-        Storage,
-        Transfer,
-        .{
-            .ignored = &[_][]const u8{ "reserved", "flags" },
-            .derived = .{},
-        },
-    ),
-});
 
 const Environment = struct {
     const cluster = 32;
@@ -46,18 +29,13 @@ const Environment = struct {
 
     const node_count = 1024;
     const cache_size = 2 * 1024 * 1024;
-    const forest_config = .{
-        .transfers = .{
-            .cache_size = cache_size,
-            .commit_count_max = 8191 * 2,
-            .prefetch_count_max = 8191 * 2,
-        },
-        .accounts = .{
-            .cache_size = cache_size,
-            .commit_count_max = 8191,
-            .prefetch_count_max = 8191,
-        },
-    };
+    const forest_options: Forest.Options = StateMachine.forest_options(.{
+        .lsm_forest_node_count = undefined, // ignored by StateMachine.forest_options()
+        .cache_size_accounts = cache_size,
+        .cache_size_transfers = cache_size,
+        .cache_size_posted = cache_size,
+        .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
+    });
 
     const State = enum {
         uninit,
@@ -107,7 +85,7 @@ const Environment = struct {
         env.grid = try Grid.init(allocator, &env.superblock);
         errdefer env.grid.deinit(allocator);
 
-        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_config);
+        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
         errdefer env.forest.deinit(allocator);
 
         env.state = .init;
@@ -321,7 +299,7 @@ const Environment = struct {
         var inserted = std.ArrayList(Account).init(allocator);
         defer inserted.deinit();
 
-        const accounts_to_insert_per_op = 1; // forest_config.accounts.commit_count_max;
+        const accounts_to_insert_per_op = 1; // forest_options.accounts.commit_count_max;
         const iterations = 4;
 
         var op: u64 = 0;
@@ -360,7 +338,7 @@ const Environment = struct {
                     .visible,
                     &env.forest.grooves.accounts,
                     @as([]const Account, &.{ account }),
-                    forest_config.accounts.commit_count_max,
+                    forest_options.accounts.tree_options_object.commit_count_max,
                 );
 
                 // Record the successfull insertion.
@@ -399,7 +377,7 @@ const Environment = struct {
                             .invisible,
                             &env.forest.grooves.accounts,
                             uncommitted,
-                            forest_config.accounts.commit_count_max,
+                            forest_options.accounts.tree_options_object.commit_count_max,
                         );
 
                         // Reset everything to after checkpoint
@@ -416,7 +394,7 @@ const Environment = struct {
                     .visible,
                     &env.forest.grooves.accounts,
                     checkpointed,
-                    forest_config.accounts.commit_count_max,
+                    forest_options.accounts.tree_options_object.commit_count_max,
                 );
             }
         }

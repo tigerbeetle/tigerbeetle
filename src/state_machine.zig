@@ -68,12 +68,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             cache_size_accounts: u32,
             cache_size_transfers: u32,
             cache_size_posted: u32,
-            commit_count_max_accounts: u32,
-            commit_count_max_transfers: u32,
-            commit_count_max_posted: u32,
-            prefetch_count_max_accounts: u32,
-            prefetch_count_max_transfers: u32,
-            prefetch_count_max_posted: u32,
+            message_body_size_max: usize,
         };
 
         prepare_timestamp: u64,
@@ -98,23 +93,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 allocator,
                 grid,
                 options.lsm_forest_node_count,
-                .{
-                    .accounts = .{
-                        .cache_size = options.cache_size_accounts,
-                        .commit_count_max = options.commit_count_max_accounts,
-                        .prefetch_count_max = options.prefetch_count_max_accounts,
-                    },
-                    .transfers = .{
-                        .cache_size = options.cache_size_transfers,
-                        .commit_count_max = options.commit_count_max_transfers,
-                        .prefetch_count_max = options.prefetch_count_max_transfers,
-                    },
-                    .posted = .{
-                        .cache_size = options.cache_size_posted,
-                        .commit_count_max = options.commit_count_max_posted,
-                        .prefetch_count_max = options.prefetch_count_max_posted,
-                    },
-                },
+                forest_options(options),
             );
             errdefer forest.deinit(allocator);
 
@@ -908,6 +887,97 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn get_posted(self: *const StateMachine, pending_id: u128) ?bool {
             return self.forest.grooves.posted.get(pending_id);
         }
+
+        pub fn forest_options(options: Options) Forest.Options {
+            const batch_accounts_max = @intCast(u32, @divFloor(
+                options.message_body_size_max,
+                @sizeOf(Account),
+            ));
+            const batch_transfers_max = @intCast(u32, @divFloor(
+                options.message_body_size_max,
+                @sizeOf(Transfer),
+            ));
+            assert(batch_accounts_max > 0);
+            assert(batch_transfers_max > 0);
+
+            return .{
+                .accounts = .{
+                    .cache_size = options.cache_size_accounts,
+                    .prefetch_count_max = std.math.max(
+                        // create_account()/lookup_account() looks up 1 account per item.
+                        batch_accounts_max,
+                        // create_transfer()/post_or_void_pending_transfer() looks up 2
+                        // accounts for every transfer.
+                        2 * batch_transfers_max,
+                    ),
+                    .tree_options_object = .{
+                        .commit_count_max = math.max(
+                            batch_accounts_max,
+                            // ×2 because creating a transfer will update 2 accounts.
+                            2 * batch_transfers_max,
+                        ),
+                    },
+                    .tree_options_id = .{ .commit_count_max = batch_accounts_max },
+                    .tree_options_index = .{
+                        .user_data = .{ .commit_count_max = batch_accounts_max },
+                        .ledger = .{ .commit_count_max = batch_accounts_max },
+                        .code = .{ .commit_count_max = batch_accounts_max },
+                        // Transfers mutate the secondary indices for debits/credits pending/posted.
+                        //
+                        // * Each mutation results in a remove and an insert: the ×2 multiplier.
+                        // * Each transfer modifies two accounts. However, this does not
+                        //   necessitate an additional ×2 multiplier — the credits of the debit
+                        //   account and the debits of the credit account are not modified.
+                        .debits_pending = .{
+                            .commit_count_max = math.max(
+                                batch_accounts_max,
+                                2 * batch_transfers_max,
+                            ),
+                        },
+                        .debits_posted = .{
+                            .commit_count_max = math.max(
+                                batch_accounts_max,
+                                2 * batch_transfers_max,
+                            ),
+                        },
+                        .credits_pending = .{
+                            .commit_count_max = math.max(
+                                batch_accounts_max,
+                                2 * batch_transfers_max,
+                            ),
+                        },
+                        .credits_posted = .{
+                            .commit_count_max = math.max(
+                                batch_accounts_max,
+                                2 * batch_transfers_max,
+                            ),
+                        },
+                    },
+                },
+                .transfers = .{
+                    .cache_size = options.cache_size_transfers,
+                    // *2 to fetch pending and post/void transfer.
+                    .prefetch_count_max = 2 * batch_transfers_max,
+                    .tree_options_object = .{ .commit_count_max = batch_transfers_max },
+                    .tree_options_id = .{ .commit_count_max = batch_transfers_max },
+                    .tree_options_index = .{
+                        .debit_account_id = .{ .commit_count_max = batch_transfers_max },
+                        .credit_account_id = .{ .commit_count_max = batch_transfers_max },
+                        .user_data = .{ .commit_count_max = batch_transfers_max },
+                        .pending_id = .{ .commit_count_max = batch_transfers_max },
+                        .timeout = .{ .commit_count_max = batch_transfers_max },
+                        .ledger = .{ .commit_count_max = batch_transfers_max },
+                        .code = .{ .commit_count_max = batch_transfers_max },
+                        .amount = .{ .commit_count_max = batch_transfers_max },
+                    },
+                },
+                .posted = .{
+                    .cache_size = options.cache_size_posted,
+                    .prefetch_count_max = batch_transfers_max,
+                    .commit_count_max = batch_transfers_max,
+                },
+            };
+        }
     };
 }
 
@@ -1017,13 +1087,9 @@ const TestContext = struct {
             .cache_size_accounts = options.cache_size_accounts,
             .cache_size_transfers = options.cache_size_transfers,
             .cache_size_posted = options.cache_size_posted,
-            // Overestimate the commit_count_max values because the test never compacts.
-            .commit_count_max_accounts = 1000,
-            .commit_count_max_transfers = 1000,
-            .commit_count_max_posted = 1000,
-            .prefetch_count_max_accounts = 1000,
-            .prefetch_count_max_transfers = 1000,
-            .prefetch_count_max_posted = 1000,
+            // Overestimate the batch size (in order overprovision commit_count_max)
+            // because the test never compacts.
+            .message_body_size_max = 1000 * @sizeOf(Account),
         });
         errdefer ctx.state_machine.deinit(allocator);
     }

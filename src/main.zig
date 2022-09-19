@@ -130,12 +130,7 @@ const Command = struct {
                 .cache_size_accounts = config.accounts_max,
                 .cache_size_transfers = config.transfers_max,
                 .cache_size_posted = config.transfers_pending_max,
-                .commit_count_max_accounts = config.commit_count_max_accounts,
-                .commit_count_max_transfers = config.commit_count_max_transfers,
-                .commit_count_max_posted = config.commit_count_max_posted,
-                .prefetch_count_max_accounts = config.prefetch_count_max_accounts,
-                .prefetch_count_max_transfers = config.prefetch_count_max_transfers,
-                .prefetch_count_max_posted = config.prefetch_count_max_posted,
+                .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
             },
             .message_bus_options = .{
                 .configuration = addresses,

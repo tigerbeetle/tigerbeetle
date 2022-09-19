@@ -131,9 +131,6 @@ pub fn main() !void {
             .prefetch_mean = 5 + random.uintLessThan(u64, 10),
             .compact_mean = 5 + random.uintLessThan(u64, 10),
             .checkpoint_mean = 5 + random.uintLessThan(u64, 10),
-            .commit_count_max_accounts = config.commit_count_max_accounts,
-            .commit_count_max_transfers = config.commit_count_max_transfers,
-            .commit_count_max_posted = config.commit_count_max_posted,
         },
     };
 

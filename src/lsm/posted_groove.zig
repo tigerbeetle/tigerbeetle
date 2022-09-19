@@ -44,7 +44,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 return value.id;
             }
 
-            // TODO(ifreund): disallow this id in the state machine.
             const sentinel_key = math.maxInt(u128);
 
             inline fn tombstone(value: *const Value) bool {
@@ -101,6 +100,8 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             /// For example, is this a size in bytes or a count in objects? It's a count in objects,
             /// but the name poorly reflects this.
             cache_size: u32,
+            /// The maximum number of objects that might be prefetched by a batch.
+            prefetch_count_max: u32,
             /// In general, the commit count max for a field, depends on the field's object,
             /// how many objects might be changed by a batch:
             ///   (config.message_size_max - sizeOf(vsr.header))
@@ -119,8 +120,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             /// However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
             /// some of these accounts may exist, requiring a remove/put to update the index.
             commit_count_max: u32,
-            /// The maximum number of objects that might be prefetched by a batch.
-            prefetch_count_max: u32,
         };
 
         pub fn init(
