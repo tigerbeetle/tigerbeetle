@@ -1651,8 +1651,7 @@ test "SuperBlockSector" {
 
 // TODO Add unit tests for Quorums.
 // TODO Test invariants and transitions across TestRunner functions.
-// TODO Add a pristine in-memory test storage shim (we currently use real disk).
-const TestStorage = @import("../storage.zig").Storage;
+const TestStorage = @import("../test/storage.zig").Storage;
 const TestSuperBlock = SuperBlockType(TestStorage);
 
 const TestRunner = struct {
@@ -1717,42 +1716,37 @@ const TestRunner = struct {
     }
 };
 
-pub fn main() !void {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const IO = @import("../io.zig").IO;
-    const Storage = @import("../storage.zig").Storage;
-
-    const dir_path = ".";
-    const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err| {
-        std.debug.print("failed to open directory '{s}': {}", .{ dir_path, err });
-        return;
-    };
-
+test "SuperBlock" {
     const cluster = 32;
     const replica = 4;
-    const size_max = 512 * 1024 * 1024;
+    const size_max = data_file_size_min;
 
-    const storage_fd = try Storage.open(dir_fd, "test_superblock", size_max, true);
-    defer std.fs.cwd().deleteFile("test_superblock") catch {};
+    var storage = try TestStorage.init(std.testing.allocator, superblock_zone_size, .{
+        .seed = 0,
+        .read_latency_min = 1,
+        .read_latency_mean = 1,
+        .write_latency_min = 1,
+        .write_latency_mean = 1,
+        .read_fault_probability = 0,
+        .write_fault_probability = 0,
+    }, replica, .{
+        .first_offset = superblock_zone_size,
+        .period = 1,
+    });
+    defer storage.deinit(std.testing.allocator);
 
-    var io = try IO.init(128, 0);
-    defer io.deinit();
+    var message_pool = try MessagePool.init(std.testing.allocator, .replica);
+    defer message_pool.deinit(std.testing.allocator);
 
-    var storage = try Storage.init(&io, size_max, storage_fd);
-    defer storage.deinit();
-
-    var superblock = try TestSuperBlock.init(allocator, &storage);
-    defer superblock.deinit(allocator);
+    var superblock = try TestSuperBlock.init(std.testing.allocator, &storage, &message_pool);
+    defer superblock.deinit(std.testing.allocator);
 
     var runner = TestRunner{ .superblock = &superblock };
-
     runner.format(.{
         .cluster = cluster,
         .replica = replica,
         .size_max = size_max,
     });
 
-    while (runner.pending > 0) try io.run_for_ns(100);
+    while (runner.pending > 0) storage.tick();
 }
