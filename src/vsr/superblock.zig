@@ -485,9 +485,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         pub fn deinit(superblock: *SuperBlock, allocator: mem.Allocator) void {
-            assert(superblock.queue_head == null);
-            assert(superblock.queue_tail == null);
-
             allocator.destroy(superblock.working);
             allocator.destroy(superblock.writing);
             allocator.destroy(superblock.staging);

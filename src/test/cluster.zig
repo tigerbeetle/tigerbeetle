@@ -231,8 +231,11 @@ pub const Cluster = struct {
                 break :op_max op_max.?;
             };
 
-            // TODO This workaround doesn't handle log wrapping correctly.
-            assert(cluster_op_max < config.journal_slot_count);
+            // This whole workaround doesn't handle log wrapping correctly.
+            // If the log has wrapped, don't crash the replica.
+            if (cluster_op_max >= config.journal_slot_count) {
+                return false;
+            }
 
             var op: u64 = cluster_op_max + 1;
             while (op > 0) {
