@@ -62,7 +62,7 @@ public class UUIDsBatch extends Batch {
             throw new IndexOutOfBoundsException();
 
         if (uuid == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Uuid cannot be null");
 
         final int start = index * Struct.SIZE;
         var ptr = getBuffer().position(start);

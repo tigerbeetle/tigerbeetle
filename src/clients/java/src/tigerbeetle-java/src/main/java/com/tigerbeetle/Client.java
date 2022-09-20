@@ -46,7 +46,7 @@ public final class Client implements AutoCloseable {
         if (replicaAddresses == null)
             throw new NullPointerException("Replica addresses cannot be null");
 
-        if (replicaAddresses == null || replicaAddresses.length == 0)
+        if (replicaAddresses.length == 0)
             throw new IllegalArgumentException("Empty replica addresses");
 
         var joiner = new StringJoiner(",");

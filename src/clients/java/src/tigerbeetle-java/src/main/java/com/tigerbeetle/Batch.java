@@ -23,7 +23,7 @@ public abstract class Batch {
     protected Batch(ByteBuffer buffer) {
 
         if (buffer == null)
-            throw new NullPointerException("buffer");
+            throw new NullPointerException("Buffer cannot be null");
 
         this.buffer = buffer.order(BYTE_ORDER);
     }

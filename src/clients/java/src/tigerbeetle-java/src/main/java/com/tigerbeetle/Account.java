@@ -77,7 +77,7 @@ public final class Account {
      */
     public void setId(UUID id) {
         if (id == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Id cannot be null");
 
         this.id = id;
     }

@@ -75,7 +75,7 @@ public final class Transfer {
      */
     public void setId(UUID id) {
         if (id == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Id cannot be null");
 
         this.id = id;
     }
@@ -101,7 +101,7 @@ public final class Transfer {
      */
     public void setDebitAccountId(UUID debitAccountId) {
         if (debitAccountId == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Debit account id cannot be null");
 
         this.debitAccountId = debitAccountId;
     }
@@ -127,7 +127,7 @@ public final class Transfer {
      */
     public void setCreditAccountId(UUID creditAccountId) {
         if (creditAccountId == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Credit account id cannot be null");
 
         this.creditAccountId = creditAccountId;
     }
@@ -245,7 +245,7 @@ public final class Transfer {
      */
     public void setCode(int code) {
         if (code < 0 || code > Character.MAX_VALUE)
-            throw new IllegalArgumentException("Code must be a unsigned 16 bits value");
+            throw new IllegalArgumentException("Code must be a 16-bits unsigned integer");
 
         this.code = (short) code;
     }
