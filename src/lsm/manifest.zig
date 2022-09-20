@@ -24,6 +24,10 @@ pub fn TableInfoType(comptime Table: type) type {
     return extern struct {
         const TableInfo = @This();
 
+        pub fn BufferType(comptime sort_direction: ?Direction) type {
+            return TableInfoBufferType(Table, sort_direction);
+        }
+
         checksum: u128,
         address: u64,
         flags: u64 = 0,
@@ -50,11 +54,21 @@ pub fn TableInfoType(comptime Table: type) type {
             assert(table.address != 0);
             assert(table.snapshot_min < table.snapshot_max);
             assert(snapshot <= snapshot_latest);
+            
+            // Snapshots are no longer as unique as they were before,
+            // with Compaction and the like committing to snapshots "in the past" / before current op.
+            //
+            // For example, Compaction may update the snapshot_max of tables during removal to make 
+            // them invisible. It will also scan for tables that are invisible with the same snapshot.
+            //
+            // We can then relax this range check to be 
+            // - inclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
+            // - exclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
+            
+            // assert(snapshot != table.snapshot_min);
+            // assert(snapshot != table.snapshot_max);
 
-            assert(snapshot != table.snapshot_min);
-            assert(snapshot != table.snapshot_max);
-
-            return table.snapshot_min < snapshot and snapshot < table.snapshot_max;
+            return table.snapshot_min <= snapshot and snapshot < table.snapshot_max;
         }
 
         pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
@@ -144,7 +158,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         const Manifest = @This();
 
         pub const TableInfo = TableInfoType(Table);
-        const TableInfoBuffer = TableInfoBufferType(Table, null);
+        const TableInfoBuffer = TableInfo.BufferType(null);
 
         const Grid = GridType(Storage);
         const Callback = fn (*Manifest) void;
@@ -300,38 +314,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
-        /// Moves the table at the address/checksum pair from one level to another.
-        /// Unlike `update_tables`, this avoids leaving the same TableInfo with different snapshots
-        /// in both levels by removing it from level_a before inserting to level_b.
-        pub fn move_table(
-            manifest: *Manifest,
-            level_a: u8,
-            level_b: u8,
-            snapshot: u64,
-            address: u64,
-            checksum: u128,
-        ) void {
-            assert(level_a < config.lsm_levels);
-            assert(level_b < config.lsm_levels);
-            assert(level_a + 1 == level_b);
-
-            const table_info: TableInfo = blk: {
-                _ = address;
-                _ = checksum;
-                break :blk @panic("TODO(Joran): lookup using address/checksum");
-            };
-
-            const tables = [_]TableInfo{table_info};
-            manifest.levels[level_a].remove_tables(manifest.node_pool, &.{snapshot}, &tables);
-            manifest.levels[level_b].insert_tables(manifest.node_pool, &tables);
-
-            // Appends move changes to the manifest log. (A move is only recorded as an insert).
-            for (tables) |*table| {
-                const log_level = @intCast(u7, level_b);
-                manifest.manifest_log.insert(log_level, table);
-            }
-        }
-
         pub fn remove_invisible_tables(
             manifest: *Manifest,
             level: u8,
@@ -341,40 +323,44 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         ) void {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
-
+            
+            // Scan and queue tables for removal in descending order to avoid
+            // buffer flushes which update the manifest_level invalidating subsequent iterator entries.
+            const direction = .descending;
             const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
 
-            var count: u32 = 0;
-            var tables: [64]TableInfo = undefined;
+            var array: [64]TableInfo = undefined;
+            var buffer = TableInfoBufferType(Table, direction){ .array = &array };
             var it = manifest_level.iterator(
                 .invisible,
                 &snapshots,
-                .ascending,
+                direction,
                 KeyRange{ .key_min = key_min, .key_max = key_max },
             );
 
             while (it.next()) |table| {
                 assert(table.invisible(&snapshots));
-                assert(compare_keys(key_min, table.key_min) != .gt);
-                assert(compare_keys(key_max, table.key_max) != .lt);
+                assert(compare_keys(key_min, table.key_max) != .gt);
+                assert(compare_keys(key_max, table.key_min) != .lt);
 
                 // Append remove changes to the manifest log.
                 const log_level = @intCast(u7, level);
                 manifest.manifest_log.remove(log_level, table);
 
-                if (count > 0) {
-                    manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
-                    count = 0;
+                if (buffer.full()) {
+                    const tables: []TableInfo = buffer.drain();
+                    std.mem.reverse(TableInfo, tables); // remove_tables() expects ascending order
+                    manifest_level.remove_tables(manifest.node_pool, &snapshots, tables);
                 }
 
-                assert(count < tables.len);
-                tables[count] = table.*;
-                count += 1;
+                buffer.push(table);
             }
-
-            if (count > 0) {
-                manifest_level.remove_tables(manifest.node_pool, &snapshots, tables[0..count]);
+            
+            const tables = buffer.drain();
+            if (tables.len > 0) {
+                std.mem.reverse(TableInfo, tables); // remove_tables() expects ascending order
+                manifest_level.remove_tables(manifest.node_pool, &snapshots, tables);
             }
         }
 

@@ -489,7 +489,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             );
             assert(!manifest.queued_for_compaction(block_reference.address));
 
-            manifest_log.superblock.free_set.release_at_checkpoint(block_reference.address);
+            manifest_log.grid.release(block_reference.address);
 
             const callback = manifest_log.read_callback;
             manifest_log.reading = false;
@@ -529,7 +529,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             header.* = .{
                 .cluster = manifest_log.superblock.working.cluster,
-                .op = manifest_log.superblock.free_set.acquire().?,
+                .op = manifest_log.grid.acquire(),
                 .size = undefined,
                 .command = .block,
             };
