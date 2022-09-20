@@ -184,16 +184,16 @@ pub const ClientTable = struct {
         size = std.mem.alignForward(size, @alignOf(vsr.Header));
         const headers = mem.bytesAsSlice(
             vsr.Header,
-            source[size .. entries_count * @sizeOf(vsr.Header)],
+            source[size..][0 .. entries_count * @sizeOf(vsr.Header)],
         );
         size += mem.sliceAsBytes(headers).len;
 
         size = std.mem.alignForward(size, @alignOf(u64));
-        const sessions = mem.bytesAsSlice(u64, source[size .. entries_count * @sizeOf(u64)]);
+        const sessions = mem.bytesAsSlice(u64, source[size..][0 .. entries_count * @sizeOf(u64)]);
         size += mem.sliceAsBytes(sessions).len;
 
         size = std.mem.alignForward(size, @alignOf(u8));
-        var bodies = source[size..];
+        var bodies = source[size .. source.len - @sizeOf(u32)];
         assert(bodies.len > 0);
 
         var i: u32 = 0;
