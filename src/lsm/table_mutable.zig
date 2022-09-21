@@ -46,6 +46,11 @@ pub fn TableMutableType(comptime Table: type) type {
         ///
         /// The values cache is only used for the latest snapshot for simplicity.
         /// Earlier snapshots will still be able to utilize the block cache.
+        ///
+        /// The values cache is updated (in bulk) when the mutable table is sorted and frozen,
+        /// rather than updating on every `put()`/`remove()`.
+        /// This avoids the redundancy of storing duplicate values between the mutable table
+        /// and the values cache.
         // TODO Share cache between trees of different grooves:
         // "A set associative cache of values shared by trees with the same key/value sizes.
         // The value type will be []u8 and this will be shared by trees with the same value size."
@@ -80,12 +85,14 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
+            if (table.values.getKeyPtr(tombstone_from_key(key))) |value| {
+                return value;
+            }
             if (table.values_cache) |cache| {
-                // Check the cache before the mutable table so that hits are recorded by the
-                // SetAssociativeCache.
+                // Check the cache after the mutable table (see `values_cache` for explanation).
                 if (cache.get(key)) |value| return value;
             }
-            return table.values.getKeyPtr(tombstone_from_key(key));
+            return null;
         }
 
         pub fn put(table: *TableMutable, value: *const Value) void {
@@ -111,10 +118,6 @@ pub fn TableMutableType(comptime Table: type) type {
             upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
 
             assert(table.values.count() <= table.value_count_max);
-
-            if (table.values_cache) |cache| {
-                cache.insert(key_from_value(value)).* = tombstone;
-            }
         }
 
         /// This may return `false` even when committing would succeed — it pessimistically
@@ -155,6 +158,12 @@ pub fn TableMutableType(comptime Table: type) type {
             const values = values_max[0..i];
             assert(values.len == table.count());
             std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+
+            if (table.values_cache) |cache| {
+                for (values) |*value| {
+                    cache.insert(key_from_value(value)).* = value.*;
+                }
+            }
 
             table.clear();
             assert(table.count() == 0);
