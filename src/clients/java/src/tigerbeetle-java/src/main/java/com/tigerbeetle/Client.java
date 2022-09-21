@@ -31,15 +31,15 @@ public final class Client implements AutoCloseable {
      * @param replicaAddresses
      * @param maxConcurrency
      *
-     * @throws InitializationException If TigerBeetle an error occurred initializing this client.
-     *         See {@link InitializationException.Status} for more details.
+     * @throws InitializationException if an error occurred initializing this client. See
+     *         {@link InitializationException.Status} for more details.
      *
-     * @throws IllegalArgumentException If {@code clusterID} is negative.
-     * @throws IllegalArgumentException If {@code replicaAddresses} is empty or presented in
+     * @throws IllegalArgumentException if {@code clusterID} is negative.
+     * @throws IllegalArgumentException if {@code replicaAddresses} is empty or presented in
      *         incorrect format.
-     * @throws NullPointerException If {@code replicaAddresses} is null or any element in the array
+     * @throws NullPointerException if {@code replicaAddresses} is null or any element in the array
      *         is null.
-     * @throws IllegalArgumentException If {@code maxConcurrency} is zero or negative.
+     * @throws IllegalArgumentException if {@code maxConcurrency} is zero or negative.
      */
     public Client(int clusterID, String[] replicaAddresses, int maxConcurrency) {
         this(clusterID, maxConcurrency);
@@ -77,13 +77,13 @@ public final class Client implements AutoCloseable {
      * @param clusterID
      * @param replicaAddresses
      *
-     * @throws InitializationException If TigerBeetle an error occurred initializing this client.
-     *         See {@link InitializationException.Status} for more details.
+     * @throws InitializationException if an error occurred initializing this client. See
+     *         {@link InitializationException.Status} for more details.
      *
-     * @throws IllegalArgumentException If {@code clusterID} is negative.
-     * @throws IllegalArgumentException If {@code replicaAddresses} is empty or presented in
+     * @throws IllegalArgumentException if {@code clusterID} is negative.
+     * @throws IllegalArgumentException if {@code replicaAddresses} is empty or presented in
      *         incorrect format.
-     * @throws NullPointerException If {@code replicaAddresses} is null or any element in the array
+     * @throws NullPointerException if {@code replicaAddresses} is null or any element in the array
      *         is null.
      */
     public Client(int clusterID, String[] replicaAddresses) {
@@ -110,8 +110,8 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a new account to be created.
      *
-     * @param account A single {@link com.tigerbeetle.Account} instance to be created.
-     * @return A {@link com.tigerbeetle.CreateAccountResult}
+     * @param account a single {@link com.tigerbeetle.Account} instance to be created.
+     * @return a {@link com.tigerbeetle.CreateAccountResult}.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws NullPointerException if {@code account} is null.
@@ -132,8 +132,8 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new accounts to be created.
      *
-     * @param batch An array containing all accounts to be created.
-     * @return An empty array on success, or an array of
+     * @param batch an array containing all accounts to be created.
+     * @return an empty array on success, or an array of
      *         {@link com.tigerbeetle.CreateAccountsResult} describing the reason.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
@@ -148,9 +148,9 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new accounts to be created.
      *
-     * @param batch A {@link com.tigerbeetle.AccountsBatch} instance containing all accounts to be
+     * @param batch a {@link com.tigerbeetle.AccountsBatch} instance containing all accounts to be
      *        created.
-     * @return An empty array on success, or an array of
+     * @return an empty array on success, or an array of
      *         {@link com.tigerbeetle.CreateAccountsResult} describing the reason.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
@@ -169,8 +169,8 @@ public final class Client implements AutoCloseable {
      * Submits a batch of new accounts to be created asynchronously.
      *
      * @see Client#createAccounts(Account[])
-     * @param batch An array containing all accounts to be created.
-     * @return A {@link java.util.concurrent.Future} to be completed.
+     * @param batch an array containing all accounts to be created.
+     * @return a {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
@@ -183,9 +183,9 @@ public final class Client implements AutoCloseable {
      * Submits a batch of new accounts to be created asynchronously.
      *
      * @see Client#createAccounts(AccountsBatch)
-     * @param batch A {@link com.tigerbeetle.AccountsBatch} instance containing all accounts to be
+     * @param batch a {@link com.tigerbeetle.AccountsBatch} instance containing all accounts to be
      *        created.
-     * @return A {@link java.util.concurrent.Future} to be completed.
+     * @return a {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
@@ -197,10 +197,10 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a single account.
+     * Looks up a single account.
      *
-     * @param uuid The account's identifier.
-     * @return A {@link com.tigerbeetle.Account} or null if not found.
+     * @param uuid the account's identifier.
+     * @return a {@link com.tigerbeetle.Account} or null if not found.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws NullPointerException if {@code uuid} is null.
@@ -219,10 +219,10 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a batch of accounts.
+     * Looks up a batch of accounts.
      *
-     * @param batch An array containing all accounts ids.
-     * @return An array of {@link com.tigerbeetle.Account} containing all accounts found.
+     * @param batch an array containing all accounts ids.
+     * @return an array of {@link com.tigerbeetle.Account} containing all accounts found.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
@@ -234,10 +234,10 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a batch of accounts.
+     * Looks up a batch of accounts.
      *
-     * @param batch An {@link com.tigerbeetle.UUIDsBatch} containing all accounts ids.
-     * @return An array of {@link com.tigerbeetle.Account} containing all accounts found.
+     * @param batch an {@link com.tigerbeetle.UUIDsBatch} containing all account ids.
+     * @return an array of {@link com.tigerbeetle.Account} containing all accounts found.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
@@ -252,11 +252,11 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a batch of accounts asynchronously.
+     * Looks up a batch of accounts asynchronously.
      *
      * @see Client#lookupAccounts(UUID[])
-     * @param batch An array containing all accounts ids.
-     * @return A {@link java.util.concurrent.Future} to be completed.
+     * @param batch an array containing all account ids.
+     * @return a {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
@@ -266,11 +266,11 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a batch of accounts asynchronously.
+     * Looks up a batch of accounts asynchronously.
      *
      * @see Client#lookupAccounts(UUID[])
-     * @param batch An {@link com.tigerbeetle.UUIDsBatch} containing all accounts ids.
-     * @return A {@link java.util.concurrent.Future} to be completed.
+     * @param batch an {@link com.tigerbeetle.UUIDsBatch} containing all account ids.
+     * @return a {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
@@ -284,8 +284,8 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a new transfer to be created.
      *
-     * @param transfer A single {@link com.tigerbeetle.Transfer} instance to be created.
-     * @return A {@link com.tigerbeetle.CreateTransferResult}
+     * @param transfer a single {@link com.tigerbeetle.Transfer} instance to be created.
+     * @return a {@link com.tigerbeetle.CreateTransferResult}
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws NullPointerException if {@code transfer} is null.
@@ -306,8 +306,8 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new transfers to be created.
      *
-     * @param batch An array containing all transfers to be created.
-     * @return An empty array on success, or an array of
+     * @param batch an array containing all transfers to be created.
+     * @return an empty array on success, or an array of
      *         {@link com.tigerbeetle.CreateTransfersResult} describing the reason.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
@@ -322,9 +322,9 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new transfers to be created.
      *
-     * @param batch A {@link com.tigerbeetle.TransfersBatch} instance containing all transfers to be
+     * @param batch a {@link com.tigerbeetle.TransfersBatch} instance containing all transfers to be
      *        created.
-     * @return An empty array on success, or an array of
+     * @return an empty array on success, or an array of
      *         {@link com.tigerbeetle.CreateTransfersResult} describing the reason.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
@@ -342,8 +342,8 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new transfers to be created asynchronously.
      *
-     * @param batch An array containing all transfers to be created.
-     * @return A {@link java.util.concurrent.Future} to be completed.
+     * @param batch an array containing all transfers to be created.
+     * @return a {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
@@ -355,9 +355,9 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new transfers to be created asynchronously.
      *
-     * @param batch A {@link com.tigerbeetle.TransfersBatch} instance containing all transfers to be
+     * @param batch a {@link com.tigerbeetle.TransfersBatch} instance containing all transfers to be
      *        created.
-     * @return A {@link java.util.concurrent.Future} to be completed.
+     * @return a {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
@@ -369,10 +369,10 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a single transfer.
+     * Looks up a single transfer.
      *
-     * @param uuid The transfer's identifier.
-     * @return A {@link com.tigerbeetle.Transfer} or null if not found.
+     * @param uuid the transfer's identifier.
+     * @return a {@link com.tigerbeetle.Transfer} or null if not found.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws NullPointerException if {@code uuid} is null.
@@ -391,10 +391,10 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a batch of transfers.
+     * Looks up a batch of transfers.
      *
-     * @param batch An array containing all transfers ids.
-     * @return An array of {@link com.tigerbeetle.Transfer} containing all transfers found.
+     * @param batch an array containing all transfer ids.
+     * @return an array of {@link com.tigerbeetle.Transfer} containing all transfers found.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
@@ -406,10 +406,10 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a batch of transfers.
+     * Looks up a batch of transfers.
      *
-     * @param batch An {@link com.tigerbeetle.UUIDsBatch} containing all transfers ids.
-     * @return An array of {@link com.tigerbeetle.Transfer} containing all transfers found.
+     * @param batch an {@link com.tigerbeetle.UUIDsBatch} containing all transfer ids.
+     * @return an array of {@link com.tigerbeetle.Transfer} containing all transfers found.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
@@ -424,11 +424,11 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a batch of transfers asynchronously.
+     * Looks up a batch of transfers asynchronously.
      *
      * @see Client#lookupTransfers(UUID[])
-     * @param batch An array containing all transfers ids.
-     * @return A {@link java.util.concurrent.Future} to be completed.
+     * @param batch an array containing all transfer ids.
+     * @return a {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
@@ -438,11 +438,11 @@ public final class Client implements AutoCloseable {
     }
 
     /**
-     * Looks up for a batch of transfers asynchronously.
+     * Looks up a batch of transfers asynchronously.
      *
      * @see Client#lookupTransfers(UUIDsBatch)
-     * @param batch An {@link com.tigerbeetle.UUIDsBatch} containing all transfers ids.
-     * @return A {@link java.util.concurrent.Future} to be completed.
+     * @param batch an {@link com.tigerbeetle.UUIDsBatch} containing all transfer ids.
+     * @return a {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
