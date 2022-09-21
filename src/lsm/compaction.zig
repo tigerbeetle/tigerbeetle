@@ -283,9 +283,13 @@ pub fn CompactionType(
             // Release the table's block addresses in the Grid as it will be made invisible.
             // This is safe; iterator_b makes a copy of the block before calling us.
             const grid = compaction.grid;
-            for (Table.index_data_addresses_used(index_block)) |address| grid.release(address);
-            for (Table.index_filter_addresses_used(index_block)) |address| grid.release(address);
-            grid.release(Table.index_block_address(index_block));
+            for (Table.index_data_addresses_used(index_block)) |address| {
+                grid.release_at_checkpoint(address);
+            }
+            for (Table.index_filter_addresses_used(index_block)) |address| {
+                grid.release_at_checkpoint(address);
+            }
+            grid.release_at_checkpoint(Table.index_block_address(index_block));
         }
 
         pub fn compact_tick(compaction: *Compaction, callback: Callback) void {
