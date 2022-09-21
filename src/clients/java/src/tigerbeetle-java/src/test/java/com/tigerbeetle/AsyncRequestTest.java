@@ -1,18 +1,22 @@
+
 package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.Test;
 
-public class RequestTest {
+public class AsyncRequestTest {
 
     @Test
     public void testCreateAccountsRequestConstructor() {
@@ -21,7 +25,7 @@ public class RequestTest {
         var batch = new AccountsBatch(1);
         batch.add(new Account());
 
-        var request = new CreateAccountsRequest(client, batch);
+        var request = AsyncRequest.createAccounts(client, batch);
         assert request != null;
     }
 
@@ -32,7 +36,7 @@ public class RequestTest {
         var batch = new TransfersBatch(1);
         batch.add(new Transfer());
 
-        var request = new CreateTransfersRequest(client, batch);
+        var request = AsyncRequest.createTransfers(client, batch);
         assert request != null;
     }
 
@@ -43,7 +47,7 @@ public class RequestTest {
         var batch = new UUIDsBatch(1);
         batch.add(new UUID(0, 0));
 
-        var request = new LookupAccountsRequest(client, batch);
+        var request = AsyncRequest.lookupAccounts(client, batch);
         assert request != null;
     }
 
@@ -54,7 +58,7 @@ public class RequestTest {
         var batch = new UUIDsBatch(1);
         batch.add(new UUID(0, 0));
 
-        var request = new LookupTransfersRequest(client, batch);
+        var request = AsyncRequest.lookupTransfers(client, batch);
         assert request != null;
     }
 
@@ -64,7 +68,7 @@ public class RequestTest {
         var batch = new AccountsBatch(1);
         batch.add(new Account());
 
-        new CreateAccountsRequest(null, batch);
+        AsyncRequest.createAccounts(null, batch);
         assert false;
     }
 
@@ -72,7 +76,7 @@ public class RequestTest {
     public void testConstructorWithBatchNull() {
 
         var client = new Client(0, 1);
-        new CreateAccountsRequest(client, null);
+        AsyncRequest.createAccounts(client, null);
         assert false;
     }
 
@@ -82,7 +86,7 @@ public class RequestTest {
         var client = new Client(0, 1);
         var batch = new AccountsBatch(0);
 
-        new CreateAccountsRequest(client, batch);
+        AsyncRequest.createAccounts(client, batch);
         assert false;
     }
 
@@ -92,124 +96,111 @@ public class RequestTest {
         var client = new Client(0, 1);
         var batch = new AccountsBatch(1);
 
-        new CreateAccountsRequest(client, batch);
+        AsyncRequest.createAccounts(client, batch);
         assert false;
     }
 
-    @Test
-    public void testItIsNotCancellable() {
-
-        var client = new Client(0, 1);
-        var batch = new TransfersBatch(1);
-        batch.add(new Transfer());
-
-        var request = new CreateTransfersRequest(client, batch);
-
-        assertFalse(request.cancel(true));
-        assertFalse(request.cancel(false));
-        assertFalse(request.isCancelled());
-    }
-
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidOperation() throws RequestException {
+    public void testEndRequestWithInvalidOperation() throws Throwable {
 
         var client = new Client(0, 1);
         var batch = new TransfersBatch(1);
         batch.add(new Transfer());
 
-        var request = new CreateTransfersRequest(client, batch);
 
         var dummyBuffer = ByteBuffer.allocateDirect(CreateTransfersResult.Struct.SIZE);
+        var callback = new CallbackSimulator<CreateTransfersResult>(
+                AsyncRequest.createTransfers(client, batch), Request.Operations.LOOKUP_ACCOUNTS,
+                dummyBuffer, 1, RequestException.Status.OK, 250);
 
-        assertFalse(request.isDone());
+        CompletableFuture<CreateTransfersResult[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
 
-        // Invalid operation, should be CREATE_TRANSFERS
-        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS, dummyBuffer, 1,
-                RequestException.Status.OK);
-
-        assertTrue(request.isDone());
-
-        request.getResult();
-        assert false;
+        try {
+            future.get();
+            assert false;
+        } catch (ExecutionException e) {
+            assertNotNull(e.getCause());
+            throw e.getCause();
+        }
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithNullBuffer() throws RequestException {
+    public void testEndRequestWithNullBuffer() throws Throwable {
 
         var client = new Client(0, 1);
         var batch = new TransfersBatch(1);
         batch.add(new Transfer());
 
-        var request = new CreateTransfersRequest(client, batch);
+        var callback = new CallbackSimulator<CreateTransfersResult>(
+                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
+                null, 1, RequestException.Status.OK, 250);
 
-        assertFalse(request.isDone());
+        CompletableFuture<CreateTransfersResult[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
 
-        request.endRequest(Request.Operations.CREATE_TRANSFERS, null, 1,
-                RequestException.Status.OK);
-
-        assertTrue(request.isDone());
-
-        request.getResult();
-        assert false;
+        try {
+            future.get();
+            assert false;
+        } catch (ExecutionException e) {
+            assertNotNull(e.getCause());
+            throw e.getCause();
+        }
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidBufferSize() throws RequestException {
+    public void testEndRequestWithInvalidBufferSize() throws Throwable {
 
         var client = new Client(0, 1);
         var batch = new TransfersBatch(1);
         batch.add(new Transfer());
 
-        var request = new CreateTransfersRequest(client, batch);
+
         var invalidBuffer = ByteBuffer.allocateDirect((CreateTransfersResult.Struct.SIZE * 2) - 1);
+        var callback = new CallbackSimulator<CreateTransfersResult>(
+                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
+                invalidBuffer, 1, RequestException.Status.OK, 250);
 
-        assertFalse(request.isDone());
+        CompletableFuture<CreateTransfersResult[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
 
-        request.endRequest(Request.Operations.CREATE_TRANSFERS, invalidBuffer, 1,
-                RequestException.Status.OK);
-
-        assertTrue(request.isDone());
-
-        request.getResult();
-        assert false;
+        try {
+            future.get();
+            assert false;
+        } catch (ExecutionException e) {
+            assertNotNull(e.getCause());
+            throw e.getCause();
+        }
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidPacket() throws RequestException {
+    public void testEndRequestWithInvalidPacket() throws Throwable {
 
         var client = new Client(0, 1);
         var batch = new TransfersBatch(1);
         batch.add(new Transfer());
 
-
-        var request = new CreateTransfersRequest(client, batch);
         var dummyBuffer = ByteBuffer.allocateDirect(Transfer.Struct.SIZE);
-        // Packet is a long representing a pointer, cannot be zero
-        final long NULL = 0;
+        final long NULL = 0; // Packet is a long representing a pointer, cannot be null
 
-        assertFalse(request.isDone());
-        request.endRequest(Request.Operations.CREATE_TRANSFERS, dummyBuffer, NULL,
-                RequestException.Status.OK);
+        var callback = new CallbackSimulator<CreateTransfersResult>(
+                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
+                dummyBuffer, NULL, RequestException.Status.OK, 250);
 
-        assertTrue(request.isDone());
+        CompletableFuture<CreateTransfersResult[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
 
-        request.getResult();
-        assert false;
-    }
-
-    @Test(expected = AssertionError.class)
-    public void testGetResultBeforeEndRequest() throws RequestException {
-
-        var client = new Client(0, 1);
-        var batch = new TransfersBatch(1);
-        batch.add(new Transfer());
-
-        var request = new CreateTransfersRequest(client, batch);
-
-        assertFalse(request.isDone());
-
-        request.getResult();
-        assert false;
+        try {
+            future.get();
+            assert false;
+        } catch (ExecutionException e) {
+            assertNotNull(e.getCause());
+            throw e.getCause();
+        }
     }
 
     @Test
@@ -219,28 +210,29 @@ public class RequestTest {
         var batch = new TransfersBatch(1);
         batch.add(new Transfer());
 
-        var request = new CreateTransfersRequest(client, batch);
-
-        assertFalse(request.isDone());
-
         var dummyBuffer = ByteBuffer.allocateDirect(CreateTransfersResult.Struct.SIZE);
-        request.endRequest(Request.Operations.CREATE_TRANSFERS, dummyBuffer, 1,
-                RequestException.Status.TOO_MUCH_DATA);
+        var callback = new CallbackSimulator<CreateTransfersResult>(
+                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
+                dummyBuffer, 1, RequestException.Status.TOO_MUCH_DATA, 250);
 
-
-        assertTrue(request.isDone());
+        CompletableFuture<CreateTransfersResult[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
 
         try {
-            request.getResult();
+            future.join();
             assert false;
-        } catch (RequestException e) {
-            assertEquals(RequestException.Status.TOO_MUCH_DATA, e.getStatus());
+        } catch (CompletionException e) {
+
+            assertTrue(e.getCause() instanceof RequestException);
+
+            var requestException = (RequestException) e.getCause();
+            assertEquals(RequestException.Status.TOO_MUCH_DATA, requestException.getStatus());
         }
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests()
-            throws RequestException {
+    public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests() throws Throwable {
         var client = new Client(0, 1);
 
         // A batch with only 1 item
@@ -248,56 +240,32 @@ public class RequestTest {
         batch.add(new Account());
 
         // A reply with 2 items, while the batch had only 1 item
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(CreateAccountsResult.Struct.SIZE * 2)
+        var incorrectReply = ByteBuffer.allocateDirect(CreateAccountsResult.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
 
-        var request = new CreateAccountsRequest(client, batch);
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS, dummyReplyBuffer.position(0), 1,
-                RequestException.Status.OK);
+        var callback = new CallbackSimulator<CreateAccountsResult>(
+                AsyncRequest.createAccounts(client, batch), Request.Operations.CREATE_ACCOUNTS,
+                incorrectReply.position(0), 1, RequestException.Status.OK, 250);
 
-        assertTrue(request.isDone());
-        request.getResult();
-    }
+        CompletableFuture<CreateAccountsResult[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
 
-    @Test(expected = AssertionError.class)
-    public void testEndRequestTwice() throws RequestException {
-        var client = new Client(0, 1);
-
-        // A batch with only 1 item
-        var batch = new AccountsBatch(1);
-        batch.add(new Account());
-
-        // A reply with 2 items, while the batch had only 1 item
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(CreateAccountsResult.Struct.SIZE)
-                .order(ByteOrder.LITTLE_ENDIAN);
-
-        var request = new CreateAccountsRequest(client, batch);
-        assertFalse(request.isDone());
-
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS, dummyReplyBuffer.position(0), 1,
-                RequestException.Status.OK);
-
-        assertTrue(request.isDone());
-        var result = request.getResult();
-        assertEquals(1, result.length);
-
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS, dummyReplyBuffer.position(0), 1,
-                RequestException.Status.OK);
-
-        assertTrue(request.isDone());
-
-        request.getResult();
-        assert false;
+        try {
+            future.get();
+            assert false;
+        } catch (ExecutionException e) {
+            assertNotNull(e.getCause());
+            throw e.getCause();
+        }
     }
 
     @Test
-    public void testCreateAccountEndRequest() throws RequestException {
+    public void testCreateAccountEndRequest() throws ExecutionException, InterruptedException {
         var client = new Client(0, 1);
         var batch = new AccountsBatch(2);
         batch.add(new Account());
         batch.add(new Account());
-
-        var request = new CreateAccountsRequest(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(CreateAccountsResult.Struct.SIZE * 2)
@@ -307,11 +275,15 @@ public class RequestTest {
         dummyReplyBuffer.putInt(1);
         dummyReplyBuffer.putInt(CreateAccountResult.Exists.ordinal());
 
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS, dummyReplyBuffer.position(0), 1,
-                RequestException.Status.OK);
+        var callback = new CallbackSimulator<CreateAccountsResult>(
+                AsyncRequest.createAccounts(client, batch), Request.Operations.CREATE_ACCOUNTS,
+                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 250);
 
-        assertTrue(request.isDone());
-        var result = request.getResult();
+        CompletableFuture<CreateAccountsResult[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
+
+        var result = future.get();
         assertEquals(2, result.length);
 
         assertEquals(0, result[0].index);
@@ -322,13 +294,11 @@ public class RequestTest {
     }
 
     @Test
-    public void testCreateTransferEndRequest() throws RequestException {
+    public void testCreateTransferEndRequest() throws InterruptedException, ExecutionException {
         var client = new Client(0, 1);
         var batch = new TransfersBatch(2);
         batch.add(new Transfer());
         batch.add(new Transfer());
-
-        var request = new CreateTransfersRequest(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(CreateTransfersResult.Struct.SIZE * 2)
@@ -338,11 +308,15 @@ public class RequestTest {
         dummyReplyBuffer.putInt(1);
         dummyReplyBuffer.putInt(CreateTransferResult.Exists.ordinal());
 
-        request.endRequest(Request.Operations.CREATE_TRANSFERS, dummyReplyBuffer.position(0), 1,
-                RequestException.Status.OK);
+        var callback = new CallbackSimulator<CreateTransfersResult>(
+                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
+                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 250);
 
-        assertTrue(request.isDone());
-        var result = request.getResult();
+        CompletableFuture<CreateTransfersResult[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
+
+        var result = future.get();
         assertEquals(2, result.length);
 
         assertEquals(0, result[0].index);
@@ -353,13 +327,11 @@ public class RequestTest {
     }
 
     @Test
-    public void testLookupAccountEndRequest() throws RequestException {
+    public void testLookupAccountEndRequest() throws InterruptedException, ExecutionException {
         var client = new Client(0, 1);
         var batch = new UUIDsBatch(2);
         batch.add(new UUID(0, 1));
         batch.add(new UUID(0, 2));
-
-        var request = new LookupAccountsRequest(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
@@ -367,11 +339,15 @@ public class RequestTest {
         dummyReplyBuffer.putLong(1);
         dummyReplyBuffer.position(Account.Struct.SIZE).putLong(2);
 
-        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS, dummyReplyBuffer.position(0), 1,
-                RequestException.Status.OK);
+        var callback = new CallbackSimulator<Account>(AsyncRequest.lookupAccounts(client, batch),
+                Request.Operations.LOOKUP_ACCOUNTS, dummyReplyBuffer.position(0), 1,
+                RequestException.Status.OK, 250);
 
-        assertTrue(request.isDone());
-        var result = request.getResult();
+        CompletableFuture<Account[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
+
+        var result = future.get();
         assertEquals(2, result.length);
 
         assertEquals(new UUID(0, 1), result[0].getId());
@@ -379,13 +355,11 @@ public class RequestTest {
     }
 
     @Test
-    public void testLookupTransferEndRequest() throws RequestException {
+    public void testLookupTransferEndRequest() throws InterruptedException, ExecutionException {
         var client = new Client(0, 1);
         var batch = new UUIDsBatch(2);
         batch.add(new UUID(0, 1));
         batch.add(new UUID(0, 2));
-
-        var request = new LookupTransfersRequest(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
@@ -393,11 +367,15 @@ public class RequestTest {
         dummyReplyBuffer.putLong(1);
         dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(2);
 
-        request.endRequest(Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
-                RequestException.Status.OK);
+        var callback = new CallbackSimulator<Transfer>(AsyncRequest.lookupTransfers(client, batch),
+                Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
+                RequestException.Status.OK, 250);
 
-        assertTrue(request.isDone());
-        var result = request.getResult();
+        CompletableFuture<Transfer[]> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
+
+        var result = future.get();
         assertEquals(2, result.length);
 
         assertEquals(new UUID(0, 1), result[0].getId());
@@ -415,15 +393,14 @@ public class RequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Transfer.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
-
         dummyReplyBuffer.putLong(1);
         dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(2);
 
-        var callback = new CallbackSimulator<LookupTransfersRequest>(
-                new LookupTransfersRequest(client, batch), Request.Operations.LOOKUP_TRANSFERS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 500);
+        var callback = new CallbackSimulator<Transfer>(AsyncRequest.lookupTransfers(client, batch),
+                Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
+                RequestException.Status.OK, 500);
 
-        Future<Transfer[]> future = callback.request;
+        Future<Transfer[]> future = callback.request.getFuture();
         callback.start();
 
         try {
@@ -454,15 +431,14 @@ public class RequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Transfer.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
-
         dummyReplyBuffer.putLong(1);
         dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(2);
 
-        var callback = new CallbackSimulator<LookupTransfersRequest>(
-                new LookupTransfersRequest(client, batch), Request.Operations.LOOKUP_TRANSFERS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 500);
+        var callback = new CallbackSimulator<Transfer>(AsyncRequest.lookupTransfers(client, batch),
+                Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
+                RequestException.Status.OK, 500);
 
-        Future<Transfer[]> future = callback.request;
+        Future<Transfer[]> future = callback.request.getFuture();
         callback.start();
 
         try {
@@ -489,11 +465,11 @@ public class RequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(0);
 
-        var callback = new CallbackSimulator<LookupTransfersRequest>(
-                new LookupTransfersRequest(client, batch), Request.Operations.LOOKUP_TRANSFERS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.TOO_MUCH_DATA, 250);
+        var callback = new CallbackSimulator<Transfer>(AsyncRequest.lookupTransfers(client, batch),
+                Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
+                RequestException.Status.TOO_MUCH_DATA, 250);
 
-        Future<Transfer[]> future = callback.request;
+        Future<Transfer[]> future = callback.request.getFuture();
         callback.start();
 
         try {
@@ -519,11 +495,11 @@ public class RequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(0);
 
-        var callback = new CallbackSimulator<LookupAccountsRequest>(
-                new LookupAccountsRequest(client, batch), Request.Operations.LOOKUP_ACCOUNTS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.INVALID_DATA_SIZE, 100);
+        var callback = new CallbackSimulator<Account>(AsyncRequest.lookupAccounts(client, batch),
+                Request.Operations.LOOKUP_ACCOUNTS, dummyReplyBuffer.position(0), 1,
+                RequestException.Status.INVALID_DATA_SIZE, 100);
 
-        Future<Account[]> future = callback.request;
+        Future<Account[]> future = callback.request.getFuture();
         callback.start();
 
         try {
@@ -539,9 +515,9 @@ public class RequestTest {
     }
 
 
-    private class CallbackSimulator<T extends Request<?>> extends Thread {
+    private class CallbackSimulator<T> extends Thread {
 
-        public final T request;
+        public final AsyncRequest<T> request;
         private final byte receivedOperation;
         private final ByteBuffer buffer;
         private final long packet;
@@ -549,8 +525,8 @@ public class RequestTest {
         private final int delay;
 
 
-        private CallbackSimulator(T request, byte receivedOperation, ByteBuffer buffer, long packet,
-                byte status, int delay) {
+        private CallbackSimulator(AsyncRequest<T> request, byte receivedOperation,
+                ByteBuffer buffer, long packet, byte status, int delay) {
             this.request = request;
             this.receivedOperation = receivedOperation;
             this.buffer = buffer;
@@ -570,3 +546,4 @@ public class RequestTest {
         }
     }
 }
+
