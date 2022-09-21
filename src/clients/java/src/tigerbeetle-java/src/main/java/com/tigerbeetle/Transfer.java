@@ -57,7 +57,7 @@ public final class Transfer {
     /**
      * Gets an identifier for this transfer, defined by the user.
      *
-     * @return An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
+     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
      *         128-bit integer.
      */
     public UUID getId() {
@@ -69,7 +69,7 @@ public final class Transfer {
      * <p>
      * Must be unique and non-zero.
      *
-     * @param id An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
+     * @param id an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
      *        unique 128-bit integer.
      * @throws NullPointerException if {@code id} is null.
      */
@@ -83,7 +83,7 @@ public final class Transfer {
     /**
      *
      *
-     * @return An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
+     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
      *         128-bit integer.
      */
     public UUID getDebitAccountId() {
@@ -95,7 +95,7 @@ public final class Transfer {
      * <p>
      * Must be unique and non-zero.
      *
-     * @param debitAccountId An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any
+     * @param debitAccountId an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any
      *        other unique 128-bit integer.
      * @throws NullPointerException if {@code debitAccountId} is null.
      */
@@ -109,7 +109,7 @@ public final class Transfer {
     /**
      *
      *
-     * @return An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
+     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
      *         128-bit integer.
      */
     public UUID getCreditAccountId() {
@@ -121,7 +121,7 @@ public final class Transfer {
      * <p>
      * Must be unique and non-zero.
      *
-     * @param creditAccountId An {@link java.util.UUID} representing an integer-encoded UUIDv4 or
+     * @param creditAccountId an {@link java.util.UUID} representing an integer-encoded UUIDv4 or
      *        any other unique 128-bit integer.
      * @throws NullPointerException if {@code creditAccountId} is null.
      */
@@ -135,7 +135,7 @@ public final class Transfer {
     /**
      * Gets the secondary identifier to link this transfer to an external entity.
      *
-     * @return An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
+     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
      *         128-bit integer.
      */
     public UUID getUserData() {
@@ -147,7 +147,7 @@ public final class Transfer {
      * <p>
      * May be zero, null values are converted to zero.
      *
-     * @param userData An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
+     * @param userData an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
      *        unique 128-bit integer.
      */
     public void setUserData(UUID userData) {
@@ -161,7 +161,7 @@ public final class Transfer {
     /**
      *
      *
-     * @return An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
+     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
      *         128-bit integer.
      */
     public UUID getPendingId() {
@@ -173,7 +173,7 @@ public final class Transfer {
      * <p>
      * May be zero, null values are converted to zero.
      *
-     * @param pendingId An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any
+     * @param pendingId an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any
      *        other unique 128-bit integer.
      */
     public void setPendingId(UUID pendingId) {
@@ -189,14 +189,14 @@ public final class Transfer {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer.
+     * @return a 64-bit integer.
      */
     public long getTimeout() {
         return timeout;
     }
 
     /**
-     * @param timeout A 64-bits integer.
+     * @param timeout A 64-bit integer.
      */
     public void setTimeout(long timeout) {
         this.timeout = timeout;
@@ -205,7 +205,7 @@ public final class Transfer {
     /**
      * Gets an identifier used to enforce transfers between the same ledger.
      *
-     * @return A 32-bit integer.
+     * @return a 32-bit integer.
      */
     public int getLedger() {
         return ledger;
@@ -218,7 +218,7 @@ public final class Transfer {
      * <p>
      * Example: 1 for USD and 2 for EUR.
      *
-     * @param ledger A 32-bit integer defined by the user.
+     * @param ledger a 32-bit integer defined by the user.
      */
     public void setLedger(int ledger) {
         this.ledger = ledger;
@@ -227,7 +227,7 @@ public final class Transfer {
     /**
      * Gets a reason for the transfer.
      *
-     * @return A 16-bits unsigned integer.
+     * @return a 16-bit unsigned integer.
      */
     public int getCode() {
         return code;
@@ -240,12 +240,12 @@ public final class Transfer {
      * <p>
      * Example: 1 for deposit, 2 for settlement.
      *
-     * @param code A 16-bits unsigned integer defined by the user.
+     * @param code a 16-bit unsigned integer defined by the user.
      * @throws IllegalArgumentException if code is negative or greater than 65535.
      */
     public void setCode(int code) {
         if (code < 0 || code > Character.MAX_VALUE)
-            throw new IllegalArgumentException("Code must be a 16-bits unsigned integer");
+            throw new IllegalArgumentException("Code must be a 16-bit unsigned integer");
 
         this.code = (short) code;
     }
@@ -254,7 +254,7 @@ public final class Transfer {
      * Gets the behavior during transfers.
      *
      * @see com.tigerbeetle.TransferFlags
-     * @return A 16-bits unsigned integer bit mask.
+     * @return a 16-bit unsigned integer bit mask.
      */
     public int getFlags() {
         return flags;
@@ -265,12 +265,12 @@ public final class Transfer {
      * <p>
      *
      * @see com.tigerbeetle.TransferFlags
-     * @param flags A 16-bits unsigned integer bit mask.
+     * @param flags a 16-bit unsigned integer bit mask.
      * @throws IllegalArgumentException if flags is negative or greater than 65535.
      */
     public void setFlags(int flags) {
         if (flags < 0 || flags > Character.MAX_VALUE)
-            throw new IllegalArgumentException("Flags must be a 16-bits unsigned integer");
+            throw new IllegalArgumentException("Flags must be a 16-bit unsigned integer");
 
         this.flags = (short) flags;
     }
@@ -280,7 +280,7 @@ public final class Transfer {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer.
+     * @return A 64-bit integer.
      */
     public long getAmount() {
         return amount;
@@ -291,7 +291,7 @@ public final class Transfer {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @param amount A 64-bits integer.
+     * @param amount a 64-bit integer.
      */
     public void setAmount(long amount) {
         this.amount = amount;
@@ -302,7 +302,7 @@ public final class Transfer {
      * <p>
      * UNIX timestamp in nanoseconds.
      *
-     * @return A 64-bits integer.
+     * @return a 64-bit integer.
      */
     public long getTimestamp() {
         return timestamp;

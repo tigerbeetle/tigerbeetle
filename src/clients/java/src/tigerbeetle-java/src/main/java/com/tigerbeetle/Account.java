@@ -59,7 +59,7 @@ public final class Account {
     /**
      * Gets an identifier for this account, defined by the user.
      *
-     * @return An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
+     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
      *         128-bit integer.
      */
     public UUID getId() {
@@ -71,7 +71,7 @@ public final class Account {
      * <p>
      * Must be unique and non-zero.
      *
-     * @param id An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
+     * @param id an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
      *        unique 128-bit integer.
      * @throws NullPointerException if {@code id} is null.
      */
@@ -97,7 +97,7 @@ public final class Account {
      * <p>
      * May be zero, null values are converted to zero.
      *
-     * @param userData An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
+     * @param userData an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
      *        unique 128-bit integer.
      */
     public void setUserData(UUID userData) {
@@ -111,7 +111,7 @@ public final class Account {
     /**
      * Gets an identifier used to enforce transfers between the same ledger.
      *
-     * @return A 32-bit integer.
+     * @return a 32-bit integer.
      */
     public int getLedger() {
         return ledger;
@@ -124,7 +124,7 @@ public final class Account {
      * <p>
      * Example: 1 for USD and 2 for EUR.
      *
-     * @param ledger A 32-bit integer defined by the user.
+     * @param ledger a 32-bit integer defined by the user.
      */
     public void setLedger(int ledger) {
         this.ledger = ledger;
@@ -133,7 +133,7 @@ public final class Account {
     /**
      * Gets a reason for the transfer.
      *
-     * @return A 16-bits unsigned integer.
+     * @return a 16-bit unsigned integer.
      */
     public int getCode() {
         return code;
@@ -146,12 +146,12 @@ public final class Account {
      * <p>
      * Example: 1 for deposit, 2 for settlement.
      *
-     * @param code A 16-bits unsigned integer defined by the user.
+     * @param code a 16-bit unsigned integer defined by the user.
      * @throws IllegalArgumentException if code is negative or greater than 65535.
      */
     public void setCode(int code) {
         if (code < 0 || code > Character.MAX_VALUE)
-            throw new IllegalArgumentException("Code must be a 16-bits unsigned integer");
+            throw new IllegalArgumentException("Code must be a 16-bit unsigned integer");
 
         this.code = (short) code;
     }
@@ -159,7 +159,7 @@ public final class Account {
     /**
      * Gets the behavior during transfers.
      *
-     * @return A 16-bits unsigned integer bit mask.
+     * @return a 16-bit unsigned integer bit mask.
      * @see com.tigerbeetle.AccountFlags
      */
     public int getFlags() {
@@ -173,12 +173,12 @@ public final class Account {
      * credits.
      *
      * @see com.tigerbeetle.AccountFlags
-     * @param flags A 16-bits unsigned integer bit mask.
+     * @param flags a 16-bit unsigned integer bit mask.
      * @throws IllegalArgumentException if flags is negative or greater than 65535.
      */
     public void setFlags(int flags) {
         if (flags < 0 || flags > Character.MAX_VALUE)
-            throw new IllegalArgumentException("Flags must be a 16-bits unsigned integer");
+            throw new IllegalArgumentException("Flags must be a 16-bit unsigned integer");
 
         this.flags = (short) flags;
     }
@@ -188,7 +188,7 @@ public final class Account {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer.
+     * @return a 64-bit integer.
      */
     public long getDebitsPending() {
         return debitsPending;
@@ -203,7 +203,7 @@ public final class Account {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer.
+     * @return a 64-bit integer.
      */
     public long getDebitsPosted() {
         return debitsPosted;
@@ -218,7 +218,7 @@ public final class Account {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer.
+     * @return a 64-bit integer.
      */
     public long getCreditsPending() {
         return creditsPending;
@@ -233,7 +233,7 @@ public final class Account {
      * <p>
      * Must always be interpreted as a positive integer.
      *
-     * @return A 64-bits integer.
+     * @return a 64-bit integer.
      */
     public long getCreditsPosted() {
         return creditsPosted;
@@ -248,7 +248,7 @@ public final class Account {
      * <p>
      * UNIX timestamp in nanoseconds.
      *
-     * @return A 64-bits integer.
+     * @return a 64-bit integer.
      */
     public long getTimestamp() {
         return timestamp;
