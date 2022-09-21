@@ -54,7 +54,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
     const Value = TreeTable.Value;
     const compare_keys = TreeTable.compare_keys;
     const tombstone = TreeTable.tombstone;
-    const tombstone_from_key = TreeTable.tombstone_from_key;
 
     const tree_hash = blk: {
         // Blake3 hash does alot at comptime..
@@ -75,27 +74,18 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
         const Grid = @import("grid.zig").GridType(Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
-        const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
+        pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 
         const CompactionType = @import("compaction.zig").CompactionType;
         const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
         const TableImmutableIteratorType = @import("table_immutable.zig").TableImmutableIteratorType;
 
-        pub const ValueCache = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, 70);
-
         const CompactionTable = CompactionType(Table, Storage, TableIteratorType);
         const CompactionTableImmutable = CompactionType(Table, Storage, TableImmutableIteratorType);
 
         grid: *Grid,
         options: Options,
-
-        /// TODO(ifreund) Replace this with SetAssociativeCache:
-        /// A set associative cache of values shared by trees with the same key/value sizes.
-        /// This is used to accelerate point lookups and is not used for range queries.
-        /// Secondary index trees used only for range queries can therefore set this to null.
-        /// The value type will be []u8 and this will be shared by trees with the same value size.
-        value_cache: ?*ValueCache,
 
         table_mutable: TableMutable,
         table_immutable: TableImmutable,
@@ -145,12 +135,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            value_cache: ?*ValueCache,
+            values_cache: ?*TableMutable.ValuesCache,
             options: Options,
         ) !Tree {
             assert(options.commit_entries_max > 0);
 
-            var table_mutable = try TableMutable.init(allocator, options.commit_entries_max);
+            var table_mutable = try TableMutable.init(allocator, values_cache, options.commit_entries_max);
             errdefer table_mutable.deinit(allocator);
 
             var table_immutable = try TableImmutable.init(allocator, options.commit_entries_max);
@@ -174,7 +164,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             return Tree{
                 .grid = grid,
                 .options = options,
-                .value_cache = value_cache,
                 .table_mutable = table_mutable,
                 .table_immutable = table_immutable,
                 .manifest = manifest,
@@ -198,15 +187,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tree.manifest.deinit(allocator);
         }
 
-        /// Get a cached value/tombstone for the given key.
-        /// Returns null if no value/tombstone for the given key is cached.
-        pub fn get_cached(tree: *const Tree, key: Key) ?*const Value {
-            const value = tree.table_mutable.get(key) orelse
-                tree.value_cache.?.getKeyPtr(tombstone_from_key(key));
-
-            return value;
-        }
-
         pub fn put(tree: *Tree, value: *const Value) void {
             tree.table_mutable.put(value);
         }
@@ -215,7 +195,30 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tree.table_mutable.remove(value);
         }
 
-        pub fn lookup(
+        /// Returns the value from the mutable or immutable table (possibly a tombstone),
+        /// if one is available for the specified snapshot.
+        pub fn lookup_from_memory(
+            tree: *Tree,
+            snapshot: u64,
+            key: Key,
+        ) ?*const Value {
+            if (snapshot == snapshot_latest) {
+                if (tree.table_mutable.get(key)) |value| return value;
+            } else {
+                // The mutable table is converted to an immutable table when a snapshot is created.
+                // This means that a snapshot will never be able to see the mutable table.
+                // This simplifies the mutable table and eliminates compaction for duplicate puts.
+            }
+
+            if (!tree.table_immutable.free and tree.table_immutable.snapshot_min < snapshot) {
+                if (tree.table_immutable.get(key)) |value| return value;
+            }
+
+            return null;
+        }
+
+        /// Call this function only after checking `lookup_from_memory()`.
+        pub fn lookup_from_levels(
             tree: *Tree,
             callback: fn (*LookupContext, ?*const Value) void,
             context: *LookupContext,
@@ -223,25 +226,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             key: Key,
         ) void {
             assert(snapshot <= snapshot_latest);
-            if (snapshot == snapshot_latest) {
-                // The mutable table is converted to an immutable table when a snapshot is created.
-                // This means that a snapshot will never be able to see the mutable table.
-                // This simplifies the mutable table and eliminates compaction for duplicate puts.
-                // The value cache is only used for the latest snapshot for simplicity.
-                // Earlier snapshots will still be able to utilize the block cache.
-                if (tree.table_mutable.get(key) orelse
-                    tree.value_cache.?.getKeyPtr(tombstone_from_key(key))) |value|
-                {
-                    callback(context, unwrap_tombstone(value));
-                    return;
-                }
-            }
-
-            if (!tree.table_immutable.free and tree.table_immutable.snapshot_min < snapshot) {
-                if (tree.table_immutable.get(key)) |value| {
-                    callback(context, unwrap_tombstone(value));
-                    return;
-                }
+            if (config.verify) {
+                // The caller is responsible for checking the mutable table.
+                assert(tree.lookup_from_memory(snapshot, key) == null);
             }
 
             var index_block_count: u8 = 0;

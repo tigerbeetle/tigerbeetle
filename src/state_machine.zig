@@ -5,6 +5,7 @@ const mem = std.mem;
 const log = std.log.scoped(.state_machine);
 
 const tb = @import("tigerbeetle.zig");
+const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
 
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
@@ -195,11 +196,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.prefetch_input = input;
             self.prefetch_callback = callback;
 
-            // We do this here instead of at the end of commit() to avoid the need to call
-            // prefetch() in the StateMachine unit tests below.
-            self.forest.grooves.accounts.prefetch_clear();
-            self.forest.grooves.transfers.prefetch_clear();
-            self.forest.grooves.posted.prefetch_clear();
+            // TODO(Snapshots) Pass in the target snapshot.
+            self.forest.grooves.accounts.prefetch_setup(snapshot_latest);
+            self.forest.grooves.transfers.prefetch_setup(snapshot_latest);
+            self.forest.grooves.posted.prefetch_setup(snapshot_latest);
 
             return switch (operation) {
                 .reserved, .root, .register => unreachable,
@@ -1049,11 +1049,7 @@ const TestContext = struct {
     grid: Grid,
     state_machine: StateMachine,
 
-    fn init(ctx: *TestContext, allocator: mem.Allocator, options: struct {
-        cache_entries_accounts: u32,
-        cache_entries_transfers: u32,
-        cache_entries_posted: u32,
-    }) !void {
+    fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
         ctx.storage = try Storage.init(
             allocator,
             4096,
@@ -1084,10 +1080,10 @@ const TestContext = struct {
 
         ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
             .lsm_forest_node_count = 1,
-            .cache_entries_accounts = options.cache_entries_accounts,
-            .cache_entries_transfers = options.cache_entries_transfers,
-            .cache_entries_posted = options.cache_entries_posted,
-            // Overestimate the batch size (in order overprovision commit_entries_max)
+            .cache_entries_accounts = 2048,
+            .cache_entries_transfers = 2048,
+            .cache_entries_posted = 2048,
+            // Overestimate the batch size (in order to overprovision commit_entries_max)
             // because the test never compacts.
             .message_body_size_max = 1000 * @sizeOf(Account),
         });
@@ -1455,11 +1451,7 @@ test "create/lookup/rollback accounts" {
     };
 
     var context: TestContext = undefined;
-    try context.init(testing.allocator, .{
-        .cache_entries_accounts = vectors.len,
-        .cache_entries_transfers = 0,
-        .cache_entries_posted = 0,
-    });
+    try context.init(testing.allocator);
     defer context.deinit(testing.allocator);
 
     const state_machine = &context.state_machine;
@@ -1481,10 +1473,6 @@ test "create/lookup/rollback accounts" {
 }
 
 test "linked accounts" {
-    const accounts_max = 5;
-    const transfers_max = 0;
-    const transfers_pending_max = 0;
-
     var accounts = [_]Account{
         // An individual event (successful):
         mem.zeroInit(Account, .{ .id = 7, .code = 1, .ledger = 1 }),
@@ -1520,11 +1508,7 @@ test "linked accounts" {
     };
 
     var context: TestContext = undefined;
-    try context.init(testing.allocator, .{
-        .cache_entries_accounts = accounts_max,
-        .cache_entries_transfers = transfers_max,
-        .cache_entries_posted = transfers_pending_max,
-    });
+    try context.init(testing.allocator);
     defer context.deinit(testing.allocator);
 
     const state_machine = &context.state_machine;
@@ -1607,11 +1591,7 @@ test "create/lookup/rollback transfers" {
     };
 
     var context: TestContext = undefined;
-    try context.init(testing.allocator, .{
-        .cache_entries_accounts = accounts.len,
-        .cache_entries_transfers = 1,
-        .cache_entries_posted = 0,
-    });
+    try context.init(testing.allocator);
     defer context.deinit(testing.allocator);
 
     const state_machine = &context.state_machine;
@@ -2286,11 +2266,7 @@ test "create/lookup/rollback 2-phase transfers" {
     };
 
     var context: TestContext = undefined;
-    try context.init(testing.allocator, .{
-        .cache_entries_accounts = accounts.len,
-        .cache_entries_transfers = 100,
-        .cache_entries_posted = 1,
-    });
+    try context.init(testing.allocator);
     defer context.deinit(testing.allocator);
 
     const state_machine = &context.state_machine;
