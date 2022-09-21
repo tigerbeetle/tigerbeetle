@@ -1,22 +1,23 @@
 package com.tigerbeetle;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import javax.management.OperationsException;
-
-import org.junit.Assert;
 import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Integration tests using a tigerbeetle instance.
@@ -44,6 +45,17 @@ public class IntegrationTest {
     public void testConstructorNullReplicaAddresses() throws Throwable {
 
         try (var client = new Client(0, null)) {
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConstructorNullElementReplicaAddresses() throws Throwable {
+
+        var replicaAddresses = new String[] {"3001", null};
+        try (var client = new Client(0, replicaAddresses)) {
 
         } catch (Throwable any) {
             throw any;
@@ -113,7 +125,7 @@ public class IntegrationTest {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
                 var errors = client.createAccounts(new Account[] {account1, account2});
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(errors.length == 0);
 
                 var lookupAccounts =
                         client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
@@ -139,7 +151,7 @@ public class IntegrationTest {
                 accountsBatch.add(account1);
                 accountsBatch.add(account2);
                 var errors = client.createAccounts(accountsBatch);
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(errors.length == 0);
 
                 var uuidsBatch = new UUIDsBatch(2);
                 uuidsBatch.add(account1.getId());
@@ -164,7 +176,7 @@ public class IntegrationTest {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
                 var error = client.createAccount(account1);
-                Assert.assertTrue(error == CreateAccountResult.Ok);
+                assertTrue(error == CreateAccountResult.Ok);
 
                 var lookupAccount = client.lookupAccount(account1.getId());
                 assertNotNull(lookupAccount);
@@ -187,7 +199,7 @@ public class IntegrationTest {
 
                 var account = new Account();
                 var error = client.createAccount(account);
-                Assert.assertTrue(error == CreateAccountResult.IdMustNotBeZero);
+                assertTrue(error == CreateAccountResult.IdMustNotBeZero);
 
                 var lookupAccount = client.lookupAccount(account.getId());
                 assertNull(lookupAccount);
@@ -209,18 +221,18 @@ public class IntegrationTest {
 
                 Future<CreateAccountsResult[]> createAccountsFuture =
                         client.createAccountsAsync(new Account[] {account1, account2});
-                Assert.assertFalse(createAccountsFuture.isDone());
+                assertFalse(createAccountsFuture.isDone());
 
                 var errors = createAccountsFuture.get();
-                Assert.assertTrue(createAccountsFuture.isDone());
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(createAccountsFuture.isDone());
+                assertTrue(errors.length == 0);
 
                 Future<Account[]> lookupAccountsFuture =
                         client.lookupAccountsAsync(new UUID[] {account1.getId(), account2.getId()});
-                Assert.assertFalse(lookupAccountsFuture.isDone());
+                assertFalse(lookupAccountsFuture.isDone());
 
                 var lookupAccounts = lookupAccountsFuture.get();
-                Assert.assertTrue(lookupAccountsFuture.isDone());
+                assertTrue(lookupAccountsFuture.isDone());
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
@@ -245,18 +257,18 @@ public class IntegrationTest {
 
                 Future<CreateAccountsResult[]> createAccountsFuture =
                         client.createAccountsAsync(accountsBatch);
-                Assert.assertFalse(createAccountsFuture.isDone());
+                assertFalse(createAccountsFuture.isDone());
 
                 var errors = createAccountsFuture.get();
-                Assert.assertTrue(createAccountsFuture.isDone());
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(createAccountsFuture.isDone());
+                assertTrue(errors.length == 0);
 
                 var uuidsBatch = new UUIDsBatch(2);
                 uuidsBatch.add(account1.getId());
                 uuidsBatch.add(account2.getId());
 
                 Future<Account[]> lookupAccountsFuture = client.lookupAccountsAsync(uuidsBatch);
-                Assert.assertFalse(lookupAccountsFuture.isDone());
+                assertFalse(lookupAccountsFuture.isDone());
 
                 var lookupAccounts = lookupAccountsFuture.get();
                 assertAccounts(account1, lookupAccounts[0]);
@@ -279,7 +291,7 @@ public class IntegrationTest {
 
                 var createAccountsErrors =
                         client.createAccounts(new Account[] {account1, account2});
-                Assert.assertTrue(createAccountsErrors.length == 0);
+                assertTrue(createAccountsErrors.length == 0);
 
                 var transfer = new Transfer();
                 transfer.setId(UUID.randomUUID());
@@ -290,24 +302,24 @@ public class IntegrationTest {
                 transfer.setAmount(100);
 
                 var createTransfersErrors = client.createTransfers(new Transfer[] {transfer});
-                Assert.assertTrue(createTransfersErrors.length == 0);
+                assertTrue(createTransfersErrors.length == 0);
 
                 var lookupAccounts =
                         client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(transfer.getAmount(), lookupAccounts[0].getCreditsPosted());
-                Assert.assertEquals(0L, lookupAccounts[0].getDebitsPosted());
+                assertEquals(transfer.getAmount(), lookupAccounts[0].getCreditsPosted());
+                assertEquals(0L, lookupAccounts[0].getDebitsPosted());
 
-                Assert.assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
-                Assert.assertEquals(0L, lookupAccounts[1].getCreditsPosted());
+                assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
+                assertEquals(0L, lookupAccounts[1].getCreditsPosted());
 
                 var lookupTransfers = client.lookupTransfers(new UUID[] {transfer.getId()});
-                Assert.assertTrue(lookupTransfers.length == 1);
+                assertTrue(lookupTransfers.length == 1);
 
                 assertTransfers(transfer, lookupTransfers[0]);
-                Assert.assertNotEquals(0L, lookupTransfers[0].getTimestamp());
+                assertNotEquals(0L, lookupTransfers[0].getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -328,7 +340,7 @@ public class IntegrationTest {
                 accountsBatch.add(account1);
                 accountsBatch.add(account2);
                 var createAccountErrors = client.createAccounts(accountsBatch);
-                Assert.assertTrue(createAccountErrors.length == 0);
+                assertTrue(createAccountErrors.length == 0);
 
                 var transfer = new Transfer();
                 transfer.setId(UUID.randomUUID());
@@ -341,7 +353,7 @@ public class IntegrationTest {
                 var transfersBatch = new TransfersBatch(1);
                 transfersBatch.add(transfer);
                 var createTransferErrors = client.createTransfers(transfersBatch);
-                Assert.assertTrue(createTransferErrors.length == 0);
+                assertTrue(createTransferErrors.length == 0);
 
                 var accountsUUIDsBatch = new UUIDsBatch(2);
                 accountsUUIDsBatch.add(account1.getId());
@@ -350,19 +362,19 @@ public class IntegrationTest {
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(transfer.getAmount(), lookupAccounts[0].getCreditsPosted());
-                Assert.assertEquals(0L, lookupAccounts[0].getDebitsPosted());
+                assertEquals(transfer.getAmount(), lookupAccounts[0].getCreditsPosted());
+                assertEquals(0L, lookupAccounts[0].getDebitsPosted());
 
-                Assert.assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
-                Assert.assertEquals(0L, lookupAccounts[1].getCreditsPosted());
+                assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
+                assertEquals(0L, lookupAccounts[1].getCreditsPosted());
 
                 var transfersUUIDsBatch = new UUIDsBatch(1);
                 transfersUUIDsBatch.add(transfer.getId());
                 var lookupTransfers = client.lookupTransfers(transfersUUIDsBatch);
-                Assert.assertTrue(lookupTransfers.length == 1);
+                assertTrue(lookupTransfers.length == 1);
 
                 assertTransfers(transfer, lookupTransfers[0]);
-                Assert.assertNotEquals(0L, lookupTransfers[0].getTimestamp());
+                assertNotEquals(0L, lookupTransfers[0].getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -381,10 +393,10 @@ public class IntegrationTest {
 
                 Future<CreateAccountsResult[]> createAccountsErrorsFuture =
                         client.createAccountsAsync(new Account[] {account1, account2});
-                Assert.assertFalse(createAccountsErrorsFuture.isDone());
+                assertFalse(createAccountsErrorsFuture.isDone());
 
                 var createAccountsErrors = createAccountsErrorsFuture.get();
-                Assert.assertTrue(createAccountsErrors.length == 0);
+                assertTrue(createAccountsErrors.length == 0);
 
                 var transfer = new Transfer();
                 transfer.setId(UUID.randomUUID());
@@ -396,34 +408,34 @@ public class IntegrationTest {
 
                 Future<CreateTransfersResult[]> createTransfersErrorsFuture =
                         client.createTransfersAsync(new Transfer[] {transfer});
-                Assert.assertFalse(createTransfersErrorsFuture.isDone());
+                assertFalse(createTransfersErrorsFuture.isDone());
 
                 var createTransfersErrors = createTransfersErrorsFuture.get();
-                Assert.assertTrue(createTransfersErrors.length == 0);
+                assertTrue(createTransfersErrors.length == 0);
 
                 Future<Account[]> lookupAccountsFuture =
                         client.lookupAccountsAsync(new UUID[] {account1.getId(), account2.getId()});
-                Assert.assertFalse(lookupAccountsFuture.isDone());
+                assertFalse(lookupAccountsFuture.isDone());
 
                 var lookupAccounts = lookupAccountsFuture.get();
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(transfer.getAmount(), lookupAccounts[0].getCreditsPosted());
-                Assert.assertEquals(0L, lookupAccounts[0].getDebitsPosted());
+                assertEquals(transfer.getAmount(), lookupAccounts[0].getCreditsPosted());
+                assertEquals(0L, lookupAccounts[0].getDebitsPosted());
 
-                Assert.assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
-                Assert.assertEquals(0L, lookupAccounts[1].getCreditsPosted());
+                assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
+                assertEquals(0L, lookupAccounts[1].getCreditsPosted());
 
                 Future<Transfer[]> lookupTransfersFuture =
                         client.lookupTransfersAsync(new UUID[] {transfer.getId()});
-                Assert.assertFalse(lookupTransfersFuture.isDone());
+                assertFalse(lookupTransfersFuture.isDone());
 
                 var lookupTransfers = lookupTransfersFuture.get();
-                Assert.assertTrue(lookupTransfers.length == 1);
+                assertTrue(lookupTransfers.length == 1);
 
                 assertTransfers(transfer, lookupTransfers[0]);
-                Assert.assertNotEquals(0L, lookupTransfers[0].getTimestamp());
+                assertNotEquals(0L, lookupTransfers[0].getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -445,10 +457,10 @@ public class IntegrationTest {
                 accountsBatch.add(account2);
                 Future<CreateAccountsResult[]> createAccountsErrorsFuture =
                         client.createAccountsAsync(accountsBatch);
-                Assert.assertFalse(createAccountsErrorsFuture.isDone());
+                assertFalse(createAccountsErrorsFuture.isDone());
 
                 var createAccountsErrors = createAccountsErrorsFuture.get();
-                Assert.assertTrue(createAccountsErrors.length == 0);
+                assertTrue(createAccountsErrors.length == 0);
 
                 var transfer = new Transfer();
                 transfer.setId(UUID.randomUUID());
@@ -463,10 +475,10 @@ public class IntegrationTest {
 
                 Future<CreateTransfersResult[]> createTransferErrorsFuture =
                         client.createTransfersAsync(transfersBatch);
-                Assert.assertFalse(createTransferErrorsFuture.isDone());
+                assertFalse(createTransferErrorsFuture.isDone());
 
                 var createTransferErrors = createTransferErrorsFuture.get();
-                Assert.assertTrue(createTransferErrors.length == 0);
+                assertTrue(createTransferErrors.length == 0);
 
                 var accountsUUIDsBatch = new UUIDsBatch(2);
                 accountsUUIDsBatch.add(account1.getId());
@@ -474,29 +486,29 @@ public class IntegrationTest {
 
                 Future<Account[]> lookupAccountsFuture =
                         client.lookupAccountsAsync(accountsUUIDsBatch);
-                Assert.assertFalse(lookupAccountsFuture.isDone());
+                assertFalse(lookupAccountsFuture.isDone());
 
                 var lookupAccounts = lookupAccountsFuture.get();
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(transfer.getAmount(), lookupAccounts[0].getCreditsPosted());
-                Assert.assertEquals(0L, lookupAccounts[0].getDebitsPosted());
+                assertEquals(transfer.getAmount(), lookupAccounts[0].getCreditsPosted());
+                assertEquals(0L, lookupAccounts[0].getDebitsPosted());
 
-                Assert.assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
-                Assert.assertEquals(0L, lookupAccounts[1].getCreditsPosted());
+                assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
+                assertEquals(0L, lookupAccounts[1].getCreditsPosted());
 
                 var transfersUUIDsBatch = new UUIDsBatch(1);
                 transfersUUIDsBatch.add(transfer.getId());
                 Future<Transfer[]> lookupTransfersFuture =
                         client.lookupTransfersAsync(transfersUUIDsBatch);
-                Assert.assertFalse(lookupTransfersFuture.isDone());
+                assertFalse(lookupTransfersFuture.isDone());
 
                 var lookupTransfers = lookupTransfersFuture.get();
-                Assert.assertTrue(lookupTransfers.length == 1);
+                assertTrue(lookupTransfers.length == 1);
 
                 assertTransfers(transfer, lookupTransfers[0]);
-                Assert.assertNotEquals(0L, lookupTransfers[0].getTimestamp());
+                assertNotEquals(0L, lookupTransfers[0].getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -514,10 +526,10 @@ public class IntegrationTest {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
                 var account1Result = client.createAccount(account1);
-                Assert.assertTrue(account1Result == CreateAccountResult.Ok);
+                assertTrue(account1Result == CreateAccountResult.Ok);
 
                 var account2Result = client.createAccount(account2);
-                Assert.assertTrue(account2Result == CreateAccountResult.Ok);
+                assertTrue(account2Result == CreateAccountResult.Ok);
 
                 var transfer = new Transfer();
                 transfer.setId(UUID.randomUUID());
@@ -528,7 +540,7 @@ public class IntegrationTest {
                 transfer.setAmount(100);
 
                 var transferResult = client.createTransfer(transfer);
-                Assert.assertTrue(transferResult == CreateTransferResult.Ok);
+                assertTrue(transferResult == CreateTransferResult.Ok);
 
                 var lookupAccount1 = client.lookupAccount(account1.getId());
                 assertAccounts(account1, lookupAccount1);
@@ -536,17 +548,17 @@ public class IntegrationTest {
                 var lookupAccount2 = client.lookupAccount(account2.getId());
                 assertAccounts(account2, lookupAccount2);
 
-                Assert.assertEquals(lookupAccount1.getCreditsPosted(), transfer.getAmount());
-                Assert.assertEquals(lookupAccount1.getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccount1.getCreditsPosted(), transfer.getAmount());
+                assertEquals(lookupAccount1.getDebitsPosted(), (long) 0);
 
-                Assert.assertEquals(lookupAccount2.getDebitsPosted(), transfer.getAmount());
-                Assert.assertEquals(lookupAccount2.getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccount2.getDebitsPosted(), transfer.getAmount());
+                assertEquals(lookupAccount2.getCreditsPosted(), (long) 0);
 
                 var lookupTransfer = client.lookupTransfer(transfer.getId());
-                Assert.assertNotNull(lookupTransfer);
+                assertNotNull(lookupTransfer);
 
                 assertTransfers(transfer, lookupTransfer);
-                Assert.assertNotEquals(0L, lookupTransfer.getTimestamp());
+                assertNotEquals(0L, lookupTransfer.getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -565,10 +577,10 @@ public class IntegrationTest {
 
                 var transfer = new Transfer();
                 var transferResult = client.createTransfer(transfer);
-                Assert.assertTrue(transferResult == CreateTransferResult.IdMustNotBeZero);
+                assertTrue(transferResult == CreateTransferResult.IdMustNotBeZero);
 
                 var lookupTransfer = client.lookupTransfer(transfer.getId());
-                Assert.assertNull(lookupTransfer);
+                assertNull(lookupTransfer);
 
             } catch (Throwable any) {
                 throw any;
@@ -586,7 +598,7 @@ public class IntegrationTest {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
                 var errors = client.createAccounts(new Account[] {account1, account2});
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(errors.length == 0);
 
                 var transfer = new Transfer();
                 transfer.setId(UUID.randomUUID());
@@ -599,28 +611,28 @@ public class IntegrationTest {
                 transfer.setTimeout(Integer.MAX_VALUE);
 
                 var result = client.createTransfer(transfer);
-                Assert.assertTrue(result == CreateTransferResult.Ok);
+                assertTrue(result == CreateTransferResult.Ok);
 
                 var lookupAccounts =
                         client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(lookupAccounts[0].getCreditsPending(), transfer.getAmount());
-                Assert.assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getCreditsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPending(), transfer.getAmount());
+                assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
 
-                Assert.assertEquals(lookupAccounts[1].getDebitsPending(), transfer.getAmount());
-                Assert.assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getDebitsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPending(), transfer.getAmount());
+                assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
 
                 var lookupTransfer = client.lookupTransfer(transfer.getId());
-                Assert.assertNotNull(lookupTransfer);
+                assertNotNull(lookupTransfer);
 
                 assertTransfers(transfer, lookupTransfer);
-                Assert.assertNotEquals(0L, lookupTransfer.getTimestamp());
+                assertNotEquals(0L, lookupTransfer.getTimestamp());
 
                 var postTransfer = new Transfer();
                 postTransfer.setId(UUID.randomUUID());
@@ -633,28 +645,28 @@ public class IntegrationTest {
                 postTransfer.setPendingId(transfer.getId());
 
                 var postResult = client.createTransfer(postTransfer);
-                Assert.assertTrue(postResult == CreateTransferResult.Ok);
+                assertTrue(postResult == CreateTransferResult.Ok);
 
                 lookupAccounts =
                         client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(lookupAccounts[0].getCreditsPosted(), transfer.getAmount());
-                Assert.assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getCreditsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPosted(), transfer.getAmount());
+                assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPending(), (long) 0);
+                assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
 
-                Assert.assertEquals(lookupAccounts[1].getDebitsPosted(), transfer.getAmount());
-                Assert.assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPosted(), transfer.getAmount());
+                assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
+                assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
 
                 var lookupPostTransfer = client.lookupTransfer(postTransfer.getId());
-                Assert.assertNotNull(lookupPostTransfer);
+                assertNotNull(lookupPostTransfer);
 
                 assertTransfers(postTransfer, lookupPostTransfer);
-                Assert.assertNotEquals(0L, lookupPostTransfer.getTimestamp());
+                assertNotEquals(0L, lookupPostTransfer.getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -672,7 +684,7 @@ public class IntegrationTest {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
                 var errors = client.createAccounts(new Account[] {account1, account2});
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(errors.length == 0);
 
                 var transfer = new Transfer();
                 transfer.setId(UUID.randomUUID());
@@ -685,28 +697,28 @@ public class IntegrationTest {
                 transfer.setTimeout(Integer.MAX_VALUE);
 
                 var result = client.createTransfer(transfer);
-                Assert.assertTrue(result == CreateTransferResult.Ok);
+                assertTrue(result == CreateTransferResult.Ok);
 
                 var lookupAccounts =
                         client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(lookupAccounts[0].getCreditsPending(), transfer.getAmount());
-                Assert.assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getCreditsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPending(), transfer.getAmount());
+                assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
 
-                Assert.assertEquals(lookupAccounts[1].getDebitsPending(), transfer.getAmount());
-                Assert.assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getDebitsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPending(), transfer.getAmount());
+                assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
 
                 var lookupTransfer = client.lookupTransfer(transfer.getId());
-                Assert.assertNotNull(lookupTransfer);
+                assertNotNull(lookupTransfer);
 
                 assertTransfers(transfer, lookupTransfer);
-                Assert.assertNotEquals(0L, lookupTransfer.getTimestamp());
+                assertNotEquals(0L, lookupTransfer.getTimestamp());
 
                 var voidTransfer = new Transfer();
                 voidTransfer.setId(UUID.randomUUID());
@@ -719,28 +731,28 @@ public class IntegrationTest {
                 voidTransfer.setPendingId(transfer.getId());
 
                 var postResult = client.createTransfer(voidTransfer);
-                Assert.assertTrue(postResult == CreateTransferResult.Ok);
+                assertTrue(postResult == CreateTransferResult.Ok);
 
                 lookupAccounts =
                         client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(lookupAccounts[0].getCreditsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getCreditsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPending(), (long) 0);
+                assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
 
-                Assert.assertEquals(lookupAccounts[1].getDebitsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
+                assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
 
                 var lookupVoidTransfer = client.lookupTransfer(voidTransfer.getId());
-                Assert.assertNotNull(lookupVoidTransfer);
+                assertNotNull(lookupVoidTransfer);
 
                 assertTransfers(voidTransfer, lookupVoidTransfer);
-                Assert.assertNotEquals(0L, lookupVoidTransfer.getTimestamp());
+                assertNotEquals(0L, lookupVoidTransfer.getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -758,7 +770,7 @@ public class IntegrationTest {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
                 var errors = client.createAccounts(new Account[] {account1, account2});
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(errors.length == 0);
 
                 var transfer1 = new Transfer();
                 transfer1.setId(UUID.randomUUID());
@@ -779,31 +791,31 @@ public class IntegrationTest {
                 transfer2.setFlags(TransferFlags.NONE);
 
                 var transfersErrors = client.createTransfers(new Transfer[] {transfer1, transfer2});
-                Assert.assertTrue(transfersErrors.length == 0);
+                assertTrue(transfersErrors.length == 0);
 
                 var lookupAccounts =
                         client.lookupAccounts(new UUID[] {account1.getId(), account2.getId()});
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(lookupAccounts[0].getCreditsPosted(), transfer1.getAmount());
-                Assert.assertEquals(lookupAccounts[0].getDebitsPosted(), transfer2.getAmount());
-                Assert.assertEquals(lookupAccounts[0].getCreditsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPosted(), transfer1.getAmount());
+                assertEquals(lookupAccounts[0].getDebitsPosted(), transfer2.getAmount());
+                assertEquals(lookupAccounts[0].getCreditsPending(), (long) 0);
+                assertEquals(lookupAccounts[0].getDebitsPending(), (long) 0);
 
-                Assert.assertEquals(lookupAccounts[1].getCreditsPosted(), transfer2.getAmount());
-                Assert.assertEquals(lookupAccounts[1].getDebitsPosted(), transfer1.getAmount());
-                Assert.assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
-                Assert.assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
+                assertEquals(lookupAccounts[1].getCreditsPosted(), transfer2.getAmount());
+                assertEquals(lookupAccounts[1].getDebitsPosted(), transfer1.getAmount());
+                assertEquals(lookupAccounts[1].getCreditsPending(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPending(), (long) 0);
 
                 var lookupTransfers =
                         client.lookupTransfers(new UUID[] {transfer1.getId(), transfer2.getId()});
-                Assert.assertEquals(2, lookupTransfers.length);
+                assertEquals(2, lookupTransfers.length);
 
                 assertTransfers(transfer1, lookupTransfers[0]);
                 assertTransfers(transfer2, lookupTransfers[1]);
-                Assert.assertNotEquals(0L, lookupTransfers[0].getTimestamp());
-                Assert.assertNotEquals(0L, lookupTransfers[1].getTimestamp());
+                assertNotEquals(0L, lookupTransfers[0].getTimestamp());
+                assertNotEquals(0L, lookupTransfers[1].getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -813,6 +825,81 @@ public class IntegrationTest {
             throw any;
         }
     }
+
+    @Test
+    public void testCreateAccountTooMuchData() throws Throwable {
+
+        try (var server = new Server()) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+
+                final int TOO_MUCH_DATA = 10000;
+                var batch = new AccountsBatch(TOO_MUCH_DATA);
+                for (int i = 0; i < TOO_MUCH_DATA; i++) {
+                    var account = new Account();
+                    account.setId(UUID.randomUUID());
+                    account.setCode(1);
+                    account.setLedger(1);
+                    batch.add(account);
+                }
+
+                try {
+                    client.createAccounts(batch);
+                    assert false;
+                } catch (RequestException requestException) {
+
+                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
+                            requestException.getStatus());
+
+                }
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+    @Test
+    public void testCreateTransferTooMuchData() throws Throwable {
+
+        try (var server = new Server()) {
+
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+
+                final int TOO_MUCH_DATA = 10000;
+                var batch = new TransfersBatch(TOO_MUCH_DATA);
+
+                for (int i = 0; i < TOO_MUCH_DATA; i++) {
+                    var transfer = new Transfer();
+                    transfer.setId(UUID.randomUUID());
+                    transfer.setDebitAccountId(account1.getId());
+                    transfer.setDebitAccountId(account2.getId());
+                    transfer.setCode(1);
+                    transfer.setLedger(1);
+                    batch.add(transfer);
+                }
+
+                try {
+                    client.createTransfers(batch);
+                    assert false;
+                } catch (RequestException requestException) {
+
+                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
+                            requestException.getStatus());
+
+                }
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
 
     /**
      * This test asserts that parallel threads will respect client's maxConcurrency.
@@ -833,7 +920,7 @@ public class IntegrationTest {
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
                 var errors = client.createAccounts(new Account[] {account1, account2});
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(errors.length == 0);
 
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
@@ -845,8 +932,8 @@ public class IntegrationTest {
                 // Wait for all threads
                 for (int i = 0; i < tasks_qty; i++) {
                     tasks[i].join();
-                    Assert.assertFalse(tasks[i].isFaulted);
-                    Assert.assertEquals(tasks[i].result, CreateTransferResult.Ok);
+                    assertFalse(tasks[i].isFaulted);
+                    assertEquals(tasks[i].result, CreateTransferResult.Ok);
                 }
 
                 // Asserting if all transfers were submited correctly
@@ -855,11 +942,11 @@ public class IntegrationTest {
                 assertAccounts(account1, lookupAccounts[0]);
                 assertAccounts(account2, lookupAccounts[1]);
 
-                Assert.assertEquals(lookupAccounts[0].getCreditsPosted(), (long) (100 * tasks_qty));
-                Assert.assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
+                assertEquals(lookupAccounts[0].getCreditsPosted(), (long) (100 * tasks_qty));
+                assertEquals(lookupAccounts[0].getDebitsPosted(), (long) 0);
 
-                Assert.assertEquals(lookupAccounts[1].getDebitsPosted(), (long) (100 * tasks_qty));
-                Assert.assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
+                assertEquals(lookupAccounts[1].getDebitsPosted(), (long) (100 * tasks_qty));
+                assertEquals(lookupAccounts[1].getCreditsPosted(), (long) 0);
 
             } catch (Throwable any) {
                 throw any;
@@ -891,7 +978,7 @@ public class IntegrationTest {
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
                 var errors = client.createAccounts(new Account[] {account1, account2});
-                Assert.assertTrue(errors.length == 0);
+                assertTrue(errors.length == 0);
 
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
@@ -914,8 +1001,7 @@ public class IntegrationTest {
                     // The client.close must wait until all submited requests have completed
                     // Asserting that either the task succeeded or failed while waiting
                     tasks[i].join();
-                    Assert.assertTrue(
-                            tasks[i].isFaulted || tasks[i].result == CreateTransferResult.Ok);
+                    assertTrue(tasks[i].isFaulted || tasks[i].result == CreateTransferResult.Ok);
                 }
 
             } catch (Throwable any) {
@@ -1011,7 +1097,7 @@ public class IntegrationTest {
             cleanUp();
         }
 
-        private void cleanUp() {
+        private void cleanUp() throws OperationsException {
             try {
 
                 if (process != null && process.isAlive()) {
@@ -1021,6 +1107,7 @@ public class IntegrationTest {
                 var file = new File("./" + TB_FILE);
                 file.delete();
             } catch (Throwable any) {
+                throw new OperationsException("Cleanup has failed");
             }
         }
     }

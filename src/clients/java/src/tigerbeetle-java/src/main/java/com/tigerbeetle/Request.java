@@ -67,10 +67,6 @@ abstract class Request<T> implements Future<T[]> {
             result = new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
                     operation, receivedOperation);
 
-        } else if (buffer == null) {
-
-            result = new AssertionError("Unexpected callback buffer: buffer=null");
-
         } else if (packet == 0) {
 
             result = new AssertionError("Unexpected callback packet: packet=null");
@@ -82,6 +78,10 @@ abstract class Request<T> implements Future<T[]> {
         } else if (isDone()) {
 
             result = new AssertionError("This request has already been completed");
+
+        } else if (buffer == null) {
+
+            result = new AssertionError("Unexpected callback buffer: buffer=null");
 
         } else {
 

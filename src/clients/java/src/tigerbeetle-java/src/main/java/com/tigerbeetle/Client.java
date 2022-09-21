@@ -37,7 +37,8 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException If {@code clusterID} is negative.
      * @throws IllegalArgumentException If {@code replicaAddresses} is empty or presented in
      *         incorrect format.
-     * @throws NullPointerException If {@code replicaAddresses} is null.
+     * @throws NullPointerException If {@code replicaAddresses} is null or any element in the array
+     *         is null.
      * @throws IllegalArgumentException If {@code maxConcurrency} is zero or negative.
      */
     public Client(int clusterID, String[] replicaAddresses, int maxConcurrency) {
@@ -51,6 +52,8 @@ public final class Client implements AutoCloseable {
 
         var joiner = new StringJoiner(",");
         for (var address : replicaAddresses) {
+            if (address == null)
+                throw new NullPointerException("Replica address cannot be null");
             joiner.add(address);
         }
 
@@ -80,7 +83,8 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException If {@code clusterID} is negative.
      * @throws IllegalArgumentException If {@code replicaAddresses} is empty or presented in
      *         incorrect format.
-     * @throws NullPointerException If {@code replicaAddresses} is null.
+     * @throws NullPointerException If {@code replicaAddresses} is null or any element in the array
+     *         is null.
      */
     public Client(int clusterID, String[] replicaAddresses) {
         this(clusterID, replicaAddresses, DEFAULT_MAX_CONCURRENCY);
@@ -134,7 +138,7 @@ public final class Client implements AutoCloseable {
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
-     * @throws NullPointerException if {@code batch} is null.
+     * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
      */
     public CreateAccountsResult[] createAccounts(Account[] batch) throws RequestException {
@@ -168,7 +172,7 @@ public final class Client implements AutoCloseable {
      * @param batch An array containing all accounts to be created.
      * @return A {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
-     * @throws NullPointerException if {@code batch} is null.
+     * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
      */
     public Future<CreateAccountsResult[]> createAccountsAsync(Account[] batch) {
@@ -222,7 +226,7 @@ public final class Client implements AutoCloseable {
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
-     * @throws NullPointerException if {@code batch} is null.
+     * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
      */
     public Account[] lookupAccounts(UUID[] batch) throws RequestException {
@@ -254,7 +258,7 @@ public final class Client implements AutoCloseable {
      * @param batch An array containing all accounts ids.
      * @return A {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
-     * @throws NullPointerException if {@code batch} is null.
+     * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
      */
     public Future<Account[]> lookupAccountsAsync(UUID[] batch) {
@@ -308,7 +312,7 @@ public final class Client implements AutoCloseable {
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
-     * @throws NullPointerException if {@code batch} is null.
+     * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
      */
     public CreateTransfersResult[] createTransfers(Transfer[] batch) throws RequestException {
@@ -341,7 +345,7 @@ public final class Client implements AutoCloseable {
      * @param batch An array containing all transfers to be created.
      * @return A {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
-     * @throws NullPointerException if {@code batch} is null.
+     * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
      */
     public Future<CreateTransfersResult[]> createTransfersAsync(Transfer[] batch) {
@@ -394,7 +398,7 @@ public final class Client implements AutoCloseable {
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
-     * @throws NullPointerException if {@code batch} is null.
+     * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
      */
     public Transfer[] lookupTransfers(UUID[] batch) throws RequestException {
@@ -426,7 +430,7 @@ public final class Client implements AutoCloseable {
      * @param batch An array containing all transfers ids.
      * @return A {@link java.util.concurrent.Future} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
-     * @throws NullPointerException if {@code batch} is null.
+     * @throws NullPointerException if {@code batch} is null or any element in the array is null.
      * @throws IllegalStateException if this client is closed.
      */
     public Future<Transfer[]> lookupTransfersAsync(UUID[] batch) {
