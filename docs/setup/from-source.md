@@ -13,9 +13,10 @@ $ scripts/install.sh
 ```
 
 Don't worry, this will only make changes within the `tigerbeetle`
-directory. No global changes.
+directory. No global changes. The result will place the compiled
+`tigerbeetle` binary into the current directory.
 
-Then create the TigerBeetle data file.
+Now create the TigerBeetle data file.
 
 ```bash
 $ ./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle

@@ -122,6 +122,7 @@ Amount of pending debits.
 Constraints:
 
 * Type is 64-bit unsigned integer (8 bytes)
+* Must be zero when the account is created
 
 ### `debits_posted`
 
@@ -130,6 +131,7 @@ Amount of posted debits.
 Constraints:
 
 * Type is 64-bit unsigned integer (8 bytes)
+* Must be zero when the account is created
 
 ### `credits_pending`
 
@@ -138,6 +140,7 @@ Amount of pending credits.
 Constraints:
 
 * Type is 64-bit unsigned integer (8 bytes)
+* Must be zero when the account is created
 
 ### `credits_posted`
 
@@ -146,6 +149,7 @@ Amount of posted credits.
 Constraints:
 
 * Type is 64-bit unsigned integer (8 bytes)
+* Must be zero when the account is created
 
 ### `timestamp`
 

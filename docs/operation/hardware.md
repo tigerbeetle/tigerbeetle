@@ -2,13 +2,15 @@
 
 ## Cluster of replicas
 
-A TigerBeetle cluster is a single binary running on 6 machines for
-strict serializability, high availability and durability.
+A TigerBeetle cluster is 6 machines each running the TigerBeetle
+server for strict serializability, high availability and
+durability. The TigerBeetle server is a single binary.
 
-A single binary operates on a single local data file for a total of 6
+Each server operates on a single local data file for a total of 6
 data files across the cluster.
 
-A single binary plus a single data file is called a replica.
+The TigerBeetle server (the single binary) plus its single data file
+is called a replica.
 
 It is important to ensure independent fault domains for each replica's
 data file, that each replica's data file is stored on a separate disk
