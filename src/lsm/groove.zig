@@ -400,10 +400,10 @@ pub fn GrooveType(
         join_pending: usize = 0,
         join_callback: ?Callback = null,
 
-        objects_cache: *ObjectTree.ValueCache,
+        objects_cache: *ObjectTree.TableMutable.ValuesCache,
         objects: ObjectTree,
 
-        ids_cache: *IdTree.ValueCache,
+        ids_cache: *IdTree.TableMutable.ValuesCache,
         ids: IdTree,
 
         indexes: IndexTrees,
@@ -419,6 +419,9 @@ pub fn GrooveType(
         /// the commit are both passed to the LSM trees and mirrored in this hash map. It is always
         /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
+
+        /// The snapshot to prefetch for.
+        prefetch_snapshot: ?u64,
 
         pub const Options = struct {
             /// TODO Improve unit in this name to make more clear what should be passed.
@@ -440,11 +443,13 @@ pub fn GrooveType(
             options: Options,
         ) !Groove {
             // Cache is heap-allocated to pass a pointer into the Object tree.
-            const objects_cache = try allocator.create(ObjectTree.ValueCache);
+            const objects_cache = try allocator.create(ObjectTree.TableMutable.ValuesCache);
             errdefer allocator.destroy(objects_cache);
 
-            objects_cache.* = .{};
-            try objects_cache.ensureTotalCapacity(allocator, options.cache_entries_max);
+            objects_cache.* = try ObjectTree.TableMutable.ValuesCache.init(
+                allocator,
+                options.cache_entries_max,
+            );
             errdefer objects_cache.deinit(allocator);
 
             // Intialize the object LSM tree.
@@ -458,11 +463,10 @@ pub fn GrooveType(
             errdefer object_tree.deinit(allocator);
 
             // Cache is heap-allocated to pass a pointer into the ID tree.
-            const ids_cache = try allocator.create(IdTree.ValueCache);
+            const ids_cache = try allocator.create(IdTree.TableMutable.ValuesCache);
             errdefer allocator.destroy(ids_cache);
 
-            ids_cache.* = .{};
-            try ids_cache.ensureTotalCapacity(allocator, options.cache_entries_max);
+            ids_cache.* = try IdTree.TableMutable.ValuesCache.init(allocator, options.cache_entries_max);
             errdefer ids_cache.deinit(allocator);
 
             var id_tree = try IdTree.init(
@@ -515,6 +519,7 @@ pub fn GrooveType(
 
                 .prefetch_ids = prefetch_ids,
                 .prefetch_objects = prefetch_objects,
+                .prefetch_snapshot = null,
             };
         }
 
@@ -541,26 +546,35 @@ pub fn GrooveType(
             return groove.prefetch_objects.getKeyPtrAdapted(id, PrefetchObjectsAdapter{});
         }
 
-        /// Must be called directly after the state machine commit is finished and prefetch results
-        /// are no longer needed.
-        pub fn prefetch_clear(groove: *Groove) void {
-            groove.prefetch_objects.clearRetainingCapacity();
+        /// Must be called directly before the state machine begins queuing ids for prefetch.
+        pub fn prefetch_setup(groove: *Groove, snapshot: u64) void {
+            assert(snapshot <= snapshot_latest);
+
+            if (groove.prefetch_snapshot == null) {
+                groove.prefetch_objects.clearRetainingCapacity();
+            } else {
+                // If there is a leftover snapshot, then prefetch() was never called, so there
+                // must already be no queued objects or ids.
+            }
+
+            groove.prefetch_snapshot = snapshot;
             assert(groove.prefetch_objects.count() == 0);
             assert(groove.prefetch_ids.count() == 0);
+
         }
 
         /// This must be called by the state machine for every key to be prefetched.
         /// We tolerate duplicate IDs enqueued by the state machine.
         /// For example, if all unique operations require the same two dependencies.
         pub fn prefetch_enqueue(groove: *Groove, id: u128) void {
-            if (groove.ids.get_cached(id)) |id_tree_value| {
-                if (!id_tree_value.tombstone()) {
-                    const object = groove.objects.get_cached(id_tree_value.timestamp).?;
+            if (groove.ids.lookup_from_memory(groove.prefetch_snapshot.?, id)) |id_tree_value| {
+                if (id_tree_value.tombstone()) {
+                    // Do nothing; a prefetched ID not present in prefetch_objects indicates
+                    // that the object has either been deleted or never existed.
+                } else {
+                    const object = groove.objects.table_mutable.get(id_tree_value.timestamp).?;
                     assert(!ObjectTreeHelpers(Object).tombstone(object));
                     groove.prefetch_objects.putAssumeCapacity(object.*, {});
-                } else {
-                    // Do nothing, a prefetched ID not present in prefetch_objects indicates
-                    // that the object has either been deleted or never existed.
                 }
             } else {
                 groove.prefetch_ids.putAssumeCapacity(id, {});
@@ -568,8 +582,7 @@ pub fn GrooveType(
         }
 
         /// Ensure the objects corresponding to all ids enqueued with prefetch_enqueue() are
-        /// in memory, either in the value cache of the object tree or in the prefetch_objects
-        /// backup hash map.
+        /// available in `prefetch_objects`.
         pub fn prefetch(
             groove: *Groove,
             callback: fn (*PrefetchContext) void,
@@ -578,14 +591,17 @@ pub fn GrooveType(
             context.* = .{
                 .groove = groove,
                 .callback = callback,
+                .snapshot = groove.prefetch_snapshot.?,
                 .id_iterator = groove.prefetch_ids.keyIterator(),
             };
+            groove.prefetch_snapshot = null;
             context.start_workers();
         }
 
         pub const PrefetchContext = struct {
             groove: *Groove,
             callback: fn (*PrefetchContext) void,
+            snapshot: u64,
 
             id_iterator: PrefetchIDs.KeyIterator,
 
@@ -648,18 +664,18 @@ pub fn GrooveType(
                 };
 
                 if (config.verify) {
-                    // This is checked in prefetch_enqueue()
-                    assert(worker.context.groove.ids.get_cached(id.*) == null);
+                    // This was checked in prefetch_enqueue().
+                    assert(worker.context.groove.ids.lookup_from_memory(worker.context.snapshot, id.*) == null);
                 }
 
                 // If not in the LSM tree's cache, the object must be read from disk and added
                 // to the auxiliary prefetch_objects hash map.
                 // TODO: this LSM tree function needlessly checks the LSM tree's cache a
                 // second time. Adding API to the LSM tree to avoid this may be worthwhile.
-                worker.context.groove.ids.lookup(
+                worker.context.groove.ids.lookup_from_levels(
                     lookup_id_callback,
                     &worker.lookup_id,
-                    snapshot_latest,
+                    worker.context.snapshot,
                     id.*,
                 );
             }
@@ -671,16 +687,28 @@ pub fn GrooveType(
                 const worker = @fieldParentPtr(PrefetchWorker, "lookup_id", completion);
 
                 if (result) |id_tree_value| {
-                    if (!id_tree_value.tombstone()) {
-                        worker.context.groove.objects.lookup(
-                            lookup_object_callback,
-                            &worker.lookup_object,
-                            snapshot_latest,
-                            id_tree_value.timestamp,
-                        );
-                    } else {
+                    if (id_tree_value.tombstone()) {
                         worker.lookup_start_next();
+                        return;
                     }
+
+                    if (worker.context.groove.objects.lookup_from_memory(
+                        worker.context.snapshot, id_tree_value.timestamp)) |object|
+                    {
+                        // The object is not a tombstone; the ID and Object trees are in sync.
+                        assert(!ObjectTreeHelpers(Object).tombstone(object));
+
+                        worker.context.groove.prefetch_objects.putAssumeCapacityNoClobber(object.*, {});
+                        worker.lookup_start_next();
+                        return;
+                    }
+
+                    worker.context.groove.objects.lookup_from_levels(
+                        lookup_object_callback,
+                        &worker.lookup_object,
+                        worker.context.snapshot,
+                        id_tree_value.timestamp,
+                    );
                 } else {
                     worker.lookup_start_next();
                 }
@@ -924,7 +952,7 @@ test "Groove" {
 
     _ = Groove.prefetch_enqueue;
     _ = Groove.prefetch;
-    _ = Groove.prefetch_clear;
+    _ = Groove.prefetch_setup;
 
     std.testing.refAllDecls(Groove.PrefetchWorker);
     std.testing.refAllDecls(Groove.PrefetchContext);
