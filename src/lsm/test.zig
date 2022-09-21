@@ -18,6 +18,7 @@ const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 const GridType = @import("grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
 const Forest = StateMachine.Forest;
+const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
@@ -244,6 +245,7 @@ const Environment = struct {
                 assertion.verify_count = std.math.min(commit_entries_max, assertion.objects.len);
                 if (assertion.verify_count == 0) return;
 
+                assertion.groove.prefetch_setup(snapshot_latest);
                 for (assertion.objects[0..assertion.verify_count]) |*object| {
                     assertion.groove.prefetch_enqueue(object.id);
                 }
@@ -256,7 +258,6 @@ const Environment = struct {
                 assert(assertion.verify_count > 0);
 
                 {
-                    defer assertion.groove.prefetch_clear();
                     for (assertion.objects[0..assertion.verify_count]) |*object| {
                         log.debug("verifying {} for id={}", .{ visibility, object.id });
                         const result = assertion.groove.get(object.id);
