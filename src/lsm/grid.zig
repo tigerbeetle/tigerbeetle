@@ -183,17 +183,20 @@ pub fn GridType(comptime Storage: type) type {
             return grid.superblock.free_set.acquire().?;
         }
 
-        /// This function must be used to release addresses, instead of release_at_checkpoint()
-        /// on the free set directly, as this also removes the address from the block cache.
-        /// This reduces conflict misses in the block cache, by freeing ways as they are released.
-        /// This also allows us to assume that addresses are not already in the cache on insertion,
-        /// and avoids a lookup on that path by using the "no clobber" put variant.
+        /// This function should be used to release addresses, instead of release_at_checkpoint()
+        /// on the free set directly, as this also demotes the address within the block cache.
+        /// This reduces conflict misses in the block cache, by freeing ways soon after they are
+        /// released.
+        ///
+        /// This does not remove the block from the cache — the block can be read until the next
+        /// checkpoint.
+        ///
         /// Asserts that the address is not currently being read from or written to.
-        pub fn release(grid: *Grid, address: u64) void {
+        pub fn release_at_checkpoint(grid: *Grid, address: u64) void {
             grid.assert_not_writing(address, null);
             grid.assert_not_reading(address, null);
 
-            grid.cache.remove(address); // Free the way in the cache now to reduce conflict misses.
+            grid.cache.demote(address);
             grid.superblock.free_set.release_at_checkpoint(address);
         }
 
@@ -304,7 +307,7 @@ pub fn GridType(comptime Storage: type) type {
             const grid = iop.grid;
             const completed_write = iop.write;
 
-            const cached_block = grid.cache.put_no_clobber_preserve_locked(
+            const cached_block = grid.cache.insert_preserve_locked(
                 *Grid,
                 block_locked,
                 grid,
@@ -367,6 +370,17 @@ pub fn GridType(comptime Storage: type) type {
             assert(!grid.read_recursion_guard);
             grid.assert_not_writing(read.address, null);
 
+            if (grid.superblock.free_set.is_free(read.address)) {
+                // We cannot assert `free_set.is_free()` because of the following case:
+                // 1. The replica receives a request_block from a repairing replica.
+                //    The block is allocated but not cached — but is due to be freed at checkpoint.
+                // 2. All of the Grid's Read IOPS are occupied, so queue the read.
+                // 3. The replica checkpoints.
+                // 4. The read dequeues, but the requested block is no longer allocated.
+                // TODO(State Transfer) How does a non-repairable block trigger state transfer?
+                unreachable;
+            }
+
             // Check if a read is already in progress for the target address.
             {
                 var it = grid.read_iops.iterate();
@@ -396,7 +410,7 @@ pub fn GridType(comptime Storage: type) type {
                 return;
             };
 
-            const block = grid.cache.put_no_clobber_preserve_locked(
+            const block = grid.cache.insert_preserve_locked(
                 *Grid,
                 block_locked,
                 grid,
