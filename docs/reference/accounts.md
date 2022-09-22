@@ -17,16 +17,15 @@ TigerBeetle as transfers move money to and from an account.
 
 ### `id`
 
-This is the unique identifier, the primary key, of the account.
+`id` is a unique, client-defined identifier for the account.
 
-As an example, you might use a UUID (encoded as an integer) that ties
-the account back to a row in a SQL database.
+The `id` should be a UUID.
 
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
-* Must not be zero or `2^128 - 1`
-* Must be unique
+* Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer).
+* Must not conflict with an another account.
 
 ### `user_data`
 
