@@ -7,8 +7,7 @@ for fields that TigerBeetle, not you (the user), are responsible.
 ### Updates
 
 Transfer fields *cannot be changed by the user* after
-creation. However, debits and credits fields are updated by
-TigerBeetle as transfers move money to and from an account.
+creation.
 
 ## Fields
 
@@ -79,16 +78,16 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must be zero if neither void nor pending transfer flag is set
-* Must match an existing transfer if non-zero
+* Must match an existing transfer's [`id`](#id) if non-zero
 
 ### `timeout`
 
-`timeout` is the interval (in nanoseconds) after a
+This is the interval (in nanoseconds) after a
 [`pending`](#flags.pending) transfer's creation that it may be posted
 or voided.
 
 If the timeout expires and the pending transfer has not already been
-posted or voided, the pending transfer is voided au tomatically.
+posted or voided, the pending transfer is voided automatically.
 
 Non-pending transfers cannot have a timeout.
 
@@ -100,7 +99,8 @@ Constraints:
 
 ### `ledger`
 
-Identifier used to enforce transfers between the same ledger.
+This is an identifier used to enforce that transfers must be between
+accounts of the same ledger.
 
 Constraints:
 
@@ -110,7 +110,7 @@ Constraints:
 
 ### `code`
 
-A user-defined enum denoting the reason for (or type of) the
+This is a user-defined enum denoting the reason for (or category of) the
 transfer.
 
 Constraints:
@@ -120,7 +120,7 @@ Constraints:
 
 ### `flags`
 
-Specifies (optional) transfer behavior.
+This specifies (optional) transfer behavior.
 
 Constraints:
 
@@ -144,7 +144,7 @@ chain. The transfer that was the first to break the chain will have a
 unique error result. Other transfers in the chain will have their error
 result set to `linked_event_failed`.
 
-Here is an example:
+Consider this set of transfers as part of a batch:
 	
 | Transfer | Index within batch | flags.linked |
 |----------|--------------------|--------------|
@@ -165,8 +165,8 @@ Transfers `A` and `E` fail or succeed independently of `B`, `C`, and
 
 A `pending` transfer reserves its [`amount`](#amount) in the
 debit/credit accounts'
-[`debits_pending`](./accounts.md#debits_pending)/[`credits_pending`](./accounts.md#credeits_pending)
-respectively. The pending transfer is complete when the first of the
+[`debits_pending`](./accounts.md#debits_pending)/[`credits_pending`](./accounts.md#credits_pending)
+fields respectively. The pending transfer is complete when the first of the
 following events occur:
 
 * If a corresponding
@@ -179,12 +179,12 @@ following events occur:
   committed, the pending transfer's reserved funds are restored to
   their original accounts.
 * If the pending transfer's timeout expires, the pending transfer's
-  reserved funds are restored to their original accounts. When this
-  flag is set, the [`timeout`](#timeout) field must be non-zero.
+  reserved funds are restored to their original accounts. (When `flags.pending`
+  is set, the [`timeout`](#timeout) field must be non-zero.)
 
 #### `flags.post_pending_transfer`
 
-A `post_pending_transfer` causes the pending transfer (referred to by
+This flag causes the pending transfer (referred to by
 [`pending_id`](#pending_id)) to "post", transferring some or all of the money the
 pending transfer reserved to its destination, and restoring the
 remainder (if any) to its origin accounts. The `amount` of a
@@ -197,25 +197,54 @@ transfer's amount.
   and the remainder is restored to its original accounts. It must be
   less than or equal to the pending transfer's amount.
 
+Additionally, when this field is set:
+
+* `pending_id` must reference a pending transfer.
+* `flags.void_pending_transfer` must not be set.
+
+And the following fields may either be zero, otherwise must match the
+value of the pending transfer's field:
+
+* `debit_account_id`
+* `credit_account_id`
+* `ledger`
+* `code`
+
 #### `flags.void_pending_transfer`
 
-This flag causes the transfer to move from pending to nothing. The
-transfer does not go through.
+This flag causes the pending transfer (referred to by
+[`pending_id`](#pending_id)) to void. The pending transfer's
+referenced debit/credit accounts'
+[`debits_pending`](./accounts.md#debits_pending)/[`credits_pending`](./accounts.md#credits_pending)
+fields .
+
+Additionally, when this field is set:
+
+* `pending_id` must reference a pending transfer.
+* `flags.post_pending_transfer` must not be set.
+
+And the following fields may either be zero, otherwise must match the
+value of the pending transfer's field:
+
+* `debit_account_id`
+* `credit_account_id`
+* `ledger`
+* `code`
 
 ### `amount`
 
-How much should be sent from the `debit_account_id` account to the
-`credit_account_id` account.
+This is how much should be debited from the `debit_account_id` account
+and credited to the `credit_account_id` account.
 
 * Type is 64-bit unsigned integer (8 bytes)
 * Must not be zero, unless marking a pending transfer as posted
 
 ### `timestamp`
 
-`timestamp` is the time the account was created, as nanoseconds since
+This is the time the account was created, as nanoseconds since
 UNIX epoch.
 
-`timestamp` is set by TigerBeetle to the moment the account arrives at
+It is set by TigerBeetle to the moment the account arrives at
 the cluster.
 
 Constraints:

@@ -20,9 +20,7 @@ TigerBeetle as transfers move money to and from an account.
 
 ### `id`
 
-`id` is a unique, client-defined identifier for the account.
-
-The `id` should be a UUID.
+This is a unique, client-defined identifier for the account.
 
 Constraints:
 
@@ -35,8 +33,8 @@ Constraints:
 This is an optional secondary identifier to link this account to an
 external entity.
 
-As an example, you might use a UUID that
-ties together a group of accounts.
+As an example, you might use a UUID that ties together a group of
+accounts.
 
 Constraints:
 
@@ -53,20 +51,23 @@ Constraints:
 
 ### `ledger`
 
-This is an identifier used to enforce transfers between the same
-ledger.
+This is an identifier that partitions the sets of accounts that can
+transact.
 
-As an example, you might use `1` to represent USD and `2` to represent
-EUR.
+Money cannot transfer between two accounts with different `ledger`
+values. See: `errors.accounts_must_have_the_same_ledger`.
+
+In a typical use case:
+* Map each currency tracked within the database to a distinct ledger. And,
+* Tag each account with the `ledger` indicating the currency in which the balance is denominated.
 
 Constraints:
-
 * Type is 32-bit unsigned integer (4 bytes)
 * Must not be zero
 
 ### `code`
 
-A user-defined enum denoting the type of the account.
+This is a user-defined enum denoting the category of the account.
 
 As an example, you might use codes `1000`-`3340` to indicate asset
 accounts in general, where `1001` is Bank Account and `1002` is Money
