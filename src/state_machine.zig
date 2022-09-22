@@ -197,9 +197,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.prefetch_callback = callback;
 
             // TODO(Snapshots) Pass in the target snapshot.
-            self.forest.grooves.accounts.prefetch_setup(snapshot_latest);
-            self.forest.grooves.transfers.prefetch_setup(snapshot_latest);
-            self.forest.grooves.posted.prefetch_setup(snapshot_latest);
+            self.forest.grooves.accounts.prefetch_setup(null);
+            self.forest.grooves.transfers.prefetch_setup(null);
+            self.forest.grooves.posted.prefetch_setup(null);
 
             return switch (operation) {
                 .reserved, .root, .register => unreachable,
@@ -1074,6 +1074,10 @@ const TestContext = struct {
 
         ctx.superblock = try SuperBlock.init(allocator, &ctx.storage, &ctx.message_pool);
         errdefer ctx.superblock.deinit(allocator);
+
+        // Pretend that the superblock is open so that the Forest can initialize.
+        ctx.superblock.opened = true;
+        ctx.superblock.working.vsr_state.commit_min = 0;
 
         ctx.grid = try Grid.init(allocator, &ctx.superblock);
         errdefer ctx.grid.deinit(allocator);

@@ -60,13 +60,18 @@ pub fn TableInfoType(comptime Table: type) type {
             // them invisible. It will also scan for tables that are invisible with the same snapshot.
             //
             // We can then relax this range check to be
-            // - inclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
-            // - exclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
+            // - exclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
+            // - inclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
+            //
+            // The reason to use (exclusive, inclusive) bounds rather than the more conventional
+            // (inclusive, exclusive) bounds is that this enables prefetches to query an ongoing
+            // compaction's input tables (rather than the output tables, which are not ready)
+            // by querying the `compaction.snapshot`.
 
             // assert(snapshot != table.snapshot_min);
             // assert(snapshot != table.snapshot_max);
 
-            return table.snapshot_min <= snapshot and snapshot < table.snapshot_max;
+            return table.snapshot_min < snapshot and snapshot <= table.snapshot_max;
         }
 
         pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
