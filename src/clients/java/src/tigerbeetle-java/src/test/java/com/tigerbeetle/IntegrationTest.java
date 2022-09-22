@@ -5,7 +5,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.UUID;
-import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -219,7 +219,7 @@ public class IntegrationTest {
         try (var server = new Server()) {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                Future<CreateAccountsResult[]> createAccountsFuture =
+                CompletableFuture<CreateAccountsResult[]> createAccountsFuture =
                         client.createAccountsAsync(new Account[] {account1, account2});
                 assertFalse(createAccountsFuture.isDone());
 
@@ -227,7 +227,7 @@ public class IntegrationTest {
                 assertTrue(createAccountsFuture.isDone());
                 assertTrue(errors.length == 0);
 
-                Future<Account[]> lookupAccountsFuture =
+                CompletableFuture<Account[]> lookupAccountsFuture =
                         client.lookupAccountsAsync(new UUID[] {account1.getId(), account2.getId()});
                 assertFalse(lookupAccountsFuture.isDone());
 
@@ -255,7 +255,7 @@ public class IntegrationTest {
                 accountsBatch.add(account1);
                 accountsBatch.add(account2);
 
-                Future<CreateAccountsResult[]> createAccountsFuture =
+                CompletableFuture<CreateAccountsResult[]> createAccountsFuture =
                         client.createAccountsAsync(accountsBatch);
                 assertFalse(createAccountsFuture.isDone());
 
@@ -267,7 +267,8 @@ public class IntegrationTest {
                 uuidsBatch.add(account1.getId());
                 uuidsBatch.add(account2.getId());
 
-                Future<Account[]> lookupAccountsFuture = client.lookupAccountsAsync(uuidsBatch);
+                CompletableFuture<Account[]> lookupAccountsFuture =
+                        client.lookupAccountsAsync(uuidsBatch);
                 assertFalse(lookupAccountsFuture.isDone());
 
                 var lookupAccounts = lookupAccountsFuture.get();
@@ -391,7 +392,7 @@ public class IntegrationTest {
         try (var server = new Server()) {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                Future<CreateAccountsResult[]> createAccountsErrorsFuture =
+                CompletableFuture<CreateAccountsResult[]> createAccountsErrorsFuture =
                         client.createAccountsAsync(new Account[] {account1, account2});
                 assertFalse(createAccountsErrorsFuture.isDone());
 
@@ -406,14 +407,14 @@ public class IntegrationTest {
                 transfer.setCode((short) 1);
                 transfer.setAmount(100);
 
-                Future<CreateTransfersResult[]> createTransfersErrorsFuture =
+                CompletableFuture<CreateTransfersResult[]> createTransfersErrorsFuture =
                         client.createTransfersAsync(new Transfer[] {transfer});
                 assertFalse(createTransfersErrorsFuture.isDone());
 
                 var createTransfersErrors = createTransfersErrorsFuture.get();
                 assertTrue(createTransfersErrors.length == 0);
 
-                Future<Account[]> lookupAccountsFuture =
+                CompletableFuture<Account[]> lookupAccountsFuture =
                         client.lookupAccountsAsync(new UUID[] {account1.getId(), account2.getId()});
                 assertFalse(lookupAccountsFuture.isDone());
 
@@ -427,7 +428,7 @@ public class IntegrationTest {
                 assertEquals(transfer.getAmount(), lookupAccounts[1].getDebitsPosted());
                 assertEquals(0L, lookupAccounts[1].getCreditsPosted());
 
-                Future<Transfer[]> lookupTransfersFuture =
+                CompletableFuture<Transfer[]> lookupTransfersFuture =
                         client.lookupTransfersAsync(new UUID[] {transfer.getId()});
                 assertFalse(lookupTransfersFuture.isDone());
 
@@ -455,7 +456,7 @@ public class IntegrationTest {
                 var accountsBatch = new AccountsBatch(2);
                 accountsBatch.add(account1);
                 accountsBatch.add(account2);
-                Future<CreateAccountsResult[]> createAccountsErrorsFuture =
+                CompletableFuture<CreateAccountsResult[]> createAccountsErrorsFuture =
                         client.createAccountsAsync(accountsBatch);
                 assertFalse(createAccountsErrorsFuture.isDone());
 
@@ -473,7 +474,7 @@ public class IntegrationTest {
                 var transfersBatch = new TransfersBatch(1);
                 transfersBatch.add(transfer);
 
-                Future<CreateTransfersResult[]> createTransferErrorsFuture =
+                CompletableFuture<CreateTransfersResult[]> createTransferErrorsFuture =
                         client.createTransfersAsync(transfersBatch);
                 assertFalse(createTransferErrorsFuture.isDone());
 
@@ -484,7 +485,7 @@ public class IntegrationTest {
                 accountsUUIDsBatch.add(account1.getId());
                 accountsUUIDsBatch.add(account2.getId());
 
-                Future<Account[]> lookupAccountsFuture =
+                CompletableFuture<Account[]> lookupAccountsFuture =
                         client.lookupAccountsAsync(accountsUUIDsBatch);
                 assertFalse(lookupAccountsFuture.isDone());
 
@@ -500,7 +501,7 @@ public class IntegrationTest {
 
                 var transfersUUIDsBatch = new UUIDsBatch(1);
                 transfersUUIDsBatch.add(transfer.getId());
-                Future<Transfer[]> lookupTransfersFuture =
+                CompletableFuture<Transfer[]> lookupTransfersFuture =
                         client.lookupTransfersAsync(transfersUUIDsBatch);
                 assertFalse(lookupTransfersFuture.isDone());
 
