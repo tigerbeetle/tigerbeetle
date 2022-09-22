@@ -13,6 +13,7 @@ const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
+const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_op;
 
 fn ObjectTreeHelpers(comptime Object: type) type {
     assert(@hasField(Object, "id"));
@@ -547,8 +548,14 @@ pub fn GrooveType(
         }
 
         /// Must be called directly before the state machine begins queuing ids for prefetch.
-        pub fn prefetch_setup(groove: *Groove, snapshot: u64) void {
-            assert(snapshot <= snapshot_latest);
+        /// When `snapshot` is null, prefetch from the current snapshot.
+        pub fn prefetch_setup(groove: *Groove, snapshot: ?u64) void {
+            // We may query the input tables of an ongoing compaction, but must not query the
+            // output tables until the compaction is complete. (Until then, the output tables may
+            // be in the manifest but not yet on disk).
+            const snapshot_max = groove.ids.compacted_snapshot_max();
+            const snapshot_target = snapshot orelse snapshot_max;
+            assert(snapshot_target <= snapshot_max);
 
             if (groove.prefetch_snapshot == null) {
                 groove.prefetch_objects.clearRetainingCapacity();
@@ -557,7 +564,7 @@ pub fn GrooveType(
                 // must already be no queued objects or ids.
             }
 
-            groove.prefetch_snapshot = snapshot;
+            groove.prefetch_snapshot = snapshot_target;
             assert(groove.prefetch_objects.count() == 0);
             assert(groove.prefetch_ids.count() == 0);
 
