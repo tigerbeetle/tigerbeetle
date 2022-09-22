@@ -261,7 +261,6 @@ pub fn main() !void {
                     }
                 }
             }
-            storage.tick();
         }
 
         for (cluster.replicas) |*replica| {
