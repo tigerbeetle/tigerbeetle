@@ -38,7 +38,6 @@ ties together a group of accounts.
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
-* May be zero
 
 ### `reserved`
 
