@@ -5,7 +5,7 @@ import java.util.UUID;
 
 public class UUIDsBatch extends Batch {
 
-    private static final class Struct {
+    interface Struct {
         public static final int SIZE = 16;
     }
 
@@ -26,11 +26,11 @@ public class UUIDsBatch extends Batch {
         this.capacity = uuids.length;
 
         for (int i = 0; i < uuids.length; i++) {
-            Set(i, uuids[i]);
+            set(i, uuids[i]);
         }
     }
 
-    UUIDsBatch(ByteBuffer buffer) throws RequestException {
+    UUIDsBatch(ByteBuffer buffer) {
         super(buffer);
 
         final var bufferLen = buffer.capacity();
@@ -45,11 +45,11 @@ public class UUIDsBatch extends Batch {
         this.lenght = capacity;
     }
 
-    public void Add(UUID uuid) {
-        Set(lenght, uuid);
+    public void add(UUID uuid) {
+        set(lenght, uuid);
     }
 
-    public UUID Get(int index) {
+    public UUID get(int index) {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
@@ -57,12 +57,12 @@ public class UUIDsBatch extends Batch {
         return uuidFromBuffer(ptr);
     }
 
-    public void Set(int index, UUID uuid) {
+    public void set(int index, UUID uuid) {
         if (index < 0 || index >= capacity)
             throw new IndexOutOfBoundsException();
 
         if (uuid == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Uuid cannot be null");
 
         final int start = index * Struct.SIZE;
         var ptr = getBuffer().position(start);
@@ -90,7 +90,7 @@ public class UUIDsBatch extends Batch {
     public UUID[] toArray() {
         var array = new UUID[lenght];
         for (int i = 0; i < lenght; i++) {
-            array[i] = Get(i);
+            array[i] = get(i);
         }
         return array;
     }

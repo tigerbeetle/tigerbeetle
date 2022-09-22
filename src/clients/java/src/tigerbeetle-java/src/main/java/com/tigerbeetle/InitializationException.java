@@ -2,7 +2,7 @@ package com.tigerbeetle;
 
 public final class InitializationException extends RuntimeException {
 
-    public static final class Status {
+    public interface Status {
         public static final int SUCCESS = 0;
         public static final int UNEXPECTED = 1;
         public static final int OUT_OF_MEMORY = 2;

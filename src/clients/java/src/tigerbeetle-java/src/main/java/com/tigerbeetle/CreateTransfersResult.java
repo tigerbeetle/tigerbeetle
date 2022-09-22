@@ -4,7 +4,7 @@ import java.nio.ByteBuffer;
 
 public final class CreateTransfersResult {
 
-    static final class Struct {
+    interface Struct {
         public static final int SIZE = 8;
     }
 

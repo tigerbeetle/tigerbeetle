@@ -3,9 +3,15 @@ package com.tigerbeetle;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
+/**
+ * Account.
+ * <p>
+ * Fields cannot be changed by the user after creation. However, debits and credits fields are
+ * modified by TigerBeetle as transfers happen to and from the account.
+ */
 public final class Account {
 
-    static final class Struct {
+    interface Struct {
         public static final int SIZE = 128;
         public static final byte[] RESERVED = new byte[48];
     }
@@ -50,83 +56,50 @@ public final class Account {
         timestamp = ptr.getLong();
     }
 
-    public short getCode() {
-        return code;
-    }
-
-    public void setCode(int code) {
-        if (code < 0 || code > Character.MAX_VALUE)
-            throw new IllegalArgumentException("Code must be a unsigned 16 bits value");
-
-        this.code = (short) code;
-    }
-
-    public short getFlags() {
-        return flags;
-    }
-
-    public void setFlags(int flags) {
-        if (flags < 0 || flags > Character.MAX_VALUE)
-            throw new IllegalArgumentException("Flags must be a unsigned 16 bits value");
-
-        this.flags = (short) flags;
-    }
-
-    public long getDebitsPending() {
-        return debitsPending;
-    }
-
-    public void setDebitsPending(long debitsPending) {
-        this.debitsPending = debitsPending;
-    }
-
-    public long getDebitsPosted() {
-        return debitsPosted;
-    }
-
-    public void setDebitsPosted(long debitsPosted) {
-        this.debitsPosted = debitsPosted;
-    }
-
-    public long getCreditsPending() {
-        return creditsPending;
-    }
-
-    public void setCreditsPending(long creditsPending) {
-        this.creditsPending = creditsPending;
-    }
-
-    public long getCreditsPosted() {
-        return creditsPosted;
-    }
-
-    public void setCreditsPosted(long creditsPosted) {
-        this.creditsPosted = creditsPosted;
-    }
-
-    public long getTimestamp() {
-        return timestamp;
-    }
-
-    public void setTimestamp(long timestamp) {
-        this.timestamp = timestamp;
-    }
-
+    /**
+     * Gets an identifier for this account, defined by the user.
+     *
+     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
+     *         128-bit integer.
+     */
     public UUID getId() {
         return id;
     }
 
+    /**
+     * Sets an identifier for this account, defined by the user.
+     * <p>
+     * Must be unique and non-zero.
+     *
+     * @param id an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
+     *        unique 128-bit integer.
+     * @throws NullPointerException if {@code id} is null.
+     */
     public void setId(UUID id) {
         if (id == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Id cannot be null");
 
         this.id = id;
     }
 
+    /**
+     * Gets the secondary identifier to link this account to an external entity.
+     *
+     * @return An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
+     *         128-bit integer.
+     */
     public UUID getUserData() {
         return userData;
     }
 
+    /**
+     * Sets the secondary identifier to link this account to an external entity.
+     * <p>
+     * May be zero, null values are converted to zero.
+     *
+     * @param userData an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
+     *        unique 128-bit integer.
+     */
     public void setUserData(UUID userData) {
         if (userData == null) {
             this.userData = ZERO;
@@ -135,12 +108,154 @@ public final class Account {
         }
     }
 
+    /**
+     * Gets an identifier used to enforce transfers between the same ledger.
+     *
+     * @return a 32-bit integer.
+     */
     public int getLedger() {
         return ledger;
     }
 
+    /**
+     * Sets an identifier used to enforce transfers between the same ledger.
+     * <p>
+     * Must be non-zero.
+     * <p>
+     * Example: 1 for USD and 2 for EUR.
+     *
+     * @param ledger a 32-bit integer defined by the user.
+     */
     public void setLedger(int ledger) {
         this.ledger = ledger;
+    }
+
+    /**
+     * Gets a reason for the transfer.
+     *
+     * @return a 16-bit unsigned integer.
+     */
+    public int getCode() {
+        return code;
+    }
+
+    /**
+     * Sets a reason for the transfer.
+     * <p>
+     * Must be non-zero.
+     * <p>
+     * Example: 1 for deposit, 2 for settlement.
+     *
+     * @param code a 16-bit unsigned integer defined by the user.
+     * @throws IllegalArgumentException if code is negative or greater than 65535.
+     */
+    public void setCode(int code) {
+        if (code < 0 || code > Character.MAX_VALUE)
+            throw new IllegalArgumentException("Code must be a 16-bit unsigned integer");
+
+        this.code = (short) code;
+    }
+
+    /**
+     * Gets the behavior during transfers.
+     *
+     * @return a 16-bit unsigned integer bit mask.
+     * @see com.tigerbeetle.AccountFlags
+     */
+    public int getFlags() {
+        return flags;
+    }
+
+    /**
+     * Sets the behavior during transfers.
+     * <p>
+     * Example: {@code AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS} to force debts not to exceed
+     * credits.
+     *
+     * @see com.tigerbeetle.AccountFlags
+     * @param flags a 16-bit unsigned integer bit mask.
+     * @throws IllegalArgumentException if flags is negative or greater than 65535.
+     */
+    public void setFlags(int flags) {
+        if (flags < 0 || flags > Character.MAX_VALUE)
+            throw new IllegalArgumentException("Flags must be a 16-bit unsigned integer");
+
+        this.flags = (short) flags;
+    }
+
+    /**
+     * Amount of pending debits.
+     * <p>
+     * Must always be interpreted as a positive integer.
+     *
+     * @return a 64-bit integer.
+     */
+    public long getDebitsPending() {
+        return debitsPending;
+    }
+
+    void setDebitsPending(long debitsPending) {
+        this.debitsPending = debitsPending;
+    }
+
+    /**
+     * Amount of non-pending debits.
+     * <p>
+     * Must always be interpreted as a positive integer.
+     *
+     * @return a 64-bit integer.
+     */
+    public long getDebitsPosted() {
+        return debitsPosted;
+    }
+
+    void setDebitsPosted(long debitsPosted) {
+        this.debitsPosted = debitsPosted;
+    }
+
+    /**
+     * Amount of pending credits.
+     * <p>
+     * Must always be interpreted as a positive integer.
+     *
+     * @return a 64-bit integer.
+     */
+    public long getCreditsPending() {
+        return creditsPending;
+    }
+
+    void setCreditsPending(long creditsPending) {
+        this.creditsPending = creditsPending;
+    }
+
+    /**
+     * Amount of non-pending credits.
+     * <p>
+     * Must always be interpreted as a positive integer.
+     *
+     * @return a 64-bit integer.
+     */
+    public long getCreditsPosted() {
+        return creditsPosted;
+    }
+
+    void setCreditsPosted(long creditsPosted) {
+        this.creditsPosted = creditsPosted;
+    }
+
+    /**
+     * Time account was created.
+     * <p>
+     * UNIX timestamp in nanoseconds.
+     *
+     * @return a 64-bit integer.
+     */
+    public long getTimestamp() {
+        return timestamp;
+    }
+
+    void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
     }
 
     void save(ByteBuffer ptr) {

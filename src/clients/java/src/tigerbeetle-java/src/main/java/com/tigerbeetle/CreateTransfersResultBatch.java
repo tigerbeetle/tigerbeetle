@@ -6,7 +6,7 @@ class CreateTransfersResultBatch extends Batch {
 
     private final int lenght;
 
-    public CreateTransfersResultBatch(ByteBuffer buffer) throws RequestException {
+    public CreateTransfersResultBatch(ByteBuffer buffer) {
         super(buffer);
 
         final var bufferLen = buffer.capacity();

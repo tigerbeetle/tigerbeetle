@@ -10,7 +10,7 @@ import java.util.UUID;
 import org.junit.Test;
 
 /**
- * Asserts the memory interpretation from/to a binary stream
+ * Asserts the memory interpretation from/to a binary stream.
  */
 public class TransfersBatchTest {
 
@@ -73,8 +73,19 @@ public class TransfersBatchTest {
         dummyStream.putLong(900); // Timestamp
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void testConstructorWithNegativeCapacity() {
+        new TransfersBatch(-1);
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testConstructorWithNullBuffer() {
+        ByteBuffer buffer = null;
+        new TransfersBatch(buffer);
+    }
+
     @Test
-    public void testGet() throws RequestException {
+    public void testGet() {
 
         TransfersBatch batch = new TransfersBatch(dummyStream.position(0));
         assertEquals(2, batch.getLenght());
@@ -115,7 +126,7 @@ public class TransfersBatchTest {
     }
 
     @Test
-    public void testSet() {
+    public void testGetAndSet() {
 
         TransfersBatch batch = new TransfersBatch(2);
         assertEquals(0, batch.getLenght());
@@ -150,6 +161,47 @@ public class TransfersBatchTest {
         assertTransfers(transfer1, getTransfer3);
     }
 
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testSetIndexOutOfBounds() {
+
+        TransfersBatch batch = new TransfersBatch(1);
+        batch.set(1, transfer1);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testSetIndexNegative() {
+
+        TransfersBatch batch = new TransfersBatch(1);
+        batch.set(-1, transfer1);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testSetNull() {
+
+        TransfersBatch batch = new TransfersBatch(1);
+        batch.set(0, null);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testGetIndexOutOfBounds() {
+
+        TransfersBatch batch = new TransfersBatch(1);
+        batch.get(1);
+        assert false; // Should be unreachable
+    }
+
+    @Test(expected = IndexOutOfBoundsException.class)
+    public void testGetIndexNegative() {
+
+        TransfersBatch batch = new TransfersBatch(1);
+        batch.get(-1);
+        assert false; // Should be unreachable
+    }
+
     @Test
     public void testFromArray() {
 
@@ -166,7 +218,7 @@ public class TransfersBatchTest {
     }
 
     @Test
-    public void testToArray() throws RequestException {
+    public void testToArray() {
 
         TransfersBatch batch = new TransfersBatch(dummyStream.position(0));
         assertEquals(2, batch.getLenght());
@@ -175,6 +227,23 @@ public class TransfersBatchTest {
         assertEquals(2, array.length);
         assertTransfers(transfer1, array[0]);
         assertTransfers(transfer2, array[1]);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testInvalidBuffer() {
+
+        // Invalid size
+        var invalidBuffer =
+                ByteBuffer.allocate((Transfer.Struct.SIZE * 2) - 1).order(ByteOrder.LITTLE_ENDIAN);
+
+        var batch = new TransfersBatch(invalidBuffer);
+        assert batch == null; // Should be unreachable
+    }
+
+    @Test
+    public void testBufferLen() {
+        var batch = new TransfersBatch(dummyStream.position(0));
+        assertEquals(dummyStream.capacity(), batch.getBufferLen());
     }
 
     private static void assertTransfers(Transfer transfer1, Transfer transfer2) {

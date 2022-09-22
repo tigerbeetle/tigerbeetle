@@ -1,6 +1,6 @@
 package com.tigerbeetle;
 
-public final class TransferFlags {
+public interface TransferFlags {
     public final static short NONE = 0;
     public final static short LINKED = (short) (1 << 0);
     public final static short PENDING = (short) (1 << 1);

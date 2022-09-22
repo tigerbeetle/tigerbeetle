@@ -6,7 +6,7 @@ class CreateAccountsResultBatch extends Batch {
 
     private final int lenght;
 
-    public CreateAccountsResultBatch(ByteBuffer buffer) throws RequestException {
+    public CreateAccountsResultBatch(ByteBuffer buffer) {
 
         super(buffer);
 

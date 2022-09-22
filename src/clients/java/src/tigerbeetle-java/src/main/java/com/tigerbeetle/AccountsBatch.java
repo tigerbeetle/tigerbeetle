@@ -25,7 +25,7 @@ public final class AccountsBatch extends Batch {
         }
     }
 
-    AccountsBatch(ByteBuffer buffer) throws RequestException {
+    AccountsBatch(ByteBuffer buffer) {
 
         super(buffer);
 
@@ -60,7 +60,7 @@ public final class AccountsBatch extends Batch {
             throw new IndexOutOfBoundsException();
 
         if (account == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Account cannot be null");
 
         final int start = index * Account.Struct.SIZE;
         var ptr = getBuffer().position(start);

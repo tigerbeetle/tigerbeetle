@@ -25,7 +25,7 @@ public final class TransfersBatch extends Batch {
         }
     }
 
-    TransfersBatch(ByteBuffer buffer) throws RequestException {
+    TransfersBatch(ByteBuffer buffer) {
 
         super(buffer);
 
@@ -58,7 +58,7 @@ public final class TransfersBatch extends Batch {
             throw new IndexOutOfBoundsException();
 
         if (transfer == null)
-            throw new NullPointerException();
+            throw new NullPointerException("Transfer cannot be null");
 
         final int start = index * Transfer.Struct.SIZE;
         var ptr = getBuffer().position(start);

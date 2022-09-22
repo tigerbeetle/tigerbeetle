@@ -1,6 +1,6 @@
 package com.tigerbeetle;
 
-public final class AccountFlags {
+public interface AccountFlags {
     public static final short NONE = (short) 0;
     public static final short LINKED = (short) (1 << 0);
     public static final short DEBITS_MUST_NOT_EXCEED_CREDITS = (short) (1 << 1);
