@@ -89,6 +89,9 @@ pub const Storage = struct {
     };
 
     memory: []align(config.sector_size) u8,
+    /// Set bits correspond to sectors that have ever been written to.
+    memory_occupied: std.DynamicBitSetUnmanaged,
+
     size: u64,
     /// Set bits correspond to faulty sectors. The underlying sectors of `memory` is left clean.
     faults: std.DynamicBitSetUnmanaged,
@@ -125,6 +128,12 @@ pub const Storage = struct {
         // TODO: random data
         mem.set(u8, memory, 0);
 
+        var memory_occupied = try std.DynamicBitSetUnmanaged.initEmpty(
+            allocator,
+            @divExact(size, config.sector_size),
+        );
+        errdefer memory_occupied.deinit(allocator);
+
         var faults = try std.DynamicBitSetUnmanaged.initEmpty(
             allocator,
             @divExact(size, config.sector_size),
@@ -141,6 +150,7 @@ pub const Storage = struct {
 
         return Storage{
             .memory = memory,
+            .memory_occupied = memory_occupied,
             .size = size,
             .faults = faults,
             .options = options,
@@ -168,6 +178,7 @@ pub const Storage = struct {
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
         allocator.free(storage.memory);
+        storage.memory_occupied.deinit(allocator);
         storage.faults.deinit(allocator);
         storage.reads.deinit();
         storage.writes.deinit();
@@ -189,6 +200,8 @@ pub const Storage = struct {
         }
     }
 
+    /// * Verifies that the read fits within the target sector.
+    /// * Verifies that the read targets sectors that have been written to.
     pub fn read_sectors(
         storage: *Storage,
         callback: fn (read: *Storage.Read) void,
@@ -203,6 +216,15 @@ pub const Storage = struct {
 
         const offset_in_storage = zone.offset(offset_in_zone);
         storage.assert_bounds_and_alignment(buffer, offset_in_storage);
+
+        {
+            const sector_min = @divExact(offset_in_storage, config.sector_size);
+            const sector_max = @divExact(offset_in_storage + buffer.len, config.sector_size);
+            var sector: usize = sector_min;
+            while (sector < sector_max) : (sector += 1) {
+                assert(storage.memory_occupied.isSet(sector));
+            }
+        }
 
         read.* = .{
             .callback = callback,
@@ -279,10 +301,10 @@ pub const Storage = struct {
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
         mem.copy(u8, storage.memory[write.offset..][0..write.buffer.len], write.buffer);
 
+        const sector_min = @divExact(write.offset, config.sector_size);
+        const sector_max = @divExact(write.offset + write.buffer.len, config.sector_size);
         // TODO Allow some corruption in other zones.
         if (write.zone == .wal) {
-            const sector_min = @divExact(write.offset, config.sector_size);
-            const sector_max = @divExact(write.offset + write.buffer.len, config.sector_size);
             var sector: usize = sector_min;
             while (sector < sector_max) : (sector += 1) storage.faults.unset(sector);
 
@@ -290,6 +312,9 @@ pub const Storage = struct {
                 storage.fault_sectors(write.offset, write.buffer.len);
             }
         }
+
+        var sector: usize = sector_min;
+        while (sector < sector_max) : (sector += 1) storage.memory_occupied.set(sector);
 
         write.callback(write);
     }
