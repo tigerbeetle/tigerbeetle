@@ -122,7 +122,9 @@ This cannot be set when `debits_must_not_exceed_credits` is also set.
 
 ### `debits_pending`
 
-Amount of pending debits.
+`debits_pending` counts debits reserved by pending transfers. When a pending transfer posts, voids, or times out, the amount is removed from `debits_pending`.
+
+Money in `debits_pending` is reserved — that is, it cannot be spent until the corresponding pending transfer finishes.
 
 Constraints:
 
