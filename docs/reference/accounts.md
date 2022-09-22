@@ -1,4 +1,7 @@
 # Accounts
+An `Account` is a record storing the cumulative effect of committed [transfers](./transfers.md).
+
+`Account`s use double-entry accounting: each tracks debits and credits separately.
 
 TigerBeetle uses the same data structures internally and
 externally. This means that sometimes you need to set temporary values
@@ -8,36 +11,33 @@ for fields that TigerBeetle, not you (the user), are responsible.
 
 Account fields *cannot be changed by the user* after
 creation. However, debits and credits fields are updated by
-TigerBeetle as transfers move money to and from an account. And the
-`timestamp` field is set by TigerBeetle after the create request.
+TigerBeetle as transfers move money to and from an account.
 
 ## Fields
 
 ### `id`
 
-This is the unique identifier, the primary key, of the account.
+`id` is a unique, client-defined identifier for the account.
 
-As an example, you might use a UUID (encoded as an integer) that ties
-the account back to a row in a SQL database.
+The `id` should be a UUID.
 
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
-* Must not be zero or `2^128 - 1`
-* Must be unique
+* Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer).
+* Must not conflict with an another account.
 
 ### `user_data`
 
 This is an optional second identifier to link this account to an
 external entity.
 
-As an example, you might use a UUID (encoded as an integer) that
+As an example, you might use a UUID that
 ties together a group of accounts.
 
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
-* May be zero
 
 ### `reserved`
 
