@@ -161,7 +161,7 @@ How much should be sent from the `debit_account_id` account to the
 `credit_account_id` account.
 
 * Type is 64-bit unsigned integer (8 bytes)
-* Must not be zero
+* Must not be zero, unless marking a pending transfer as posted
 
 ### `timestamp`
 
@@ -182,3 +182,7 @@ If you're curious and want to learn more, you can find the source code
 for this struct in
 [src/tigerbeetle.zig](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/tigerbeetle.zig). Search
 for `const Transfer = extern struct {`.
+
+You can find the source code for creating a transfer in
+[src/state_machine.zig](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/state_machine.zig). Search
+for `fn create_transfer(`.
