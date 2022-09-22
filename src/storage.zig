@@ -84,10 +84,8 @@ pub const Storage = struct {
     }
 
     pub fn tick(storage: *Storage) void {
-        storage.io.tick() catch |err| {
-            log.warn("tick: {}", .{err});
-            std.debug.panic("storage tick: {}", .{err});
-        };
+        _ = storage;
+        // IO is ticked by the top-level (e.g. main.zig).
     }
 
     pub fn read_sectors(
