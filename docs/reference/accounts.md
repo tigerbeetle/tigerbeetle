@@ -1,7 +1,10 @@
 # Accounts
-An `Account` is a record storing the cumulative effect of committed [transfers](./transfers.md).
 
-`Account`s use double-entry accounting: each tracks debits and credits separately.
+An `Account` is a record storing the cumulative effect of committed
+[transfers](./transfers.md).
+
+`Account`s use double-entry accounting: each tracks debits and credits
+separately.
 
 TigerBeetle uses the same data structures internally and
 externally. This means that sometimes you need to set temporary values
@@ -41,7 +44,7 @@ Constraints:
 
 ### `reserved`
 
-Reserved for future use.
+This space may be used for additional data in the future.
 
 Constraints:
 
@@ -50,7 +53,8 @@ Constraints:
 
 ### `ledger`
 
-Identifier used to enforce transfers between the same ledger.
+This is an identifier used to enforce transfers between the same
+ledger.
 
 As an example, you might use `1` to represent USD and `2` to represent
 EUR.
@@ -62,7 +66,7 @@ Constraints:
 
 ### `code`
 
-A user-defined enum representing the type of the account.
+A user-defined enum denoting the type of the account.
 
 As an example, you might use codes `1000`-`3340` to indicate asset
 accounts in general, where `1001` is Bank Account and `1002` is Money
@@ -83,7 +87,7 @@ Constraints:
 
 #### `flags.linked`
 
-When the linked flag is specified, it links an account with the next
+When the `linked` flag is specified, it links an account with the next
 account in the batch, to create a chain of account, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first account without this flag. The last
@@ -92,7 +96,7 @@ this would leave a chain open-ended.
 
 Multiple chains or individual accounts may coexist within a batch to
 succeed or fail independently. Accounts within a chain are executed
-within order, or are rolled back on error, so that the effect of each
+in order, or are rolled back on error, so that the effect of each
 account in the chain is visible to the next, and so that the chain is
 either visible or invisible as a unit to subsequent accounts after the
 chain. The account that was the first to break the chain will have a

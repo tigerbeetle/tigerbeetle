@@ -14,10 +14,9 @@ TigerBeetle as transfers move money to and from an account.
 
 ### `id`
 
-This is the unique identifier, the primary key, of the transaction.
+This is a unique identifier for the transaction.
 
-As an example, you might generate a UUID (encoded as an integer) to
-identify each transaction.
+As an example, you might generate a UUID to identify each transaction.
 
 Constraints:
 
@@ -27,7 +26,7 @@ Constraints:
 
 ### `debit_account_id`
 
-The account to pull an amount from.
+This refers to the account to debit the transfer's [`amount`](#amount).
 
 Constraints:
 
@@ -37,7 +36,7 @@ Constraints:
 
 ### `credit_account_id`
 
-The account to send an amount to.
+This refers to the account to credit the transfer's [`amount`](#amount).
 
 Constraints:
 
@@ -50,8 +49,8 @@ Constraints:
 This is an optional secondary identifier to link this transfer to an
 external entity.
 
-As an example, you might use a UUID (encoded as an integer) that
-ties together a group of transfers.
+As an example, you might use a UUID that ties together a group of
+transfers.
 
 Constraints:
 
@@ -59,7 +58,7 @@ Constraints:
 
 ### `reserved`
 
-Reserved for future use.
+This space may be used for additional data in the future.
 
 Constraints:
 
@@ -68,10 +67,13 @@ Constraints:
 
 ### `pending_id`
 
-If this transfer will post or void a pending transfer, this field is
-for the id of that pending transfer. (You specify whether it will
-post or void a pending transfer in the [`flags`](#flags) field
-documented below).
+If this transfer will post or void a pending transfer, `pending_id`
+references that pending transfer. If this is not a post or void
+transfer, it must be zero.
+
+See also:
+* [`flags.post_pending_transfer`](#flags.post_pending_transfer)
+* [`flags.void_pending_transfer`](#flags.void_pending_transfer)
 
 Constraints:
 
@@ -81,8 +83,14 @@ Constraints:
 
 ### `timeout`
 
-This field relates to the [`flags.pending`](#flags-pending) described
-below. It is a duration expressed in nanoseconds.
+`timeout` is the interval (in nanoseconds) after a
+[`pending`](#flags.pending) transfer's creation that it may be posted
+or voided.
+
+If the timeout expires and the pending transfer has not already been
+posted or voided, the pending transfer is voided au tomatically.
+
+Non-pending transfers cannot have a timeout.
 
 Constraints:
 
@@ -102,7 +110,7 @@ Constraints:
 
 ### `code`
 
-A user-defined enum representing the reason for (or type of) the
+A user-defined enum denoting the reason for (or type of) the
 transfer.
 
 Constraints:
@@ -112,7 +120,7 @@ Constraints:
 
 ### `flags`
 
-Specifies behavior during transfers.
+Specifies (optional) transfer behavior.
 
 Constraints:
 
@@ -120,7 +128,7 @@ Constraints:
 
 #### `flags.linked`
 
-When the linked flag is specified, it links an transfer with the next
+When the linked flag is specified, it links a transfer with the next
 transfer in the batch, to create a chain of transfer, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first transfer without this flag. The last
@@ -136,19 +144,58 @@ chain. The transfer that was the first to break the chain will have a
 unique error result. Other transfers in the chain will have their error
 result set to `linked_event_failed`.
 
+Here is an example:
+	
+| Transfer | Index within batch | flags.linked |
+|----------|--------------------|--------------|
+| `A`      | `0`                | `false`      |
+| `B`      | `1`                | `true`       |
+| `C`      | `2`                | `true`       |
+| `D`      | `3`                | `false`      |
+| `E`      | `4`                | `false`      |
+
+If any of transfers `B`, `C`, or `D` fail (for example, due to
+`error.exceeds_credits`), then `B`, `C`, and `D` will all fail. They
+are linked.
+
+Transfers `A` and `E` fail or succeed independently of `B`, `C`, and
+`D`.
+
 #### `flags.pending`
 
-This flag begins a two-phase commit for this transfer. The transfer is
-not complete until a transaction with the same `id` is sent with the
-`flags.post_pending_transfer` or `flags.void_pending_transfer` set (both
-described below).
+A `pending` transfer reserves its [`amount`](#amount) in the
+debit/credit accounts'
+[`debits_pending`](./accounts.md#debits_pending)/[`credits_pending`](./accounts.md#credeits_pending)
+respectively. The pending transfer is complete when the first of the
+following events occur:
 
-When this flag is on, the [`timeout`](#timeout) field must be non-zero.
+* If a corresponding
+  [`post_pending_transfer`](#flags.post_pending_transfer) is
+  committed, some or all of the pending transfer's reserved funds are
+  posted, and the remainder (if any) is restored to the original
+  accounts.
+* If a corresponding
+  [`void_pending_transfer`](#flags.void_pending_transfer) is
+  committed, the pending transfer's reserved funds are restored to
+  their original accounts.
+* If the pending transfer's timeout expires, the pending transfer's
+  reserved funds are restored to their original accounts. When this
+  flag is set, the [`timeout`](#timeout) field must be non-zero.
 
 #### `flags.post_pending_transfer`
 
-This flag causes the transfer to move from pending to posted. The
-transfer succeeds.
+A `post_pending_transfer` causes the pending transfer (referred to by
+[`pending_id`](#pending_id)) to "post", transferring some or all of the money the
+pending transfer reserved to its destination, and restoring the
+remainder (if any) to its origin accounts. The `amount` of a
+`post_pending_transfer` must be less-than or equal-to the pending
+transfer's amount.
+
+* If the posted `amount` is 0, the full pending transfer's amount is
+  posted.
+* If the posted `amount` is nonzero, then only this amount is posted,
+  and the remainder is restored to its original accounts. It must be
+  less than or equal to the pending transfer's amount.
 
 #### `flags.void_pending_transfer`
 
@@ -165,11 +212,11 @@ How much should be sent from the `debit_account_id` account to the
 
 ### `timestamp`
 
-Time the account was created. This is set by TigerBeetle. The format
-is UNIX timestamp in nanoseconds.
+`timestamp` is the time the account was created, as nanoseconds since
+UNIX epoch.
 
-It is set by TigerBeetle the moment the account is committed (created
-by consensus).
+`timestamp` is set by TigerBeetle to the moment the account arrives at
+the cluster.
 
 Constraints:
 
