@@ -1,5 +1,7 @@
 # Transfers
+A `Transfer` is an immutable record of a financial transaction between two accounts.
 
+`Transfer`s use double-entry accounting: each transfer updates the balance of the debit account and the credit account.
 TigerBeetle uses the same data structures internally and
 externally. This means that sometimes you need to set temporary values
 for fields that TigerBeetle, not you (the user), are responsible.
