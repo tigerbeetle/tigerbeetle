@@ -47,7 +47,7 @@ Constraints:
 
 ### `user_data`
 
-This is an optional second identifier to link this transfer to an
+This is an optional secondary identifier to link this transfer to an
 external entity.
 
 As an example, you might use a UUID (encoded as an integer) that
@@ -56,7 +56,6 @@ ties together a group of transfers.
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
-* May be zero
 
 ### `reserved`
 

@@ -29,7 +29,7 @@ Constraints:
 
 ### `user_data`
 
-This is an optional second identifier to link this account to an
+This is an optional secondary identifier to link this account to an
 external entity.
 
 As an example, you might use a UUID that
