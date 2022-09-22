@@ -485,15 +485,14 @@ pub fn CompactionType(
             assert(compaction.iterator_b.buffered_all_values());
             assert(compaction.iterator_b.peek() == null);
 
-            // Remove the level_a table if it was provided given it's now been merged into level_b.
+            // Remove the level_a table if it was provided; it has been merged into level_b.
             // TODO: Release the grid blocks associated with level_a as well
-            if (compaction.level_b != 0) {
+            if (compaction.remove_level_a) |*level_a_table| {
                 const level_a = compaction.level_b - 1;
-
-                if (compaction.remove_level_a) |*level_a_table| {
-                    compaction.manifest.update_table(level_a, compaction.snapshot, level_a_table);
-                    assert(level_a_table.snapshot_max == compaction.snapshot);
-                }
+                compaction.manifest.update_table(level_a, compaction.snapshot, level_a_table);
+                assert(level_a_table.snapshot_max == compaction.snapshot);
+            } else {
+                assert(compaction.level_b == 0);
             }
 
             // Finally, mark Compaction as officially complete and ready to be reset().

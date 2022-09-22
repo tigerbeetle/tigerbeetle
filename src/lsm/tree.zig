@@ -139,6 +139,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             options: Options,
         ) !Tree {
             assert(options.commit_entries_max > 0);
+            assert(grid.superblock.opened);
 
             var table_mutable = try TableMutable.init(allocator, values_cache, options.commit_entries_max);
             errdefer table_mutable.deinit(allocator);
@@ -169,7 +170,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .manifest = manifest,
                 .compaction_table_immutable = compaction_table_immutable,
                 .compaction_table = compaction_table,
-                .compaction_op = 0,
+                .compaction_op = grid.superblock.working.vsr_state.commit_min,
                 .compaction_io_pending = 0,
                 .compaction_callback = null,
                 .checkpoint_callback = null,
@@ -202,11 +203,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             snapshot: u64,
             key: Key,
         ) ?*const Value {
-            if (snapshot == snapshot_latest) {
+            assert(snapshot <= tree.compacted_snapshot_max());
+
+            if (snapshot == tree.compacted_snapshot_max()) {
                 if (tree.table_mutable.get(key)) |value| return value;
             } else {
                 // The mutable table is converted to an immutable table when a snapshot is created.
-                // This means that a snapshot will never be able to see the mutable table.
+                // This means that a past snapshot will never be able to see the mutable table.
                 // This simplifies the mutable table and eliminates compaction for duplicate puts.
             }
 
@@ -225,7 +228,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             snapshot: u64,
             key: Key,
         ) void {
-            assert(snapshot <= snapshot_latest);
+            assert(snapshot <= tree.compacted_snapshot_max());
             if (config.verify) {
                 // The caller is responsible for checking the mutable table.
                 assert(tree.lookup_from_memory(snapshot, key) == null);
@@ -501,6 +504,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         /// Compactions start on the down beat of a half measure, using 0-based beats.
         /// For example, if there are 4 beats in a measure, start on beat 0 or beat 2.
         pub fn compact(tree: *Tree, callback: fn (*Tree) void, op: u64) void {
+            assert(tree.compaction_callback == null);
+
             tree.compact_start(callback, op);
             tree.compact_drive();
         }
@@ -509,7 +514,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
 
-            if (op > 0) assert(op > tree.compaction_op);
+            assert(op != 0);
+            assert(op > tree.compaction_op);
             tree.compaction_op = op;
             tree.compaction_callback = callback;
 
@@ -517,15 +523,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             const start = (compaction_beat == 0) or
                 (compaction_beat == half_measure_beat_count);
 
-            // The target snapshot of a compaction is actually the previous batch.
-            //
-            // At the start of the current batch, mutable table inserts from the previous batch
-            // would be in the immutable table. This means the current batch compaction will
-            // actually be flushing to disk (levels) mutable table updates from the previous batch.
-            //
-            // -1 as the ops are zero based so the "last" op from previous batch is reflected.
-            const snapshot = std.mem.alignBackward(op, config.lsm_batch_multiple) -| 1;
-            assert(snapshot != snapshot_latest);
+            const snapshot = compaction_snapshot_for_op(op);
+            assert(snapshot < snapshot_latest);
 
             log.debug(tree_name ++ ": compact_start: op={d} snapshot={d} beat={d}/{d}", .{
                 op,
@@ -835,10 +834,34 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             callback(tree);
         }
 
+        /// Returns the highest snapshot that has been fully compacted.
+        /// Equivalently, returns the highest snapshot that is safe to prefetch from.
+        ///
+        /// * While a compaction is ongoing, this is the last beat of the previous measure.
+        ///   (The tree cannot safely read from a running compaction's output tables — the tables
+        ///   are added to the manifest before the corresponding blocks are written to disk).
+        /// * Between compaction measures, this includes the op that was last compacted.
+        /// * Before any compaction has begun, this includes highest checkpointed op.
+        pub fn compacted_snapshot_max(tree: *const Tree) u64 {
+            const compaction_beat = tree.compaction_op % config.lsm_batch_multiple;
+            if (compaction_beat == config.lsm_batch_multiple - 1 and
+                tree.compaction_callback == null)
+            {
+                // The tree is either between compactions, or it has not compacted since checkpoint.
+                // +1 to query the new output tables (with snapshot_min=compaction_op)
+                // rather than the old set of tables (with snapshot_max=compaction_op).
+                return tree.compaction_op + 1;
+            } else {
+                // A compaction is in progress.
+                return compaction_snapshot_for_op(tree.compaction_op);
+            }
+        }
+
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
             // Assert no outstanding compact_tick() work..
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
+            assert(tree.compaction_op > 0);
 
             // Assert that this is the last beat in the compaction measure.
             const compaction_beat = tree.compaction_op % config.lsm_batch_multiple;
@@ -856,7 +879,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             // Assert that we're checkpointing only after invisible tables have been removed.
             if (config.verify) {
-                const snapshot = std.mem.alignBackward(tree.compaction_op, config.lsm_batch_multiple) -| 1;
+                const snapshot = compaction_snapshot_for_op(tree.compaction_op);
                 tree.manifest.assert_no_invisible_tables(snapshot);
             }
 
@@ -910,6 +933,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             _ = query;
         }
     };
+}
+
+/// Returns the target snapshot of a compaction at the given op.
+///
+/// The target snapshot of a compaction is actually the (last op of the) previous batch.
+///
+/// At the start of the current batch, mutable table inserts from the previous batch
+/// would be in the immutable table. This means the current batch compaction will
+/// actually be flushing to disk (levels) mutable table updates from the previous batch.
+///
+/// -1 as the ops are zero based so the "last" op from previous batch is reflected.
+pub fn compaction_snapshot_for_op(op: u64) u64 {
+    return std.mem.alignBackward(op, config.lsm_batch_multiple) -| 1;
 }
 
 /// The total number of tables that can be supported by the tree across so many levels.

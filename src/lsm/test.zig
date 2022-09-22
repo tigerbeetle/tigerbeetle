@@ -18,7 +18,6 @@ const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 const GridType = @import("grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
 const Forest = StateMachine.Forest;
-const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
@@ -60,6 +59,8 @@ const Environment = struct {
     superblock_context: SuperBlock.Context,
     grid: Grid,
     forest: Forest,
+    // We need @fieldParentPtr() of forest, so we can't use an optional Forest.
+    forest_exists: bool = false,
 
     fn init(env: *Environment, must_create: bool) !void {
         env.state = .uninit;
@@ -87,8 +88,9 @@ const Environment = struct {
         env.grid = try Grid.init(allocator, &env.superblock);
         errdefer env.grid.deinit(allocator);
 
-        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
-        errdefer env.forest.deinit(allocator);
+        // Forest must be initialized with an open superblock.
+        env.forest = undefined;
+        env.forest_exists = false;
 
         env.state = .init;
     }
@@ -97,7 +99,10 @@ const Environment = struct {
         assert(env.state != .uninit);
         defer env.state = .uninit;
 
-        env.forest.deinit(allocator);
+        if (env.forest_exists) {
+            env.forest.deinit(allocator);
+            env.forest_exists = false;
+        }
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
         env.message_pool.deinit(allocator);
@@ -158,6 +163,9 @@ const Environment = struct {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
         assert(env.state == .init);
         env.state = .superblock_open;
+
+        env.forest = Forest.init(allocator, &env.grid, node_count, forest_options) catch unreachable;
+        env.forest_exists = true;
         env.forest.open(forest_open_callback);
     }
 
@@ -245,7 +253,7 @@ const Environment = struct {
                 assertion.verify_count = std.math.min(commit_entries_max, assertion.objects.len);
                 if (assertion.verify_count == 0) return;
 
-                assertion.groove.prefetch_setup(snapshot_latest);
+                assertion.groove.prefetch_setup(null);
                 for (assertion.objects[0..assertion.verify_count]) |*object| {
                     assertion.groove.prefetch_enqueue(object.id);
                 }
@@ -304,7 +312,7 @@ const Environment = struct {
         const accounts_to_insert_per_op = 1; // forest_options.accounts.commit_entries_max;
         const iterations = 4;
 
-        var op: u64 = 0;
+        var op: u64 = 1;
         var id: u128 = 0;
         var timestamp: u64 = 42;
         var crash_probability = std.rand.DefaultPrng.init(1337);
@@ -351,13 +359,15 @@ const Environment = struct {
             try env.compact(op);
             defer op += 1;
 
-            // checkpoint the records when the forest is likely finished compaction.
+            // Checkpoint when the forest finishes compaction.
             const checkpoint_op = op -| config.lsm_batch_multiple;
             if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
                 // Checkpoint the forest then superblock
+                env.superblock.staging.vsr_state.commit_min = checkpoint_op;
+                env.superblock.staging.vsr_state.commit_max = checkpoint_op;
                 try env.checkpoint();
 
-                const checkpointed = inserted.items[0..((checkpoint_op + 1) * accounts_to_insert_per_op)];
+                const checkpointed = inserted.items[0 .. checkpoint_op * accounts_to_insert_per_op];
                 const uncommitted = inserted.items[checkpointed.len..];
                 log.debug("checkpointed={d} uncommitted={d}", .{ checkpointed.len, uncommitted.len });
                 assert(uncommitted.len == config.lsm_batch_multiple * accounts_to_insert_per_op);

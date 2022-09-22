@@ -12,6 +12,7 @@ const GridType = @import("grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
+const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_op;
 
 /// This type wraps a single LSM tree in the API needed to integrate it with the Forest.
 /// TigerBeetle's state machine requires a map from u128 ID to posted boolean for transfers
@@ -89,7 +90,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
 
-        /// The snapshot to prefetch for.
+        /// The snapshot to prefetch from.
         prefetch_snapshot: ?u64,
 
         /// This field is necessary to expose the same open()/compact()/checkpoint() function
@@ -161,17 +162,23 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         }
 
         /// Must be called directly before the state machine begins queuing ids for prefetch.
-        pub fn prefetch_setup(groove: *PostedGroove, snapshot: u64) void {
-            assert(snapshot <= snapshot_latest);
+        /// When `snapshot` is null, prefetch from the current snapshot.
+        pub fn prefetch_setup(groove: *PostedGroove, snapshot: ?u64) void {
+            // We may query the input tables of an ongoing compaction, but must not query the
+            // output tables until the compaction is complete. (Until then, the output tables may
+            // be in the manifest but not yet on disk).
+            const snapshot_max = groove.tree.compacted_snapshot_max();
+            const snapshot_target = snapshot orelse snapshot_max;
+            assert(snapshot_target <= snapshot_max);
 
             if (groove.prefetch_snapshot == null) {
-                groove.prefetch_snapshot = snapshot;
+                groove.prefetch_objects.clearRetainingCapacity();
             } else {
                 // If there is a leftover snapshot, then prefetch() was never called, so there
                 // must already be no queued objects or ids.
             }
 
-            groove.prefetch_objects.clearRetainingCapacity();
+            groove.prefetch_snapshot = snapshot_target;
             assert(groove.prefetch_objects.count() == 0);
             assert(groove.prefetch_ids.count() == 0);
         }
