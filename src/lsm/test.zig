@@ -28,12 +28,12 @@ const Environment = struct {
     const size_max = vsr.Zone.superblock.size().? + vsr.Zone.wal.size().? + (512 + 64) * 1024 * 1024;
 
     const node_count = 1024;
-    const cache_size = 2 * 1024 * 1024;
+    const cache_cardinality_max = 2 * 1024 * 1024;
     const forest_options = StateMachine.forest_options(.{
         .lsm_forest_node_count = undefined, // ignored by StateMachine.forest_options()
-        .cache_size_accounts = cache_size,
-        .cache_size_transfers = cache_size,
-        .cache_size_posted = cache_size,
+        .cache_cardinality_accounts = cache_cardinality_max,
+        .cache_cardinality_transfers = cache_cardinality_max,
+        .cache_cardinality_posted = cache_cardinality_max,
         .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
     });
 

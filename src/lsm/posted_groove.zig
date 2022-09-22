@@ -95,7 +95,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
         /// See comments for Groove.Options.
         pub const Options = struct {
-            cache_size: u32,
+            cache_cardinality_max: u32,
             prefetch_count_max: u32,
             commit_count_max: u32,
         };
@@ -111,7 +111,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             errdefer allocator.destroy(cache);
 
             cache.* = .{};
-            try cache.ensureTotalCapacity(allocator, options.cache_size);
+            try cache.ensureTotalCapacity(allocator, options.cache_cardinality_max);
             errdefer cache.deinit(allocator);
 
             var tree = try Tree.init(
