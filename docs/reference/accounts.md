@@ -11,8 +11,7 @@ for fields that TigerBeetle, not you (the user), are responsible.
 
 Account fields *cannot be changed by the user* after
 creation. However, debits and credits fields are updated by
-TigerBeetle as transfers move money to and from an account. And the
-`timestamp` field is set by TigerBeetle after the create request.
+TigerBeetle as transfers move money to and from an account.
 
 ## Fields
 
