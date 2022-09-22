@@ -3,10 +3,10 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
-const meta = std.meta;
 
 const div_ceil = @import("../util.zig").div_ceil;
-
+const binary_search_values_raw = @import("binary_search.zig").binary_search_values_raw;
+const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 const Direction = @import("direction.zig").Direction;
 
 pub const Cursor = struct {
@@ -19,13 +19,36 @@ pub fn SegmentedArray(
     comptime NodePool: type,
     comptime element_count_max: u32,
 ) type {
+    return SegmentedArrayType(T, NodePool, element_count_max, null, {}, {});
+}
+
+pub fn SortedSegmentedArray(
+    comptime T: type,
+    comptime NodePool: type,
+    comptime element_count_max: u32,
+    comptime Key: type,
+    comptime key_from_value: fn (*const T) callconv(.Inline) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+) type {
+    return SegmentedArrayType(T, NodePool, element_count_max, Key, key_from_value, compare_keys);
+}
+
+fn SegmentedArrayType(
+    comptime T: type,
+    comptime NodePool: type,
+    comptime element_count_max: u32,
+    // Set when the SegmentedArray is ordered:
+    comptime Key: ?type,
+    comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.Inline) K) else void,
+    comptime compare_keys: if (Key) |K| (fn (K, K) callconv(.Inline) math.Order) else void,
+) type {
     return struct {
         const Self = @This();
 
         // We can't use @divExact() here as we store TableInfo structs of various sizes in this
         // data structure. This means that there may be padding at the end of the node.
         pub const node_capacity = blk: {
-            const max = NodePool.node_size / @sizeOf(T);
+            const max = @divFloor(NodePool.node_size, @sizeOf(T));
 
             // We require that the node is evenly divisible by 2 to simplify our code
             // that splits/joins nodes at the midpoint.
@@ -88,7 +111,34 @@ pub fn SegmentedArray(
             allocator.free(array.indexes);
         }
 
-        pub fn insert_elements(
+        pub usingnamespace if (Key) |_| struct {
+            /// Returns the absolute index of the element being inserted.
+            pub fn insert_element(
+                array: *Self,
+                node_pool: *NodePool,
+                element: T,
+            ) u32 {
+                const cursor = array.search(key_from_value(&element));
+                const absolute_index = array.absolute_index_for_cursor(cursor);
+                array.insert_elements_at_absolute_index(node_pool, absolute_index, &[_]T{element});
+                return absolute_index;
+            }
+        } else struct {
+            pub fn insert_elements(
+                array: *Self,
+                node_pool: *NodePool,
+                absolute_index: u32,
+                elements: []const T,
+            ) void {
+                return array.insert_elements_at_absolute_index(
+                    node_pool,
+                    absolute_index,
+                    elements,
+                );
+            }
+        };
+
+        fn insert_elements_at_absolute_index(
             array: *Self,
             node_pool: *NodePool,
             absolute_index: u32,
@@ -535,27 +585,31 @@ pub fn SegmentedArray(
             assert(absolute_index < element_count_max);
             assert(absolute_index <= array.len());
 
-            var node: u32 = 0;
-            while (node + 1 < array.node_count and
-                absolute_index >= array.indexes[node + 1])
-            {
-                node += 1;
-            }
-            assert(node < array.node_count);
+            const result = binary_search_keys(u32, struct {
+                inline fn compare(a: u32, b: u32) math.Order {
+                    return math.order(a, b);
+                }
+            }.compare, array.indexes[0..array.node_count], absolute_index);
 
-            const relative_index = absolute_index - array.indexes[node];
-
-            if (node == array.node_count - 1) {
-                // Insertion may target the index one past the end of the array.
-                assert(relative_index <= array.count(node));
+            if (result.exact) {
+                return .{
+                    .node = result.index,
+                    .relative_index = 0,
+                };
             } else {
-                assert(relative_index < array.count(node));
+                const node = result.index - 1;
+                const relative_index = absolute_index - array.indexes[node];
+                if (node == array.node_count - 1) {
+                    // Insertion may target the index one past the end of the array.
+                    assert(relative_index <= array.count(node));
+                } else {
+                    assert(relative_index < array.count(node));
+                }
+                return .{
+                    .node = node,
+                    .relative_index = relative_index,
+                };
             }
-
-            return .{
-                .node = node,
-                .relative_index = relative_index,
-            };
         }
 
         pub const Iterator = struct {
@@ -607,19 +661,15 @@ pub fn SegmentedArray(
             }
         };
 
-        pub fn iterator(
+        pub fn iterator_from_cursor(
             array: *const Self,
-            /// Absolute index to start iteration at.
-            absolute_index: u32,
-            /// The start node allows us to skip over nodes as an optimization.
-            /// If ascending start from the first element of the start node and ascend.
-            /// If descending start from the last element of the start node and descend.
-            start_node: u32,
+            /// First element of iteration.
+            cursor: Cursor,
             direction: Direction,
         ) Iterator {
             if (array.node_count == 0) {
-                assert(absolute_index == 0);
-                assert(start_node == 0);
+                assert(cursor.node == 0);
+                assert(cursor.relative_index == 0);
 
                 return Iterator{
                     .array = array,
@@ -627,58 +677,110 @@ pub fn SegmentedArray(
                     .cursor = .{ .node = 0, .relative_index = 0 },
                     .done = true,
                 };
-            }
+            } else {
+                assert(cursor.node < array.node_count);
+                assert(cursor.relative_index < array.count(cursor.node));
 
-            assert(start_node < array.node_count);
-            assert(absolute_index < element_count_max);
-            assert(absolute_index < array.indexes[array.node_count]);
-
-            switch (direction) {
-                .ascending => {
-                    assert(absolute_index >= array.indexes[start_node]);
-
-                    var node = start_node;
-                    while (node + 1 < array.node_count and
-                        absolute_index >= array.indexes[node + 1])
-                    {
-                        node += 1;
-                    }
-                    assert(node < array.node_count);
-
-                    const relative_index = absolute_index - array.indexes[node];
-                    assert(relative_index < array.count(node));
-
-                    return .{
-                        .array = array,
-                        .direction = direction,
-                        .cursor = .{
-                            .node = node,
-                            .relative_index = relative_index,
-                        },
-                    };
-                },
-                .descending => {
-                    assert(absolute_index < array.indexes[start_node + 1]);
-
-                    var node = start_node;
-                    while (node > 0 and absolute_index < array.indexes[node]) {
-                        node -= 1;
-                    }
-
-                    const relative_index = absolute_index - array.indexes[node];
-                    assert(relative_index < array.count(node));
-
-                    return .{
-                        .array = array,
-                        .direction = direction,
-                        .cursor = .{
-                            .node = node,
-                            .relative_index = relative_index,
-                        },
-                    };
-                },
+                return .{
+                    .array = array,
+                    .direction = direction,
+                    .cursor = cursor,
+                };
             }
         }
+
+        pub fn iterator_from_index(
+            array: *const Self,
+            /// First element of iteration.
+            absolute_index: u32,
+            direction: Direction,
+        ) Iterator {
+            assert(absolute_index < element_count_max);
+
+            if (array.node_count == 0) {
+                assert(absolute_index == 0);
+
+                return Iterator{
+                    .array = array,
+                    .direction = direction,
+                    .cursor = .{ .node = 0, .relative_index = 0 },
+                    .done = true,
+                };
+            } else {
+                assert(absolute_index < array.len());
+
+                return Iterator{
+                    .array = array,
+                    .direction = direction,
+                    .cursor = array.cursor_for_absolute_index(absolute_index),
+                };
+            }
+        }
+
+        pub usingnamespace if (Key) |K| struct {
+            /// Returns a cursor to the index of the key either exactly equal to the target key or,
+            /// if there is no exact match, the next greatest key.
+            pub fn search(
+                array: *const Self,
+                key: K,
+            ) Cursor {
+                if (array.node_count == 0) {
+                    return .{
+                        .node = 0,
+                        .relative_index = 0,
+                    };
+                }
+
+                var offset: usize = 0;
+                var length: usize = array.node_count;
+                while (length > 1) {
+                    const half = length / 2;
+                    const mid = offset + half;
+
+                    const node = &array.nodes[mid].?[0];
+                    // This trick seems to be what's needed to get llvm to emit branchless code for this,
+                    // a ternary-style if expression was generated as a jump here for whatever reason.
+                    const next_offsets = [_]usize{ offset, mid };
+                    offset = next_offsets[@boolToInt(compare_keys(key_from_value(node), key) == .lt)];
+
+                    length -= half;
+                }
+
+                // Unlike a normal binary search, don't increment the offset when "key" is higher
+                // than the element — "round down" to the previous node.
+                // This guarantees that the node result is never "== node_count".
+                //
+                // (If there are two adjacent nodes starting with keys A and C, and we search B,
+                // we want to pick the A node.)
+                const node = @intCast(u32, offset);
+                assert(node < array.node_count);
+
+                const relative_index = binary_search_values_raw(
+                    K,
+                    T,
+                    key_from_value,
+                    compare_keys,
+                    array.node_elements(node),
+                    key,
+                );
+
+                // Follow the same rule as absolute_index_for_cursor:
+                // only return relative_index==array.count() at the last node.
+                if (node + 1 < array.node_count and
+                    relative_index == array.count(node))
+                {
+                    return .{
+                        .node = node + 1,
+                        .relative_index = 0,
+                    };
+                } else {
+                    return .{
+                        .node = node,
+                        .relative_index = relative_index,
+                    };
+                }
+            }
+        } else struct {};
     };
 }
 
@@ -686,6 +788,10 @@ fn TestContext(
     comptime T: type,
     comptime node_size: u32,
     comptime element_count_max: u32,
+    comptime Key: type,
+    comptime key_from_value: fn (*const T) callconv(.Inline) Key,
+    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    comptime element_order: enum { sorted, unsorted },
 ) type {
     return struct {
         const Self = @This();
@@ -698,7 +804,10 @@ fn TestContext(
 
         // Test overaligned nodes to catch compile errors for missing @alignCast()
         const TestPool = NodePool(node_size, 2 * @alignOf(T));
-        const TestArray = SegmentedArray(T, TestPool, element_count_max);
+        const TestArray = switch (element_order) {
+            .sorted => SortedSegmentedArray(T, TestPool, element_count_max, Key, key_from_value, compare_keys),
+            .unsorted => SegmentedArray(T, TestPool, element_count_max),
+        };
 
         random: std.rand.Random,
 
@@ -770,19 +879,31 @@ fn TestContext(
             if (count_free == 0) return;
 
             var buffer: [TestArray.node_capacity * 3]T = undefined;
-
             const count_max = @minimum(count_free, TestArray.node_capacity * 3);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
             context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
 
             assert(context.reference.items.len <= element_count_max);
-            const index = context.random.uintAtMostBiased(u32, reference_len);
 
-            context.array.insert_elements(&context.pool, index, buffer[0..count]);
+            switch (element_order) {
+                .unsorted => {
+                    const index = context.random.uintAtMostBiased(u32, reference_len);
 
-            // TODO the standard library could use an AssumeCapacity variant of this.
-            context.reference.insertSlice(index, buffer[0..count]) catch unreachable;
-
+                    context.array.insert_elements(&context.pool, index, buffer[0..count]);
+                    // TODO the standard library could use an AssumeCapacity variant of this.
+                    context.reference.insertSlice(index, buffer[0..count]) catch unreachable;
+                },
+                .sorted => {
+                    for (buffer[0..count]) |value| {
+                        const index_actual = context.array.insert_element(&context.pool, value);
+                        const index_expect = context.reference_index(key_from_value(&value));
+                       // const index_expect = if (context.reference.items.len == 0) 0
+                       //     else binary_search_values_raw(Key, T, key_from_value, compare_keys, context.reference.items, key_from_value(&value));
+                        context.reference.insert(index_expect, value) catch unreachable;
+                        try std.testing.expectEqual(index_expect, index_actual);
+                    }
+                },
+            }
             context.inserts += count;
 
             try context.verify();
@@ -830,7 +951,7 @@ fn TestContext(
                 for (context.reference.items) |i| std.debug.print("{}, ", .{i});
 
                 std.debug.print("\nactual: ", .{});
-                var it = context.array.iterator(0, 0, .ascending);
+                var it = context.array.iterator_from_index(0, .ascending);
                 while (it.next()) |i| std.debug.print("{}, ", .{i.*});
                 std.debug.print("\n", .{});
             }
@@ -838,7 +959,7 @@ fn TestContext(
             try testing.expectEqual(context.reference.items.len, context.array.len());
 
             {
-                var it = context.array.iterator(0, 0, .ascending);
+                var it = context.array.iterator_from_index(0, .ascending);
 
                 for (context.reference.items) |expect| {
                     const actual = it.next() orelse return error.TestUnexpectedResult;
@@ -848,9 +969,8 @@ fn TestContext(
             }
 
             {
-                var it = context.array.iterator(
+                var it = context.array.iterator_from_index(
                     @intCast(u32, context.reference.items.len) -| 1,
-                    context.array.last().node,
                     .descending,
                 );
 
@@ -865,7 +985,26 @@ fn TestContext(
                 try testing.expectEqual(@as(?*const T, null), it.next());
             }
 
-            try testing.expectEqual(context.reference.items.len, context.array.len());
+            {
+                for (context.reference.items) |_, i| {
+                    try testing.expect(std.meta.eql(
+                        i,
+                        context.array.absolute_index_for_cursor(
+                            context.array.cursor_for_absolute_index(@intCast(u32, i)),
+                        ),
+                    ));
+                }
+            }
+
+            if (element_order == .sorted) {
+                for (context.reference.items) |*expect, i| {
+                    if (i == 0) continue;
+                    try testing.expect(compare_keys(
+                        key_from_value(&context.reference.items[i - 1]),
+                        key_from_value(expect),
+                    ) != .gt);
+                }
+            }
 
             if (context.array.len() == 0) {
                 try testing.expectEqual(@as(u32, 0), context.array.node_count);
@@ -875,51 +1014,44 @@ fn TestContext(
                 try testing.expectEqual(@as(?*[TestArray.node_capacity]T, null), node);
             }
 
-            if (context.reference.items.len > 0) {
-                const reference_len = @intCast(u32, context.reference.items.len);
-                const index = context.random.uintLessThanBiased(u32, reference_len);
-                const cursor = context.array.cursor_for_absolute_index(index);
-
-                {
-                    const start_node = context.random.uintAtMostBiased(u32, cursor.node);
-
-                    var it = context.array.iterator(index, start_node, .ascending);
-
-                    for (context.reference.items[index..]) |expect| {
-                        const actual = it.next() orelse return error.TestUnexpectedResult;
-                        try testing.expectEqual(expect, actual.*);
-                    }
-                    try testing.expectEqual(@as(?*const T, null), it.next());
-                }
-
-                {
-                    const start_node = cursor.node + context.random.uintAtMostBiased(
-                        u32,
-                        context.array.node_count - 1 - cursor.node,
-                    );
-                    assert(start_node >= cursor.node);
-                    assert(start_node < context.array.node_count);
-
-                    var it = context.array.iterator(index, start_node, .descending);
-
-                    var i = index + 1;
-                    while (i > 0) {
-                        i -= 1;
-
-                        const expect = context.reference.items[i];
-                        const actual = it.next() orelse return error.TestUnexpectedResult;
-                        try testing.expectEqual(expect, actual.*);
-                    }
-                    try testing.expectEqual(@as(?*const T, null), it.next());
-                }
-            }
-
             {
                 var i: u32 = 0;
                 while (i < context.array.node_count -| 1) : (i += 1) {
                     try testing.expect(context.array.count(i) >=
                         @divExact(TestArray.node_capacity, 2));
                 }
+            }
+            if (element_order == .sorted) try context.verify_search();
+        }
+
+        fn verify_search(context: *Self) !void {
+            var queries: [20]Key = undefined;
+            context.random.bytes(mem.sliceAsBytes(&queries));
+
+            // Test min/max exceptional values on different SegmentedArray shapes.
+            queries[0] = 0;
+            queries[1] = math.maxInt(Key);
+
+            for (queries) |query| {
+                try testing.expectEqual(
+                    context.reference_index(query),
+                    context.array.absolute_index_for_cursor(context.array.search(query)),
+                );
+            }
+        }
+
+        fn reference_index(context: *const Self, key: Key) u32 {
+            if (context.reference.items.len == 0) {
+                return 0;
+            } else {
+                return binary_search_values_raw(
+                    Key,
+                    T,
+                    key_from_value,
+                    compare_keys,
+                    context.reference.items,
+                    key,
+                );
             }
         }
     };
@@ -931,20 +1063,37 @@ test "SegmentedArray" {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    // TODO Import this type from lsm/tree.zig.
-    const TableInfo = extern struct {
-        checksum: u128,
-        key_min: u128,
-        key_max: u128,
+    const Key = @import("composite_key.zig").CompositeKey(u64);
+    const TableType = @import("table.zig").TableType;
+    const TableInfoType = @import("manifest.zig").TableInfoType;
+    const TableInfo = TableInfoType(TableType(
+        Key,
+        Key.Value,
+        Key.compare_keys,
+        Key.key_from_value,
+        Key.sentinel_key,
+        Key.tombstone,
+        Key.tombstone_from_key,
+    ));
 
-        address: u64,
+    const CompareInt = struct {
+        inline fn compare_keys(a: u32, b: u32) std.math.Order {
+            return std.math.order(a, b);
+        }
 
-        /// Set to the current snapshot tick on creation.
-        snapshot_min: u64,
-        /// Initially math.maxInt(u64) on creation, set to the current
-        /// snapshot tick on deletion.
-        snapshot_max: u64,
-        flags: u64 = 0,
+        inline fn key_from_value(value: *const u32) u32 {
+            return value.*;
+        }
+    };
+
+    const CompareTable = struct {
+        inline fn compare_keys(a: u64, b: u64) std.math.Order {
+            return std.math.order(a, b);
+        }
+
+        inline fn key_from_value(value: *const TableInfo) u64 {
+            return value.address;
+        }
     };
 
     comptime {
@@ -979,19 +1128,25 @@ test "SegmentedArray" {
         Options{ .element_type = TableInfo, .node_size = 512, .element_count_max = 1024 },
         Options{ .element_type = TableInfo, .node_size = 1024, .element_count_max = 1024 },
     }) |options| {
-        const Context = TestContext(
-            options.element_type,
-            options.node_size,
-            options.element_count_max,
-        );
+        inline for (.{ .sorted, .unsorted }) |order| {
+            const Context = TestContext(
+                options.element_type,
+                options.node_size,
+                options.element_count_max,
+                if (options.element_type == u32) u32 else u64,
+                if (options.element_type == u32) CompareInt.key_from_value else CompareTable.key_from_value,
+                if (options.element_type == u32) CompareInt.compare_keys else CompareTable.compare_keys,
+                order,
+            );
 
-        var context = try Context.init(random);
-        defer context.deinit();
+            var context = try Context.init(random);
+            defer context.deinit();
 
-        try context.run();
+            try context.run();
 
-        if (options.node_size % @sizeOf(options.element_type) != 0) tested_padding = true;
-        if (Context.TestArray.node_capacity == 2) tested_node_capacity_min = true;
+            if (options.node_size % @sizeOf(options.element_type) != 0) tested_padding = true;
+            if (Context.TestArray.node_capacity == 2) tested_node_capacity_min = true;
+        }
     }
 
     assert(tested_padding);
