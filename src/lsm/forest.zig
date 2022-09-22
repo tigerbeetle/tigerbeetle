@@ -81,7 +81,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             allocator: mem.Allocator,
             grid: *Grid,
             node_count: u32,
-            // (e.g.) .{ .transfers = .{ .cache_size = 128, … }, .accounts = … }
+            // (e.g.) .{ .transfers = .{ .cache_cardinality_max = 128, … }, .accounts = … }
             grooves_options: GroovesOptions,
         ) !Forest {
             // NodePool must be allocated to pass in a stable address for the Grooves.
@@ -423,14 +423,14 @@ fn ForestTestType(comptime StorageProvider: type) type {
     const size_max = (512 + 64) * 1024 * 1024;
 
     const node_count = 1024;
-    const cache_size = 2 * 1024 * 1024;
+    const cache_cardinality_max = 2 * 1024 * 1024;
     const forest_config = .{
         .transfers = .{
-            .cache_size = cache_size,
+            .cache_cardinality_max = cache_cardinality_max,
             .commit_count_max = 8191 * 2,
         },
         .accounts = .{
-            .cache_size = cache_size,
+            .cache_cardinality_max = cache_cardinality_max,
             .commit_count_max = 8191,
         },
     };

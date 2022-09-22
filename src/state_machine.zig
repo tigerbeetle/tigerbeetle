@@ -65,9 +65,9 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub const Options = struct {
             lsm_forest_node_count: u32,
-            cache_size_accounts: u32,
-            cache_size_transfers: u32,
-            cache_size_posted: u32,
+            cache_cardinality_accounts: u32,
+            cache_cardinality_transfers: u32,
+            cache_cardinality_posted: u32,
             message_body_size_max: usize,
         };
 
@@ -902,7 +902,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             return .{
                 .accounts = .{
-                    .cache_size = options.cache_size_accounts,
+                    .cache_cardinality_max = options.cache_cardinality_accounts,
                     .prefetch_count_max = std.math.max(
                         // create_account()/lookup_account() looks up 1 account per item.
                         batch_accounts_max,
@@ -955,7 +955,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     },
                 },
                 .transfers = .{
-                    .cache_size = options.cache_size_transfers,
+                    .cache_cardinality_max = options.cache_cardinality_transfers,
                     // *2 to fetch pending and post/void transfer.
                     .prefetch_count_max = 2 * batch_transfers_max,
                     .tree_options_object = .{ .commit_count_max = batch_transfers_max },
@@ -972,7 +972,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     },
                 },
                 .posted = .{
-                    .cache_size = options.cache_size_posted,
+                    .cache_cardinality_max = options.cache_cardinality_posted,
                     .prefetch_count_max = batch_transfers_max,
                     .commit_count_max = batch_transfers_max,
                 },
@@ -1050,9 +1050,9 @@ const TestContext = struct {
     state_machine: StateMachine,
 
     fn init(ctx: *TestContext, allocator: mem.Allocator, options: struct {
-        cache_size_accounts: u32,
-        cache_size_transfers: u32,
-        cache_size_posted: u32,
+        cache_cardinality_accounts: u32,
+        cache_cardinality_transfers: u32,
+        cache_cardinality_posted: u32,
     }) !void {
         ctx.storage = try Storage.init(
             allocator,
@@ -1084,9 +1084,9 @@ const TestContext = struct {
 
         ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
             .lsm_forest_node_count = 1,
-            .cache_size_accounts = options.cache_size_accounts,
-            .cache_size_transfers = options.cache_size_transfers,
-            .cache_size_posted = options.cache_size_posted,
+            .cache_cardinality_accounts = options.cache_cardinality_accounts,
+            .cache_cardinality_transfers = options.cache_cardinality_transfers,
+            .cache_cardinality_posted = options.cache_cardinality_posted,
             // Overestimate the batch size (in order overprovision commit_count_max)
             // because the test never compacts.
             .message_body_size_max = 1000 * @sizeOf(Account),
@@ -1456,9 +1456,9 @@ test "create/lookup/rollback accounts" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .cache_size_accounts = vectors.len,
-        .cache_size_transfers = 0,
-        .cache_size_posted = 0,
+        .cache_cardinality_accounts = vectors.len,
+        .cache_cardinality_transfers = 0,
+        .cache_cardinality_posted = 0,
     });
     defer context.deinit(testing.allocator);
 
@@ -1521,9 +1521,9 @@ test "linked accounts" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .cache_size_accounts = accounts_max,
-        .cache_size_transfers = transfers_max,
-        .cache_size_posted = transfers_pending_max,
+        .cache_cardinality_accounts = accounts_max,
+        .cache_cardinality_transfers = transfers_max,
+        .cache_cardinality_posted = transfers_pending_max,
     });
     defer context.deinit(testing.allocator);
 
@@ -1608,9 +1608,9 @@ test "create/lookup/rollback transfers" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .cache_size_accounts = accounts.len,
-        .cache_size_transfers = 1,
-        .cache_size_posted = 0,
+        .cache_cardinality_accounts = accounts.len,
+        .cache_cardinality_transfers = 1,
+        .cache_cardinality_posted = 0,
     });
     defer context.deinit(testing.allocator);
 
@@ -2287,9 +2287,9 @@ test "create/lookup/rollback 2-phase transfers" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .cache_size_accounts = accounts.len,
-        .cache_size_transfers = 100,
-        .cache_size_posted = 1,
+        .cache_cardinality_accounts = accounts.len,
+        .cache_cardinality_transfers = 100,
+        .cache_cardinality_posted = 1,
     });
     defer context.deinit(testing.allocator);
 
