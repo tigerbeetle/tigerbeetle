@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.tigerbeetle</groupId>
@@ -12,7 +11,7 @@
   <url>https://www.tigerbeetle.com</url>
   <scm>
     <url>https://github.com/tigerbeetledb/tigerbeetle-java</url>
-  </scm> 
+  </scm>
 
   <licenses>
     <license>
@@ -21,11 +20,14 @@
       <distribution>repo</distribution>
     </license>
   </licenses>
- 
-  <properties> 
+
+  <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.source>11</maven.compiler.source>
     <maven.compiler.target>11</maven.compiler.target>
+    <!-- JaCoCo thresholds -->
+    <jacoco.unit-tests.limit.instruction-ratio>95%</jacoco.unit-tests.limit.instruction-ratio>
+    <jacoco.unit-tests.limit.branch-ratio>90%</jacoco.unit-tests.limit.branch-ratio>
   </properties>
 
   <dependencies>
@@ -69,7 +71,7 @@
               <exclude>**/*.obj</exclude>
               <exclude>**/*.pdb</exclude>
             </excludes>
-          </configuration>          
+          </configuration>
         </plugin>
         <plugin>
           <artifactId>maven-install-plugin</artifactId>
@@ -91,7 +93,7 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-javadoc-plugin</artifactId>
           <version>3.4.1</version>
-        </plugin>        
+        </plugin>
         <plugin>
           <groupId>org.jacoco</groupId>
           <artifactId>jacoco-maven-plugin</artifactId>
@@ -110,7 +112,7 @@
               <!-- Excluding the benchmark -->
               <exclude>Benchmark.class</exclude>
             </excludes>
-          </configuration>          
+          </configuration>
         </plugin>
         <plugin>
           <groupId>net.revelc.code.formatter</groupId>
@@ -119,7 +121,7 @@
           <configuration>
             <lineEnding>LF</lineEnding>
             <configFile>${project.basedir}/formatter.xml</configFile>
-          </configuration>                
+          </configuration>
         </plugin>
       </plugins>
     </pluginManagement>
@@ -141,19 +143,19 @@
           </execution>
         </executions>
         <configuration>
-            <workingDirectory>${project.basedir}/../zig</workingDirectory>
-            <executable>${project.basedir}/../zig/lib/tigerbeetle/zig/zig</executable>
-            <arguments>
-                <argument>build</argument>
-                <argument>-Drelease-safe</argument>
-            </arguments>
-        </configuration>        
+          <workingDirectory>${project.basedir}/../zig</workingDirectory>
+          <executable>${project.basedir}/../zig/lib/tigerbeetle/zig/zig</executable>
+          <arguments>
+            <argument>build</argument>
+            <argument>-Drelease-safe</argument>
+          </arguments>
+        </configuration>
       </plugin>
 
       <!-- Formatter -->
       <plugin>
         <groupId>net.revelc.code.formatter</groupId>
-        <artifactId>formatter-maven-plugin</artifactId>      
+        <artifactId>formatter-maven-plugin</artifactId>
         <executions>
           <execution>
             <id>format</id>
@@ -168,30 +170,56 @@
             <goals>
               <goal>validate</goal>
             </goals>
-          </execution>          
+          </execution>
         </executions>
-      </plugin>      
+      </plugin>
 
-      <!-- Code Coverage report generation using JaCoCo -->
+      <!-- Code Coverage using JaCoCo -->
       <plugin>
-          <groupId>org.jacoco</groupId>
-          <artifactId>jacoco-maven-plugin</artifactId>
-          <executions>
-              <execution>
-                  <id>jacoco-initialize</id>
-                  <goals>
-                      <goal>prepare-agent</goal>
-                  </goals>
-              </execution>
-              <!-- could be replaced by a online tool such as codecov -->
-              <execution>
-                  <id>jacoco-report</id>
-                  <phase>test</phase>
-                  <goals>
-                      <goal>report</goal>
-                  </goals>
-              </execution>
-          </executions>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>jacoco-initialize</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>jacoco-check</id>
+            <phase>test</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>INSTRUCTION</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${jacoco.unit-tests.limit.instruction-ratio}</minimum>
+                    </limit>
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${jacoco.unit-tests.limit.branch-ratio}</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+          <!-- could be replaced by a online tool such as codecov -->
+          <execution>
+            <id>jacoco-report</id>
+            <phase>test</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
 
       <!-- Javadoc -->
@@ -206,15 +234,9 @@
             </goals>
           </execution>
         </executions>
-      </plugin>      
-
-
-
-
-
+      </plugin>
     </plugins>
   </build>
-  
   <distributionManagement>
     <repository>
       <id>github</id>
@@ -222,5 +244,4 @@
       <url>https://maven.pkg.github.com/tigerbeetledb/tigerbeetle-java</url>
     </repository>
   </distributionManagement>
-
 </project>
