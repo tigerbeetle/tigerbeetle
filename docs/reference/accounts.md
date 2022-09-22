@@ -73,7 +73,7 @@ Constraints:
 * Type is 16-bit unsigned integer (2 bytes)
 * Must not be zero
 
-### `flag`
+### `flags`
 
 A bitfield that toggles additional behavior.
 
@@ -81,13 +81,13 @@ Constraints:
 
 * Type is 16-bit unsigned integer (2 bytes)
 
-#### `linked` flag
+#### `flags.linked`
 
 When the linked flag is specified, it links an account with the next
 account in the batch, to create a chain of account, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first account without this flag. The last
-account in a batch may therefore never have the `linked` flag set as
+account in a batch may therefore never have `flags.linked` set as
 this would leave a chain open-ended.
 
 Multiple chains or individual accounts may coexist within a batch to
@@ -99,7 +99,7 @@ chain. The account that was the first to break the chain will have a
 unique error result. Other accounts in the chain will have their error
 result set to `linked_event_failed`.
 
-#### `debits_must_not_exceed_credits` flag
+#### `flags.debits_must_not_exceed_credits`
 
 When set, transfers will be rejected that would cause this account's
 debits to exceed credits. Specifically when `account.debits_pending +
@@ -107,7 +107,7 @@ account.debits_posted + transfer.amount > account.credits_posted`.
 
 This cannot be set when `credits_must_not_exceed_debits` is also set.
 
-#### `credits_must_not_exceed_debits` flag
+#### `flags.credits_must_not_exceed_debits`
 
 When set, transfers will be rejected that would cause this account's
 credits to exceed debits. Specifically when `account.credits_pending +

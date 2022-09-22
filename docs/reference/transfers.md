@@ -81,14 +81,14 @@ Constraints:
 
 ### `timeout`
 
-This field relates to the [`pending` flag](#pending-flag) described
+This field relates to the [`flags.pending`](#flags-pending) described
 below. It is a duration expressed in nanoseconds.
 
 Constraints:
 
 * Type is 64-bit integer (8 bytes)
-* Must be zero if `pending` flag is *not* set
-* Must be non-zero if `pending` flag *is* set
+* Must be zero if `flags.pending` is *not* set
+* Must be non-zero if `flags.pending` *is* set
 
 ### `ledger`
 
@@ -118,13 +118,13 @@ Constraints:
 
 * Type is 16-bit unsigned integer (2 bytes)
 
-#### `linked` flag
+#### `flags.linked`
 
 When the linked flag is specified, it links an transfer with the next
 transfer in the batch, to create a chain of transfer, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first transfer without this flag. The last
-transfer in a batch may therefore never have the `linked` flag set as
+transfer in a batch may therefore never have `flags.linked` set as
 this would leave a chain open-ended.
 
 Multiple chains or individual transfers may coexist within a batch to
@@ -136,21 +136,21 @@ chain. The transfer that was the first to break the chain will have a
 unique error result. Other transfers in the chain will have their error
 result set to `linked_event_failed`.
 
-#### `pending` flag
+#### `flags.pending`
 
-This flag  commit for this transfer. The transfer is
-not complete until a transaction with the same id is sent with the
-`post_pending_transfer` or `void_pending_transfer` flag set (both
+This flag begins a two-phase commit for this transfer. The transfer is
+not complete until a transaction with the same `id` is sent with the
+`flags.post_pending_transfer` or `flags.void_pending_transfer` set (both
 described below).
 
 When this flag is on, the [`timeout`](#timeout) field must be non-zero.
 
-#### `post_pending_transfer` flag
+#### `flags.post_pending_transfer`
 
 This flag causes the transfer to move from pending to posted. The
 transfer succeeds.
 
-#### `void_pending_transfer` flag
+#### `flags.void_pending_transfer`
 
 This flag causes the transfer to move from pending to nothing. The
 transfer does not go through.
