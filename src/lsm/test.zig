@@ -258,7 +258,7 @@ const Environment = struct {
                 {
                     defer assertion.groove.prefetch_clear();
                     for (assertion.objects[0..assertion.verify_count]) |*object| {
-                        log.debug("verifying {} for id={}", .{visibility, object.id});
+                        log.debug("verifying {} for id={}", .{ visibility, object.id });
                         const result = assertion.groove.get(object.id);
 
                         switch (visibility) {
@@ -266,7 +266,7 @@ const Environment = struct {
                             .visible => {
                                 assert(result != null);
                                 assert(std.mem.eql(u8, std.mem.asBytes(result.?), std.mem.asBytes(object)));
-                            }
+                            },
                         }
                     }
                 }
@@ -311,7 +311,7 @@ const Environment = struct {
         var iter: usize = 0;
         while (iter < (accounts_to_insert_per_op * config.lsm_batch_multiple * iterations)) : (iter += 1) {
             // Insert a bunch of accounts
-            
+
             var i: u32 = 0;
             while (i < accounts_to_insert_per_op) : (i += 1) {
                 defer id += 1;
@@ -330,7 +330,7 @@ const Environment = struct {
                     .credits_posted = 42,
                 };
 
-                 // Insert an account ...
+                // Insert an account ...
                 const groove = &env.forest.grooves.accounts;
                 groove.put(&account);
 
@@ -338,7 +338,7 @@ const Environment = struct {
                 try env.assert_visibility(
                     .visible,
                     &env.forest.grooves.accounts,
-                    @as([]const Account, &.{ account }),
+                    @as([]const Account, &.{account}),
                     forest_options.accounts.tree_options_object.commit_entries_max,
                 );
 
@@ -358,7 +358,7 @@ const Environment = struct {
 
                 const checkpointed = inserted.items[0..((checkpoint_op + 1) * accounts_to_insert_per_op)];
                 const uncommitted = inserted.items[checkpointed.len..];
-                log.debug("checkpointed={d} uncommitted={d}", .{checkpointed.len, uncommitted.len});
+                log.debug("checkpointed={d} uncommitted={d}", .{ checkpointed.len, uncommitted.len });
                 assert(uncommitted.len == config.lsm_batch_multiple * accounts_to_insert_per_op);
 
                 // Randomly initiate a crash
@@ -388,7 +388,7 @@ const Environment = struct {
                         timestamp = checkpointed[checkpointed.len - 1].timestamp + 1;
                     }
                     crashing = false;
-                } 
+                }
 
                 // Double check the forest contains the checkpointed values (positive space)
                 try env.assert_visibility(
@@ -406,5 +406,3 @@ pub fn main() !void {
     try Environment.format(); // NOTE: this can be commented out after first run to speed up testing.
     try Environment.run(); //try do_simple();
 }
-
-

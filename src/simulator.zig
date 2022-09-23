@@ -33,7 +33,6 @@ pub const deployment_environment = .simulation;
 var cluster: *Cluster = undefined;
 
 pub fn main() !void {
-
     comptime {
         assert(config.deployment_environment == .simulation);
     }
