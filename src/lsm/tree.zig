@@ -125,9 +125,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             /// how many objects might be inserted/updated/removed by a batch:
             ///   (config.message_size_max - sizeOf(vsr.header))
             /// For example, there are at most 8191 transfers in a batch.
-            /// So commit_count_max=8191 for transfer objects and indexes.
+            /// So commit_entries_max=8191 for transfer objects and indexes.
             ///
-            /// However, if a transfer is ever mutated, then this will double commit_count_max
+            /// However, if a transfer is ever mutated, then this will double commit_entries_max
             /// since the old index might need to be removed, and the new index inserted.
             ///
             /// A way to see this is by looking at the state machine. If a transfer is inserted,
@@ -138,7 +138,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             /// For example, create_accounts will put at most 8191 accounts.
             /// However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
             /// some of these accounts may exist, requiring a remove/put to update the index.
-            commit_count_max: u32,
+            commit_entries_max: u32,
         };
 
         pub fn init(
@@ -148,12 +148,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             value_cache: ?*ValueCache,
             options: Options,
         ) !Tree {
-            assert(options.commit_count_max > 0);
+            assert(options.commit_entries_max > 0);
 
-            var table_mutable = try TableMutable.init(allocator, options.commit_count_max);
+            var table_mutable = try TableMutable.init(allocator, options.commit_entries_max);
             errdefer table_mutable.deinit(allocator);
 
-            var table_immutable = try TableImmutable.init(allocator, options.commit_count_max);
+            var table_immutable = try TableImmutable.init(allocator, options.commit_entries_max);
             errdefer table_immutable.deinit(allocator);
 
             assert(table_immutable.value_count_max == table_mutable.value_count_max);
@@ -815,7 +815,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // At the end of every beat:
             // - ensure mutable table can be flushed to immutable table.
             // - compact the manifest before invoking the compact() callback.
-            assert(tree.table_mutable.can_commit_batch(tree.options.commit_count_max));
+            assert(tree.table_mutable.can_commit_batch(tree.options.commit_entries_max));
             tree.manifest.compact(compact_manifest_callback);
         }
 
@@ -1011,13 +1011,13 @@ pub fn main() !void {
     defer value_cache.deinit(allocator);
 
     const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
-    const commit_count_max = @divFloor(batch_size_max, 128);
+    const commit_entries_max = @divFloor(batch_size_max, 128);
 
     var sort_buffer = try allocator.allocAdvanced(
         u8,
         16,
-        // This must be the greatest commit_count_max and value_size across trees:
-        commit_count_max * config.lsm_batch_multiple * 128,
+        // This must be the greatest commit_entries_max and value_size across trees:
+        commit_entries_max * config.lsm_batch_multiple * 128,
         .exact,
     );
     defer allocator.free(sort_buffer);
@@ -1034,8 +1034,8 @@ pub fn main() !void {
         &grid,
         &value_cache,
         .{
-            .prefetch_count_max = commit_count_max * 2,
-            .commit_count_max = commit_count_max,
+            .prefetch_entries_max = commit_entries_max * 2,
+            .commit_entries_max = commit_entries_max,
         },
     );
     defer tree.deinit(allocator);

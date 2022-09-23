@@ -50,16 +50,16 @@ pub const memory_size_max_default = 1024 * 1024 * 1024;
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const cache_accounts_max = switch (deployment_environment) {
-    .production => 1_000_000,
-    else => 100_000,
+    .production => 100_000,
+    else => 10_000,
 };
 
 /// The maximum number of transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 /// We allocate more capacity than the number of transfers for a safe hash table load factor.
 pub const cache_transfers_max = switch (deployment_environment) {
-    .production => 100_000_000,
-    else => 1_000_000,
+    .production => 1_000_000,
+    else => 100_000,
 };
 
 /// The maximum number of two-phase transfers to store in memory:
