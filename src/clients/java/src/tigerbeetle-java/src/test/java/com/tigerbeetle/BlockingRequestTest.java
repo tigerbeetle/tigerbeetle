@@ -5,8 +5,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.UUID;
 import org.junit.Test;
+import com.tigerbeetle.UInt128.Bytes;
 
 public class BlockingRequestTest {
 
@@ -36,8 +36,8 @@ public class BlockingRequestTest {
     public void testLookupAccountsRequestConstructor() {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(1);
-        batch.add(new UUID(0, 0));
+        var batch = new UInt128Batch(1);
+        batch.add(0, 0);
 
         var request = BlockingRequest.lookupAccounts(client, batch);
         assert request != null;
@@ -47,8 +47,8 @@ public class BlockingRequestTest {
     public void testLookupTransfersRequestConstructor() {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(1);
-        batch.add(new UUID(0, 0));
+        var batch = new UInt128Batch(1);
+        batch.add(0, 0);
 
         var request = BlockingRequest.lookupTransfers(client, batch);
         assert request != null;
@@ -337,17 +337,17 @@ public class BlockingRequestTest {
     @Test
     public void testLookupAccountEndRequest() throws RequestException {
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(2);
-        batch.add(new UUID(0, 1));
-        batch.add(new UUID(0, 2));
+        var batch = new UInt128Batch(2);
+        batch.add(100, 1000);
+        batch.add(200, 2000);
 
         var request = BlockingRequest.lookupAccounts(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Account.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putLong(1);
-        dummyReplyBuffer.position(Account.Struct.SIZE).putLong(2);
+        dummyReplyBuffer.putLong(100).putLong(1000);
+        dummyReplyBuffer.position(Account.Struct.SIZE).putLong(200).putLong(2000);
 
         request.endRequest(Request.Operations.LOOKUP_ACCOUNTS, dummyReplyBuffer.position(0), 1,
                 RequestException.Status.OK);
@@ -356,24 +356,27 @@ public class BlockingRequestTest {
         var result = request.waitForResult();
         assertEquals(2, result.length);
 
-        assertEquals(new UUID(0, 1), result[0].getId());
-        assertEquals(new UUID(0, 2), result[1].getId());
+        assertEquals(100L, result[0].getId(Bytes.LeastSignificant));
+        assertEquals(1000L, result[0].getId(Bytes.MostSignificant));
+
+        assertEquals(200L, result[1].getId(Bytes.LeastSignificant));
+        assertEquals(2000L, result[1].getId(Bytes.MostSignificant));
     }
 
     @Test
     public void testLookupTransferEndRequest() throws RequestException {
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(2);
-        batch.add(new UUID(0, 1));
-        batch.add(new UUID(0, 2));
+        var batch = new UInt128Batch(2);
+        batch.add(100, 1000);
+        batch.add(200, 2000);
 
         var request = BlockingRequest.lookupTransfers(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Transfer.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putLong(1);
-        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(2);
+        dummyReplyBuffer.putLong(100).putLong(1000);
+        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(200).putLong(2000);
 
         request.endRequest(Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
                 RequestException.Status.OK);
@@ -382,24 +385,27 @@ public class BlockingRequestTest {
         var result = request.waitForResult();
         assertEquals(2, result.length);
 
-        assertEquals(new UUID(0, 1), result[0].getId());
-        assertEquals(new UUID(0, 2), result[1].getId());
+        assertEquals(100L, result[0].getId(Bytes.LeastSignificant));
+        assertEquals(1000L, result[0].getId(Bytes.MostSignificant));
+
+        assertEquals(200L, result[1].getId(Bytes.LeastSignificant));
+        assertEquals(2000L, result[1].getId(Bytes.MostSignificant));
     }
 
     @Test
     public void testSuccessCompletion() throws RequestException {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(2);
-        batch.add(new UUID(0, 1));
-        batch.add(new UUID(0, 2));
+        var batch = new UInt128Batch(2);
+        batch.add(100, 1000);
+        batch.add(200, 2000);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Transfer.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
 
-        dummyReplyBuffer.putLong(1);
-        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(2);
+        dummyReplyBuffer.putLong(100).putLong(1000);
+        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(200).putLong(2000);
 
         var callback = new CallbackSimulator<Transfer>(
                 BlockingRequest.lookupTransfers(client, batch), Request.Operations.LOOKUP_TRANSFERS,
@@ -411,16 +417,19 @@ public class BlockingRequestTest {
         var result = callback.request.waitForResult();
         assertEquals(2, result.length);
 
-        assertEquals(new UUID(0, 1), result[0].getId());
-        assertEquals(new UUID(0, 2), result[1].getId());
+        assertEquals(100L, result[0].getId(Bytes.LeastSignificant));
+        assertEquals(1000L, result[0].getId(Bytes.MostSignificant));
+
+        assertEquals(200L, result[1].getId(Bytes.LeastSignificant));
+        assertEquals(2000L, result[1].getId(Bytes.MostSignificant));
     }
 
     @Test
     public void testFailedCompletion() throws InterruptedException {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(1);
-        batch.add(new UUID(0, 0));
+        var batch = new UInt128Batch(1);
+        batch.add(0, 0);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(0);

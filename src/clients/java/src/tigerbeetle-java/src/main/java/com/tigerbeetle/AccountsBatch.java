@@ -64,7 +64,7 @@ public final class AccountsBatch extends Batch {
 
         final int start = index * Account.Struct.SIZE;
         var ptr = getBuffer().position(start);
-        account.save(ptr);
+        account.copyTo(ptr);
 
         if (ptr.position() - start != Account.Struct.SIZE)
             throw new AssertionError(

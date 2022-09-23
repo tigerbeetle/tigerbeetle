@@ -10,13 +10,13 @@ public class Benchmark {
             var accounts = new AccountsBatch(2);
 
             var account1 = new Account();
-            account1.setId(UUID.randomUUID());
+            account1.setId(UInt128.fromUUID(UUID.randomUUID()));
             account1.setCode(100);
             account1.setLedger(720);
             accounts.add(account1);
 
             var account2 = new Account();
-            account2.setId(UUID.randomUUID());
+            account2.setId(UInt128.fromUUID(UUID.randomUUID()));
             account2.setCode(200);
             account2.setLedger(720);
             accounts.add(account2);
@@ -38,7 +38,7 @@ public class Benchmark {
                 var batch = new TransfersBatch(TRANSFERS_PER_BATCH);
                 for (int j = 0; j < TRANSFERS_PER_BATCH; j++) {
                     var transfer = new Transfer();
-                    transfer.setId(new UUID(i + 1, j + 1));
+                    transfer.setId(i + 1, j + 1);
                     transfer.setCreditAccountId(account1.getId());
                     transfer.setDebitAccountId(account2.getId());
                     transfer.setCode((short) 1);

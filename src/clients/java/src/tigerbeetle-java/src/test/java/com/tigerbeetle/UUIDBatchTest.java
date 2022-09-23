@@ -1,5 +1,6 @@
 package com.tigerbeetle;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
 import java.nio.ByteBuffer;
@@ -13,14 +14,14 @@ import org.junit.Test;
  */
 public class UUIDBatchTest {
 
-    private static final UUID uuid1;
-    private static final UUID uuid2;
+    private static final byte[] id1;
+    private static final byte[] id2;
     private static final ByteBuffer dummyStream;
 
     static {
 
-        uuid1 = new UUID(1000, 100);
-        uuid2 = new UUID(2000, 200);
+        id1 = UInt128.toBytes(100, 1000);
+        id2 = UInt128.toBytes(200, 2000);
 
         // Mimic the the binnary response
         dummyStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
@@ -30,32 +31,32 @@ public class UUIDBatchTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithNegativeCapacity() {
-        new UUIDsBatch(-1);
+        new UInt128Batch(-1);
     }
 
     @Test(expected = NullPointerException.class)
     public void testConstructorWithNullBuffer() {
         ByteBuffer buffer = null;
-        new UUIDsBatch(buffer);
+        new UInt128Batch(buffer);
     }
 
     @Test
     public void testAdd() {
 
-        UUIDsBatch batch = new UUIDsBatch(2);
+        UInt128Batch batch = new UInt128Batch(2);
         assertEquals(0, batch.getLenght());
         assertEquals(2, batch.getCapacity());
 
-        batch.add(uuid1);
+        batch.add(id1);
         assertEquals(1, batch.getLenght());
 
-        batch.add(uuid2);
+        batch.add(id2);
         assertEquals(2, batch.getLenght());
 
-        UUID[] array = batch.toArray();
+        byte[][] array = batch.toArray();
         assertEquals(array.length, 2);
-        assertEquals(uuid1, array[0]);
-        assertEquals(uuid2, array[1]);
+        assertArrayEquals(id1, array[0]);
+        assertArrayEquals(id2, array[1]);
 
         assertBuffer(dummyStream, batch.getBuffer());
     }
@@ -63,44 +64,44 @@ public class UUIDBatchTest {
     @Test
     public void testGetAndSet() {
 
-        UUIDsBatch batch = new UUIDsBatch(1);
+        UInt128Batch batch = new UInt128Batch(1);
         assertEquals(0, batch.getLenght());
         assertEquals(1, batch.getCapacity());
 
-        batch.set(0, uuid1);
+        batch.set(0, id1);
         assertEquals(1, batch.getLenght());
 
-        assertEquals(uuid1, batch.get(0));
+        assertArrayEquals(id1, batch.get(0));
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
     public void testSetIndexOutOfBounds() {
 
-        UUIDsBatch batch = new UUIDsBatch(1);
-        batch.set(1, uuid1);
+        UInt128Batch batch = new UInt128Batch(1);
+        batch.set(1, id1);
         assert false; // Should be unreachable
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
     public void testSetIndexNegative() {
 
-        UUIDsBatch batch = new UUIDsBatch(1);
-        batch.set(-1, uuid1);
+        UInt128Batch batch = new UInt128Batch(1);
+        batch.set(-1, id1);
         assert false; // Should be unreachable
     }
 
     @Test(expected = NullPointerException.class)
     public void testSetNull() {
-
-        UUIDsBatch batch = new UUIDsBatch(1);
-        batch.set(0, null);
+        UUID uuid = null;
+        UInt128Batch batch = new UInt128Batch(1);
+        batch.set(0, uuid);
         assert false; // Should be unreachable
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
     public void testGetIndexOutOfBounds() {
 
-        UUIDsBatch batch = new UUIDsBatch(1);
+        UInt128Batch batch = new UInt128Batch(1);
         batch.get(1);
         assert false; // Should be unreachable
     }
@@ -108,7 +109,7 @@ public class UUIDBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testGetIndexNegative() {
 
-        UUIDsBatch batch = new UUIDsBatch(1);
+        UInt128Batch batch = new UInt128Batch(1);
         batch.get(-1);
         assert false; // Should be unreachable
     }
@@ -116,7 +117,7 @@ public class UUIDBatchTest {
     @Test
     public void testFromArray() {
 
-        UUIDsBatch batch = new UUIDsBatch(new UUID[] {uuid1, uuid2});
+        UInt128Batch batch = new UInt128Batch(new byte[][] {id1, id2});
         assertEquals(batch.getLenght(), 2);
 
         assertBuffer(dummyStream, batch.getBuffer());
@@ -124,30 +125,30 @@ public class UUIDBatchTest {
 
     @Test
     public void testBufferLen() {
-        var batch = new UUIDsBatch(dummyStream.position(0));
+        var batch = new UInt128Batch(dummyStream.position(0));
         assertEquals(dummyStream.capacity(), batch.getBufferLen());
     }
 
     @Test
     public void testToArray() {
 
-        UUIDsBatch batch = new UUIDsBatch(dummyStream.position(0));
+        UInt128Batch batch = new UInt128Batch(dummyStream.position(0));
         assertEquals(batch.getLenght(), 2);
 
-        UUID[] array = batch.toArray();
+        byte[][] array = batch.toArray();
         assertEquals(array.length, 2);
-        assertEquals(uuid1, array[0]);
-        assertEquals(uuid2, array[1]);
+        assertArrayEquals(id1, array[0]);
+        assertArrayEquals(id2, array[1]);
     }
 
     @Test(expected = AssertionError.class)
     public void testInvalidBuffer() {
 
         // Invalid size
-        var invalidBuffer = ByteBuffer.allocate((UUIDsBatch.Struct.SIZE * 2) - 1)
+        var invalidBuffer = ByteBuffer.allocate((UInt128Batch.Struct.SIZE * 2) - 1)
                 .order(ByteOrder.LITTLE_ENDIAN);
 
-        var batch = new UUIDsBatch(invalidBuffer);
+        var batch = new UInt128Batch(invalidBuffer);
         assert batch == null; // Should be unreachable
     }
 

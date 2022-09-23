@@ -1,11 +1,11 @@
 package com.tigerbeetle;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.UUID;
 
 import org.junit.Test;
 
@@ -20,19 +20,19 @@ public class TransfersBatchTest {
 
     static {
         transfer1 = new Transfer();
-        transfer1.setId(new UUID(5000, 500));
-        transfer1.setDebitAccountId(new UUID(1000, 100));
-        transfer1.setCreditAccountId(new UUID(2000, 200));
-        transfer1.setUserData(new UUID(3000, 300));
+        transfer1.setId(5000, 500);
+        transfer1.setDebitAccountId(1000, 100);
+        transfer1.setCreditAccountId(2000, 200);
+        transfer1.setUserData(3000, 300);
         transfer1.setAmount(1000);
         transfer1.setCode(10);
         transfer1.setLedger(720);
 
         transfer2 = new Transfer();
-        transfer2.setId(new UUID(5001, 501));
-        transfer2.setDebitAccountId(new UUID(1001, 101));
-        transfer2.setCreditAccountId(new UUID(2001, 201));
-        transfer2.setUserData(new UUID(3001, 301));
+        transfer2.setId(5001, 501);
+        transfer2.setDebitAccountId(1001, 101);
+        transfer2.setCreditAccountId(2001, 201);
+        transfer2.setUserData(3001, 301);
         transfer2.setAmount(200);
         transfer2.setCode(20);
         transfer2.setLedger(100);
@@ -45,10 +45,10 @@ public class TransfersBatchTest {
         dummyStream = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
 
         // Item 1
-        dummyStream.putLong(500).putLong(5000); // Id
-        dummyStream.putLong(100).putLong(1000); // CreditAccountId
-        dummyStream.putLong(200).putLong(2000); // DebitAccountId
-        dummyStream.putLong(300).putLong(3000); // UserData
+        dummyStream.putLong(5000).putLong(500); // Id
+        dummyStream.putLong(1000).putLong(100); // CreditAccountId
+        dummyStream.putLong(2000).putLong(200); // DebitAccountId
+        dummyStream.putLong(3000).putLong(300); // UserData
         dummyStream.put(new byte[16]); // Reserved
         dummyStream.putLong(0).putLong(0); // PendingId
         dummyStream.putLong(0); // Timeout
@@ -59,12 +59,12 @@ public class TransfersBatchTest {
         dummyStream.putLong(0); // Timestamp
 
         // Item 2
-        dummyStream.putLong(501).putLong(5001); // Id
-        dummyStream.putLong(101).putLong(1001); // CreditAccountId
-        dummyStream.putLong(201).putLong(2001); // DebitAccountId
-        dummyStream.putLong(301).putLong(3001); // UserData
+        dummyStream.putLong(5001).putLong(501); // Id
+        dummyStream.putLong(1001).putLong(101); // CreditAccountId
+        dummyStream.putLong(2001).putLong(201); // DebitAccountId
+        dummyStream.putLong(3001).putLong(301); // UserData
         dummyStream.put(new byte[16]); // Reserved
-        dummyStream.putLong(500).putLong(5000); // PendingId
+        dummyStream.putLong(5000).putLong(500); // PendingId
         dummyStream.putLong(2500); // Timeout
         dummyStream.putInt(100); // Ledger
         dummyStream.putShort((short) 20); // Code
@@ -247,16 +247,16 @@ public class TransfersBatchTest {
     }
 
     private static void assertTransfers(Transfer transfer1, Transfer transfer2) {
-        assertEquals(transfer1.getId(), transfer2.getId());
-        assertEquals(transfer1.getCreditAccountId(), transfer2.getCreditAccountId());
-        assertEquals(transfer1.getDebitAccountId(), transfer2.getDebitAccountId());
-        assertEquals(transfer1.getUserData(), transfer2.getUserData());
+        assertArrayEquals(transfer1.getId(), transfer2.getId());
+        assertArrayEquals(transfer1.getCreditAccountId(), transfer2.getCreditAccountId());
+        assertArrayEquals(transfer1.getDebitAccountId(), transfer2.getDebitAccountId());
+        assertArrayEquals(transfer1.getUserData(), transfer2.getUserData());
         assertEquals(transfer1.getLedger(), transfer2.getLedger());
         assertEquals(transfer1.getCode(), transfer2.getCode());
         assertEquals(transfer1.getFlags(), transfer2.getFlags());
         assertEquals(transfer1.getAmount(), transfer2.getAmount());
         assertEquals(transfer1.getTimeout(), transfer2.getTimeout());
-        assertEquals(transfer1.getPendingId(), transfer2.getPendingId());
+        assertArrayEquals(transfer1.getPendingId(), transfer2.getPendingId());
         assertEquals(transfer1.getTimestamp(), transfer2.getTimestamp());
     }
 

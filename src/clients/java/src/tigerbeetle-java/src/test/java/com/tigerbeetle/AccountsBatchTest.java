@@ -1,11 +1,11 @@
 package com.tigerbeetle;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.UUID;
 
 import org.junit.Test;
 
@@ -21,8 +21,8 @@ public class AccountsBatchTest {
     static {
 
         account1 = new Account();
-        account1.setId(new UUID(10, 100));
-        account1.setUserData(new UUID(1000, 1100));
+        account1.setId(10, 100);
+        account1.setUserData(1000, 1100);
         account1.setLedger(720);
         account1.setCode(1);
         account1.setFlags(AccountFlags.LINKED);
@@ -33,8 +33,8 @@ public class AccountsBatchTest {
         account1.setTimestamp(999);
 
         account2 = new Account();
-        account2.setId(new UUID(20, 200));
-        account2.setUserData(new UUID(2000, 2200));
+        account2.setId(20, 200);
+        account2.setUserData(2000, 2200);
         account2.setLedger(730);
         account2.setCode(2);
         account2.setFlags(AccountFlags.LINKED | AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS);
@@ -48,8 +48,8 @@ public class AccountsBatchTest {
         dummyStream = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
 
         // Item 1
-        dummyStream.putLong(100).putLong(10); // Id
-        dummyStream.putLong(1100).putLong(1000); // UserData
+        dummyStream.putLong(10).putLong(100); // Id
+        dummyStream.putLong(1000).putLong(1100); // UserData
         dummyStream.put(new byte[48]); // Reserved
         dummyStream.putInt(720); // Ledger
         dummyStream.putShort((short) 1); // Code
@@ -61,8 +61,8 @@ public class AccountsBatchTest {
         dummyStream.putLong(999); // Timestamp
 
         // Item 2
-        dummyStream.putLong(200).putLong(20); // Id
-        dummyStream.putLong(2200).putLong(2000); // UserData
+        dummyStream.putLong(20).putLong(200); // Id
+        dummyStream.putLong(2000).putLong(2200); // UserData
         dummyStream.put(new byte[48]); // Reserved
         dummyStream.putInt(730); // Ledger
         dummyStream.putShort((short) 2); // Code
@@ -248,8 +248,8 @@ public class AccountsBatchTest {
     }
 
     private static void assertAccounts(Account account1, Account account2) {
-        assertEquals(account1.getId(), account2.getId());
-        assertEquals(account1.getUserData(), account2.getUserData());
+        assertArrayEquals(account1.getId(), account2.getId());
+        assertArrayEquals(account1.getUserData(), account2.getUserData());
         assertEquals(account1.getLedger(), account2.getLedger());
         assertEquals(account1.getCode(), account2.getCode());
         assertEquals(account1.getFlags(), account2.getFlags());

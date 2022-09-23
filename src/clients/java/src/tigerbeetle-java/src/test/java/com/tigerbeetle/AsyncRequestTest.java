@@ -7,7 +7,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -15,6 +14,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.Test;
+import com.tigerbeetle.UInt128.Bytes;
 
 public class AsyncRequestTest {
 
@@ -44,8 +44,8 @@ public class AsyncRequestTest {
     public void testLookupAccountsRequestConstructor() {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(1);
-        batch.add(new UUID(0, 0));
+        var batch = new UInt128Batch(1);
+        batch.add(0, 0);
 
         var request = AsyncRequest.lookupAccounts(client, batch);
         assert request != null;
@@ -55,8 +55,8 @@ public class AsyncRequestTest {
     public void testLookupTransfersRequestConstructor() {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(1);
-        batch.add(new UUID(0, 0));
+        var batch = new UInt128Batch(1);
+        batch.add(0, 0);
 
         var request = AsyncRequest.lookupTransfers(client, batch);
         assert request != null;
@@ -329,15 +329,15 @@ public class AsyncRequestTest {
     @Test
     public void testLookupAccountEndRequest() throws InterruptedException, ExecutionException {
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(2);
-        batch.add(new UUID(0, 1));
-        batch.add(new UUID(0, 2));
+        var batch = new UInt128Batch(2);
+        batch.add(0, 1);
+        batch.add(0, 2);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Account.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putLong(1);
-        dummyReplyBuffer.position(Account.Struct.SIZE).putLong(2);
+        dummyReplyBuffer.putLong(100).putLong(1000);
+        dummyReplyBuffer.position(Account.Struct.SIZE).putLong(200).putLong(2000);
 
         var callback = new CallbackSimulator<Account>(AsyncRequest.lookupAccounts(client, batch),
                 Request.Operations.LOOKUP_ACCOUNTS, dummyReplyBuffer.position(0), 1,
@@ -350,22 +350,25 @@ public class AsyncRequestTest {
         var result = future.get();
         assertEquals(2, result.length);
 
-        assertEquals(new UUID(0, 1), result[0].getId());
-        assertEquals(new UUID(0, 2), result[1].getId());
+        assertEquals(100L, result[0].getId(Bytes.LeastSignificant));
+        assertEquals(1000L, result[0].getId(Bytes.MostSignificant));
+
+        assertEquals(200L, result[1].getId(Bytes.LeastSignificant));
+        assertEquals(2000L, result[1].getId(Bytes.MostSignificant));
     }
 
     @Test
     public void testLookupTransferEndRequest() throws InterruptedException, ExecutionException {
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(2);
-        batch.add(new UUID(0, 1));
-        batch.add(new UUID(0, 2));
+        var batch = new UInt128Batch(2);
+        batch.add(0, 1);
+        batch.add(0, 2);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Transfer.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putLong(1);
-        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(2);
+        dummyReplyBuffer.putLong(100).putLong(1000);
+        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(200).putLong(2000);
 
         var callback = new CallbackSimulator<Transfer>(AsyncRequest.lookupTransfers(client, batch),
                 Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
@@ -378,23 +381,26 @@ public class AsyncRequestTest {
         var result = future.get();
         assertEquals(2, result.length);
 
-        assertEquals(new UUID(0, 1), result[0].getId());
-        assertEquals(new UUID(0, 2), result[1].getId());
+        assertEquals(100L, result[0].getId(Bytes.LeastSignificant));
+        assertEquals(1000L, result[0].getId(Bytes.MostSignificant));
+
+        assertEquals(200L, result[1].getId(Bytes.LeastSignificant));
+        assertEquals(2000L, result[1].getId(Bytes.MostSignificant));
     }
 
     @Test
     public void testSuccessFuture() throws InterruptedException, ExecutionException {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(2);
-        batch.add(new UUID(0, 1));
-        batch.add(new UUID(0, 2));
+        var batch = new UInt128Batch(2);
+        batch.add(0, 1);
+        batch.add(0, 2);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Transfer.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putLong(1);
-        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(2);
+        dummyReplyBuffer.putLong(100).putLong(1000);
+        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(200).putLong(2000);
 
         var callback = new CallbackSimulator<Transfer>(AsyncRequest.lookupTransfers(client, batch),
                 Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
@@ -416,23 +422,26 @@ public class AsyncRequestTest {
         var result = future.get();
         assertEquals(2, result.length);
 
-        assertEquals(new UUID(0, 1), result[0].getId());
-        assertEquals(new UUID(0, 2), result[1].getId());
+        assertEquals(100L, result[0].getId(Bytes.LeastSignificant));
+        assertEquals(1000L, result[0].getId(Bytes.MostSignificant));
+
+        assertEquals(200L, result[1].getId(Bytes.LeastSignificant));
+        assertEquals(2000L, result[1].getId(Bytes.MostSignificant));
     }
 
     @Test
     public void testSuccessFutureWithTimeout() throws InterruptedException, ExecutionException {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(2);
-        batch.add(new UUID(0, 1));
-        batch.add(new UUID(0, 2));
+        var batch = new UInt128Batch(2);
+        batch.add(0, 1);
+        batch.add(0, 2);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer =
                 ByteBuffer.allocateDirect(Transfer.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putLong(1);
-        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(2);
+        dummyReplyBuffer.putLong(100).putLong(1000);
+        dummyReplyBuffer.position(Transfer.Struct.SIZE).putLong(200).putLong(2000);
 
         var callback = new CallbackSimulator<Transfer>(AsyncRequest.lookupTransfers(client, batch),
                 Request.Operations.LOOKUP_TRANSFERS, dummyReplyBuffer.position(0), 1,
@@ -446,8 +455,11 @@ public class AsyncRequestTest {
             var result = future.get(1000, TimeUnit.MILLISECONDS);
             assertEquals(2, result.length);
 
-            assertEquals(new UUID(0, 1), result[0].getId());
-            assertEquals(new UUID(0, 2), result[1].getId());
+            assertEquals(100L, result[0].getId(Bytes.LeastSignificant));
+            assertEquals(1000L, result[0].getId(Bytes.MostSignificant));
+
+            assertEquals(200L, result[1].getId(Bytes.LeastSignificant));
+            assertEquals(2000L, result[1].getId(Bytes.MostSignificant));
 
         } catch (TimeoutException timeout) {
             assert false;
@@ -459,8 +471,8 @@ public class AsyncRequestTest {
     public void testFailedFuture() throws InterruptedException {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(1);
-        batch.add(new UUID(0, 0));
+        var batch = new UInt128Batch(1);
+        batch.add(0, 0);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(0);
@@ -489,8 +501,8 @@ public class AsyncRequestTest {
     public void testFailedFutureWithTimeout() throws InterruptedException, TimeoutException {
 
         var client = new Client(0, 1);
-        var batch = new UUIDsBatch(1);
-        batch.add(new UUID(0, 0));
+        var batch = new UInt128Batch(1);
+        batch.add(0, 0);
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(0);

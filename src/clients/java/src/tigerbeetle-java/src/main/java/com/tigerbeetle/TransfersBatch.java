@@ -62,7 +62,7 @@ public final class TransfersBatch extends Batch {
 
         final int start = index * Transfer.Struct.SIZE;
         var ptr = getBuffer().position(start);
-        transfer.save(ptr);
+        transfer.copyTo(ptr);
 
         if (ptr.position() - start != Transfer.Struct.SIZE)
             throw new AssertionError(

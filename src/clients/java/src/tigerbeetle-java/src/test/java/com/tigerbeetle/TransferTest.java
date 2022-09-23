@@ -2,19 +2,24 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
 import java.math.BigInteger;
-import java.util.UUID;
 import org.junit.Test;
+import com.tigerbeetle.UInt128.Bytes;
 
 public class TransferTest {
 
     @Test
     public void testDefaultValues() {
         var transfer = new Transfer();
-        assertEquals(new UUID(0, 0), transfer.getId());
-        assertEquals(new UUID(0, 0), transfer.getDebitAccountId());
-        assertEquals(new UUID(0, 0), transfer.getCreditAccountId());
-        assertEquals(new UUID(0, 0), transfer.getUserData());
-        assertEquals(new UUID(0, 0), transfer.getPendingId());
+        assertEquals(0L, transfer.getId(Bytes.LeastSignificant));
+        assertEquals(0L, transfer.getId(Bytes.MostSignificant));
+        assertEquals(0L, transfer.getDebitAccountId(Bytes.LeastSignificant));
+        assertEquals(0L, transfer.getDebitAccountId(Bytes.MostSignificant));
+        assertEquals(0L, transfer.getCreditAccountId(Bytes.LeastSignificant));
+        assertEquals(0L, transfer.getCreditAccountId(Bytes.MostSignificant));
+        assertEquals(0L, transfer.getUserData(Bytes.LeastSignificant));
+        assertEquals(0L, transfer.getUserData(Bytes.MostSignificant));
+        assertEquals(0L, transfer.getPendingId(Bytes.LeastSignificant));
+        assertEquals(0L, transfer.getPendingId(Bytes.MostSignificant));
         assertEquals((long) 0, transfer.getTimeout());
         assertEquals(0, transfer.getLedger());
         assertEquals(0, transfer.getCode());
@@ -26,68 +31,80 @@ public class TransferTest {
     @Test
     public void testId() {
         var transfer = new Transfer();
-        transfer.setId(new UUID(100, 200));
-        assertEquals(new UUID(100, 200), transfer.getId());
+        transfer.setId(100, 200);
+        assertEquals(100L, transfer.getId(Bytes.LeastSignificant));
+        assertEquals(200L, transfer.getId(Bytes.MostSignificant));
     }
 
     @Test(expected = NullPointerException.class)
     public void testIdNull() {
+        byte[] id = null;
         var transfer = new Transfer();
-        transfer.setId(null);
+        transfer.setId(id);
     }
 
     @Test
     public void testDebitAccountId() {
         var transfer = new Transfer();
-        transfer.setDebitAccountId(new UUID(100, 200));
-        assertEquals(new UUID(100, 200), transfer.getDebitAccountId());
+        transfer.setDebitAccountId(100, 200);
+        assertEquals(100L, transfer.getDebitAccountId(Bytes.LeastSignificant));
+        assertEquals(200L, transfer.getDebitAccountId(Bytes.MostSignificant));
     }
 
     @Test(expected = NullPointerException.class)
     public void testDebitAccountIdNull() {
+        byte[] debitAccountId = null;
         var transfer = new Transfer();
-        transfer.setDebitAccountId(null);
+        transfer.setDebitAccountId(debitAccountId);
     }
 
     @Test
     public void testCreditAccountId() {
         var transfer = new Transfer();
-        transfer.setCreditAccountId(new UUID(100, 200));
-        assertEquals(new UUID(100, 200), transfer.getCreditAccountId());
+        transfer.setCreditAccountId(100, 200);
+        assertEquals(100L, transfer.getCreditAccountId(Bytes.LeastSignificant));
+        assertEquals(200L, transfer.getCreditAccountId(Bytes.MostSignificant));
     }
 
     @Test(expected = NullPointerException.class)
     public void testCreditAccountIdNull() {
+        byte[] creditAccountId = null;
         var transfer = new Transfer();
-        transfer.setCreditAccountId(null);
+        transfer.setCreditAccountId(creditAccountId);
     }
 
     @Test
     public void testUserData() {
         var transfer = new Transfer();
-        transfer.setUserData(new UUID(100, 200));
-        assertEquals(new UUID(100, 200), transfer.getUserData());
+        transfer.setUserData(100, 200);
+        assertEquals(100L, transfer.getUserData(Bytes.LeastSignificant));
+        assertEquals(200L, transfer.getUserData(Bytes.MostSignificant));
     }
 
     @Test
     public void testUserDataNull() {
+        byte[] userData = null;
         var transfer = new Transfer();
-        transfer.setUserData(null);
-        assertEquals(new UUID(0, 0), transfer.getUserData());
+        transfer.setUserData(userData);
+        assertEquals(0L, transfer.getUserData(Bytes.LeastSignificant));
+        assertEquals(0L, transfer.getUserData(Bytes.MostSignificant));
     }
 
     @Test
     public void testPendingId() {
         var transfer = new Transfer();
-        transfer.setPendingId(new UUID(100, 200));
-        assertEquals(new UUID(100, 200), transfer.getPendingId());
+        transfer.setPendingId(100, 200);
+        assertEquals(100L, transfer.getPendingId(Bytes.LeastSignificant));
+        assertEquals(200L, transfer.getPendingId(Bytes.MostSignificant));
     }
 
     @Test
     public void testPendingIdNull() {
+        byte[] pendingId = null;
         var transfer = new Transfer();
-        transfer.setPendingId(null);
-        assertEquals(new UUID(0, 0), transfer.getPendingId());
+        transfer.setPendingId(pendingId);
+        assertEquals(0L, transfer.getPendingId(Bytes.LeastSignificant));
+        assertEquals(0L, transfer.getPendingId(Bytes.MostSignificant));
     }
 
     @Test

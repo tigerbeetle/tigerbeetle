@@ -18,7 +18,7 @@ final class BlockingRequest<T> extends Request<T> {
                 batch);
     }
 
-    public static BlockingRequest<Account> lookupAccounts(Client client, UUIDsBatch batch) {
+    public static BlockingRequest<Account> lookupAccounts(Client client, UInt128Batch batch) {
         return new BlockingRequest<Account>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
     }
 
@@ -28,7 +28,7 @@ final class BlockingRequest<T> extends Request<T> {
                 Request.Operations.CREATE_TRANSFERS, batch);
     }
 
-    public static BlockingRequest<Transfer> lookupTransfers(Client client, UUIDsBatch batch) {
+    public static BlockingRequest<Transfer> lookupTransfers(Client client, UInt128Batch batch) {
         return new BlockingRequest<Transfer>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
     }
 

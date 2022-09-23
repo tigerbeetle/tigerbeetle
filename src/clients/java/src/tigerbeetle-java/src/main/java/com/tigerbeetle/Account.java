@@ -1,7 +1,7 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
-import java.util.UUID;
+import com.tigerbeetle.UInt128.Bytes;
 
 /**
  * Account.
@@ -16,10 +16,10 @@ public final class Account {
         public static final byte[] RESERVED = new byte[48];
     }
 
-    private static final UUID ZERO = new UUID(0, 0);
-
-    private UUID id;
-    private UUID userData;
+    private long idLeastSignificant;
+    private long idMostSignificant;
+    private long userDataLeastSignificant;
+    private long userDataMostSignificant;
     private int ledger;
     private short code;
     private short flags;
@@ -30,21 +30,25 @@ public final class Account {
     private long timestamp;
 
     public Account() {
-        id = ZERO;
-        userData = ZERO;
+        idLeastSignificant = 0L;
+        idMostSignificant = 0L;
+        userDataLeastSignificant = 0L;
+        userDataMostSignificant = 0L;
         ledger = 0;
         code = 0;
         flags = AccountFlags.NONE;
-        creditsPosted = 0;
-        creditsPending = 0;
-        debitsPosted = 0;
-        debitsPending = 0;
-        timestamp = 0;
+        creditsPosted = 0L;
+        creditsPending = 0L;
+        debitsPosted = 0L;
+        debitsPending = 0L;
+        timestamp = 0L;
     }
 
     Account(ByteBuffer ptr) {
-        id = Batch.uuidFromBuffer(ptr);
-        userData = Batch.uuidFromBuffer(ptr);
+        idLeastSignificant = ptr.getLong();
+        idMostSignificant = ptr.getLong();
+        userDataLeastSignificant = ptr.getLong();
+        userDataMostSignificant = ptr.getLong();
         ptr = ptr.position(ptr.position() + Struct.RESERVED.length);
         ledger = ptr.getInt();
         code = ptr.getShort();
@@ -57,54 +61,103 @@ public final class Account {
     }
 
     /**
-     * Gets an identifier for this account, defined by the user.
+     * <p>
      *
-     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
-     *         128-bit integer.
+     * @return
      */
-    public UUID getId() {
-        return id;
+    public byte[] getId() {
+        return UInt128.toBytes(idLeastSignificant, idMostSignificant);
     }
 
     /**
-     * Sets an identifier for this account, defined by the user.
      * <p>
-     * Must be unique and non-zero.
      *
-     * @param id an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
-     *        unique 128-bit integer.
+     * @return
+     */
+    public long getId(Bytes part) {
+        switch (part) {
+            case LeastSignificant:
+                return idLeastSignificant;
+            case MostSignificant:
+                return idMostSignificant;
+            default:
+                throw new IllegalArgumentException("Invalid byte part");
+        }
+    }
+
+    /**
+     * <p>
+     *
+     * @param id
      * @throws NullPointerException if {@code id} is null.
      */
-    public void setId(UUID id) {
-        if (id == null)
-            throw new NullPointerException("Id cannot be null");
-
-        this.id = id;
+    public void setId(final long leastSignificant, final long mostSignificant) {
+        this.idLeastSignificant = leastSignificant;
+        this.idMostSignificant = mostSignificant;
     }
 
     /**
-     * Gets the secondary identifier to link this account to an external entity.
+     * <p>
      *
-     * @return An {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
-     *         128-bit integer.
+     * @param id
+     * @throws NullPointerException if {@code id} is null.
+     * @throws IllegalArgumentException if {@code id} is not 16 bytes long.
      */
-    public UUID getUserData() {
-        return userData;
+    public void setId(final byte[] id) {
+        this.idLeastSignificant = UInt128.getLong(id, Bytes.LeastSignificant);
+        this.idMostSignificant = UInt128.getLong(id, Bytes.MostSignificant);
     }
 
     /**
-     * Sets the secondary identifier to link this account to an external entity.
+     * <p>
+     *
+     * @return
+     */
+    public byte[] getUserData() {
+        return UInt128.toBytes(userDataLeastSignificant, userDataMostSignificant);
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public long getUserData(Bytes part) {
+        switch (part) {
+            case LeastSignificant:
+                return userDataLeastSignificant;
+            case MostSignificant:
+                return userDataMostSignificant;
+            default:
+                throw new IllegalArgumentException("Invalid byte part");
+        }
+    }
+
+    /**
+     * <p>
+     *
+     * @param leastSignificant
+     * @param mostSignificant
+     */
+    public void setUserData(long leastSignificant, long mostSignificant) {
+        this.userDataLeastSignificant = leastSignificant;
+        this.userDataMostSignificant = mostSignificant;
+    }
+
+    /**
      * <p>
      * May be zero, null values are converted to zero.
      *
-     * @param userData an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
-     *        unique 128-bit integer.
+     * @param userData
+     * @throws IllegalArgumentException if {@code userData} is not 16 bytes long.
      */
-    public void setUserData(UUID userData) {
+    public void setUserData(final byte[] userData) {
         if (userData == null) {
-            this.userData = ZERO;
+            this.userDataLeastSignificant = 0L;
+            this.userDataMostSignificant = 0L;
         } else {
-            this.userData = userData;
+            this.userDataLeastSignificant = UInt128.getLong(userData, Bytes.LeastSignificant);
+            this.userDataMostSignificant = UInt128.getLong(userData, Bytes.MostSignificant);
         }
     }
 
@@ -258,11 +311,11 @@ public final class Account {
         this.timestamp = timestamp;
     }
 
-    void save(ByteBuffer ptr) {
-        ptr.putLong(id.getLeastSignificantBits());
-        ptr.putLong(id.getMostSignificantBits());
-        ptr.putLong(userData.getLeastSignificantBits());
-        ptr.putLong(userData.getMostSignificantBits());
+    void copyTo(ByteBuffer ptr) {
+        ptr.putLong(idLeastSignificant);
+        ptr.putLong(idMostSignificant);
+        ptr.putLong(userDataLeastSignificant);
+        ptr.putLong(userDataMostSignificant);
         ptr.put(Struct.RESERVED);
         ptr.putInt(ledger);
         ptr.putShort(code);

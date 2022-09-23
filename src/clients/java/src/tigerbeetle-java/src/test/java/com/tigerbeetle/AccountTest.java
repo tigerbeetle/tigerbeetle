@@ -1,16 +1,18 @@
 package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
-import java.util.UUID;
 import org.junit.Test;
+import com.tigerbeetle.UInt128.Bytes;
 
 public class AccountTest {
 
     @Test
     public void testDefaultValues() {
         var account = new Account();
-        assertEquals(new UUID(0, 0), account.getId());
-        assertEquals(new UUID(0, 0), account.getUserData());
+        assertEquals(0L, account.getId(Bytes.LeastSignificant));
+        assertEquals(0L, account.getId(Bytes.MostSignificant));
+        assertEquals(0L, account.getUserData(Bytes.LeastSignificant));
+        assertEquals(0L, account.getUserData(Bytes.MostSignificant));
         assertEquals(0, account.getLedger());
         assertEquals(AccountFlags.NONE, account.getFlags());
         assertEquals((long) 0, account.getDebitsPosted());
@@ -23,28 +25,33 @@ public class AccountTest {
     @Test
     public void testId() {
         var account = new Account();
-        account.setId(new UUID(100, 200));
-        assertEquals(new UUID(100, 200), account.getId());
+        account.setId(100, 200);
+        assertEquals(100L, account.getId(Bytes.LeastSignificant));
+        assertEquals(200L, account.getId(Bytes.MostSignificant));
     }
 
     @Test(expected = NullPointerException.class)
     public void testIdNull() {
+        byte[] uuid = null;
         var account = new Account();
-        account.setId(null);
+        account.setId(uuid);
     }
 
     @Test
     public void testUserData() {
         var account = new Account();
-        account.setUserData(new UUID(100, 200));
-        assertEquals(new UUID(100, 200), account.getUserData());
+        account.setUserData(100, 200);
+        assertEquals(100L, account.getUserData(Bytes.LeastSignificant));
+        assertEquals(200L, account.getUserData(Bytes.MostSignificant));
     }
 
     @Test
     public void testUserDataNull() {
+        byte[] userData = null;
         var account = new Account();
-        account.setUserData(null);
-        assertEquals(new UUID(0, 0), account.getUserData());
+        account.setUserData(userData);
+        assertEquals(0L, account.getUserData(Bytes.LeastSignificant));
+        assertEquals(0L, account.getUserData(Bytes.MostSignificant));
     }
 
     @Test

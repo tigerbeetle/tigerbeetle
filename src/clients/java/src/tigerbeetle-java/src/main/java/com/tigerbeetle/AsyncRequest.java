@@ -18,7 +18,7 @@ final class AsyncRequest<T> extends Request<T> {
                 batch);
     }
 
-    public static AsyncRequest<Account> lookupAccounts(Client client, UUIDsBatch batch) {
+    public static AsyncRequest<Account> lookupAccounts(Client client, UInt128Batch batch) {
         return new AsyncRequest<Account>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
     }
 
@@ -28,7 +28,7 @@ final class AsyncRequest<T> extends Request<T> {
                 batch);
     }
 
-    public static AsyncRequest<Transfer> lookupTransfers(Client client, UUIDsBatch batch) {
+    public static AsyncRequest<Transfer> lookupTransfers(Client client, UInt128Batch batch) {
         return new AsyncRequest<Transfer>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
     }
 

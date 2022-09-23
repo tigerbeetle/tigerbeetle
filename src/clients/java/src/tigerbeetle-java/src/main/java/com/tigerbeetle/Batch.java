@@ -8,7 +8,7 @@ public abstract class Batch {
 
     // We require little-endian architectures everywhere for efficient network
     // deserialization:
-    private final static ByteOrder BYTE_ORDER = ByteOrder.LITTLE_ENDIAN;
+    final static ByteOrder BYTE_ORDER = ByteOrder.LITTLE_ENDIAN;
 
     private final ByteBuffer buffer;
 

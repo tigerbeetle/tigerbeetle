@@ -1,7 +1,7 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
-import java.util.UUID;
+import com.tigerbeetle.UInt128.Bytes;
 
 public final class Transfer {
 
@@ -10,42 +10,55 @@ public final class Transfer {
         public static final byte[] RESERVED = new byte[16];
     }
 
-    private static final UUID ZERO = new UUID(0, 0);
-
-    private UUID id;
-    private UUID debitAccountId;
-    private UUID creditAccountId;
-    private UUID userData;
-    private UUID pendingId;
+    private long idLeastSignificant;
+    private long idMostSignificant;
+    private long debitAccountIdLeastSignificant;
+    private long debitAccountIdMostSignificant;
+    private long creditAccountIdLeastSignificant;
+    private long creditAccountIdMostSignificant;
+    private long userDataLeastSignificant;
+    private long userDataMostSignificant;
+    private long pendingIdLeastSignificant;
+    private long pendingIdMostSignificant;
     private long timeout;
     private int ledger;
     private short code;
     private short flags;
-    private long amount = 0;
+    private long amount;
     private long timestamp;
 
     public Transfer() {
-        id = ZERO;
-        debitAccountId = ZERO;
-        creditAccountId = ZERO;
-        userData = ZERO;
-        pendingId = ZERO;
-        timeout = 0;
+        idLeastSignificant = 0L;
+        idMostSignificant = 0L;
+        debitAccountIdLeastSignificant = 0L;
+        debitAccountIdMostSignificant = 0L;
+        creditAccountIdLeastSignificant = 0L;
+        creditAccountIdMostSignificant = 0L;
+        userDataLeastSignificant = 0L;
+        userDataMostSignificant = 0L;
+        pendingIdLeastSignificant = 0L;
+        pendingIdMostSignificant = 0L;
+        timeout = 0L;
         ledger = 0;
         code = 0;
         flags = TransferFlags.NONE;
-        amount = 0;
-        timestamp = 0;
+        amount = 0L;
+        timestamp = 0L;
     }
 
     Transfer(ByteBuffer ptr) {
 
-        id = Batch.uuidFromBuffer(ptr);
-        debitAccountId = Batch.uuidFromBuffer(ptr);
-        creditAccountId = Batch.uuidFromBuffer(ptr);
-        userData = Batch.uuidFromBuffer(ptr);
+        idLeastSignificant = ptr.getLong();
+        idMostSignificant = ptr.getLong();
+        debitAccountIdLeastSignificant = ptr.getLong();
+        debitAccountIdMostSignificant = ptr.getLong();
+        creditAccountIdLeastSignificant = ptr.getLong();
+        creditAccountIdMostSignificant = ptr.getLong();
+        userDataLeastSignificant = ptr.getLong();
+        userDataMostSignificant = ptr.getLong();
         ptr = ptr.position(ptr.position() + Struct.RESERVED.length);
-        pendingId = Batch.uuidFromBuffer(ptr);
+        pendingIdLeastSignificant = ptr.getLong();
+        pendingIdMostSignificant = ptr.getLong();
         timeout = ptr.getLong();
         ledger = ptr.getInt();
         code = ptr.getShort();
@@ -55,132 +68,252 @@ public final class Transfer {
     }
 
     /**
-     * Gets an identifier for this transfer, defined by the user.
-     *
-     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
-     *         128-bit integer.
-     */
-    public UUID getId() {
-        return id;
-    }
-
-    /**
-     * Sets an identifier for this transfer, defined by the user.
      * <p>
-     * Must be unique and non-zero.
      *
-     * @param id an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
-     *        unique 128-bit integer.
-     * @throws NullPointerException if {@code id} is null.
+     * @return
      */
-    public void setId(UUID id) {
-        if (id == null)
-            throw new NullPointerException("Id cannot be null");
-
-        this.id = id;
+    public byte[] getId() {
+        return UInt128.toBytes(idLeastSignificant, idMostSignificant);
     }
 
     /**
-     *
-     *
-     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
-     *         128-bit integer.
-     */
-    public UUID getDebitAccountId() {
-        return debitAccountId;
-    }
-
-    /**
-     *
      * <p>
-     * Must be unique and non-zero.
      *
-     * @param debitAccountId an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any
-     *        other unique 128-bit integer.
-     * @throws NullPointerException if {@code debitAccountId} is null.
+     * @return
      */
-    public void setDebitAccountId(UUID debitAccountId) {
-        if (debitAccountId == null)
-            throw new NullPointerException("Debit account id cannot be null");
-
-        this.debitAccountId = debitAccountId;
-    }
-
-    /**
-     *
-     *
-     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
-     *         128-bit integer.
-     */
-    public UUID getCreditAccountId() {
-        return creditAccountId;
-    }
-
-    /**
-     *
-     * <p>
-     * Must be unique and non-zero.
-     *
-     * @param creditAccountId an {@link java.util.UUID} representing an integer-encoded UUIDv4 or
-     *        any other unique 128-bit integer.
-     * @throws NullPointerException if {@code creditAccountId} is null.
-     */
-    public void setCreditAccountId(UUID creditAccountId) {
-        if (creditAccountId == null)
-            throw new NullPointerException("Credit account id cannot be null");
-
-        this.creditAccountId = creditAccountId;
-    }
-
-    /**
-     * Gets the secondary identifier to link this transfer to an external entity.
-     *
-     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
-     *         128-bit integer.
-     */
-    public UUID getUserData() {
-        return userData;
-    }
-
-    /**
-     * Sets the secondary identifier to link this transfer to an external entity.
-     * <p>
-     * May be zero, null values are converted to zero.
-     *
-     * @param userData an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other
-     *        unique 128-bit integer.
-     */
-    public void setUserData(UUID userData) {
-        if (userData == null) {
-            this.userData = ZERO;
-        } else {
-            this.userData = userData;
+    public long getId(Bytes part) {
+        switch (part) {
+            case LeastSignificant:
+                return idLeastSignificant;
+            case MostSignificant:
+                return idMostSignificant;
+            default:
+                throw new IllegalArgumentException("Invalid byte part");
         }
     }
 
     /**
+     * <p>
      *
-     *
-     * @return an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any other unique
-     *         128-bit integer.
+     * @param leastSignificant
+     * @param mostSignificant
      */
-    public UUID getPendingId() {
-        return pendingId;
+    public void setId(final long leastSignificant, final long mostSignificant) {
+        this.idLeastSignificant = leastSignificant;
+        this.idMostSignificant = mostSignificant;
     }
 
     /**
+     * <p>
      *
+     * @param id
+     * @throws NullPointerException if {@code id} is null.
+     * @throws IllegalArgumentException if {@code id} is not 16 bytes long.
+     */
+    public void setId(final byte[] id) {
+        this.idLeastSignificant = UInt128.getLong(id, Bytes.LeastSignificant);
+        this.idMostSignificant = UInt128.getLong(id, Bytes.MostSignificant);
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public byte[] getDebitAccountId() {
+        return UInt128.toBytes(debitAccountIdLeastSignificant, debitAccountIdMostSignificant);
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public long getDebitAccountId(Bytes part) {
+        switch (part) {
+            case LeastSignificant:
+                return debitAccountIdLeastSignificant;
+            case MostSignificant:
+                return debitAccountIdMostSignificant;
+            default:
+                throw new IllegalArgumentException("Invalid byte part");
+        }
+    }
+
+    /**
+     * <p>
+     *
+     * @param leastSignificant
+     * @param mostSignificant
+     */
+    public void setDebitAccountId(final long leastSignificant, final long mostSignificant) {
+        this.debitAccountIdLeastSignificant = leastSignificant;
+        this.debitAccountIdMostSignificant = mostSignificant;
+    }
+
+    /**
+     * <p>
+     *
+     * @param id
+     * @throws NullPointerException if {@code id} is null.
+     * @throws IllegalArgumentException if {@code id} is not 16 bytes long.
+     */
+    public void setDebitAccountId(final byte[] id) {
+        this.debitAccountIdLeastSignificant = UInt128.getLong(id, Bytes.LeastSignificant);
+        this.debitAccountIdMostSignificant = UInt128.getLong(id, Bytes.MostSignificant);
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public byte[] getCreditAccountId() {
+        return UInt128.toBytes(creditAccountIdLeastSignificant, creditAccountIdMostSignificant);
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public long getCreditAccountId(Bytes part) {
+        switch (part) {
+            case LeastSignificant:
+                return creditAccountIdLeastSignificant;
+            case MostSignificant:
+                return creditAccountIdMostSignificant;
+            default:
+                throw new IllegalArgumentException("Invalid byte part");
+        }
+    }
+
+    /**
+     * <p>
+     *
+     * @param leastSignificant
+     * @param mostSignificant
+     */
+    public void setCreditAccountId(final long leastSignificant, final long mostSignificant) {
+        this.creditAccountIdLeastSignificant = leastSignificant;
+        this.creditAccountIdMostSignificant = mostSignificant;
+    }
+
+    /**
+     * <p>
+     *
+     * @param id
+     * @throws NullPointerException if {@code id} is null.
+     * @throws IllegalArgumentException if {@code id} is not 16 bytes long.
+     */
+    public void setCreditAccountId(final byte[] id) {
+        this.creditAccountIdLeastSignificant = UInt128.getLong(id, Bytes.LeastSignificant);
+        this.creditAccountIdMostSignificant = UInt128.getLong(id, Bytes.MostSignificant);
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public byte[] getUserData() {
+        return UInt128.toBytes(userDataLeastSignificant, userDataMostSignificant);
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public long getUserData(Bytes part) {
+        switch (part) {
+            case LeastSignificant:
+                return userDataLeastSignificant;
+            case MostSignificant:
+                return userDataMostSignificant;
+            default:
+                throw new IllegalArgumentException("Invalid byte part");
+        }
+    }
+
+    /**
+     * <p>
+     *
+     * @param leastSignificant
+     * @param mostSignificant
+     */
+    public void setUserData(long leastSignificant, long mostSignificant) {
+        this.userDataLeastSignificant = leastSignificant;
+        this.userDataMostSignificant = mostSignificant;
+    }
+
+    /**
      * <p>
      * May be zero, null values are converted to zero.
      *
-     * @param pendingId an {@link java.util.UUID} representing an integer-encoded UUIDv4 or any
-     *        other unique 128-bit integer.
+     * @param userData
+     * @throws IllegalArgumentException if {@code userData} is not 16 bytes long.
      */
-    public void setPendingId(UUID pendingId) {
-        if (pendingId == null) {
-            this.pendingId = ZERO;
+    public void setUserData(final byte[] userData) {
+        if (userData == null) {
+            this.userDataLeastSignificant = 0L;
+            this.userDataMostSignificant = 0L;
         } else {
-            this.pendingId = pendingId;
+            this.userDataLeastSignificant = UInt128.getLong(userData, Bytes.LeastSignificant);
+            this.userDataMostSignificant = UInt128.getLong(userData, Bytes.MostSignificant);
+        }
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public byte[] getPendingId() {
+        return UInt128.toBytes(pendingIdLeastSignificant, pendingIdMostSignificant);
+    }
+
+    /**
+     * <p>
+     *
+     * @return
+     */
+    public long getPendingId(Bytes part) {
+        switch (part) {
+            case LeastSignificant:
+                return pendingIdLeastSignificant;
+            case MostSignificant:
+                return pendingIdMostSignificant;
+            default:
+                throw new IllegalArgumentException("Invalid byte part");
+        }
+    }
+
+    /**
+     * <p>
+     *
+     * @param leastSignificant
+     * @param mostSignificant
+     */
+    public void setPendingId(long leastSignificant, long mostSignificant) {
+        this.pendingIdLeastSignificant = leastSignificant;
+        this.pendingIdMostSignificant = mostSignificant;
+    }
+
+    /**
+     * <p>
+     * May be zero, null values are converted to zero.
+     *
+     * @param userData
+     * @throws IllegalArgumentException if {@code userData} is not 16 bytes long.
+     */
+    public void setPendingId(final byte[] pendingId) {
+        if (pendingId == null) {
+            this.pendingIdLeastSignificant = 0L;
+            this.pendingIdMostSignificant = 0L;
+        } else {
+            this.pendingIdLeastSignificant = UInt128.getLong(pendingId, Bytes.LeastSignificant);
+            this.pendingIdMostSignificant = UInt128.getLong(pendingId, Bytes.MostSignificant);
         }
     }
 
@@ -312,18 +445,18 @@ public final class Transfer {
         this.timestamp = timestamp;
     }
 
-    void save(ByteBuffer ptr) {
-        ptr.putLong(id.getLeastSignificantBits());
-        ptr.putLong(id.getMostSignificantBits());
-        ptr.putLong(debitAccountId.getLeastSignificantBits());
-        ptr.putLong(debitAccountId.getMostSignificantBits());
-        ptr.putLong(creditAccountId.getLeastSignificantBits());
-        ptr.putLong(creditAccountId.getMostSignificantBits());
-        ptr.putLong(userData.getLeastSignificantBits());
-        ptr.putLong(userData.getMostSignificantBits());
+    void copyTo(ByteBuffer ptr) {
+        ptr.putLong(idLeastSignificant);
+        ptr.putLong(idMostSignificant);
+        ptr.putLong(debitAccountIdLeastSignificant);
+        ptr.putLong(debitAccountIdMostSignificant);
+        ptr.putLong(creditAccountIdLeastSignificant);
+        ptr.putLong(creditAccountIdMostSignificant);
+        ptr.putLong(userDataLeastSignificant);
+        ptr.putLong(userDataMostSignificant);
         ptr.put(Struct.RESERVED);
-        ptr.putLong(pendingId.getLeastSignificantBits());
-        ptr.putLong(pendingId.getMostSignificantBits());
+        ptr.putLong(pendingIdLeastSignificant);
+        ptr.putLong(pendingIdMostSignificant);
         ptr.putLong(timeout);
         ptr.putInt(ledger);
         ptr.putShort(code);
