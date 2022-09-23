@@ -25,7 +25,12 @@ pub fn KWayMergeIterator(
 
         context: *Context,
 
-        /// Sorted array of keys, with each key representing the next key in each stream.
+        /// Array of keys, with each key representing the next key in each stream.
+        ///
+        /// Structured as a binary heap:
+        /// * When `direction=ascending`, keys are ordered low-to-high.
+        /// * When `direction=descending`, keys are ordered high-to-low.
+        /// * Equivalent keys are ordered from high precedence to low.
         keys: [k_max]Key,
 
         /// For each key in keys above, the corresponding index of the stream containing that key.
@@ -53,7 +58,8 @@ pub fn KWayMergeIterator(
                 .direction = direction,
             };
 
-            // We must loop on stream_index but assign at it.k, as k may be less than stream_index.
+            // We must loop on stream_index but assign at it.k, as k may be less than stream_index
+            // when there are empty streams.
             // TODO Do we have test coverage for this edge case?
             var stream_index: u32 = 0;
             while (stream_index < stream_count_max) : (stream_index += 1) {

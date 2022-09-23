@@ -22,9 +22,12 @@ pub fn TableImmutableType(comptime Table: type) type {
         snapshot_min: u64,
         free: bool,
 
-        pub fn init(allocator: mem.Allocator, commit_count_max: u32) !TableImmutable {
+        /// `commit_entries_max` is the maximum number of Values that can be inserted by a single commit.
+        pub fn init(allocator: mem.Allocator, commit_entries_max: u32) !TableImmutable {
+            assert(commit_entries_max > 0);
+
             // The in-memory immutable table is the same size as the mutable table:
-            const value_count_max = commit_count_max * config.lsm_batch_multiple;
+            const value_count_max = commit_entries_max * config.lsm_batch_multiple;
             const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
             assert(data_block_count <= Table.data_block_count_max);
 
@@ -45,11 +48,13 @@ pub fn TableImmutableType(comptime Table: type) type {
         }
 
         pub inline fn key_min(table: *const TableImmutable) Key {
+            assert(!table.free);
             assert(table.values.len > 0);
             return key_from_value(&table.values[0]);
         }
 
         pub inline fn key_max(table: *const TableImmutable) Key {
+            assert(!table.free);
             assert(table.values.len > 0);
             return key_from_value(&table.values[table.values.len - 1]);
         }
@@ -96,7 +101,7 @@ pub fn TableImmutableType(comptime Table: type) type {
                     assert(i > 0);
                     const left_key = key_from_value(&sorted_values[i - 1]);
                     const right_key = key_from_value(&sorted_values[i]);
-                    assert(compare_keys(left_key, right_key) != .gt);
+                    assert(compare_keys(left_key, right_key) == .lt);
                 }
             }
 
@@ -140,7 +145,7 @@ pub fn TableImmutableIteratorType(comptime Table: type, comptime Storage: type) 
         const TableImmutableIterator = @This();
         const TableImmutable = TableImmutableType(Table);
 
-        table: *TableImmutable,
+        table: *const TableImmutable,
         values_index: u32,
 
         pub fn init(allocator: mem.Allocator) !TableImmutableIterator {
@@ -158,7 +163,7 @@ pub fn TableImmutableIteratorType(comptime Table: type, comptime Storage: type) 
         }
 
         pub const Context = struct {
-            table: *TableImmutable,
+            table: *const TableImmutable,
         };
 
         pub fn start(
@@ -174,21 +179,23 @@ pub fn TableImmutableIteratorType(comptime Table: type, comptime Storage: type) 
         }
 
         pub fn tick(it: *const TableImmutableIterator) bool {
-            _ = it;
+            assert(!it.table.free);
             return false; // No I/O is performed as it's all in memory.
         }
 
         pub fn buffered_all_values(it: *const TableImmutableIterator) bool {
-            _ = it;
+            assert(!it.table.free);
             return true; // All values are "buffered" in memory.
         }
 
         pub fn peek(it: *const TableImmutableIterator) ?Table.Key {
+            assert(!it.table.free);
             if (it.values_index == it.table.values.len) return null;
             return Table.key_from_value(&it.table.values[it.values_index]);
         }
 
         pub fn pop(it: *TableImmutableIterator) Table.Value {
+            assert(!it.table.free);
             defer it.values_index += 1;
             return it.table.values[it.values_index];
         }

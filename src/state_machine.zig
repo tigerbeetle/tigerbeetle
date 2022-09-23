@@ -65,9 +65,10 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub const Options = struct {
             lsm_forest_node_count: u32,
-            cache_size_accounts: u32,
-            cache_size_transfers: u32,
-            cache_size_posted: u32,
+            cache_entries_accounts: u32,
+            cache_entries_transfers: u32,
+            cache_entries_posted: u32,
+            message_body_size_max: usize,
         };
 
         prepare_timestamp: u64,
@@ -92,20 +93,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 allocator,
                 grid,
                 options.lsm_forest_node_count,
-                .{
-                    .accounts = .{
-                        .cache_size = options.cache_size_accounts,
-                        .commit_count_max = 8191,
-                    },
-                    .transfers = .{
-                        .cache_size = options.cache_size_transfers,
-                        .commit_count_max = 8191 * 2,
-                    },
-                    .posted = .{
-                        .cache_size = options.cache_size_posted,
-                        .commit_count_max = 8191 * 2,
-                    },
-                },
+                forest_options(options),
             );
             errdefer forest.deinit(allocator);
 
@@ -368,7 +356,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         pub fn tick(self: *StateMachine) void {
-            self.forest.tick();
+            _ = self;
         }
 
         pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
@@ -899,6 +887,97 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn get_posted(self: *const StateMachine, pending_id: u128) ?bool {
             return self.forest.grooves.posted.get(pending_id);
         }
+
+        pub fn forest_options(options: Options) Forest.GroovesOptions {
+            const batch_accounts_max = @intCast(u32, @divFloor(
+                options.message_body_size_max,
+                @sizeOf(Account),
+            ));
+            const batch_transfers_max = @intCast(u32, @divFloor(
+                options.message_body_size_max,
+                @sizeOf(Transfer),
+            ));
+            assert(batch_accounts_max > 0);
+            assert(batch_transfers_max > 0);
+
+            return .{
+                .accounts = .{
+                    .cache_entries_max = options.cache_entries_accounts,
+                    .prefetch_entries_max = std.math.max(
+                        // create_account()/lookup_account() looks up 1 account per item.
+                        batch_accounts_max,
+                        // create_transfer()/post_or_void_pending_transfer() looks up 2
+                        // accounts for every transfer.
+                        2 * batch_transfers_max,
+                    ),
+                    .tree_options_object = .{
+                        .commit_entries_max = math.max(
+                            batch_accounts_max,
+                            // ×2 because creating a transfer will update 2 accounts.
+                            2 * batch_transfers_max,
+                        ),
+                    },
+                    .tree_options_id = .{ .commit_entries_max = batch_accounts_max },
+                    .tree_options_index = .{
+                        .user_data = .{ .commit_entries_max = batch_accounts_max },
+                        .ledger = .{ .commit_entries_max = batch_accounts_max },
+                        .code = .{ .commit_entries_max = batch_accounts_max },
+                        // Transfers mutate the secondary indices for debits/credits pending/posted.
+                        //
+                        // * Each mutation results in a remove and an insert: the ×2 multiplier.
+                        // * Each transfer modifies two accounts. However, this does not
+                        //   necessitate an additional ×2 multiplier — the credits of the debit
+                        //   account and the debits of the credit account are not modified.
+                        .debits_pending = .{
+                            .commit_entries_max = math.max(
+                                batch_accounts_max,
+                                2 * batch_transfers_max,
+                            ),
+                        },
+                        .debits_posted = .{
+                            .commit_entries_max = math.max(
+                                batch_accounts_max,
+                                2 * batch_transfers_max,
+                            ),
+                        },
+                        .credits_pending = .{
+                            .commit_entries_max = math.max(
+                                batch_accounts_max,
+                                2 * batch_transfers_max,
+                            ),
+                        },
+                        .credits_posted = .{
+                            .commit_entries_max = math.max(
+                                batch_accounts_max,
+                                2 * batch_transfers_max,
+                            ),
+                        },
+                    },
+                },
+                .transfers = .{
+                    .cache_entries_max = options.cache_entries_transfers,
+                    // *2 to fetch pending and post/void transfer.
+                    .prefetch_entries_max = 2 * batch_transfers_max,
+                    .tree_options_object = .{ .commit_entries_max = batch_transfers_max },
+                    .tree_options_id = .{ .commit_entries_max = batch_transfers_max },
+                    .tree_options_index = .{
+                        .debit_account_id = .{ .commit_entries_max = batch_transfers_max },
+                        .credit_account_id = .{ .commit_entries_max = batch_transfers_max },
+                        .user_data = .{ .commit_entries_max = batch_transfers_max },
+                        .pending_id = .{ .commit_entries_max = batch_transfers_max },
+                        .timeout = .{ .commit_entries_max = batch_transfers_max },
+                        .ledger = .{ .commit_entries_max = batch_transfers_max },
+                        .code = .{ .commit_entries_max = batch_transfers_max },
+                        .amount = .{ .commit_entries_max = batch_transfers_max },
+                    },
+                },
+                .posted = .{
+                    .cache_entries_max = options.cache_entries_posted,
+                    .prefetch_entries_max = batch_transfers_max,
+                    .commit_entries_max = batch_transfers_max,
+                },
+            };
+        }
     };
 }
 
@@ -970,7 +1049,11 @@ const TestContext = struct {
     grid: Grid,
     state_machine: StateMachine,
 
-    fn init(ctx: *TestContext, allocator: mem.Allocator, options: StateMachine.Options) !void {
+    fn init(ctx: *TestContext, allocator: mem.Allocator, options: struct {
+        cache_entries_accounts: u32,
+        cache_entries_transfers: u32,
+        cache_entries_posted: u32,
+    }) !void {
         ctx.storage = try Storage.init(
             allocator,
             4096,
@@ -999,7 +1082,15 @@ const TestContext = struct {
         ctx.grid = try Grid.init(allocator, &ctx.superblock);
         errdefer ctx.grid.deinit(allocator);
 
-        ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, options);
+        ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
+            .lsm_forest_node_count = 1,
+            .cache_entries_accounts = options.cache_entries_accounts,
+            .cache_entries_transfers = options.cache_entries_transfers,
+            .cache_entries_posted = options.cache_entries_posted,
+            // Overestimate the batch size (in order overprovision commit_entries_max)
+            // because the test never compacts.
+            .message_body_size_max = 1000 * @sizeOf(Account),
+        });
         errdefer ctx.state_machine.deinit(allocator);
     }
 
@@ -1365,10 +1456,9 @@ test "create/lookup/rollback accounts" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .lsm_forest_node_count = 1,
-        .cache_size_accounts = vectors.len,
-        .cache_size_transfers = 0,
-        .cache_size_posted = 0,
+        .cache_entries_accounts = vectors.len,
+        .cache_entries_transfers = 0,
+        .cache_entries_posted = 0,
     });
     defer context.deinit(testing.allocator);
 
@@ -1431,10 +1521,9 @@ test "linked accounts" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .lsm_forest_node_count = 1,
-        .cache_size_accounts = accounts_max,
-        .cache_size_transfers = transfers_max,
-        .cache_size_posted = transfers_pending_max,
+        .cache_entries_accounts = accounts_max,
+        .cache_entries_transfers = transfers_max,
+        .cache_entries_posted = transfers_pending_max,
     });
     defer context.deinit(testing.allocator);
 
@@ -1519,10 +1608,9 @@ test "create/lookup/rollback transfers" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .lsm_forest_node_count = 1,
-        .cache_size_accounts = accounts.len,
-        .cache_size_transfers = 1,
-        .cache_size_posted = 0,
+        .cache_entries_accounts = accounts.len,
+        .cache_entries_transfers = 1,
+        .cache_entries_posted = 0,
     });
     defer context.deinit(testing.allocator);
 
@@ -2199,10 +2287,9 @@ test "create/lookup/rollback 2-phase transfers" {
 
     var context: TestContext = undefined;
     try context.init(testing.allocator, .{
-        .lsm_forest_node_count = 1,
-        .cache_size_accounts = accounts.len,
-        .cache_size_transfers = 100,
-        .cache_size_posted = 1,
+        .cache_entries_accounts = accounts.len,
+        .cache_entries_transfers = 100,
+        .cache_entries_posted = 1,
     });
     defer context.deinit(testing.allocator);
 

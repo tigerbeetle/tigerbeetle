@@ -112,7 +112,7 @@ pub const Operation = enum(u8) {
             @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
         }
         if (!@hasField(Op, "root") or std.meta.fieldInfo(Op, .root).value != 1) {
-            @compileError("StateMachine.Operation must have an 'root' field with value 1");
+            @compileError("StateMachine.Operation must have a 'root' field with value 1");
         }
         if (!@hasField(Op, "register") or std.meta.fieldInfo(Op, .register).value != 2) {
             @compileError("StateMachine.Operation must have a 'register' field with value 2");

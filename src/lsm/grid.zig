@@ -12,6 +12,32 @@ const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeC
 
 const log = std.log.scoped(.grid);
 
+/// A block's type is implicitly determined by how its address is stored (e.g. in the index block).
+/// BlockType is an additional check that a block has the expected type on read.
+///
+/// The BlockType is stored in the block's `header.operation`.
+pub const BlockType = enum(u8) {
+    /// Unused; verifies that no block is written with a default 0 operation.
+    reserved = 0,
+
+    manifest = 1,
+    index = 2,
+    filter = 3,
+    data = 4,
+
+    pub inline fn from(vsr_operation: vsr.Operation) BlockType {
+        return @intToEnum(BlockType, @enumToInt(vsr_operation));
+    }
+
+    pub inline fn operation(block_type: BlockType) vsr.Operation {
+        return @intToEnum(vsr.Operation, @enumToInt(block_type));
+    }
+};
+
+/// The Grid provides access to on-disk blocks (blobs of `block_size` bytes).
+/// Each block is identified by an "address" (`u64`, beginning at 1).
+///
+/// Recently/frequently-used blocks are transparently cached in memory.
 pub fn GridType(comptime Storage: type) type {
     const block_size = config.block_size;
     const SuperBlock = SuperBlockType(Storage);
@@ -84,6 +110,7 @@ pub fn GridType(comptime Storage: type) type {
             callback: fn (*Grid.Read, BlockPtrConst) void,
             address: u64,
             checksum: u128,
+            block_type: BlockType,
 
             /// Link for read_queue/read_recovery_queue/ReadIOP.reads linked lists.
             next: ?*Read = null,
@@ -313,9 +340,11 @@ pub fn GridType(comptime Storage: type) type {
             read: *Grid.Read,
             address: u64,
             checksum: u128,
+            block_type: BlockType,
         ) void {
             assert(grid.superblock.opened);
             assert(address > 0);
+            assert(block_type != .reserved);
             assert(!grid.superblock.free_set.is_free(address));
             grid.assert_not_writing(address, null);
 
@@ -323,6 +352,7 @@ pub fn GridType(comptime Storage: type) type {
                 .callback = callback,
                 .address = address,
                 .checksum = checksum,
+                .block_type = block_type,
             };
 
             if (grid.read_recursion_guard) {
@@ -406,6 +436,7 @@ pub fn GridType(comptime Storage: type) type {
 
             const address = iop.reads.peek().?.address;
             const checksum = iop.reads.peek().?.checksum;
+            const block_type = iop.reads.peek().?.block_type;
 
             const checksum_valid = header.valid_checksum();
             const checksum_body_valid = checksum_valid and
@@ -414,11 +445,15 @@ pub fn GridType(comptime Storage: type) type {
 
             if (checksum_valid and checksum_body_valid and checksum_match) {
                 assert(!grid.read_recursion_guard);
+                assert(header.op == address);
+                assert(header.operation == block_type.operation());
+
                 grid.read_recursion_guard = true;
                 defer grid.read_recursion_guard = false;
                 while (iop.reads.pop()) |read| {
                     assert(read.address == address);
                     assert(read.checksum == checksum);
+                    assert(read.block_type == BlockType.from(header.operation));
                     read.callback(read, iop.block);
                 }
             } else {
@@ -428,8 +463,16 @@ pub fn GridType(comptime Storage: type) type {
                     log.err("invalid checksum body at address {}", .{address});
                 } else if (!checksum_match) {
                     log.err(
-                        "expected address={} checksum={}, found address={} checksum={}",
-                        .{ address, checksum, header.op, header.checksum },
+                        "expected address={} checksum={} block_type={}, " ++
+                        "found address={} checksum={} block_type={}",
+                        .{
+                            address,
+                            checksum,
+                            block_type,
+                            header.op,
+                            header.checksum,
+                            @enumToInt(header.operation),
+                        },
                     );
                 } else {
                     unreachable;

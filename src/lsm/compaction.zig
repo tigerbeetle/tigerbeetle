@@ -1,3 +1,33 @@
+//! Compaction moves or merges a table's values into the next level.
+//!
+//!
+//! Compaction overview:
+//!
+//! 1. Given:
+//!
+//!   - levels A and B, where A+1=B
+//!   - a single table in level A ("table A")
+//!   - all tables from level B which intersect table A's key range ("tables B")
+//!     (This can include anything between 0 tables and all of level B's tables.)
+//!
+//! 2. If table A's key range is disjoint from the keys in level B, move table A into level B.
+//!    All done! (But if the key ranges intersect, jump to step 3).
+//!
+//! 3. Create an iterator from the sort-merge of table A and the concatenation of tables B.
+//!    If the same key exists in level A and B, take A's and discard B's. †
+//!
+//! 4. Write the sort-merge iterator into a sequence of new tables on disk.
+//!
+//! 5. Update the old level-B tables in the Manifest with their new `snapshot_max` so that they
+//!    become invisible to subsequent read transactions.
+//!
+//! 6. Insert the new level-B tables into the Manifest.
+//!
+//!
+//! † When A's value is a tombstone, there is a special case for garbage collection. When either:
+//! * level B is the final level, or
+//! * A's key does not exist in B or any deeper level,
+//! then the tombstone is omitted from the compacted output (see: `compaction_must_drop_tombstones`).
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;
@@ -338,6 +368,7 @@ pub fn CompactionType(
             // This happens after IO for the first reads complete.
             if (compaction.merge_iterator == null) {
                 compaction.merge_iterator = MergeIterator.init(compaction, k, .ascending);
+                assert(!compaction.merge_iterator.?.empty());
             }
 
             assert(!compaction.data.writable);

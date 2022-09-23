@@ -119,15 +119,12 @@ pub fn main() !void {
 
         const timer = try std.time.Timer.start();
         const repetitions = std.math.max(1, @divFloor(samples, queries.len));
-        // Sum the results, just to make sure the compiler doesn't optimize all of this out.
-        var sum: Key = 0;
         var j: usize = 0;
         while (j < repetitions) : (j += 1) {
             for (queries) |query| {
-                sum += array.absolute_index_for_cursor(array.search(query));
+                std.mem.doNotOptimizeAway(array.absolute_index_for_cursor(array.search(query)));
             }
         }
-        assert(sum > 0);
         const time = timer.read() / repetitions / queries.len;
 
         try stdout.print("KeyType={} ValueCount={:_>7} ValueSize={:_>2}B NodeSize={:_>6}B LookupTime={:_>6}ns\n", .{

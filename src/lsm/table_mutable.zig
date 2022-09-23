@@ -22,13 +22,13 @@ pub fn TableMutableType(comptime Table: type) type {
 
         value_count_max: u32,
         values: Values = .{},
-        dirty: bool = false,
 
-        pub fn init(allocator: mem.Allocator, commit_count_max: u32) !TableMutable {
+        /// `commit_entries_max` is the maximum number of Values that can be inserted by a single commit.
+        pub fn init(allocator: mem.Allocator, commit_entries_max: u32) !TableMutable {
             comptime assert(config.lsm_batch_multiple > 0);
-            assert(commit_count_max > 0);
+            assert(commit_entries_max > 0);
 
-            const value_count_max = commit_count_max * config.lsm_batch_multiple;
+            const value_count_max = commit_entries_max * config.lsm_batch_multiple;
             const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
             assert(data_block_count <= Table.data_block_count_max);
 
@@ -54,24 +54,25 @@ pub fn TableMutableType(comptime Table: type) type {
             // If the key is already present in the hash map, the old key will not be overwritten
             // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
             // level getOrPut() API and manually overwrite the old key.
-            const gop = table.values.getOrPutAssumeCapacity(value.*);
-            gop.key_ptr.* = value.*;
+            const upsert = table.values.getOrPutAssumeCapacity(value.*);
+            upsert.key_ptr.* = value.*;
 
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
-            table.dirty = true;
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
             // If the key is already present in the hash map, the old key will not be overwritten
             // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
             // level getOrPut() API and manually overwrite the old key.
-            const tombstone = tombstone_from_key(key_from_value(value));
-            const gop = table.values.getOrPutAssumeCapacity(tombstone);
-            gop.key_ptr.* = tombstone;
+            const upsert = table.values.getOrPutAssumeCapacity(value.*);
+            upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+
             assert(table.values.count() <= table.value_count_max);
         }
 
+        /// This may return `false` even when committing would succeed — it pessimistically
+        /// assumes that none of the batch's keys are already in `table.values`.
         pub fn can_commit_batch(table: *TableMutable, batch_count: u32) bool {
             assert(batch_count <= table.value_count_max);
             return (table.count() + batch_count) <= table.value_count_max;
@@ -81,7 +82,6 @@ pub fn TableMutableType(comptime Table: type) type {
             assert(table.values.count() > 0);
             table.values.clearRetainingCapacity();
             assert(table.values.count() == 0);
-            table.dirty = false;
         }
 
         pub fn count(table: *const TableMutable) u32 {

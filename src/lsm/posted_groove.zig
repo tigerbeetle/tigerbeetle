@@ -44,7 +44,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 return value.id;
             }
 
-            // TODO(ifreund): disallow this id in the state machine.
             const sentinel_key = math.maxInt(u128);
 
             inline fn tombstone(value: *const Value) bool {
@@ -69,11 +68,11 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             Value.tombstone_from_key,
         );
 
-        const Tree = TreeType(Table, Storage, "groove");
+        const Tree = TreeType(Table, Storage, "posted_groove");
         const Grid = GridType(Storage);
 
         const PrefetchIDs = std.AutoHashMapUnmanaged(u128, void);
-        const PrefetchObjects = std.AutoHashMapUnmanaged(u128, bool);
+        const PrefetchObjects = std.AutoHashMapUnmanaged(u128, bool); // true:posted, false:voided
 
         cache: *Tree.ValueCache,
         tree: Tree,
@@ -90,42 +89,29 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
 
-        /// This field is necessary to expose the same open()/compact_cpu()/compact_io() function
+        /// This field is necessary to expose the same open()/compact()/checkpoint() function
         /// signatures as the real Groove type.
         callback: ?fn (*PostedGroove) void = null,
+
+        /// See comments for Groove.Options.
+        pub const Options = struct {
+            cache_entries_max: u32,
+            prefetch_entries_max: u32,
+            commit_entries_max: u32,
+        };
 
         pub fn init(
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            // The cache size is meant to be computed based on the left over available memory
-            // that tigerbeetle was given to allocate from CLI arguments.
-            cache_size: u32,
-            // In general, the commit count max for a field, depends on the field's object,
-            // how many objects might be changed by a batch:
-            //   (config.message_size_max - sizeOf(vsr.header))
-            // For example, there are at most 8191 transfers in a batch.
-            // So commit_count_max=8191 for transfer objects and indexes.
-            //
-            // However, if a transfer is ever mutated, then this will double commit_count_max
-            // since the old index might need to be removed, and the new index inserted.
-            //
-            // A way to see this is by looking at the state machine. If a transfer is inserted,
-            // how many accounts and transfer put/removes will be generated?
-            //
-            // This also means looking at the state machine operation that will generate the
-            // most put/removes in the worst case.
-            // For example, create_accounts will put at most 8191 accounts.
-            // However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
-            // some of these accounts may exist, requiring a remove/put to update the index.
-            commit_count_max: u32,
+            options: Options,
         ) !PostedGroove {
-            // Cache is dynamically allocated to pass a pointer into the Object tree.
+            // Cache is heap-allocated to pass a pointer into the Object tree.
             const cache = try allocator.create(Tree.ValueCache);
             errdefer allocator.destroy(cache);
 
             cache.* = .{};
-            try cache.ensureTotalCapacity(allocator, cache_size);
+            try cache.ensureTotalCapacity(allocator, options.cache_entries_max);
             errdefer cache.deinit(allocator);
 
             var tree = try Tree.init(
@@ -134,20 +120,17 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 grid,
                 cache,
                 .{
-                    .commit_count_max = commit_count_max,
+                    .commit_entries_max = options.commit_entries_max,
                 },
             );
             errdefer tree.deinit(allocator);
 
-            // TODO: document why this is twice the commit count max.
-            const prefetch_count_max = commit_count_max * 2;
-
             var prefetch_ids = PrefetchIDs{};
-            try prefetch_ids.ensureTotalCapacity(allocator, prefetch_count_max);
+            try prefetch_ids.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_ids.deinit(allocator);
 
             var prefetch_objects = PrefetchObjects{};
-            try prefetch_objects.ensureTotalCapacity(allocator, prefetch_count_max);
+            try prefetch_objects.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_objects.deinit(allocator);
 
             return PostedGroove{
@@ -160,8 +143,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         }
 
         pub fn deinit(groove: *PostedGroove, allocator: mem.Allocator) void {
-            assert(groove.callback == null);
-
             groove.tree.deinit(allocator);
             groove.cache.deinit(allocator);
             allocator.destroy(groove.cache);

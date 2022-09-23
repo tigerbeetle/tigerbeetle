@@ -148,7 +148,7 @@ pub fn GrooveType(
     /// - derived: { .field = fn (*const Object) ?DerivedType }:
     ///     An anonymous struct which contain fields that don't exist on the Object
     ///     but can be derived from an Object instance using the field's corresponding function.
-    comptime options: anytype,
+    comptime groove_options: anytype,
 ) type {
     @setEvalBranchQuota(64000);
 
@@ -160,13 +160,13 @@ pub fn GrooveType(
     comptime var index_fields: []const std.builtin.TypeInfo.StructField = &.{};
 
     // Generate index LSM trees from the struct fields.
-    inline for (std.meta.fields(Object)) |field| {
+    for (std.meta.fields(Object)) |field| {
         // See if we should ignore this field from the options.
         //
         // By default, we ignore the "timestamp" field since it's a special identifier.
-        // Since the "timestamp" is ignored by default, it shouldn't be provided in options.ignored.
+        // Since the "timestamp" is ignored by default, it shouldn't be provided in groove_options.ignored.
         comptime var ignored = mem.eql(u8, field.name, "timestamp") or mem.eql(u8, field.name, "id");
-        inline for (options.ignored) |ignored_field_name| {
+        for (groove_options.ignored) |ignored_field_name| {
             comptime assert(!std.mem.eql(u8, ignored_field_name, "timestamp"));
             comptime assert(!std.mem.eql(u8, ignored_field_name, "id"));
             ignored = ignored or std.mem.eql(u8, field.name, ignored_field_name);
@@ -187,11 +187,11 @@ pub fn GrooveType(
         }
     }
 
-    // Generiate IndexTrees for fields derived from the Value in options.
-    const derived_fields = std.meta.fields(@TypeOf(options.derived));
-    inline for (derived_fields) |field| {
+    // Generate IndexTrees for fields derived from the Value in groove_options.
+    const derived_fields = std.meta.fields(@TypeOf(groove_options.derived));
+    for (derived_fields) |field| {
         // Get the function info for the derived field.
-        const derive_func = @field(options.derived, field.name);
+        const derive_func = @field(groove_options.derived, field.name);
         const derive_func_info = @typeInfo(@TypeOf(derive_func)).Fn;
 
         // Make sure it has only one argument.
@@ -223,6 +223,20 @@ pub fn GrooveType(
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(IndexTree),
+            },
+        };
+    }
+
+    comptime var index_options_fields: []const std.builtin.TypeInfo.StructField = &.{};
+    for (index_fields) |index_field| {
+        const IndexTree = index_field.field_type;
+        index_options_fields = index_options_fields ++ [_]std.builtin.TypeInfo.StructField{
+            .{
+                .name = index_field.name,
+                .field_type = IndexTree.Options,
+                .default_value = null,
+                .is_comptime = false,
+                .alignment = @alignOf(IndexTree.Options),
             },
         };
     }
@@ -265,6 +279,14 @@ pub fn GrooveType(
             .is_tuple = false,
         },
     });
+    const IndexTreeOptions = @Type(.{
+        .Struct = .{
+            .layout = .Auto,
+            .fields = index_options_fields,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
 
     // Verify no hash collisions between all the trees:
     comptime var hashes: []const u128 = &.{ObjectTree.hash};
@@ -273,19 +295,20 @@ pub fn GrooveType(
         const IndexTree = @TypeOf(@field(@as(IndexTrees, undefined), field.name));
         const hash: []const u128 = &.{IndexTree.hash};
 
-        assert(std.mem.containsAtLeast(u128, hashes, 0, hash));
+        assert(std.mem.indexOf(u128, hashes, hash) == null);
         hashes = hashes ++ hash;
     }
 
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len -
-        options.ignored.len -
+        groove_options.ignored.len -
         // The id/timestamp field is implicitly ignored since it's the primary key for ObjectTree:
         2 +
-        std.meta.fields(@TypeOf(options.derived)).len;
+        std.meta.fields(@TypeOf(groove_options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
+    assert(indexes_count_actual == std.meta.fields(IndexTreeOptions).len);
 
     // Generate a helper function for interacting with an Index field type.
     const IndexTreeFieldHelperType = struct {
@@ -304,7 +327,7 @@ pub fn GrooveType(
                 return @TypeOf(@field(@as(Object, undefined), field_name));
             }
 
-            const derived_fn = @TypeOf(@field(options.derived, field_name));
+            const derived_fn = @TypeOf(@field(groove_options.derived, field_name));
             return @typeInfo(derived_fn).Fn.return_type.?.Optional.child;
         }
 
@@ -315,7 +338,7 @@ pub fn GrooveType(
                 /// Try to extract an index from the object, deriving it when necessary.
                 pub fn derive_index(object: *const Object) ?Index {
                     if (comptime is_derived(field_name)) {
-                        return @field(options.derived, field_name)(object);
+                        return @field(groove_options.derived, field_name)(object);
                     } else {
                         return @field(object, field_name);
                     }
@@ -397,41 +420,31 @@ pub fn GrooveType(
         /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
 
+        pub const Options = struct {
+            /// TODO Improve unit in this name to make more clear what should be passed.
+            /// For example, is this a size in bytes or a count in objects? It's a count in objects,
+            /// but the name poorly reflects this.
+            cache_entries_max: u32,
+            /// The maximum number of objects that might be prefetched by a batch.
+            prefetch_entries_max: u32,
+
+            tree_options_object: ObjectTree.Options,
+            tree_options_id: IdTree.Options,
+            tree_options_index: IndexTreeOptions,
+        };
+
         pub fn init(
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            // The cache size is meant to be computed based on the left over available memory
-            // that tigerbeetle was given to allocate from CLI arguments.
-            // TODO Improve unit in this name to make more clear what should be passed.
-            // For example, is this a size in bytes or a count in objects? It's a count in objects,
-            // but the name poorly reflects this.
-            cache_size: u32,
-            // In general, the commit count max for a field, depends on the field's object,
-            // how many objects might be changed by a batch:
-            //   (config.message_size_max - sizeOf(vsr.header))
-            // For example, there are at most 8191 transfers in a batch.
-            // So commit_count_max=8191 for transfer objects and indexes.
-            //
-            // However, if a transfer is ever mutated, then this will double commit_count_max
-            // since the old index might need to be removed, and the new index inserted.
-            //
-            // A way to see this is by looking at the state machine. If a transfer is inserted,
-            // how many accounts and transfer put/removes will be generated?
-            //
-            // This also means looking at the state machine operation that will generate the
-            // most put/removes in the worst case.
-            // For example, create_accounts will put at most 8191 accounts.
-            // However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
-            // some of these accounts may exist, requiring a remove/put to update the index.
-            commit_count_max: u32,
+            options: Options,
         ) !Groove {
-            // Cache is dynamically allocated to pass a pointer into the Object tree.
+            // Cache is heap-allocated to pass a pointer into the Object tree.
             const objects_cache = try allocator.create(ObjectTree.ValueCache);
             errdefer allocator.destroy(objects_cache);
 
             objects_cache.* = .{};
-            try objects_cache.ensureTotalCapacity(allocator, cache_size);
+            try objects_cache.ensureTotalCapacity(allocator, options.cache_entries_max);
             errdefer objects_cache.deinit(allocator);
 
             // Intialize the object LSM tree.
@@ -440,18 +453,16 @@ pub fn GrooveType(
                 node_pool,
                 grid,
                 objects_cache,
-                .{
-                    .commit_count_max = commit_count_max,
-                },
+                options.tree_options_object,
             );
             errdefer object_tree.deinit(allocator);
 
-            // Cache is dynamically allocated to pass a pointer into the ID tree.
+            // Cache is heap-allocated to pass a pointer into the ID tree.
             const ids_cache = try allocator.create(IdTree.ValueCache);
             errdefer allocator.destroy(ids_cache);
 
             ids_cache.* = .{};
-            try ids_cache.ensureTotalCapacity(allocator, cache_size);
+            try ids_cache.ensureTotalCapacity(allocator, options.cache_entries_max);
             errdefer ids_cache.deinit(allocator);
 
             var id_tree = try IdTree.init(
@@ -459,9 +470,7 @@ pub fn GrooveType(
                 node_pool,
                 grid,
                 ids_cache,
-                .{
-                    .commit_count_max = commit_count_max,
-                },
+                options.tree_options_id,
             );
             errdefer id_tree.deinit(allocator);
 
@@ -482,22 +491,17 @@ pub fn GrooveType(
                     node_pool,
                     grid,
                     null, // No value cache for index trees.
-                    .{
-                        .commit_count_max = commit_count_max,
-                    },
+                    @field(options.tree_options_index, field.name),
                 );
                 index_trees_initialized += 1;
             }
 
-            // TODO: document why this is twice the commit count max.
-            const prefetch_count_max = commit_count_max * 2;
-
             var prefetch_ids = PrefetchIDs{};
-            try prefetch_ids.ensureTotalCapacity(allocator, prefetch_count_max);
+            try prefetch_ids.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_ids.deinit(allocator);
 
             var prefetch_objects = PrefetchObjects{};
-            try prefetch_objects.ensureTotalCapacity(allocator, prefetch_count_max);
+            try prefetch_objects.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_objects.deinit(allocator);
 
             return Groove{
@@ -515,10 +519,6 @@ pub fn GrooveType(
         }
 
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
-            assert(groove.join_op == null);
-            assert(groove.join_pending == 0);
-            assert(groove.join_callback == null);
-
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(groove.indexes, field.name).deinit(allocator);
             }
@@ -786,7 +786,7 @@ pub fn GrooveType(
             assert(groove.prefetch_objects.removeAdapted(object.id, PrefetchObjectsAdapter{}));
         }
 
-        /// Maximum number of pending sync callbacks (ObjecTree + IdTree + IndexTrees).
+        /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
         const join_pending_max = 2 + std.meta.fields(IndexTrees).len;
 
         fn JoinType(comptime join_op: JoinOp) type {

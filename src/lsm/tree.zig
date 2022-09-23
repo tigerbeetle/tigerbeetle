@@ -17,7 +17,6 @@ const bloom_filter = @import("bloom_filter.zig");
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const SuperBlockType = vsr.SuperBlockType;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -35,7 +34,7 @@ pub const snapshot_latest: u64 = math.maxInt(u64) - 1;
 // /// write the ops in batch to the memtable/objcache, previously called commit()
 // pub fn write(batch) void
 //
-// /// Flush in memory state to disk, preform merges, etc
+// /// Flush in memory state to disk, perform merges, etc
 // /// Only function that triggers Write I/O in LSMs, as well as some Read
 // /// Make as incremental as possible, don't block the main thread, avoid high latency/spikes
 // pub fn flush(callback) void
@@ -47,14 +46,15 @@ pub const snapshot_latest: u64 = math.maxInt(u64) - 1;
 // pub fn decode_superblock(buffer) void
 //
 
+/// The maximum number of tables for a single tree.
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
-pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name: []const u8) type {
-    const Key = Table.Key;
-    const Value = Table.Value;
-    const compare_keys = Table.compare_keys;
-    const tombstone = Table.tombstone;
-    const tombstone_from_key = Table.tombstone_from_key;
+pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_name: []const u8) type {
+    const Key = TreeTable.Key;
+    const Value = TreeTable.Value;
+    const compare_keys = TreeTable.compare_keys;
+    const tombstone = TreeTable.tombstone;
+    const tombstone_from_key = TreeTable.tombstone_from_key;
 
     const tree_hash = blk: {
         // Blake3 hash does alot at comptime..
@@ -69,7 +69,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         const Tree = @This();
 
         // Expose the Table & hash for the Groove.
-        pub const TableType = Table;
+        pub const Table = TreeTable;
         pub const name = tree_name;
         pub const hash = tree_hash;
 
@@ -120,7 +120,25 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
 
         pub const Options = struct {
             /// The maximum number of keys that may be committed per batch.
-            commit_count_max: u32,
+            ///
+            /// In general, the commit count max for a field depends on the field's object —
+            /// how many objects might be inserted/updated/removed by a batch:
+            ///   (config.message_size_max - sizeOf(vsr.header))
+            /// For example, there are at most 8191 transfers in a batch.
+            /// So commit_entries_max=8191 for transfer objects and indexes.
+            ///
+            /// However, if a transfer is ever mutated, then this will double commit_entries_max
+            /// since the old index might need to be removed, and the new index inserted.
+            ///
+            /// A way to see this is by looking at the state machine. If a transfer is inserted,
+            /// how many accounts and transfer put/removes will be generated?
+            ///
+            /// This also means looking at the state machine operation that will generate the
+            /// most put/removes in the worst case.
+            /// For example, create_accounts will put at most 8191 accounts.
+            /// However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
+            /// some of these accounts may exist, requiring a remove/put to update the index.
+            commit_entries_max: u32,
         };
 
         pub fn init(
@@ -130,11 +148,15 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             value_cache: ?*ValueCache,
             options: Options,
         ) !Tree {
-            var table_mutable = try TableMutable.init(allocator, options.commit_count_max);
+            assert(options.commit_entries_max > 0);
+
+            var table_mutable = try TableMutable.init(allocator, options.commit_entries_max);
             errdefer table_mutable.deinit(allocator);
 
-            var table_immutable = try TableImmutable.init(allocator, options.commit_count_max);
+            var table_immutable = try TableImmutable.init(allocator, options.commit_entries_max);
             errdefer table_immutable.deinit(allocator);
+
+            assert(table_immutable.value_count_max == table_mutable.value_count_max);
 
             var manifest = try Manifest.init(allocator, node_pool, grid, tree_hash);
             errdefer manifest.deinit(allocator);
@@ -296,6 +318,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                     &context.completion,
                     context.index_block_addresses[context.index_block],
                     context.index_block_checksums[context.index_block],
+                    .index,
                 );
             }
 
@@ -318,6 +341,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                     completion,
                     blocks.filter_block_address,
                     blocks.filter_block_checksum,
+                    .filter,
                 );
             }
 
@@ -335,6 +359,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                         completion,
                         context.data_block.?.address,
                         context.data_block.?.checksum,
+                        .data,
                     );
                 } else {
                     // The key is not present in this table, check the next level.
@@ -405,7 +430,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         //
         // A full compaction phase is denoted as a bar or measure, using terms from music notation.
         // Each measure consists of `lsm_batch_multiple` beats or "compaction ticks" of work.
-        // A compaction beat is started asynchronously with `compact_tick` which takes a callback.
+        // A compaction beat is started asynchronously with `compact` which takes a callback.
         // After `compact_tick` is called, `compact_cpu` should be called to enable pipelining.
         // The compaction beat completes when the `compact_tick` callback is invoked.
         //
@@ -434,7 +459,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
         //
         //  - (third) down beat of the measure:
         //      * assert: no compactions are currently running.
-        //      * start odd level and immutable table compactions.
+        //      * start odd level compactions if there are any tables to compact, and only if we must.
+        //      * compact the immutable table if it contains any sorted values (it could be empty).
         //
         //  - (fourth) last beat of the measure:
         //      * finish ticking running odd-level and immutable table compactions.
@@ -504,7 +530,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             const start = (compaction_beat == 0) or
                 (compaction_beat == half_measure_beat_count);
 
-            // The target snapshot of a compaction is actually the previous batch minus one.
+            // The target snapshot of a compaction is actually the previous batch.
             //
             // At the start of the current batch, mutable table inserts from the previous batch
             // would be in the immutable table. This means the current batch compaction will
@@ -653,8 +679,8 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
                 assert(compaction.level_b == 0);
                 log.debug(tree_name ++ ": compact_tick() for immutable table to level 0", .{});
                 compaction.compact_tick(Tree.compact_tick_callback_table_immutable);
-                
             } else {
+                assert(@TypeOf(compaction.*) == CompactionTable);
                 log.debug(tree_name ++ ": compact_tick() for level {d} to level {d}", .{
                     compaction.level_b - 1,
                     compaction.level_b,
@@ -789,7 +815,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             // At the end of every beat:
             // - ensure mutable table can be flushed to immutable table.
             // - compact the manifest before invoking the compact() callback.
-            assert(tree.table_mutable.can_commit_batch(tree.options.commit_count_max));
+            assert(tree.table_mutable.can_commit_batch(tree.options.commit_entries_max));
             tree.manifest.compact(compact_manifest_callback);
         }
 
@@ -816,7 +842,7 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback != null);
 
-            // Invoke the compact_tick() callback after the manifest compacts at the end of the beat.
+            // Invoke the compact() callback after the manifest compacts at the end of the beat.
             const callback = tree.compaction_callback.?;
             tree.compaction_callback = null;
             callback(tree);
@@ -827,10 +853,10 @@ pub fn TreeType(comptime Table: type, comptime Storage: type, comptime tree_name
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
 
-            // Avoid checkpointing if this is not the last beat in the compaction measure.
+            // Assert that this is the last beat in the compaction measure.
             const compaction_beat = tree.compaction_op % config.lsm_batch_multiple;
             const last_beat_in_measure = config.lsm_batch_multiple - 1;
-            if (compaction_beat != last_beat_in_measure) return callback(tree);
+            assert(last_beat_in_measure == compaction_beat);
 
             // Assert no outstanding compactions.
             assert(tree.compaction_table_immutable.status == .idle);
@@ -985,19 +1011,19 @@ pub fn main() !void {
     defer value_cache.deinit(allocator);
 
     const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
-    const commit_count_max = @divFloor(batch_size_max, 128);
+    const commit_entries_max = @divFloor(batch_size_max, 128);
 
     var sort_buffer = try allocator.allocAdvanced(
         u8,
         16,
-        // This must be the greatest commit_count_max and value_size across trees:
-        commit_count_max * config.lsm_batch_multiple * 128,
+        // This must be the greatest commit_entries_max and value_size across trees:
+        commit_entries_max * config.lsm_batch_multiple * 128,
         .exact,
     );
     defer allocator.free(sort_buffer);
 
     // TODO Initialize SuperBlock:
-    var superblock: SuperBlockType(Storage) = undefined;
+    var superblock: vsr.SuperBlockType(Storage) = undefined;
 
     var grid = try Grid.init(allocator, &superblock);
     defer grid.deinit(allocator);
@@ -1008,8 +1034,8 @@ pub fn main() !void {
         &grid,
         &value_cache,
         .{
-            .prefetch_count_max = commit_count_max * 2,
-            .commit_count_max = commit_count_max,
+            .prefetch_entries_max = commit_entries_max * 2,
+            .commit_entries_max = commit_entries_max,
         },
     );
     defer tree.deinit(allocator);

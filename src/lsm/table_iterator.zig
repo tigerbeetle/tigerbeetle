@@ -9,6 +9,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
+/// A TableIterator iterates a table's values in ascending-key order.
 pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
     return struct {
         const TableIterator = @This();
@@ -100,8 +101,8 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
         pub const Context = struct {
             grid: *Grid,
-            address: u64,
-            checksum: u128,
+            address: u64, // Table index block address.
+            checksum: u128, // Table index block checksum.
             index_block_callback: ?IndexBlockCallback = null,
         };
 
@@ -148,6 +149,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
                     &it.read,
                     it.address,
                     it.checksum,
+                    .index,
                 );
                 return true;
             }
@@ -171,12 +173,13 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             assert(!it.read_pending);
             it.read_pending = true;
-            it.grid.read_block(on_read, &it.read, address, checksum);
+            it.grid.read_block(on_read, &it.read, address, checksum, .data);
         }
 
         fn on_read_table_index(read: *Grid.Read, block: Grid.BlockPtrConst) void {
             const it = @fieldParentPtr(TableIterator, "read", read);
             assert(it.read_pending);
+            assert(it.data_block_index == 0);
             it.read_pending = false;
 
             assert(it.read_table_index);
@@ -194,6 +197,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
             const read_pending = it.tick();
             // After reading the table index, we always read at least one data block.
             assert(read_pending);
+            assert(it.read_pending);
         }
 
         fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {

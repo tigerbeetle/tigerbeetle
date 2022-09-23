@@ -45,7 +45,7 @@ pub const ClientTable = struct {
         try entries.ensureTotalCapacity(allocator, @intCast(u32, config.clients_max));
         assert(entries.capacity() >= config.clients_max);
 
-        const sorted = try allocator.alloc(*const Entry, entries.capacity());
+        const sorted = try allocator.alloc(*const Entry, config.clients_max);
         errdefer allocator.free(sorted);
 
         return ClientTable{
@@ -184,16 +184,16 @@ pub const ClientTable = struct {
         size = std.mem.alignForward(size, @alignOf(vsr.Header));
         const headers = mem.bytesAsSlice(
             vsr.Header,
-            source[size .. entries_count * @sizeOf(vsr.Header)],
+            source[size..][0 .. entries_count * @sizeOf(vsr.Header)],
         );
         size += mem.sliceAsBytes(headers).len;
 
         size = std.mem.alignForward(size, @alignOf(u64));
-        const sessions = mem.bytesAsSlice(u64, source[size .. entries_count * @sizeOf(u64)]);
+        const sessions = mem.bytesAsSlice(u64, source[size..][0 .. entries_count * @sizeOf(u64)]);
         size += mem.sliceAsBytes(sessions).len;
 
         size = std.mem.alignForward(size, @alignOf(u8));
-        var bodies = source[size..];
+        var bodies = source[size .. source.len - @sizeOf(u32)];
         assert(bodies.len > 0);
 
         var i: u32 = 0;
@@ -229,7 +229,7 @@ pub const ClientTable = struct {
     }
 
     pub fn capacity(client_table: *const ClientTable) usize {
-        return client_table.entries.capacity();
+        return client_table.sorted.len;
     }
 
     pub fn get(client_table: *ClientTable, client: u128) ?*Entry {
