@@ -127,9 +127,10 @@ const Command = struct {
             .state_machine_options = .{
                 // TODO Tune lsm_forest_node_count better.
                 .lsm_forest_node_count = 4096,
-                .cache_size_accounts = config.accounts_max,
-                .cache_size_transfers = config.transfers_max,
-                .cache_size_posted = config.transfers_pending_max,
+                .cache_entries_accounts = config.cache_accounts_max,
+                .cache_entries_transfers = config.cache_transfers_max,
+                .cache_entries_posted = config.cache_transfers_pending_max,
+                .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
             },
             .message_bus_options = .{
                 .configuration = addresses,
@@ -148,6 +149,10 @@ const Command = struct {
 
         while (true) {
             replica.tick();
+            command.io.tick() catch |err| {
+                log.warn("tick: {}", .{err});
+                std.debug.panic("io tick: {}", .{err});
+            };
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }

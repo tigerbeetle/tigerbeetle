@@ -27,6 +27,7 @@ pub fn CompositeKey(comptime Field: type) type {
             comptime {
                 assert(@sizeOf(Value) == @sizeOf(Field) * 2);
                 assert(@alignOf(Value) == @alignOf(Field));
+                assert(@sizeOf(Value) * 8 == @bitSizeOf(Value));
             }
         };
 
@@ -38,6 +39,7 @@ pub fn CompositeKey(comptime Field: type) type {
         comptime {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
             assert(@alignOf(Self) == @alignOf(Field));
+            assert(@sizeOf(Self) * 8 == @bitSizeOf(Self));
         }
 
         pub inline fn compare_keys(a: Self, b: Self) math.Order {

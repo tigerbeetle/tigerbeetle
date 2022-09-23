@@ -31,8 +31,15 @@ const vsr = @import("../vsr.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("grid.zig").GridType;
+const BlockType = @import("grid.zig").BlockType;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
+/// ManifestLog block schema:
+/// │ vsr.Header                  │ operation=BlockType.manifest
+/// │ [entry_count_max]Label      │ level index, insert|remove
+/// │ [≤entry_count_max]TableInfo │
+/// │ […]u8{0}                    │ padding (to end of block)
+/// Label and TableInfo entries correspond.
 pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
     return struct {
         const ManifestLog = @This();
@@ -105,11 +112,13 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         open_event: OpenEvent = undefined,
         open_iterator: SuperBlock.Manifest.IteratorReverse = undefined,
 
+        /// Set for the duration of `compact`.
         reading: bool = false,
         read: Grid.Read = undefined,
         read_callback: Callback = undefined,
         read_block_reference: ?SuperBlock.Manifest.BlockReference = null,
 
+        /// Set for the duration of `flush` and `checkpoint`.
         writing: bool = false,
         write: Grid.Write = undefined,
         write_callback: Callback = undefined,
@@ -155,6 +164,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
 
+            assert(manifest_log.blocks.count == 0);
+            assert(manifest_log.blocks_closed == 0);
+            assert(manifest_log.entry_count == 0);
+
             manifest_log.open_event = event;
             manifest_log.open_iterator = manifest_log.superblock.manifest.iterator_reverse(
                 manifest_log.tree_hash,
@@ -171,6 +184,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
 
+            assert(manifest_log.blocks.count == 0);
+            assert(manifest_log.blocks_closed == 0);
+            assert(manifest_log.entry_count == 0);
+
             manifest_log.read_block_reference = manifest_log.open_iterator.next();
 
             if (manifest_log.read_block_reference) |block| {
@@ -182,6 +199,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     &manifest_log.read,
                     block.address,
                     block.checksum,
+                    .manifest,
                 );
             } else {
                 manifest_log.opened = true;
@@ -304,6 +322,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.entry_count += 1;
         }
 
+        /// `flush` does not close a partial block; that is only necessary during `checkpoint`.
         pub fn flush(manifest_log: *ManifestLog, callback: Callback) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
@@ -395,18 +414,21 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         pub fn compact(manifest_log: *ManifestLog, callback: Callback) void {
+            assert(manifest_log.opened);
             assert(!manifest_log.reading);
+            assert(!manifest_log.writing);
             manifest_log.read_callback = callback;
-            manifest_log.flush(flush_callback);
+            manifest_log.flush(compact_flush_callback);
         }
 
-        fn flush_callback(manifest_log: *ManifestLog) void {
+        fn compact_flush_callback(manifest_log: *ManifestLog) void {
             const callback = manifest_log.read_callback;
             manifest_log.read_callback = undefined;
 
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
+            assert(manifest_log.blocks_closed == 0);
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
@@ -419,17 +441,18 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 manifest_log.read_block_reference = block;
 
                 manifest_log.grid.read_block(
-                    compact_callback,
+                    compact_read_block_callback,
                     &manifest_log.read,
                     block.address,
                     block.checksum,
+                    .manifest,
                 );
             } else {
                 callback(manifest_log);
             }
         }
 
-        fn compact_callback(read: *Grid.Read, block: BlockPtrConst) void {
+        fn compact_read_block_callback(read: *Grid.Read, block: BlockPtrConst) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "read", read);
             assert(manifest_log.opened);
             assert(manifest_log.reading);
@@ -519,6 +542,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         fn acquire_block(manifest_log: *ManifestLog) void {
+            assert(manifest_log.opened);
             assert(manifest_log.entry_count == 0);
             assert(!manifest_log.blocks.full());
 
@@ -554,6 +578,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // Zero unused tables, and padding:
             mem.set(u8, block[header.size..], 0);
 
+            header.operation = BlockType.manifest.operation();
             header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
             header.set_checksum();
 
@@ -573,6 +598,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         fn verify_block(block: BlockPtrConst, checksum: ?u128, address: ?u64) void {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            assert(BlockType.from(header.operation) == .manifest);
 
             if (config.verify) {
                 assert(header.valid_checksum());
@@ -623,6 +649,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             // Encode the smaller type first because this will be multiplied by entry_count_max.
             const labels_size = entry_count_max * @sizeOf(Label);
+            assert(labels_size == labels_size_max);
+            assert((@sizeOf(vsr.Header) + labels_size) % @alignOf(TableInfo) == 0);
             const tables_size = entry_count * @sizeOf(TableInfo);
 
             return @sizeOf(vsr.Header) + labels_size + tables_size;
@@ -649,14 +677,14 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         fn tables(block: BlockPtr) *[entry_count_max]TableInfo {
             return mem.bytesAsSlice(
                 TableInfo,
-                block[@sizeOf(vsr.Header) + entry_count_max ..][0..tables_size_max],
+                block[@sizeOf(vsr.Header) + labels_size_max ..][0..tables_size_max],
             )[0..entry_count_max];
         }
 
         fn tables_const(block: BlockPtrConst) *const [entry_count_max]TableInfo {
             return mem.bytesAsSlice(
                 TableInfo,
-                block[@sizeOf(vsr.Header) + entry_count_max ..][0..tables_size_max],
+                block[@sizeOf(vsr.Header) + labels_size_max ..][0..tables_size_max],
             )[0..entry_count_max];
         }
     };

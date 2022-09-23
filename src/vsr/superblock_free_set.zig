@@ -14,8 +14,8 @@ const div_ceil = @import("../util.zig").div_ceil;
 ///
 /// Set bits indicate free blocks, unset bits are allocated.
 pub const FreeSet = struct {
-    // Each bit of `index` is the OR of `shard_size` bits of `blocks`.
-    // That is, if a shard has any free blocks, the corresponding index bit is set.
+    /// Each bit of `index` is the OR of `shard_size` bits of `blocks`.
+    /// That is, if a shard has any free blocks, the corresponding index bit is set.
     index: DynamicBitSetUnmanaged,
     blocks: DynamicBitSetUnmanaged,
     /// Set bits indicate blocks to be released at the next checkpoint.

@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const tigerbeetle = @import("tigerbeetle.zig");
 
 const Environment = enum {
     development,
@@ -48,22 +49,22 @@ pub const memory_size_max_default = 1024 * 1024 * 1024;
 
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const accounts_max = switch (deployment_environment) {
-    .production => 1_000_000,
-    else => 100_000,
+pub const cache_accounts_max = switch (deployment_environment) {
+    .production => 100_000,
+    else => 10_000,
 };
 
 /// The maximum number of transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 /// We allocate more capacity than the number of transfers for a safe hash table load factor.
-pub const transfers_max = switch (deployment_environment) {
-    .production => 100_000_000,
-    else => 1_000_000,
+pub const cache_transfers_max = switch (deployment_environment) {
+    .production => 1_000_000,
+    else => 100_000,
 };
 
 /// The maximum number of two-phase transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const transfers_pending_max = transfers_max;
+pub const cache_transfers_pending_max = cache_transfers_max;
 
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
@@ -235,8 +236,15 @@ pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size
 pub const lsm_trees = 30;
 
 /// The number of levels in an LSM tree.
+/// A higher number of levels increases read amplification, as well as total storage capacity.
 pub const lsm_levels = 7;
 
+/// The number of tables at level i (0 ≤ i < lsm_levels) is `pow(lsm_growth_factor, i+1)`.
+/// A higher growth factor increases write amplification (by increasing the number of tables in
+/// level B that overlap a table in level A in a compaction), but decreases read amplification (by
+/// reducing the height of the tree and thus the number of levels that must be probed). Since read
+/// amplification can be optimized more easily (with filters and caching), we target a growth
+/// factor of 8 for lower write amplification rather than the more typical growth factor of 10.
 pub const lsm_growth_factor = 8;
 
 /// The maximum key size for an LSM tree in bytes.
@@ -308,7 +316,7 @@ pub const verify = true;
 pub const journal_size_headers = journal_slot_count * 128; // 128 == @sizeOf(Header)
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
- // TODO Move these into a separate `config_valid.zig` which we import here:
+// TODO Move these into a separate `config_valid.zig` which we import here:
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;
@@ -340,6 +348,14 @@ comptime {
     // The WAL format requires messages to be a multiple of the sector size.
     assert(message_size_max % sector_size == 0);
     assert(message_size_max >= sector_size);
+
+    // ManifestLog serializes the level as a u7.
+    assert(lsm_levels > 0);
+    assert(lsm_levels <= std.math.maxInt(u7));
+
+    assert(block_size % sector_size == 0);
+    assert(lsm_table_size_max % sector_size == 0);
+    assert(lsm_table_size_max % block_size == 0);
 
     // The LSM tree uses half-measures to balance compaction.
     assert(lsm_batch_multiple % 2 == 0);

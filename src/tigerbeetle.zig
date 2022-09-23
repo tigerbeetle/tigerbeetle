@@ -2,8 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-pub const config = @import("config.zig");
-
 pub const Account = extern struct {
     id: u128,
     /// Opaque third-party identifier to link this account (many-to-one) to an external entity.

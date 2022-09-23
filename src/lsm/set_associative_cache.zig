@@ -19,6 +19,7 @@ pub const Layout = struct {
     value_alignment: ?u29 = null,
 };
 
+/// Each Key is associated with a set of n consecutive ways (or slots) that may contain the Value.
 pub fn SetAssociativeCache(
     comptime Key: type,
     comptime Value: type,
@@ -86,9 +87,37 @@ pub fn SetAssociativeCache(
         const Clock = meta.Int(.unsigned, clock_hand_bits);
 
         sets: u64,
+
+        /// A short, partial hash of a Key, corresponding to a Value.
+        /// Because the tag is small, collisions are possible:
+        /// `tag(v₁) = tag(v₂)` does not imply `v₁ = v₂`.
+        /// However, most of the time, where the tag differs, a full key comparison can be avoided.
+        /// Since tags are 16-32x smaller than keys, they can also be kept hot in cache.
         tags: []Tag,
+
+        /// When the corresponding Count is zero, the Value is absent.
         values: []align(value_alignment) Value,
+
+        /// Each value has a Count, which tracks the number of recent reads.
+        ///
+        /// * A Count is incremented when the value is accessed by `get`.
+        /// * A Count is decremented when a cache write to the value's Set misses.
+        /// * The value is evicted when its Count reaches zero.
+        ///
         counts: PackedUnsignedIntegerArray(Count),
+
+        /// Each set has a Clock: a counter that cycles between each of the set's ways (i.e. slots).
+        ///
+        /// On cache write, entries are checked for occupancy (or eviction) beginning from the
+        /// clock's position, wrapping around.
+        ///
+        /// The algorithm implemented is "CLOCK Nth-Chance" — each way has more than one bit,
+        /// to give ways more than one chance before eviction.
+        ///
+        /// * A similar algorithm called "RRIParoo" is described in
+        ///   "Kangaroo: Caching Billions of Tiny Objects on Flash".
+        /// * For more general information on CLOCK algorithms, see:
+        ///   https://en.wikipedia.org/wiki/Page_replacement_algorithm.
         clocks: PackedUnsignedIntegerArray(Clock),
 
         pub fn init(allocator: mem.Allocator, value_count_max: u64) !Self {
@@ -177,7 +206,7 @@ pub fn SetAssociativeCache(
         }
 
         /// If the key is present in the set, returns the way. Otherwise returns null.
-        inline fn search(self: *Self, set: Set, key: Key) ?usize {
+        inline fn search(self: *const Self, set: Set, key: Key) ?usize {
             const ways = search_tags(set.tags, set.tag);
 
             var it = BitIterator(Ways){ .bits = ways };
@@ -194,7 +223,7 @@ pub fn SetAssociativeCache(
         /// Where each set bit represents the index of a way that has the same tag.
         const Ways = meta.Int(.unsigned, layout.ways);
 
-        inline fn search_tags(tags: *[layout.ways]Tag, tag: Tag) Ways {
+        inline fn search_tags(tags: *const [layout.ways]Tag, tag: Tag) Ways {
             const x: Vector(layout.ways, Tag) = tags.*;
             const y: Vector(layout.ways, Tag) = @splat(layout.ways, tag);
 

@@ -52,6 +52,7 @@ pub const SuperBlockSector = extern struct {
     size: u64,
 
     /// The maximum size of the data file.
+    // TODO Actually limit the file to this size.
     size_max: u64,
 
     /// A monotonically increasing counter to locate the latest superblock at startup.
@@ -509,8 +510,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(!superblock.opened);
 
             assert(options.replica < config.replicas_max);
-            // TODO Assert that size_max exceeds the minimum comptime size of storage zones.
-            assert(options.size_max > superblock_zone_size);
+            assert(options.size_max >= data_file_size_min);
             assert(options.size_max % config.sector_size == 0);
 
             // This working copy provides the parent checksum, and will not be written to disk.
@@ -716,6 +716,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (superblock.free_set.highest_address_acquired()) |address| {
                 staging.size += address * config.block_size;
             }
+            assert(staging.size >= data_file_size_min);
+            assert(staging.size <= staging.size_max);
 
             staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
@@ -904,6 +906,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.writing.cluster == superblock.staging.cluster);
             assert(superblock.writing.replica == superblock.working.replica);
             assert(superblock.writing.replica == superblock.staging.replica);
+
+            assert(superblock.writing.size >= data_file_size_min);
+            assert(superblock.writing.size <= superblock.writing.size_max);
 
             assert(context.copy < superblock_copies_max);
             assert(context.copy >= starting_copy_for_sequence(superblock.writing.sequence));
@@ -1144,6 +1149,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock manifest lost");
             } else {
+                log.debug("open: read_manifest: corrupt copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_manifest(context);
             }
@@ -1208,6 +1214,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock free set lost");
             } else {
+                log.debug("open: read_free_set: corrupt copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_free_set(context);
             }
@@ -1277,6 +1284,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock client table lost");
             } else {
+                log.debug("open: read_client_table: corrupt copy={}", .{ context.copy });
                 context.copy += 1;
                 superblock.read_client_table(context);
             }
@@ -1325,6 +1333,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 if (superblock.working.manifest_size > 0) {
                     assert(superblock.manifest.count > 0);
                 }
+                // TODO Make the FreeSet encoding format not dependant on the word size.
                 if (superblock.working.free_set_size > @sizeOf(usize)) {
                     assert(superblock.free_set.count_acquired() > 0);
                 }
@@ -1642,8 +1651,7 @@ test "SuperBlockSector" {
 
 // TODO Add unit tests for Quorums.
 // TODO Test invariants and transitions across TestRunner functions.
-// TODO Add a pristine in-memory test storage shim (we currently use real disk).
-const TestStorage = @import("../storage.zig").Storage;
+const TestStorage = @import("../test/storage.zig").Storage;
 const TestSuperBlock = SuperBlockType(TestStorage);
 
 const TestRunner = struct {
@@ -1708,42 +1716,37 @@ const TestRunner = struct {
     }
 };
 
-pub fn main() !void {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const IO = @import("../io.zig").IO;
-    const Storage = @import("../storage.zig").Storage;
-
-    const dir_path = ".";
-    const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err| {
-        std.debug.print("failed to open directory '{s}': {}", .{ dir_path, err });
-        return;
-    };
-
+test "SuperBlock" {
     const cluster = 32;
     const replica = 4;
-    const size_max = 512 * 1024 * 1024;
+    const size_max = data_file_size_min;
 
-    const storage_fd = try Storage.open(dir_fd, "test_superblock", size_max, true);
-    defer std.fs.cwd().deleteFile("test_superblock") catch {};
+    var storage = try TestStorage.init(std.testing.allocator, superblock_zone_size, .{
+        .seed = 0,
+        .read_latency_min = 1,
+        .read_latency_mean = 1,
+        .write_latency_min = 1,
+        .write_latency_mean = 1,
+        .read_fault_probability = 0,
+        .write_fault_probability = 0,
+    }, replica, .{
+        .first_offset = superblock_zone_size,
+        .period = 1,
+    });
+    defer storage.deinit(std.testing.allocator);
 
-    var io = try IO.init(128, 0);
-    defer io.deinit();
+    var message_pool = try MessagePool.init(std.testing.allocator, .replica);
+    defer message_pool.deinit(std.testing.allocator);
 
-    var storage = try Storage.init(&io, size_max, storage_fd);
-    defer storage.deinit();
-
-    var superblock = try TestSuperBlock.init(allocator, &storage);
-    defer superblock.deinit(allocator);
+    var superblock = try TestSuperBlock.init(std.testing.allocator, &storage, &message_pool);
+    defer superblock.deinit(std.testing.allocator);
 
     var runner = TestRunner{ .superblock = &superblock };
-
     runner.format(.{
         .cluster = cluster,
         .replica = replica,
         .size_max = size_max,
     });
 
-    while (runner.pending > 0) try io.run_for_ns(100);
+    while (runner.pending > 0) storage.tick();
 }

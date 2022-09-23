@@ -15,7 +15,6 @@ const GridType = @import("grid.zig").GridType;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
-const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 
 pub fn TableInfoType(comptime Table: type) type {
     const Key = Table.Key;
@@ -24,8 +23,11 @@ pub fn TableInfoType(comptime Table: type) type {
     return extern struct {
         const TableInfo = @This();
 
+        /// Checksum of the table's index block.
         checksum: u128,
+        /// Address of the table's index block.
         address: u64,
+        /// Unused.
         flags: u64 = 0,
 
         /// The minimum snapshot that can see this table (with exclusive bounds).
@@ -36,8 +38,8 @@ pub fn TableInfoType(comptime Table: type) type {
         /// This value is set to the current snapshot tick on table deletion.
         snapshot_max: u64 = math.maxInt(u64),
 
-        key_min: Key,
-        key_max: Key,
+        key_min: Key, // Inclusive.
+        key_max: Key, // Inclusive.
 
         comptime {
             assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
@@ -103,7 +105,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         const Grid = GridType(Storage);
         const Callback = fn (*Manifest) void;
 
-        /// Levels beyond level 0 have tables with disjoint key ranges.
         /// Here, we use a structure with indexes over the segmented array for performance.
         const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
         const KeyRange = Level.KeyRange;
@@ -190,7 +191,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest_level = &manifest.levels[level];
             manifest_level.insert_table(manifest.node_pool, table);
 
-            // Appends insert changes to the manifest log
+            // Append insert changes to the manifest log
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
 
@@ -209,7 +210,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest_level.set_snapshot_max(snapshot, table);
             assert(table.snapshot_max == snapshot);
 
-            // Appends update changes to the manifest log
+            // Append update changes to the manifest log
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
         }
@@ -249,6 +250,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
+        /// Returns an iterator over tables that might contain `key` (but are not guaranteed to).
         pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {
             return .{
                 .manifest = manifest,
@@ -258,11 +260,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub const LookupIterator = struct {
-            manifest: *Manifest,
+            manifest: *const Manifest,
             snapshot: u64,
             key: Key,
             level: u8 = 0,
             inner: ?Level.Iterator = null,
+            // Verifies that we never check a newer table after an older one.
             precedence: ?u64 = null,
 
             pub fn next(it: *LookupIterator) ?*const TableInfo {

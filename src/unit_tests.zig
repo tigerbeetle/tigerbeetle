@@ -2,6 +2,7 @@ test {
     _ = @import("vsr.zig");
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
+    _ = @import("vsr/superblock.zig");
     _ = @import("vsr/superblock_manifest.zig");
     _ = @import("vsr/superblock_free_set.zig");
     // TODO: clean up logging of clock test and enable it here.
