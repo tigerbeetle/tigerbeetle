@@ -34,7 +34,7 @@ pub fn TableInfoType(comptime Table: type) type {
         /// This value is set to the current snapshot tick on table creation.
         snapshot_min: u64,
 
-        /// The maximum snapshot that can see this table (with exclusive bounds).
+        /// The maximum snapshot that can see this table (with inclusive bounds).
         /// This value is set to the current snapshot tick on table deletion.
         snapshot_max: u64 = math.maxInt(u64),
 
@@ -66,7 +66,8 @@ pub fn TableInfoType(comptime Table: type) type {
             // The reason to use (exclusive, inclusive) bounds rather than the more conventional
             // (inclusive, exclusive) bounds is that this enables prefetches to query an ongoing
             // compaction's input tables (rather than the output tables, which are not ready)
-            // by querying the `compaction.snapshot`.
+            // by querying the `tree.compaction_op_done`.
+            // When the compaction finishes, `compaction_op_done` is bumped to `compaction_op`.
 
             // assert(snapshot != table.snapshot_min);
             // assert(snapshot != table.snapshot_max);
@@ -324,6 +325,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         /// Returns the next table in the range, after `key_exclusive` if provided.
+        ///
+        /// * The table returned is visible to `snapshot`.
         pub fn next_table(
             manifest: *const Manifest,
             level: u8,
