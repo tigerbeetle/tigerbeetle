@@ -420,15 +420,13 @@ pub fn GrooveType(
         /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
 
-        pub const IndexTreesOptions = IndexTreesOptions;
-
         pub const Options = struct {
             /// TODO Improve unit in this name to make more clear what should be passed.
             /// For example, is this a size in bytes or a count in objects? It's a count in objects,
             /// but the name poorly reflects this.
-            cache_cardinality_max: u32,
+            cache_entries_max: u32,
             /// The maximum number of objects that might be prefetched by a batch.
-            prefetch_count_max: u32,
+            prefetch_entries_max: u32,
 
             tree_options_object: ObjectTree.Options,
             tree_options_id: IdTree.Options,
@@ -446,7 +444,7 @@ pub fn GrooveType(
             errdefer allocator.destroy(objects_cache);
 
             objects_cache.* = .{};
-            try objects_cache.ensureTotalCapacity(allocator, options.cache_cardinality_max);
+            try objects_cache.ensureTotalCapacity(allocator, options.cache_entries_max);
             errdefer objects_cache.deinit(allocator);
 
             // Intialize the object LSM tree.
@@ -464,7 +462,7 @@ pub fn GrooveType(
             errdefer allocator.destroy(ids_cache);
 
             ids_cache.* = .{};
-            try ids_cache.ensureTotalCapacity(allocator, options.cache_cardinality_max);
+            try ids_cache.ensureTotalCapacity(allocator, options.cache_entries_max);
             errdefer ids_cache.deinit(allocator);
 
             var id_tree = try IdTree.init(
@@ -499,11 +497,11 @@ pub fn GrooveType(
             }
 
             var prefetch_ids = PrefetchIDs{};
-            try prefetch_ids.ensureTotalCapacity(allocator, options.prefetch_count_max);
+            try prefetch_ids.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_ids.deinit(allocator);
 
             var prefetch_objects = PrefetchObjects{};
-            try prefetch_objects.ensureTotalCapacity(allocator, options.prefetch_count_max);
+            try prefetch_objects.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_objects.deinit(allocator);
 
             return Groove{

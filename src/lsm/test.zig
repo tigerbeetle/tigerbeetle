@@ -28,12 +28,13 @@ const Environment = struct {
     const size_max = vsr.Zone.superblock.size().? + vsr.Zone.wal.size().? + (512 + 64) * 1024 * 1024;
 
     const node_count = 1024;
-    const cache_cardinality_max = 2 * 1024 * 1024;
+    const cache_entries_max = 2 * 1024 * 1024;
     const forest_options = StateMachine.forest_options(.{
-        .lsm_forest_node_count = undefined, // ignored by StateMachine.forest_options()
-        .cache_cardinality_accounts = cache_cardinality_max,
-        .cache_cardinality_transfers = cache_cardinality_max,
-        .cache_cardinality_posted = cache_cardinality_max,
+        // Ignored by StateMachine.forest_options().
+        .lsm_forest_node_count = undefined,
+        .cache_entries_accounts = cache_entries_max,
+        .cache_entries_transfers = cache_entries_max,
+        .cache_entries_posted = cache_entries_max,
         .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
     });
 
@@ -227,7 +228,7 @@ const Environment = struct {
         comptime visibility: Visibility,
         groove: anytype,
         objects: anytype,
-        comptime commit_count_max: u32,
+        comptime commit_entries_max: u32,
     ) !void {
         const Groove = @TypeOf(groove.*);
         const Object = @TypeOf(objects[0]);
@@ -240,7 +241,7 @@ const Environment = struct {
 
             fn verify(assertion: *@This()) void {
                 assert(assertion.verify_count == 0);
-                assertion.verify_count = std.math.min(commit_count_max, assertion.objects.len);
+                assertion.verify_count = std.math.min(commit_entries_max, assertion.objects.len);
                 if (assertion.verify_count == 0) return;
 
                 for (assertion.objects[0..assertion.verify_count]) |*object| {
@@ -299,7 +300,7 @@ const Environment = struct {
         var inserted = std.ArrayList(Account).init(allocator);
         defer inserted.deinit();
 
-        const accounts_to_insert_per_op = 1; // forest_options.accounts.commit_count_max;
+        const accounts_to_insert_per_op = 1; // forest_options.accounts.commit_entries_max;
         const iterations = 4;
 
         var op: u64 = 0;
@@ -338,7 +339,7 @@ const Environment = struct {
                     .visible,
                     &env.forest.grooves.accounts,
                     @as([]const Account, &.{ account }),
-                    forest_options.accounts.tree_options_object.commit_count_max,
+                    forest_options.accounts.tree_options_object.commit_entries_max,
                 );
 
                 // Record the successfull insertion.
@@ -377,7 +378,7 @@ const Environment = struct {
                             .invisible,
                             &env.forest.grooves.accounts,
                             uncommitted,
-                            forest_options.accounts.tree_options_object.commit_count_max,
+                            forest_options.accounts.tree_options_object.commit_entries_max,
                         );
 
                         // Reset everything to after checkpoint
@@ -394,7 +395,7 @@ const Environment = struct {
                     .visible,
                     &env.forest.grooves.accounts,
                     checkpointed,
-                    forest_options.accounts.tree_options_object.commit_count_max,
+                    forest_options.accounts.tree_options_object.commit_entries_max,
                 );
             }
         }

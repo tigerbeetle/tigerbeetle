@@ -22,12 +22,12 @@ pub fn TableImmutableType(comptime Table: type) type {
         snapshot_min: u64,
         free: bool,
 
-        /// `commit_count_max` is the maximum number of Values that can be inserted by a single commit.
-        pub fn init(allocator: mem.Allocator, commit_count_max: u32) !TableImmutable {
-            assert(commit_count_max > 0);
+        /// `commit_entries_max` is the maximum number of Values that can be inserted by a single commit.
+        pub fn init(allocator: mem.Allocator, commit_entries_max: u32) !TableImmutable {
+            assert(commit_entries_max > 0);
 
             // The in-memory immutable table is the same size as the mutable table:
-            const value_count_max = commit_count_max * config.lsm_batch_multiple;
+            const value_count_max = commit_entries_max * config.lsm_batch_multiple;
             const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
             assert(data_block_count <= Table.data_block_count_max);
 

@@ -23,12 +23,12 @@ pub fn TableMutableType(comptime Table: type) type {
         value_count_max: u32,
         values: Values = .{},
 
-        /// `commit_count_max` is the maximum number of Values that can be inserted by a single commit.
-        pub fn init(allocator: mem.Allocator, commit_count_max: u32) !TableMutable {
+        /// `commit_entries_max` is the maximum number of Values that can be inserted by a single commit.
+        pub fn init(allocator: mem.Allocator, commit_entries_max: u32) !TableMutable {
             comptime assert(config.lsm_batch_multiple > 0);
-            assert(commit_count_max > 0);
+            assert(commit_entries_max > 0);
 
-            const value_count_max = commit_count_max * config.lsm_batch_multiple;
+            const value_count_max = commit_entries_max * config.lsm_batch_multiple;
             const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
             assert(data_block_count <= Table.data_block_count_max);
 

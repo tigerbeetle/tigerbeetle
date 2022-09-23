@@ -95,9 +95,9 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
         /// See comments for Groove.Options.
         pub const Options = struct {
-            cache_cardinality_max: u32,
-            prefetch_count_max: u32,
-            commit_count_max: u32,
+            cache_entries_max: u32,
+            prefetch_entries_max: u32,
+            commit_entries_max: u32,
         };
 
         pub fn init(
@@ -111,7 +111,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             errdefer allocator.destroy(cache);
 
             cache.* = .{};
-            try cache.ensureTotalCapacity(allocator, options.cache_cardinality_max);
+            try cache.ensureTotalCapacity(allocator, options.cache_entries_max);
             errdefer cache.deinit(allocator);
 
             var tree = try Tree.init(
@@ -120,17 +120,17 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 grid,
                 cache,
                 .{
-                    .commit_count_max = options.commit_count_max,
+                    .commit_entries_max = options.commit_entries_max,
                 },
             );
             errdefer tree.deinit(allocator);
 
             var prefetch_ids = PrefetchIDs{};
-            try prefetch_ids.ensureTotalCapacity(allocator, options.prefetch_count_max);
+            try prefetch_ids.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_ids.deinit(allocator);
 
             var prefetch_objects = PrefetchObjects{};
-            try prefetch_objects.ensureTotalCapacity(allocator, options.prefetch_count_max);
+            try prefetch_objects.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_objects.deinit(allocator);
 
             return PostedGroove{
