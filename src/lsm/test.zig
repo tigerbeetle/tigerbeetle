@@ -313,7 +313,7 @@ const Environment = struct {
         const iterations = 4;
 
         var op: u64 = 1;
-        var id: u128 = 0;
+        var id: u128 = 1;
         var timestamp: u64 = 42;
         var crash_probability = std.rand.DefaultPrng.init(1337);
 

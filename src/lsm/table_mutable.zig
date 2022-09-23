@@ -60,7 +60,7 @@ pub fn TableMutableType(comptime Table: type) type {
         pub fn init(
             allocator: mem.Allocator,
             values_cache: ?*ValuesCache,
-            cache_entries_max: u32,
+            commit_entries_max: u32,
         ) !TableMutable {
             comptime assert(config.lsm_batch_multiple > 0);
             assert(commit_entries_max > 0);
