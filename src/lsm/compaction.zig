@@ -295,10 +295,10 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
 
             compaction.callback = callback;
-            
+
             // Generate fake IO to make sure io_pending doesn't reach zero multiple times from
             // IO being completed inline down below.
-            // The fake IO is immediately resolved and triggers the cpu_merge_start if all 
+            // The fake IO is immediately resolved and triggers the cpu_merge_start if all
             // IO completes inline or if no IO was started.
             compaction.io_start();
             defer compaction.io_finish();
@@ -306,7 +306,7 @@ pub fn CompactionType(
             // Start reading blocks from the iterator to merge them.
             if (compaction.iterator_a.tick()) compaction.io_start();
             if (compaction.iterator_b.tick()) compaction.io_start();
-            
+
             // Start writing blocks prepared by the merge iterator from a previous compact_tick().
             compaction.io_write_start(.data);
             compaction.io_write_start(.filter);
@@ -382,7 +382,7 @@ pub fn CompactionType(
             }
 
             // TODO Implement pacing here by deciding if we should do another compact_tick()
-            // instead of invoking the callback, using compaction.range.table_count as the heuristic.     
+            // instead of invoking the callback, using compaction.range.table_count as the heuristic.
 
             const callback = compaction.callback.?;
             compaction.callback = null;
@@ -411,9 +411,9 @@ pub fn CompactionType(
                 compaction.table_builder.data_block_append(&value);
             }
 
-            // Finalize the data block if it's full or if it contains pending values when there's 
+            // Finalize the data block if it's full or if it contains pending values when there's
             // no more left to merge.
-            if (compaction.table_builder.data_block_full() or 
+            if (compaction.table_builder.data_block_full() or
                 (merge_iterator.empty() and !compaction.table_builder.data_block_empty()))
             {
                 compaction.table_builder.data_block_finish(.{
@@ -429,7 +429,7 @@ pub fn CompactionType(
 
             // Finalize the filter block if it's full or if it contains pending data blocks
             // when there's no more merged values to fill them.
-            if (compaction.table_builder.filter_block_full() or 
+            if (compaction.table_builder.filter_block_full() or
                 (merge_iterator.empty() and !compaction.table_builder.filter_block_empty()))
             {
                 compaction.table_builder.filter_block_finish(.{

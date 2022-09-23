@@ -99,7 +99,7 @@ pub fn main() !void {
     // Pre-allocate a million transfers:
     const transfers = try allocator.alloc(tb.Transfer, transfers_max);
     defer allocator.free(transfers);
-    
+
     for (transfers) |*transfer, index| {
         transfer.* = .{
             .id = index,
