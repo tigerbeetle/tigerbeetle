@@ -668,10 +668,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 }
 
                 const header = mem.bytesAsValue(
-                    Header, 
+                    Header,
                     @alignCast(@alignOf(Header), data[0..@sizeOf(Header)]),
                 );
-                
+
                 if (!connection.recv_checked_header) {
                     if (!header.valid_checksum()) {
                         log.err("invalid header checksum received from {}", .{connection.peer});

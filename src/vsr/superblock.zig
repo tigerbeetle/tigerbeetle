@@ -1149,7 +1149,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock manifest lost");
             } else {
-                log.debug("open: read_manifest: corrupt copy={}", .{ context.copy });
+                log.debug("open: read_manifest: corrupt copy={}", .{context.copy});
                 context.copy += 1;
                 superblock.read_manifest(context);
             }
@@ -1214,7 +1214,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock free set lost");
             } else {
-                log.debug("open: read_free_set: corrupt copy={}", .{ context.copy });
+                log.debug("open: read_free_set: corrupt copy={}", .{context.copy});
                 context.copy += 1;
                 superblock.read_free_set(context);
             }
@@ -1284,7 +1284,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
                 @panic("superblock client table lost");
             } else {
-                log.debug("open: read_client_table: corrupt copy={}", .{ context.copy });
+                log.debug("open: read_client_table: corrupt copy={}", .{context.copy});
                 context.copy += 1;
                 superblock.read_client_table(context);
             }
