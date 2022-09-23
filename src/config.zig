@@ -10,8 +10,7 @@ const Environment = enum {
 
 /// Whether development or production:
 pub const deployment_environment: Environment =
-    if (@hasDecl(@import("root"), "deployment_environment")) @import("root").deployment_environment
-    else .development;
+    if (@hasDecl(@import("root"), "deployment_environment")) @import("root").deployment_environment else .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=3):
 pub const log_level = 2;
@@ -97,7 +96,7 @@ pub const connections_max = replicas_max + clients_max;
 pub const message_size_max = switch (deployment_environment) {
     // Use a small message size during the simulator for improved performance.
     .simulation => sector_size,
-    else => 1 * 1024 * 1024
+    else => 1 * 1024 * 1024,
 };
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.

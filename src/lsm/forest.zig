@@ -261,7 +261,7 @@ pub fn main() !void {
             context.initialized = false;
 
             // Format the storage
-            {   
+            {
                 const must_create = true;
                 try context.init(size_max, must_create);
                 defer context.deinit();
@@ -371,7 +371,7 @@ fn test_forest_in_memory() !void {
                     &superblock,
                 );
             }
-            
+
             // Run the callback on the formatted storage
             try callback(&storage);
         }
@@ -525,7 +525,7 @@ fn ForestTestType(comptime StorageProvider: type) type {
                 {
                     const ledger = self.prng.random().int(u32);
                     const code = self.prng.random().int(u16);
-                    
+
                     const id = self.prng.random().int(u128);
                     const timestamp = self.timestamp;
                     self.timestamp += 1;
@@ -547,7 +547,7 @@ fn ForestTestType(comptime StorageProvider: type) type {
                     forest.grooves.accounts.put(&account);
                     try self.accounts.inserted.append(account);
                 }
-                
+
                 // Compact the forest
                 {
                     const S = struct {
