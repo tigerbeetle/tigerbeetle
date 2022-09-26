@@ -261,16 +261,16 @@ pub fn main() !void {
                 }
             }
 
-            // NOTE IO is ticked by the top-level since it may
-            // be shared by more than one replica, for example during tests.
-            // storage.tick();
+            storage.tick();
         }
 
-        for (cluster.replicas) |*replica| {
+        for (cluster.replicas) |*replica, index| {
             switch (cluster.health[replica.replica]) {
                 .up => |*ticks| {
                     ticks.* -|= 1;
                     replica.tick();
+                    cluster.storages[index].tick();
+
                     cluster.state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
