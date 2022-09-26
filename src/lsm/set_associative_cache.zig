@@ -212,8 +212,7 @@ pub fn SetAssociativeCache(
             const set = self.associate(key);
             const way = self.search(set, key) orelse return;
 
-            const count = self.counts.get(set.offset + way);
-            self.counts.set(set.offset + way, div_ceil(count, 2));
+            self.counts.set(set.offset + way, 1);
         }
 
         /// If the key is present in the set, returns the way. Otherwise returns null.

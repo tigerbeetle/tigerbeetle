@@ -495,7 +495,7 @@ pub fn GrooveType(
                     allocator,
                     node_pool,
                     grid,
-                    null, // No value cache for index trees.
+                    null, // No value cache for index trees, since they only do range queries.
                     @field(options.tree_options_index, field.name),
                 );
                 index_trees_initialized += 1;
@@ -560,14 +560,13 @@ pub fn GrooveType(
             if (groove.prefetch_snapshot == null) {
                 groove.prefetch_objects.clearRetainingCapacity();
             } else {
-                // If there is a leftover snapshot, then prefetch() was never called, so there
-                // must already be no queued objects or ids.
+                // If there is a snapshot already set from the previous prefetch_setup(), then its
+                // prefetch() was never called, so there must already be no queued objects or ids.
             }
 
             groove.prefetch_snapshot = snapshot_target;
             assert(groove.prefetch_objects.count() == 0);
             assert(groove.prefetch_ids.count() == 0);
-
         }
 
         /// This must be called by the state machine for every key to be prefetched.
@@ -576,10 +575,12 @@ pub fn GrooveType(
         pub fn prefetch_enqueue(groove: *Groove, id: u128) void {
             if (groove.ids.lookup_from_memory(groove.prefetch_snapshot.?, id)) |id_tree_value| {
                 if (id_tree_value.tombstone()) {
-                    // Do nothing; a prefetched ID not present in prefetch_objects indicates
-                    // that the object has either been deleted or never existed.
+                    // Do nothing; an explicit ID tombstone indicates that the object was deleted.
                 } else {
-                    const object = groove.objects.table_mutable.get(id_tree_value.timestamp).?;
+                    const object = groove.objects.lookup_from_memory(
+                        groove.prefetch_snapshot.?,
+                        id_tree_value.timestamp,
+                    ).?;
                     assert(!ObjectTreeHelpers(Object).tombstone(object));
                     groove.prefetch_objects.putAssumeCapacity(object.*, {});
                 }
@@ -677,8 +678,6 @@ pub fn GrooveType(
 
                 // If not in the LSM tree's cache, the object must be read from disk and added
                 // to the auxiliary prefetch_objects hash map.
-                // TODO: this LSM tree function needlessly checks the LSM tree's cache a
-                // second time. Adding API to the LSM tree to avoid this may be worthwhile.
                 worker.context.groove.ids.lookup_from_levels(
                     lookup_id_callback,
                     &worker.lookup_id,
