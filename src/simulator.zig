@@ -260,6 +260,10 @@ pub fn main() !void {
                     }
                 }
             }
+
+            // NOTE IO is ticked by the top-level since it may
+            // be shared by more than one replica, for example during tests.
+            // storage.tick();
         }
 
         for (cluster.replicas) |*replica| {
