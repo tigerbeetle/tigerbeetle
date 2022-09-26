@@ -174,8 +174,8 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             if (groove.prefetch_snapshot == null) {
                 groove.prefetch_objects.clearRetainingCapacity();
             } else {
-                // If there is a leftover snapshot, then prefetch() was never called, so there
-                // must already be no queued objects or ids.
+                // If there is a snapshot already set from the previous prefetch_setup(), then its
+                // prefetch() was never called, so there must already be no queued objects or ids.
             }
 
             groove.prefetch_snapshot = snapshot_target;
