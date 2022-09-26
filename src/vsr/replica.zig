@@ -3543,14 +3543,24 @@ pub fn ReplicaType(
         ///
         /// For a replica with journal_slot_count=8 and lsm_batch_multiple=2:
         ///
-        ///   |01|23|45|67| (initial log fill)
-        ///   |89|01|23|45| (first wrap of log)
-        ///   |67|89|01|23| (second wrap of log)
+        ///   checkpoint() call      0   1   2   3
+        ///   op_checkpoint          0   5  11  17
+        ///   op_checkpoint_next     5  11  17  23
+        ///   op_checkpoint_trigger  7  13  19  25
         ///
-        ///   checkpoint() call      0   1   2
-        ///   op_checkpoint          0   5  11
-        ///   op_checkpoint_next     5  11  17
-        ///   op_checkpoint_trigger  7  13  19
+        ///     commit log (ops)           │ write-ahead log (slots)
+        ///     0   4   8   2   6   0   4  │ 0---4---
+        ///   0 ─────✓·%                   │ 01234✓6%   initial log fill
+        ///   1 ───────────✓·%             │ 890✓2%45   first wrap of log
+        ///   2 ─────────────────✓·%       │ 6✓8%0123   second wrap of log
+        ///   3 ───────────────────────✓·% │ 4%67890✓   third wrap of log
+        ///
+        /// Legend:
+        ///
+        ///   ─/✓  op on disk at checkpoint
+        ///   ·/%  op in memory at checkpoint
+        ///     ✓  op_checkpoint
+        ///     %  op_checkpoint_trigger
         ///
         fn op_checkpoint_next(self: *const Self) u64 {
             assert(self.op_checkpoint <= self.commit_min);
