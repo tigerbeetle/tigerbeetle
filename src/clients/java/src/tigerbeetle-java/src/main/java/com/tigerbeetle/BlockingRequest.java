@@ -1,5 +1,7 @@
 package com.tigerbeetle;
 
+import static com.tigerbeetle.AssertionError.assertTrue;
+
 final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> {
 
     // @formatter:off
@@ -120,8 +122,7 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
 
     TResponse getResult() throws RequestException {
 
-        if (result == null && exception == null)
-            throw new AssertionError("Unexpected request result: result=null");
+        assertTrue(result != null || exception != null, "Unexpected request result: result=null");
 
         // Handling checked and unchecked exceptions accordingly
         if (exception != null) {

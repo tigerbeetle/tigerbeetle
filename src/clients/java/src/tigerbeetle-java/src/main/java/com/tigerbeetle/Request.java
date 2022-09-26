@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import java.lang.annotation.Native;
 import java.nio.ByteBuffer;
+import static com.tigerbeetle.AssertionError.assertTrue;
 
 abstract class Request<TResponse extends Batch> {
 
@@ -156,14 +157,11 @@ abstract class Request<TResponse extends Batch> {
      */
     private ByteBuffer memcpy(final ByteBuffer source) {
 
-        if (source == null)
-            throw new AssertionError("Source buffer cannot be null");
-        if (!source.isDirect())
-            throw new AssertionError("Source buffer must be direct");
+        assertTrue(source != null, "Source buffer cannot be null");
+        assertTrue(source.isDirect(), "Source buffer must be direct");
 
         final var capacity = source.capacity();
-        if (capacity <= 0)
-            throw new AssertionError("Source buffer cannot be empty");
+        assertTrue(capacity >= 0, "Source buffer cannot be empty");
 
         final var copy = ByteBuffer.allocate(capacity);
         copy.put(source);

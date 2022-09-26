@@ -33,7 +33,8 @@ public enum CreateAccountResult {
     public static CreateAccountResult fromValue(int value) {
         var values = CreateAccountResult.values();
         if (value < 0 || value >= values.length)
-            throw new AssertionError("Invalid CreateAccountResult: value=%d", value);
+            throw new IllegalArgumentException(
+                    String.format("Invalid CreateAccountResult value=%d", value));
 
         return values[value];
     }

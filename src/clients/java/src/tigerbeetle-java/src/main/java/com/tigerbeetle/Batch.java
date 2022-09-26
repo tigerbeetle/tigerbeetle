@@ -3,6 +3,7 @@ package com.tigerbeetle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import com.tigerbeetle.UInt128.Bytes;
+import static com.tigerbeetle.AssertionError.assertTrue;
 
 public abstract class Batch {
 
@@ -66,11 +67,9 @@ public abstract class Batch {
 
     Batch(final int capacity, final int ELEMENT_SIZE) {
 
-        if (capacity < 0)
-            throw new IllegalArgumentException("Buffer capacity cannot be negative");
+        assertTrue(ELEMENT_SIZE > 0, "Element size cannot be zero or negative");
 
-        if (ELEMENT_SIZE <= 0)
-            throw new AssertionError("Element size cannot be zero or negative");
+        if (capacity < 0) throw new IllegalArgumentException("Buffer capacity cannot be negative");
 
         this.ELEMENT_SIZE = ELEMENT_SIZE;
 
@@ -86,19 +85,16 @@ public abstract class Batch {
 
     Batch(final ByteBuffer buffer, final int ELEMENT_SIZE) {
 
+        assertTrue(ELEMENT_SIZE > 0, "Element size cannot be zero or negative");
+
         if (buffer == null)
             throw new NullPointerException("Buffer cannot be null");
-
-        if (ELEMENT_SIZE <= 0)
-            throw new AssertionError("Element size cannot be zero or negative");
 
         this.ELEMENT_SIZE = ELEMENT_SIZE;
         final var bufferLen = buffer.capacity();
 
         // Make sure the completion handler is giving us valid data
-        if (bufferLen % ELEMENT_SIZE != 0)
-            throw new AssertionError(
-                    "Invalid data received from completion handler: bufferLen=%d, elementSize=%d.",
+        assertTrue(bufferLen % ELEMENT_SIZE == 0, "Invalid data received from completion handler: bufferLen=%d, elementSize=%d.",
                     bufferLen, ELEMENT_SIZE);
 
         this.capacity = bufferLen / ELEMENT_SIZE;

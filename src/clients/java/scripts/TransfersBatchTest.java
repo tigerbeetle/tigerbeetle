@@ -16,7 +16,7 @@ public class TransfersBatchTest {
 
     private static final Transfer transfer1;
     private static final Transfer transfer2;
-    private static final ByteBuffer dummyStream;
+    private static final ByteBuffer dummyTransfersStream;
 
     static {
         transfer1 = new Transfer();
@@ -42,35 +42,35 @@ public class TransfersBatchTest {
         transfer2.setTimestamp(900);
 
         // Mimic the the binnary response
-        dummyStream = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
+        dummyTransfersStream = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
 
         // Item 1
-        dummyStream.putLong(5000).putLong(500); // Id
-        dummyStream.putLong(1000).putLong(100); // CreditAccountId
-        dummyStream.putLong(2000).putLong(200); // DebitAccountId
-        dummyStream.putLong(3000).putLong(300); // UserData
-        dummyStream.put(new byte[16]); // Reserved
-        dummyStream.putLong(0).putLong(0); // PendingId
-        dummyStream.putLong(0); // Timeout
-        dummyStream.putInt(720); // Ledger
-        dummyStream.putShort((short) 10); // Code
-        dummyStream.putShort((short) 0); // Flags
-        dummyStream.putLong(1000); // Amount
-        dummyStream.putLong(0); // Timestamp
+        dummyTransfersStream.putLong(5000).putLong(500); // Id
+        dummyTransfersStream.putLong(1000).putLong(100); // CreditAccountId
+        dummyTransfersStream.putLong(2000).putLong(200); // DebitAccountId
+        dummyTransfersStream.putLong(3000).putLong(300); // UserData
+        dummyTransfersStream.put(new byte[16]); // Reserved
+        dummyTransfersStream.putLong(0).putLong(0); // PendingId
+        dummyTransfersStream.putLong(0); // Timeout
+        dummyTransfersStream.putInt(720); // Ledger
+        dummyTransfersStream.putShort((short) 10); // Code
+        dummyTransfersStream.putShort((short) 0); // Flags
+        dummyTransfersStream.putLong(1000); // Amount
+        dummyTransfersStream.putLong(0); // Timestamp
 
         // Item 2
-        dummyStream.putLong(5001).putLong(501); // Id
-        dummyStream.putLong(1001).putLong(101); // CreditAccountId
-        dummyStream.putLong(2001).putLong(201); // DebitAccountId
-        dummyStream.putLong(3001).putLong(301); // UserData
-        dummyStream.put(new byte[16]); // Reserved
-        dummyStream.putLong(5000).putLong(500); // PendingId
-        dummyStream.putLong(2500); // Timeout
-        dummyStream.putInt(100); // Ledger
-        dummyStream.putShort((short) 20); // Code
-        dummyStream.putShort((short) 3); // Flags
-        dummyStream.putLong(200); // Amount
-        dummyStream.putLong(900); // Timestamp
+        dummyTransfersStream.putLong(5001).putLong(501); // Id
+        dummyTransfersStream.putLong(1001).putLong(101); // CreditAccountId
+        dummyTransfersStream.putLong(2001).putLong(201); // DebitAccountId
+        dummyTransfersStream.putLong(3001).putLong(301); // UserData
+        dummyTransfersStream.put(new byte[16]); // Reserved
+        dummyTransfersStream.putLong(5000).putLong(500); // PendingId
+        dummyTransfersStream.putLong(2500); // Timeout
+        dummyTransfersStream.putInt(100); // Ledger
+        dummyTransfersStream.putShort((short) 20); // Code
+        dummyTransfersStream.putShort((short) 3); // Flags
+        dummyTransfersStream.putLong(200); // Amount
+        dummyTransfersStream.putLong(900); // Timestamp
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -87,7 +87,7 @@ public class TransfersBatchTest {
     @Test
     public void testGet() {
 
-        Transfers batch = new Transfers(dummyStream.position(0));
+        Transfers batch = new Transfers(dummyTransfersStream.position(0));
         assertEquals(2, batch.getLength());
 
         Transfer getTransfer1 = batch.get(0);
@@ -122,7 +122,7 @@ public class TransfersBatchTest {
         assertTransfers(transfer1, getTransfer1);
         assertTransfers(transfer2, getTransfer2);
 
-        assertBuffer(dummyStream, batch.getBuffer(0));
+        assertBuffer(dummyTransfersStream, batch.getBuffer(0));
     }
 
     @Test
@@ -214,13 +214,13 @@ public class TransfersBatchTest {
         assertTransfers(transfer1, batch.get(0));
         assertTransfers(transfer2, batch.get(1));
 
-        assertBuffer(dummyStream, batch.getBuffer(0));
+        assertBuffer(dummyTransfersStream, batch.getBuffer(0));
     }
 
     @Test
     public void testToArray() {
 
-        Transfers batch = new Transfers(dummyStream.position(0));
+        Transfers batch = new Transfers(dummyTransfersStream.position(0));
         assertEquals(2, batch.getLength());
 
         Transfer[] array = batch.toArray();
@@ -242,8 +242,8 @@ public class TransfersBatchTest {
 
     @Test
     public void testBufferLen() {
-        var batch = new Transfers(dummyStream.position(0));
-        assertEquals(dummyStream.capacity(), batch.getBufferLen());
+        var batch = new Transfers(dummyTransfersStream.position(0));
+        assertEquals(dummyTransfersStream.capacity(), batch.getBufferLen());
     }
 
     private static void assertTransfers(Transfer transfer1, Transfer transfer2) {

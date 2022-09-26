@@ -6,6 +6,8 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
+import static com.tigerbeetle.AssertionError.assertTrue;
+
 public final class Client implements AutoCloseable {
     static {
         JNILoader.loadFromJar();
@@ -16,11 +18,11 @@ public final class Client implements AutoCloseable {
     private final int clusterID;
     private final int maxConcurrency;
     private final Semaphore maxConcurrencySemaphore;
-    private final ReentrantLock packetsLock;
 
-    private long clientHandle;
-    private long packetsHead;
-    private long packetsTail;
+    private final ReentrantLock packetsLock;
+    private volatile long clientHandle;
+    private volatile long packetsHead;
+    private volatile long packetsTail;
 
     /**
      * Initializes an instance of TigerBeetle client. This class is thread-safe and for optimal
@@ -108,7 +110,7 @@ public final class Client implements AutoCloseable {
 
         this.clusterID = clusterID;
         this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
-        this.packetsLock = new ReentrantLock();
+        this.packetsLock = new ReentrantLock(false);
     }
 
     /**
@@ -292,8 +294,7 @@ public final class Client implements AutoCloseable {
 
         if (clientHandle != 0) {
 
-            if (packet == 0L)
-                throw new AssertionError("Packet cannot be null.");
+            assertTrue(packet != 0L, "Packet cannot be null.");
 
             packetsLock.lock();
             try {
@@ -322,12 +323,16 @@ public final class Client implements AutoCloseable {
             this.maxConcurrencySemaphore.acquireUninterruptibly(maxConcurrency);
 
             // Deinit and sinalize that this client is closed by setting the handles to 0
-            synchronized (this) {
+            packetsLock.lock();
+            try {
+
                 clientDeinit(clientHandle);
 
                 clientHandle = 0;
                 packetsHead = 0;
                 packetsTail = 0;
+            } finally {
+                packetsLock.unlock();
             }
         }
     }

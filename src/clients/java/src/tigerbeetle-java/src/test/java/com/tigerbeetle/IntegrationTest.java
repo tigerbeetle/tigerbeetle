@@ -26,19 +26,21 @@ public class IntegrationTest {
     private static final Accounts accounts;
     private static final Ids accountIds;
 
-    private static final byte[] account1Id =
-            new byte[] {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-    private static final byte[] account2Id =
-            new byte[] {2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-    private static final byte[] transaction1Id =
-            new byte[] {10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-    private static final byte[] transaction2Id =
-            new byte[] {20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    private static final byte[] account1Id;
+    private static final byte[] account2Id;
+    private static final byte[] transaction1Id;
+    private static final byte[] transaction2Id;
 
     static {
+
+        account1Id = new byte[] {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+        account2Id = new byte[] {2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+        transaction1Id = new byte[] {10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+        transaction2Id = new byte[] {20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
         accounts = new Accounts(2);
 
         accounts.add();
@@ -969,7 +971,7 @@ public class IntegrationTest {
                 // Wait for all threads
                 for (int i = 0; i < tasks_qty; i++) {
                     tasks[i].join();
-                    assertFalse(tasks[i].isFaulted);
+                    assertTrue(tasks[i].exception == null);
                     assertEquals(0, tasks[i].result.getLength());
                 }
 
@@ -1014,11 +1016,10 @@ public class IntegrationTest {
 
         try (var server = new Server()) {
 
-            // Defining a ratio between concurrent threads and client's maxConcurrency
             // The goal here is to force to have way more threads than the client can
             // process simultaneously
             final int tasks_qty = 12;
-            final int max_concurrency = tasks_qty / 4;
+            final int max_concurrency = 1;
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -1033,7 +1034,6 @@ public class IntegrationTest {
                     tasks[i].start();
                 }
 
-                // Wait just for one thread to complete
                 tasks[0].join();
 
                 // And them close the client while several threads are still working
@@ -1041,13 +1041,33 @@ public class IntegrationTest {
                 // maxConcurrency limit
                 client.close();
 
+                int failedCount = 0;
+                int succeededCount = 0;
+
                 for (int i = 0; i < tasks_qty; i++) {
 
                     // The client.close must wait until all submited requests have completed
                     // Asserting that either the task succeeded or failed while waiting
                     tasks[i].join();
-                    assertTrue(tasks[i].isFaulted || tasks[i].result.getLength() == 0);
+
+                    final var failed = tasks[i].exception != null
+                            && tasks[i].exception.getMessage().equals("Client is closed");
+                    final var succeeded =
+                            tasks[i].result != null && tasks[i].result.getLength() == 0;
+
+                    assertTrue(failed || succeeded);
+
+                    if (failed) {
+                        failedCount += 1;
+                    } else if (succeeded) {
+                        succeededCount += 1;
+                    }
                 }
+
+                assertTrue(failedCount > 0);
+                assertTrue(succeededCount > 0);
+                assertTrue(succeededCount + failedCount == tasks_qty);
+
 
             } catch (Throwable any) {
                 throw any;
@@ -1080,20 +1100,21 @@ public class IntegrationTest {
         assertArrayEquals(transfer1.getPendingId(), transfer2.getPendingId());
     }
 
-    private class TransferTask extends Thread {
+    private static class TransferTask extends Thread {
 
         public final Client client;
         public CreateTransferResults result;
-        public boolean isFaulted;
+        public Throwable exception;
 
         public TransferTask(Client client) {
             this.client = client;
             this.result = null;
-            this.isFaulted = false;
+            this.exception = null;
         }
 
         @Override
         public synchronized void run() {
+
             var transfers = new Transfers(1);
             transfers.add();
 
@@ -1107,12 +1128,12 @@ public class IntegrationTest {
             try {
                 result = client.createTransfers(transfers);
             } catch (Throwable e) {
-                isFaulted = true;
+                exception = e;
             }
         }
     }
 
-    private class Server implements AutoCloseable {
+    private static class Server implements AutoCloseable {
 
         public static final String TB_EXE = "tigerbeetle";
         public static final String TB_PORT = "3001";
@@ -1159,5 +1180,7 @@ public class IntegrationTest {
             }
         }
     }
+
+
 
 }
