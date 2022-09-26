@@ -953,8 +953,8 @@ public class IntegrationTest {
             // Defining a ratio between concurrent threads and client's maxConcurrency
             // The goal here is to force to have more threads than the client can process
             // simultaneously
-            final int tasks_qty = 12;
-            final int max_concurrency = tasks_qty / 4;
+            final int tasks_qty = 8;
+            final int max_concurrency = tasks_qty / 2;
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -1018,7 +1018,7 @@ public class IntegrationTest {
 
             // The goal here is to force to have way more threads than the client can
             // process simultaneously
-            final int tasks_qty = 12;
+            final int tasks_qty = 8;
             final int max_concurrency = 1;
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
