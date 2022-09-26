@@ -8,7 +8,7 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
      *
      * Implements a Request that blocks the caller thread until signaled as completed by the TB's callback.
      * See AsyncRequest.java for the async implementation.
-     * 
+     *
      * We could have used the same AsyncRequest implementation by just waiting the CompletableFuture<T>.
      *
      * CompletableFuture<T> implements a sophisticated lock using CAS + waiter stack:

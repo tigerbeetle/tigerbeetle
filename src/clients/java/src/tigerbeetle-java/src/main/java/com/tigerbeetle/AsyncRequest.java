@@ -10,9 +10,9 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
      *
      * Implements a Request to be used when invoked asynchronously.
      * Exposes a CompletableFuture<T> to be awaited by an executor or thread pool until signaled as completed by the TB's callback.
-     * 
+     *
      * See BlockingRequest.java for the sync implementation.
-     * 
+     *
      */
     // @formatter:on
 

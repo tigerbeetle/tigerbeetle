@@ -13,9 +13,9 @@ public abstract class Batch {
      * Batch uses a ByteArray to hold direct memory that both the Java side and the JNI side can access.
      *
      * We expose the API using the concept of "Cursor" familiar to JDBC's ResultSet, where a single Batch
-     * instance points to multiple elements depending on the cursor position, eliminating individual instances 
+     * instance points to multiple elements depending on the cursor position, eliminating individual instances
      * for each element.
-     * 
+     *
      * Intended usage:
      *
      * <pre>

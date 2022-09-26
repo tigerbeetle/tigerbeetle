@@ -12,16 +12,16 @@ abstract class Request<TResponse extends Batch> {
      * Implements a context that will be used to submit the request and to signal the completion.
      * A reference to this class is stored by the JNI side in the "user_data" field when calling "tb_client_submit",
      * meaning that no GC will occur before the callback completion
-     * 
+     *
      * Memory:
-     * 
+     *
      * - Holds the request body until the completion to be accessible by the C client.
      * - Copies the response body to be exposed to the application.
-     * 
+     *
      * Completion:
-     * 
+     *
      * - See AsyncRequest.java and BlockingRequest.java
-     * 
+     *
      */
     // @formatter:on
 
