@@ -1,7 +1,7 @@
 //! An LSM tree.
 //!
 //!
-//! These charts depict `compaction_op` and `compaction_op_done` over a series of
+//! These charts depict `compaction_op` and `prefetch_snapshot_max` over a series of
 //! commits and compactions (with lsm_batch_multiple=8).
 //!
 //! Legend:
@@ -9,8 +9,8 @@
 //!   ┼   full measure (first beat start)
 //!   ┬   half measure (third beat start)
 //!   →   compaction_op
-//!   ←   compaction_op_done (prefetch uses this as the current snapshot)
-//!   ↔   compaction_op_done == compaction_op (same op)
+//!   ←   prefetch_snapshot_max (prefetch uses this as the current snapshot)
+//!   ↔   prefetch_snapshot_max == compaction_op (same op)
 //!   .   op is in mutable table (in memory)
 //!   ,   op is in immutable table (in memory)
 //!   #   op is on disk
@@ -60,8 +60,6 @@
 //! Notice how in the checkpoint recovery example above, we are careful not to `compact(op)` twice
 //! for any op (even if we crash/recover), since that could lead to differences between replicas'
 //! storage. The last measure of `commit()`s is always only in memory, so it is safe to repeat.
-//!
-//! `compaction_op_done` ("←") also represents the highest snapshot which can be prefetched from.
 //!
 const std = @import("std");
 const builtin = @import("builtin");
@@ -174,11 +172,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         /// See also: `compaction_snapshot_for_op`.
         ///
         /// Invariants:
-        /// * is one less than a multiple of a half-measure (unless compaction_op_done=0).
+        /// * is one less than a multiple of a half-measure (unless prefetch_snapshot_max=0).
         /// * is equal to `compaction_op` while no compaction is in progress
         ///   (at init; between half-measures).
         /// * is less than `compaction_op` while any compaction is in progress.
-        compaction_op_done: u64,
+        prefetch_snapshot_max: u64,
 
         compaction_io_pending: usize,
         compaction_callback: ?fn (*Tree) void,
@@ -257,7 +255,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .compaction_table_immutable = compaction_table_immutable,
                 .compaction_table = compaction_table,
                 .compaction_op = compaction_op,
-                .compaction_op_done = compaction_op,
+                .prefetch_snapshot_max = compaction_op,
                 .compaction_io_pending = 0,
                 .compaction_callback = null,
                 .checkpoint_callback = null,
@@ -290,9 +288,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             snapshot: u64,
             key: Key,
         ) ?*const Value {
-            assert(snapshot <= tree.compaction_op_done);
+            assert(snapshot <= tree.prefetch_snapshot_max);
 
-            if (snapshot == tree.compaction_op_done) {
+            if (snapshot == tree.prefetch_snapshot_max) {
                 if (tree.table_mutable.get(key)) |value| return value;
             } else {
                 // The mutable table is converted to an immutable table when a snapshot is created.
@@ -315,7 +313,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             snapshot: u64,
             key: Key,
         ) void {
-            assert(snapshot <= tree.compaction_op_done);
+            assert(snapshot <= tree.prefetch_snapshot_max);
             if (config.verify) {
                 // The caller is responsible for checking the mutable table.
                 assert(tree.lookup_from_memory(snapshot, key) == null);
@@ -599,7 +597,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             if (op != tree.compaction_op + 1) {
                 // We recovered from a checkpoint, and must avoid replaying one measure of
                 // compactions that were applied before the checkpoint.
-                assert(tree.compaction_op == tree.compaction_op_done);
+                assert(tree.compaction_op == tree.prefetch_snapshot_max);
                 assert(tree.compaction_op >= op);
                 assert(tree.compaction_op - op <= config.lsm_batch_multiple);
                 // TODO Defer this callback until tick() to avoid stack growth.
@@ -616,6 +614,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(tree.compaction_callback == null);
 
             assert(tree.compaction_op + 1 == op);
+            assert(tree.prefetch_snapshot_max < op);
             tree.compaction_op = op;
             tree.compaction_callback = callback;
 
@@ -625,6 +624,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             const snapshot = compaction_snapshot_for_op(op);
             assert(snapshot < snapshot_latest);
+            assert(snapshot == 0 or (snapshot + 1) % half_measure_beat_count == 0);
 
             log.debug(tree_name ++ ": compact_start: op={d} snapshot={d} beat={d}/{d}", .{
                 op,
@@ -869,10 +869,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // We couldn't remove the (invisible) input tables until now because prefetch()
             // needs a complete set of tables for lookups to avoid missing data.
 
-            assert(tree.compaction_op > tree.compaction_op_done);
-            assert(tree.compaction_op - tree.compaction_op_done <= half_measure_beat_count);
+            assert(tree.compaction_op > tree.prefetch_snapshot_max);
+            assert(tree.compaction_op - tree.prefetch_snapshot_max <= half_measure_beat_count);
             assert((tree.compaction_op + 1) % half_measure_beat_count == 0);
-            tree.compaction_op_done = tree.compaction_op;
+            tree.prefetch_snapshot_max = tree.compaction_op;
 
             // Reset the immutable table Compaction.
             // Also clear any invisible tables it created during compaction.
@@ -971,7 +971,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
             assert(tree.compaction_op > 0);
-            assert(tree.compaction_op == tree.compaction_op_done);
+            assert(tree.compaction_op == tree.prefetch_snapshot_max);
 
             // Assert that this is the last beat in the compaction measure.
             const compaction_beat = tree.compaction_op % config.lsm_batch_multiple;
