@@ -530,7 +530,10 @@ pub fn ReplicaType(
 
             // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
-            self.journal.storage.tick();
+
+            // Storage/IO is ticked by top-level in case of multiple replicas sharing the same IO.
+            // self.journal.storage.tick();
+
             self.grid.tick();
             self.state_machine.tick();
             self.message_bus.tick();
