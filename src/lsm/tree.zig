@@ -828,12 +828,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             const compaction_beat = tree.compaction_op % config.lsm_batch_multiple;
             const even_levels = compaction_beat < half_measure_beat_count;
-            const finished_even_levels = compaction_beat == half_measure_beat_count - 1;
-            const finished_odd_levels = compaction_beat == config.lsm_batch_multiple - 1;
-            if (!finished_even_levels and !finished_odd_levels) {
-                const callback = tree.compaction_callback.?;
-                tree.compaction_callback = null;
-                callback(tree);
+            const compacted_levels_even = compaction_beat == half_measure_beat_count - 1;
+            const compacted_levels_odd = compaction_beat == config.lsm_batch_multiple - 1;
+            if (!compacted_levels_even and !compacted_levels_odd) {
+                tree.compact_finish();
                 return;
             }
 
@@ -842,8 +840,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // 2. Remove invisible tables from the manifest.
             // 3. Compact the manifest.
             // Then at the end of the fourth beat, freeze the mutable table.
-            assert(finished_even_levels or finished_odd_levels);
-            assert(finished_even_levels != finished_odd_levels);
+            assert(compacted_levels_even or compacted_levels_odd);
+            assert(compacted_levels_even != compacted_levels_odd);
 
             const still_compacting = blk: {
                 if (even_levels) {
@@ -924,7 +922,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // At the end of the fourth/last beat:
             // - Assert all visible tables haven't overflowed their max per level.
             // - Convert mutable table to immutable table for next measure.
-            if (finished_odd_levels) {
+            if (compacted_levels_odd) {
                 tree.manifest.assert_level_table_counts();
                 tree.compact_mutable_table_into_immutable();
             }
@@ -956,6 +954,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             const tree = @fieldParentPtr(Tree, "manifest", manifest);
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback != null);
+            tree.compact_finish();
+        }
+
+        fn compact_finish(tree: *Tree) void {
+            assert(tree.compaction_io_pending == 0);
 
             // Invoke the compact() callback after the manifest compacts at the end of the beat.
             const callback = tree.compaction_callback.?;

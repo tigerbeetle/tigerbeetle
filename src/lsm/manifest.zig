@@ -48,29 +48,19 @@ pub fn TableInfoType(comptime Table: type) type {
             assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
         }
 
+        /// Snapshot visibility is:
+        /// - exclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
+        /// - inclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
+        ///
+        /// The reason to use (exclusive, inclusive) bounds rather than the more conventional
+        /// (inclusive, exclusive) bounds is that this enables prefetches to query an ongoing
+        /// compaction's input tables (rather than the output tables, which are not ready)
+        /// by querying the `tree.compaction_op_done`.
+        /// When the compaction finishes, `compaction_op_done` is bumped to `compaction_op`.
         pub fn visible(table: *const TableInfo, snapshot: u64) bool {
             assert(table.address != 0);
             assert(table.snapshot_min < table.snapshot_max);
             assert(snapshot <= snapshot_latest);
-
-            // Snapshots are no longer as unique as they were before,
-            // with Compaction and the like committing to snapshots "in the past" / before current op.
-            //
-            // For example, Compaction may update the snapshot_max of tables during removal to make
-            // them invisible. It will also scan for tables that are invisible with the same snapshot.
-            //
-            // We can then relax this range check to be
-            // - exclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
-            // - inclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
-            //
-            // The reason to use (exclusive, inclusive) bounds rather than the more conventional
-            // (inclusive, exclusive) bounds is that this enables prefetches to query an ongoing
-            // compaction's input tables (rather than the output tables, which are not ready)
-            // by querying the `tree.compaction_op_done`.
-            // When the compaction finishes, `compaction_op_done` is bumped to `compaction_op`.
-
-            // assert(snapshot != table.snapshot_min);
-            // assert(snapshot != table.snapshot_max);
 
             return table.snapshot_min < snapshot and snapshot <= table.snapshot_max;
         }
