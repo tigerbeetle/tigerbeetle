@@ -406,6 +406,22 @@ pub fn ManifestLevelType(
 
             return adjusted;
         }
+
+        /// The function is only used for verification; it is not performance-critical.
+        pub fn contains(level: Self, table: *const TableInfo) bool {
+            assert(config.verify);
+
+            var level_tables = level.iterator(.visible, &.{
+                table.snapshot_min,
+            }, .ascending, KeyRange{
+                .key_min = table.key_min,
+                .key_max = table.key_max,
+            });
+            while (level_tables.next()) |level_table| {
+                if (level_table.equal(table)) return true;
+            }
+            return false;
+        }
     };
 }
 

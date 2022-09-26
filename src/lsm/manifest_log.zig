@@ -47,8 +47,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         const SuperBlock = SuperBlockType(Storage);
         const Grid = GridType(Storage);
 
-        const BlockPtr = *align(config.sector_size) [config.block_size]u8;
-        const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
+        const BlockPtr = Grid.BlockPtr;
+        const BlockPtrConst = Grid.BlockPtrConst;
 
         pub const Callback = fn (manifest_log: *ManifestLog) void;
 
@@ -115,13 +115,13 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         /// Set for the duration of `compact`.
         reading: bool = false,
         read: Grid.Read = undefined,
-        read_callback: Callback = undefined,
+        read_callback: ?Callback = null,
         read_block_reference: ?SuperBlock.Manifest.BlockReference = null,
 
         /// Set for the duration of `flush` and `checkpoint`.
         writing: bool = false,
         write: Grid.Write = undefined,
-        write_callback: Callback = undefined,
+        write_callback: ?Callback = null,
 
         pub fn init(allocator: mem.Allocator, grid: *Grid, tree_hash: u128) !ManifestLog {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
@@ -163,6 +163,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(!manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
+            assert(manifest_log.read_callback == null);
 
             assert(manifest_log.blocks.count == 0);
             assert(manifest_log.blocks_closed == 0);
@@ -206,9 +207,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 manifest_log.open_event = undefined;
                 manifest_log.open_iterator = undefined;
 
-                const callback = manifest_log.read_callback;
+                const callback = manifest_log.read_callback.?;
                 manifest_log.reading = false;
-                manifest_log.read_callback = undefined;
+                manifest_log.read_callback = null;
                 assert(manifest_log.read_block_reference == null);
 
                 callback(manifest_log);
@@ -327,6 +328,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
+            assert(manifest_log.write_callback == null);
 
             manifest_log.writing = true;
             manifest_log.write_callback = callback;
@@ -351,8 +353,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     assert(manifest_log.entry_count < entry_count_max);
                 }
 
-                const callback = manifest_log.write_callback;
-                manifest_log.write_callback = undefined;
+                const callback = manifest_log.write_callback.?;
+                manifest_log.write_callback = null;
                 manifest_log.writing = false;
 
                 callback(manifest_log);
@@ -417,13 +419,13 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
+            assert(manifest_log.read_callback == null);
             manifest_log.read_callback = callback;
             manifest_log.flush(compact_flush_callback);
         }
 
         fn compact_flush_callback(manifest_log: *ManifestLog) void {
-            const callback = manifest_log.read_callback;
-            manifest_log.read_callback = undefined;
+            const callback = manifest_log.read_callback.?;
 
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
@@ -437,7 +439,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(block.address > 0);
 
                 manifest_log.reading = true;
-                manifest_log.read_callback = callback;
                 manifest_log.read_block_reference = block;
 
                 manifest_log.grid.read_block(
@@ -448,6 +449,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     .manifest,
                 );
             } else {
+                manifest_log.read_callback = null;
                 callback(manifest_log);
             }
         }
@@ -514,9 +516,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             manifest_log.grid.release_at_checkpoint(block_reference.address);
 
-            const callback = manifest_log.read_callback;
+            const callback = manifest_log.read_callback.?;
             manifest_log.reading = false;
-            manifest_log.read_callback = undefined;
+            manifest_log.read_callback = null;
             manifest_log.read_block_reference = null;
 
             callback(manifest_log);
@@ -526,6 +528,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
+            assert(manifest_log.write_callback == null);
 
             manifest_log.writing = true;
             manifest_log.write_callback = callback;

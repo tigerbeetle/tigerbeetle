@@ -31,11 +31,13 @@ pub fn TableInfoType(comptime Table: type) type {
         flags: u64 = 0,
 
         /// The minimum snapshot that can see this table (with exclusive bounds).
-        /// This value is set to the current snapshot tick on table creation.
+        /// - This value is set to the current snapshot tick on table creation.
         snapshot_min: u64,
 
         /// The maximum snapshot that can see this table (with inclusive bounds).
-        /// This value is set to the current snapshot tick on table deletion.
+        /// - This value is set to maxInt(64) when the table is created (output) by compaction.
+        /// - This value is set to the current snapshot tick when the table is processed (input) by
+        ///   compaction.
         snapshot_max: u64 = math.maxInt(u64),
 
         key_min: Key, // Inclusive.
@@ -44,19 +46,29 @@ pub fn TableInfoType(comptime Table: type) type {
         comptime {
             assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
             assert(@alignOf(TableInfo) == 16);
-            // Assert that there is no implicit padding in the struct.
             assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
         }
 
+        /// Every query targets a particular snapshot. The snapshot determines which tables are
+        /// visible to the query — i.e., which tables are accessed to answer the query.
+        ///
+        /// A table is "visible" to a snapshot if the snapshot lies within the table's
+        /// snapshot_min/snapshot_max interval.
+        ///
         /// Snapshot visibility is:
-        /// - inclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
-        /// - inclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
+        /// - inclusive to snapshot_min.
+        ///   (New tables are inserted with `snapshot_min = compaction.snapshot + 1`).
+        /// - inclusive to snapshot_max.
+        ///   (Tables are made invisible by setting `snapshot_max = compaction.snapshot`).
         ///
-        /// Prefetch queries the ongoing compaction's input tables (rather than the output tables,
-        /// which are not ready) with `tree.prefetch_snapshot_max` as the snapshot.
+        /// Prefetch does not query the output tables of an ongoing compaction, because the output
+        /// tables are not ready. Output tables are added to the manifest before being written to
+        /// disk.
         ///
-        /// When the (half-measure) compaction finishes, `prefetch_snapshot_max` is bumped to the
-        /// last compaction's `compaction_op`.
+        /// Instead, prefetch will continue to query the compaction's input tables until the
+        /// half-measure of compaction completes. At that point `tree.prefetch_snapshot_max` is
+        /// updated (to the compaction's `compaction_op`), simultaneously rendering the old (input)
+        /// tables invisible, and the new (output) tables visible.
         pub fn visible(table: *const TableInfo, snapshot: u64) bool {
             assert(table.address != 0);
             assert(table.snapshot_min <= table.snapshot_max);
@@ -191,7 +203,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
 
-            // TODO Verify that tables can be found exactly before returning.
+            if (config.verify) {
+                assert(manifest_level.contains(table));
+            }
         }
 
         /// Updates the snapshot_max on the provide table for the given level.
