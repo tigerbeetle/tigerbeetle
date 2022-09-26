@@ -954,8 +954,7 @@ pub fn ReplicaType(
             // const threshold = self.quorum_replication;
             // TODO: When Block recover & state transfer are implemented, this can be removed.
             const threshold =
-                if (prepare.message.header.op == self.op_checkpoint_trigger()) self.replica_count
-                else self.quorum_replication;
+                if (prepare.message.header.op == self.op_checkpoint_trigger()) self.replica_count else self.quorum_replication;
 
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
