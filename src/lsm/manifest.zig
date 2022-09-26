@@ -49,20 +49,20 @@ pub fn TableInfoType(comptime Table: type) type {
         }
 
         /// Snapshot visibility is:
-        /// - exclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
+        /// - inclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
         /// - inclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
         ///
-        /// The reason to use (exclusive, inclusive) bounds rather than the more conventional
-        /// (inclusive, exclusive) bounds is that this enables prefetches to query an ongoing
-        /// compaction's input tables (rather than the output tables, which are not ready)
-        /// by querying the `tree.compaction_op_done`.
-        /// When the compaction finishes, `compaction_op_done` is bumped to `compaction_op`.
+        /// Prefetch queries the ongoing compaction's input tables (rather than the output tables,
+        /// which are not ready) with `tree.prefetch_snapshot_max` as the snapshot.
+        ///
+        /// When the (half-measure) compaction finishes, `prefetch_snapshot_max` is bumped to the
+        /// last compaction's `compaction_op`.
         pub fn visible(table: *const TableInfo, snapshot: u64) bool {
             assert(table.address != 0);
-            assert(table.snapshot_min < table.snapshot_max);
+            assert(table.snapshot_min <= table.snapshot_max);
             assert(snapshot <= snapshot_latest);
 
-            return table.snapshot_min < snapshot and snapshot <= table.snapshot_max;
+            return table.snapshot_min <= snapshot and snapshot <= table.snapshot_max;
         }
 
         pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
@@ -195,7 +195,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         /// Updates the snapshot_max on the provide table for the given level.
-        /// The table provided is mutable to allow their snapshots to be updated.
+        /// The table provided is mutable to allow its snapshot_max to be updated.
         pub fn update_table(
             manifest: *Manifest,
             level: u8,
