@@ -84,9 +84,10 @@ pub const Storage = struct {
     }
 
     pub fn tick(storage: *Storage) void {
-        _ = storage;
-        // IO is ticked by the top-level (e.g. main.zig) since it may
-        // be shared by more than one replica, for example during tests.
+        storage.io.tick() catch |err| {
+            log.warn("tick: {}", .{err});
+            std.debug.panic("io.tick(): {}", .{err});
+        };
     }
 
     pub fn read_sectors(
