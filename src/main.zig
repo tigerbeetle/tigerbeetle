@@ -149,10 +149,6 @@ const Command = struct {
 
         while (true) {
             replica.tick();
-            command.io.tick() catch |err| {
-                log.warn("tick: {}", .{err});
-                std.debug.panic("io tick: {}", .{err});
-            };
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }
