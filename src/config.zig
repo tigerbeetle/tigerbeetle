@@ -48,22 +48,22 @@ pub const memory_size_max_default = 1024 * 1024 * 1024;
 
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_accounts_max = std.math.floorPowerOfTwo(usize, switch (deployment_environment) {
-    .production => 100_000,
-    else => 10_000,
-});
+pub const cache_accounts_max = switch (deployment_environment) {
+    .production => 64 * 1024,
+    else => 8 * 1024,
+};
 
 /// The maximum number of transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 /// We allocate more capacity than the number of transfers for a safe hash table load factor.
-pub const cache_transfers_max = std.math.floorPowerOfTwo(usize, switch (deployment_environment) {
-    .production => 1_000_000,
-    else => 100_000,
-});
+pub const cache_transfers_max = switch (deployment_environment) {
+    .production => 1024 * 1024,
+    else => 64 * 1024,
+};
 
 /// The maximum number of two-phase transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_transfers_pending_max = std.math.floorPowerOfTwo(usize, cache_transfers_max);
+pub const cache_transfers_pending_max = cache_transfers_max;
 
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.

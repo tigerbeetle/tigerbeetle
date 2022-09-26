@@ -377,7 +377,17 @@ pub fn GridType(comptime Storage: type) type {
                 // 2. All of the Grid's Read IOPS are occupied, so queue the read.
                 // 3. The replica checkpoints.
                 // 4. The read dequeues, but the requested block is no longer allocated.
-                // TODO(State Transfer) How does a non-repairable block trigger state transfer?
+                // TODO(State Transfer):
+                // 1. If a local read results in a fault, then the replica should attempt a
+                //    remote read.
+                // 2. If a remote replica has the block then it responds (and the local read
+                //    completes), otherwise it nacks.
+                // 3. If we receive too many nacks or if we get the feeling that we are too far
+                //    behind (perhaps the primary nacks), then complete the read callback but now
+                //    with a null result, so that it unwinds the stack all the way back to VSR,
+                //    which then initiates state transfer. At present, we expect that reads always
+                //    return a block, so to support this bubbling up, we'll need to make the block
+                //    result optional.
                 unreachable;
             }
 

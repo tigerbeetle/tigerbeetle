@@ -49,8 +49,8 @@ pub fn TableMutableType(comptime Table: type) type {
         ///
         /// The values cache is updated (in bulk) when the mutable table is sorted and frozen,
         /// rather than updating on every `put()`/`remove()`.
-        /// This avoids the redundancy of storing duplicate values between the mutable table
-        /// and the values cache.
+        /// This amortizes cache inserts for hot keys in the mutable table, and avoids redundantly
+        /// storing duplicate values in both the mutable table and values cache.
         // TODO Share cache between trees of different grooves:
         // "A set associative cache of values shared by trees with the same key/value sizes.
         // The value type will be []u8 and this will be shared by trees with the same value size."
@@ -153,17 +153,13 @@ pub fn TableMutableType(comptime Table: type) type {
             var it = table.values.keyIterator();
             while (it.next()) |value| : (i += 1) {
                 values_max[i] = value.*;
+
+                if (table.values_cache) |cache| cache.insert(key_from_value(value)).* = value.*;
             }
 
             const values = values_max[0..i];
             assert(values.len == table.count());
             std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
-
-            if (table.values_cache) |cache| {
-                for (values) |*value| {
-                    cache.insert(key_from_value(value)).* = value.*;
-                }
-            }
 
             table.clear();
             assert(table.count() == 0);

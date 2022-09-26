@@ -140,7 +140,7 @@ pub fn CompactionType(
 
         manifest: *Manifest,
         level_b: u8,
-        input_level_a: ?TableInfo,
+        level_a_input: ?TableInfo,
 
         pub fn init(allocator: mem.Allocator) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
@@ -174,7 +174,7 @@ pub fn CompactionType(
                 // Assigned by start()
                 .manifest = undefined,
                 .level_b = undefined,
-                .input_level_a = null,
+                .level_a_input = null,
             };
         }
 
@@ -231,7 +231,7 @@ pub fn CompactionType(
 
                 .manifest = manifest,
                 .level_b = level_b,
-                .input_level_a = if (table_a) |table| table.* else null,
+                .level_a_input = if (table_a) |table| table.* else null,
             };
 
             assert(!compaction.index.writable);
@@ -488,7 +488,7 @@ pub fn CompactionType(
             // Mark the level_a table as invisible if it was provided;
             // it has been merged into level_b.
             // TODO: Release the grid blocks associated with level_a as well
-            if (compaction.input_level_a) |*level_a_table| {
+            if (compaction.level_a_input) |*level_a_table| {
                 const level_a = compaction.level_b - 1;
                 compaction.manifest.update_table(level_a, compaction.snapshot, level_a_table);
                 assert(level_a_table.snapshot_max == compaction.snapshot);
