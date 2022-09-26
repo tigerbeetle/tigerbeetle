@@ -42,9 +42,10 @@
 //! * The sides of each rectangle depict:
 //!   * left:   table.key_min (the diagram is inclusive, and the table.key_min is inclusive)
 //!   * right:  table.key_max (the diagram is EXCLUSIVE, but the table.key_max is INCLUSIVE)
-//!   * bottom: table.snapshot_min (exclusive)
-//!   * top:    table.snapshot_max (exclusive)
+//!   * bottom: table.snapshot_min (inclusive)
+//!   * top:    table.snapshot_max (inclusive)
 //! * (Not depicted: tables may have `table.key_min == table.key_max`.)
+//! * (Not depicted: the newest set of tables would have `table.snapshot_max == maxInt(u64)`.)
 //!
 const std = @import("std");
 const assert = std.debug.assert;

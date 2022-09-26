@@ -18,16 +18,81 @@
 //!
 //! 4. Write the sort-merge iterator into a sequence of new tables on disk.
 //!
-//! 5. Update the old level-B tables in the Manifest with their new `snapshot_max` so that they
-//!    become invisible to subsequent read transactions.
+//! 5. Update the input tables in the Manifest with their new `snapshot_max` so that they become
+//!    invisible to subsequent read transactions.
 //!
 //! 6. Insert the new level-B tables into the Manifest.
-//!
 //!
 //! † When A's value is a tombstone, there is a special case for garbage collection. When either:
 //! * level B is the final level, or
 //! * A's key does not exist in B or any deeper level,
 //! then the tombstone is omitted from the compacted output (see: `compaction_must_drop_tombstones`).
+//!
+//!
+//! Compaction and Snapshots:
+//!
+//! `tree.compact()` is called immediately after every commit, with the op that was committed
+//! immediately prior. (If we are recovering after a crash, the op is the superblock's commit_min).
+//!
+//! `compaction.snapshot`:
+//!   * is the last op of the previous half-measure (relative to the most recently committed op).
+//!   * identifies the input tables (which must be visible to the snapshot).
+//!   * limits the input table's visibility (`table_in.snapshot_max = compaction.snapshot`).
+//!   * defines the output tables' visibility (`table_out.snapshot_min = compaction.snapshot + 1`).
+//!   * defines the immutable table's visibility at the end of the last beat.
+//!     - (`table_immutable.snapshot_min = compaction.snapshot + 1`)
+//!     - See `compact_mutable_table_into_immutable()`.
+//!
+//! This chart depicts the snapshots of compaction input/output tables relative to the compacting op
+//! (with lsm_batch_multiple=8):
+//!
+//!   table IO       snapshot interval      group
+//!            ┅┅┅┅
+//!      T₁ I  ?───·························· ⎤  The first measure of compaction is just for
+//!      T₂  O $   ·························· ⎦  demonstration; there are no tables to compact yet.
+//!      T₁ I  $───                           ⎤
+//!      T₂  O $   ?───────────────────────── ⎦
+//!                ┅┅┅┅
+//!      T₁ I     $?───······················ ⎤  Each compaction is depicted by two steps:
+//!      T₂  O    $    ······················ ⎦  "during" and "after".
+//!      T₁ I     $────                       ⎤
+//!      T₂  O    $    ?───────────────────── ⎦
+//!                    ┅┅┅┅
+//!      T₂ I         $?───·················· ⎤  Output tables have snapshot_max=maxInt(u64).
+//!      T₃  O        $    ·················· ⎦
+//!      T₂ I         $────                   ⎤
+//!      T₃  O        $    ?───────────────── ⎦
+//!                            ┅┅┅┅
+//!      T₃ I             $?───────·········· ⎤  In this compaction, T₃ was untouched by the
+//!      T₄  O            $        ·········· ⎦  previous compaction (ops 12…15), so its snapshots
+//!      T₃ I             $────────           ⎤  cover a wider interval.
+//!      T₄  O            $        ?───────── ⎦
+//!                                ┅┅┅┅
+//!      T₄ I                     $?───······ ⎤  During compaction, prefetch() queries the old input
+//!      T₅  O                    $    ······ ⎦  tables until the compaction half-measure completes.
+//!      T₄ I                     $────       ⎤
+//!      T₅  O                    $    ?───── ⎦
+//!                                    ┅┅┅┅
+//!      T₅ I                         $?───·· ⎤  Once prefetch can query from the new output tables,
+//!      T₆  O                        $    ·· ⎦  the old tables can be removed if they are invisible
+//!      T₅ I                         $────·· ⎤  to all saved snapshots.
+//!      T₆  O                        $    ?─ ⎦
+//!            ┼───┬───┼───┬───┼───┬───┼───┬─ beat
+//!            0   4   8  12  16  20  24  28  op/snapshot
+//!
+//! Legend:
+//!
+//!     ┅  Indicate the compact() ops which drive the changes for the following compaction.
+//!     ·  Indicate an update to the table's snapshot range during compaction.
+//!     ?  The snapshot (and table) used for prefetching current data.
+//!     $  `compaction.snapshot`
+//!     ─  The (inclusive) interval covered by the table's snapshot_min → snapshot_max.
+//!     ┼  The first beat of a full measure.
+//!     ┬  The first beat of a half measure.
+//!     I  Table is an input table for the current compaction.
+//!     O  Table is an output table for the current compaction.
+//!    ⎤⎦  Group updates that occur simultaneously.
+//!
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;
@@ -120,6 +185,10 @@ pub fn CompactionType(
 
         grid: *Grid,
         range: Manifest.CompactionRange,
+
+        /// Input tables must be visisble to `snapshot`.
+        /// `snapshot` will be the input table's snapshot_max.
+        /// `snapshot + 1` will be the output table's snapshot_min.
         snapshot: u64,
         drop_tombstones: bool,
 
@@ -185,7 +254,9 @@ pub fn CompactionType(
             compaction.iterator_a.deinit(allocator);
         }
 
-        /// table_a is null when level A is 0.
+        /// The compaction's input tables are:
+        /// * table_a (which is null when level B is 0), and
+        /// * any level-B tables visible to `snapshot` within `range`.
         pub fn start(
             compaction: *Compaction,
             grid: *Grid,
@@ -201,6 +272,7 @@ pub fn CompactionType(
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done and compaction.merge_iterator == null);
 
+            assert((snapshot + 1) % @divExact(config.lsm_batch_multiple, 2) == 0);
             assert(range.table_count > 0);
 
             assert(level_b < config.lsm_levels);
@@ -276,7 +348,7 @@ pub fn CompactionType(
             assert(compaction.callback != null);
             assert(!compaction.merge_done);
 
-            // Tables discovered by iterator_b that are visible
+            // Tables discovered by iterator_b that are visible at the start of compaction.
             var table_copy = table.*;
             compaction.manifest.update_table(compaction.level_b, compaction.snapshot, &table_copy);
 
@@ -455,7 +527,7 @@ pub fn CompactionType(
                 const table = compaction.table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .address = compaction.grid.acquire(),
-                    .snapshot_min = compaction.snapshot,
+                    .snapshot_min = compaction.snapshot + 1,
                 });
                 compaction.manifest.insert_table(compaction.level_b, &table);
 

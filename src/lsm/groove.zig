@@ -553,7 +553,7 @@ pub fn GrooveType(
             // We may query the input tables of an ongoing compaction, but must not query the
             // output tables until the compaction is complete. (Until then, the output tables may
             // be in the manifest but not yet on disk).
-            const snapshot_max = groove.ids.compaction_op_done;
+            const snapshot_max = groove.ids.prefetch_snapshot_max;
             const snapshot_target = snapshot orelse snapshot_max;
             assert(snapshot_target <= snapshot_max);
 
@@ -699,8 +699,9 @@ pub fn GrooveType(
                     }
 
                     if (worker.context.groove.objects.lookup_from_memory(
-                        worker.context.snapshot, id_tree_value.timestamp)) |object|
-                    {
+                        worker.context.snapshot,
+                        id_tree_value.timestamp,
+                    )) |object| {
                         // The object is not a tombstone; the ID and Object trees are in sync.
                         assert(!ObjectTreeHelpers(Object).tombstone(object));
 
