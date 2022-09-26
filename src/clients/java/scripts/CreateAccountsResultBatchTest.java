@@ -13,15 +13,11 @@ import org.junit.Test;
  */
 public class CreateAccountsResultBatchTest {
 
-    private static final CreateAccountsResult result1;
-    private static final CreateAccountsResult result2;
+    private static final CreateAccountResult result1 = CreateAccountResult.Ok;
+    private static final CreateAccountResult result2 = CreateAccountResult.Exists;
     private static final ByteBuffer dummyStream;
 
     static {
-
-        result1 = new CreateAccountsResult(0, CreateAccountResult.Ok);
-        result2 = new CreateAccountsResult(1, CreateAccountResult.Exists);
-
         // Mimic the the binnary response
         dummyStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyStream.putInt(0).putInt(0); // Item 0 - OK
@@ -31,8 +27,10 @@ public class CreateAccountsResultBatchTest {
     @Test
     public void testGet() {
 
-        CreateAccountsResultBatch batch = new CreateAccountsResultBatch(dummyStream.position(0));
-        assertEquals(batch.getLenght(), 2);
+        CreateAccountResults batch = new CreateAccountResults(dummyStream.position(0));
+        assertEquals(2, batch.getCapacity());
+        assertEquals(2, batch.getLength());
+        assertEquals(0, batch.position());
 
         CreateAccountsResult getResult1 = batch.get(0);
         assertNotNull(getResult1);
@@ -46,7 +44,7 @@ public class CreateAccountsResultBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testGetIndexOutOfBounds() {
 
-        CreateAccountsResultBatch batch = new CreateAccountsResultBatch(dummyStream.position(0));
+        CreateAccountResults batch = new CreateAccountResults(dummyStream.position(0));
         batch.get(3);
         assert false; // Should be unreachable
     }
@@ -54,7 +52,7 @@ public class CreateAccountsResultBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testGetIndexNegative() {
 
-        CreateAccountsResultBatch batch = new CreateAccountsResultBatch(dummyStream.position(0));
+        CreateAccountResults batch = new CreateAccountResults(dummyStream.position(0));
         batch.get(-1);
         assert false; // Should be unreachable
     }
@@ -62,8 +60,8 @@ public class CreateAccountsResultBatchTest {
     @Test
     public void testToArray() {
 
-        CreateAccountsResultBatch batch = new CreateAccountsResultBatch(dummyStream.position(0));
-        assertEquals(batch.getLenght(), 2);
+        CreateAccountResults batch = new CreateAccountResults(dummyStream.position(0));
+        assertEquals(batch.getCapacity(), 2);
 
         CreateAccountsResult[] array = batch.toArray();
         assertEquals(array.length, 2);
@@ -78,13 +76,13 @@ public class CreateAccountsResultBatchTest {
         var invalidBuffer = ByteBuffer.allocate((CreateAccountsResult.Struct.SIZE * 2) - 1)
                 .order(ByteOrder.LITTLE_ENDIAN);
 
-        var batch = new CreateAccountsResultBatch(invalidBuffer);
+        var batch = new CreateAccountResults(invalidBuffer);
         assert batch == null; // Should be unreachable
     }
 
     @Test
     public void testBufferLen() {
-        var batch = new CreateAccountsResultBatch(dummyStream.position(0));
+        var batch = new CreateAccountResults(dummyStream.position(0));
         assertEquals(dummyStream.capacity(), batch.getBufferLen());
     }
 

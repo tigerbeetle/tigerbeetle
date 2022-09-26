@@ -31,14 +31,14 @@ public class CreateTransfersResultBatchTest {
     @Test(expected = NullPointerException.class)
     public void testConstructorWithNullBuffer() {
         ByteBuffer buffer = null;
-        new CreateTransfersResultBatch(buffer);
+        new CreateTransferResults(buffer);
     }
 
     @Test
     public void testGet() {
 
-        CreateTransfersResultBatch batch = new CreateTransfersResultBatch(dummyStream.position(0));
-        assertEquals(batch.getLenght(), 2);
+        CreateTransferResults batch = new CreateTransferResults(dummyStream.position(0));
+        assertEquals(batch.getCapacity(), 2);
 
         CreateTransfersResult getResult1 = batch.get(0);
         assertNotNull(getResult1);
@@ -52,7 +52,7 @@ public class CreateTransfersResultBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testGetIndexOutOfBounds() {
 
-        CreateTransfersResultBatch batch = new CreateTransfersResultBatch(dummyStream.position(0));
+        CreateTransferResults batch = new CreateTransferResults(dummyStream.position(0));
         batch.get(3);
         assert false; // Should be unreachable
     }
@@ -60,7 +60,7 @@ public class CreateTransfersResultBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testGetIndexNegative() {
 
-        CreateTransfersResultBatch batch = new CreateTransfersResultBatch(dummyStream.position(0));
+        CreateTransferResults batch = new CreateTransferResults(dummyStream.position(0));
         batch.get(-1);
         assert false; // Should be unreachable
     }
@@ -68,8 +68,8 @@ public class CreateTransfersResultBatchTest {
     @Test
     public void testToArray() {
 
-        CreateTransfersResultBatch batch = new CreateTransfersResultBatch(dummyStream.position(0));
-        assertEquals(batch.getLenght(), 2);
+        CreateTransferResults batch = new CreateTransferResults(dummyStream.position(0));
+        assertEquals(batch.getCapacity(), 2);
 
         CreateTransfersResult[] array = batch.toArray();
         assertEquals(array.length, 2);
@@ -79,7 +79,7 @@ public class CreateTransfersResultBatchTest {
 
     @Test
     public void testBufferLen() {
-        var batch = new CreateTransfersResultBatch(dummyStream.position(0));
+        var batch = new CreateTransferResults(dummyStream.position(0));
         assertEquals(dummyStream.capacity(), batch.getBufferLen());
     }
 
@@ -90,7 +90,7 @@ public class CreateTransfersResultBatchTest {
         var invalidBuffer = ByteBuffer.allocate((CreateTransfersResult.Struct.SIZE * 2) - 1)
                 .order(ByteOrder.LITTLE_ENDIAN);
 
-        var batch = new CreateTransfersResultBatch(invalidBuffer);
+        var batch = new CreateTransferResults(invalidBuffer);
         assert batch == null; // Should be unreachable
     }
 

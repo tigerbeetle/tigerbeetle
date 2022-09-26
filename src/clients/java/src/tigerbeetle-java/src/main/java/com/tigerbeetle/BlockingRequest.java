@@ -1,49 +1,73 @@
 package com.tigerbeetle;
 
-final class BlockingRequest<T> extends Request<T> {
+final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> {
 
-    private T[] result;
+    // @formatter:off
+    /*
+     * Overview:
+     *
+     * Implements a Request that blocks the caller thread until signaled as completed by the TB's callback.
+     * See AsyncRequest.java for the async implementation.
+     * 
+     * We could have used the same AsyncRequest implementation by just waiting the CompletableFuture<T>.
+     *
+     * CompletableFuture<T> implements a sophisticated lock using CAS + waiter stack:
+     * https://hg.openjdk.java.net/jdk8/jdk8/jdk/file/687fd7c7986d/src/share/classes/java/util/concurrent/CompletableFuture.java#l114
+     *
+     * This BlockingRequest<T> implements a much simpler general-purpose "synchronized" block that relies on the
+     * standard Monitor.wait().
+     *
+     * This approach is particulary good here for 3 reasons:
+     *
+     *   1. We are aways dealing with just one waiter thread, no need for a waiter stack.
+     *   2. It is expected for a request to be at least 2 io-ticks long, making sense to suspend the waiter thread immediately.
+     *   3. To avoid putting more pressure on the GC with additional object allocations required by the CompletableFuture
+     *
+     */
+    // @formatter:on
+
+    private TResponse result;
     private Throwable exception;
 
-    private BlockingRequest(Client client, byte operation, Batch batch) {
+    private BlockingRequest(final Client client, final byte operation, final Batch batch) {
         super(client, operation, batch);
 
         result = null;
         exception = null;
     }
 
-    public static BlockingRequest<CreateAccountsResult> createAccounts(Client client,
-            AccountsBatch batch) {
-        return new BlockingRequest<CreateAccountsResult>(client, Request.Operations.CREATE_ACCOUNTS,
+    public static BlockingRequest<CreateAccountResults> createAccounts(final Client client,
+            final Accounts batch) {
+        return new BlockingRequest<CreateAccountResults>(client, Request.Operations.CREATE_ACCOUNTS,
                 batch);
     }
 
-    public static BlockingRequest<Account> lookupAccounts(Client client, UInt128Batch batch) {
-        return new BlockingRequest<Account>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
+    public static BlockingRequest<Accounts> lookupAccounts(final Client client, final Ids batch) {
+        return new BlockingRequest<Accounts>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
     }
 
-    public static BlockingRequest<CreateTransfersResult> createTransfers(Client client,
-            TransfersBatch batch) {
-        return new BlockingRequest<CreateTransfersResult>(client,
+    public static BlockingRequest<CreateTransferResults> createTransfers(final Client client,
+            final Transfers batch) {
+        return new BlockingRequest<CreateTransferResults>(client,
                 Request.Operations.CREATE_TRANSFERS, batch);
     }
 
-    public static BlockingRequest<Transfer> lookupTransfers(Client client, UInt128Batch batch) {
-        return new BlockingRequest<Transfer>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
+    public static BlockingRequest<Transfers> lookupTransfers(final Client client, final Ids batch) {
+        return new BlockingRequest<Transfers>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
     }
 
     public boolean isDone() {
         return result != null || exception != null;
     }
 
-    public T[] waitForResult() throws RequestException {
+    public TResponse waitForResult() throws RequestException {
 
         waitForCompletionUninterruptibly();
         return getResult();
     }
 
     @Override
-    protected void setResult(T[] result) {
+    protected void setResult(final TResponse result) {
 
         synchronized (this) {
 
@@ -59,18 +83,18 @@ final class BlockingRequest<T> extends Request<T> {
                 this.exception = null;
             }
 
-            notifyAll();
+            notify();
         }
 
     }
 
     @Override
-    protected void setException(Throwable exception) {
+    protected void setException(final Throwable exception) {
 
         synchronized (this) {
             this.result = null;
             this.exception = exception;
-            notifyAll();
+            notify();
         }
 
     }
@@ -94,7 +118,7 @@ final class BlockingRequest<T> extends Request<T> {
         }
     }
 
-    T[] getResult() throws RequestException {
+    TResponse getResult() throws RequestException {
 
         if (result == null && exception == null)
             throw new AssertionError("Unexpected request result: result=null");

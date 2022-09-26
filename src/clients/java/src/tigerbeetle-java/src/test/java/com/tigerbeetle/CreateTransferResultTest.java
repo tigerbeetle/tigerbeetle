@@ -24,5 +24,11 @@ public class CreateTransferResultTest {
         CreateTransferResult.fromValue(value);
     }
 
+    @Test(expected = AssertionError.class)
+    public void testNegativeValue() {
+        var value = -1;
+        CreateTransferResult.fromValue(value);
+    }
+
 
 }

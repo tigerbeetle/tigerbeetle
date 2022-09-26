@@ -2,47 +2,62 @@ package com.tigerbeetle;
 
 import java.util.concurrent.CompletableFuture;
 
-final class AsyncRequest<T> extends Request<T> {
+final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
 
-    private final CompletableFuture<T[]> future;
+    // @formatter:off
+    /*
+     * Overview:
+     *
+     * Implements a Request to be used when invoked asynchronously.
+     * Exposes a CompletableFuture<T> to be awaited by an executor or thread pool until signaled as completed by the TB's callback.
+     * 
+     * See BlockingRequest.java for the sync implementation.
+     * 
+     */
+    // @formatter:on
 
-    private AsyncRequest(Client client, byte operation, Batch batch) {
+    private final CompletableFuture<TResponse> future;
+
+    private AsyncRequest(final Client client, final byte operation, final Batch batch) {
         super(client, operation, batch);
 
-        future = new CompletableFuture<>();
+        future = new CompletableFuture<TResponse>();
     }
 
-    public static AsyncRequest<CreateAccountsResult> createAccounts(Client client,
-            AccountsBatch batch) {
-        return new AsyncRequest<CreateAccountsResult>(client, Request.Operations.CREATE_ACCOUNTS,
+    public static AsyncRequest<CreateAccountResults> createAccounts(final Client client,
+            final Accounts batch) {
+        return new AsyncRequest<CreateAccountResults>(client, Request.Operations.CREATE_ACCOUNTS,
                 batch);
     }
 
-    public static AsyncRequest<Account> lookupAccounts(Client client, UInt128Batch batch) {
-        return new AsyncRequest<Account>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
+    public static AsyncRequest<Accounts> lookupAccounts(final Client client, final Ids batch) {
+        return new AsyncRequest<Accounts>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
     }
 
-    public static AsyncRequest<CreateTransfersResult> createTransfers(Client client,
-            TransfersBatch batch) {
-        return new AsyncRequest<CreateTransfersResult>(client, Request.Operations.CREATE_TRANSFERS,
+    public static AsyncRequest<CreateTransferResults> createTransfers(final Client client,
+            final Transfers batch) {
+        return new AsyncRequest<CreateTransferResults>(client, Request.Operations.CREATE_TRANSFERS,
                 batch);
     }
 
-    public static AsyncRequest<Transfer> lookupTransfers(Client client, UInt128Batch batch) {
-        return new AsyncRequest<Transfer>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
+    public static AsyncRequest<Transfers> lookupTransfers(final Client client, final Ids batch) {
+        return new AsyncRequest<Transfers>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
     }
 
-    public CompletableFuture<T[]> getFuture() {
+    public CompletableFuture<TResponse> getFuture() {
         return future;
     }
 
     @Override
-    protected void setResult(T[] result) {
-        future.complete(result);
+    protected void setResult(final TResponse result) {
+
+        // To prevent the completion to run in the callback thread
+        // we must call "completeAsync" instead of "complete".
+        future.completeAsync(() -> result);
     }
 
     @Override
-    protected void setException(Throwable exception) {
+    protected void setException(final Throwable exception) {
         future.completeExceptionally(exception);
     }
 }

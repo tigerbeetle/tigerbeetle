@@ -24,5 +24,11 @@ public class CreateAccountResultTest {
         CreateAccountResult.fromValue(value);
     }
 
+    @Test(expected = AssertionError.class)
+    public void testNegativeValue() {
+        var value = -1;
+        CreateAccountResult.fromValue(value);
+    }
+
 
 }

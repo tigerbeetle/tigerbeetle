@@ -75,20 +75,20 @@ public class TransfersBatchTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithNegativeCapacity() {
-        new TransfersBatch(-1);
+        new Transfers(-1);
     }
 
     @Test(expected = NullPointerException.class)
     public void testConstructorWithNullBuffer() {
         ByteBuffer buffer = null;
-        new TransfersBatch(buffer);
+        new Transfers(buffer);
     }
 
     @Test
     public void testGet() {
 
-        TransfersBatch batch = new TransfersBatch(dummyStream.position(0));
-        assertEquals(2, batch.getLenght());
+        Transfers batch = new Transfers(dummyStream.position(0));
+        assertEquals(2, batch.getLength());
 
         Transfer getTransfer1 = batch.get(0);
         assertNotNull(getTransfer1);
@@ -103,15 +103,15 @@ public class TransfersBatchTest {
     @Test
     public void testAdd() {
 
-        TransfersBatch batch = new TransfersBatch(2);
-        assertEquals(0, batch.getLenght());
+        Transfers batch = new Transfers(2);
+        assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
 
         batch.add(transfer1);
-        assertEquals(1, batch.getLenght());
+        assertEquals(1, batch.getLength());
 
         batch.add(transfer2);
-        assertEquals(2, batch.getLenght());
+        assertEquals(2, batch.getLength());
 
         Transfer getTransfer1 = batch.get(0);
         assertNotNull(getTransfer1);
@@ -122,19 +122,19 @@ public class TransfersBatchTest {
         assertTransfers(transfer1, getTransfer1);
         assertTransfers(transfer2, getTransfer2);
 
-        assertBuffer(dummyStream, batch.getBuffer());
+        assertBuffer(dummyStream, batch.getBuffer(0));
     }
 
     @Test
     public void testGetAndSet() {
 
-        TransfersBatch batch = new TransfersBatch(2);
-        assertEquals(0, batch.getLenght());
+        Transfers batch = new Transfers(2);
+        assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
 
         // Set inndex 0
         batch.set(0, transfer1);
-        assertEquals(1, batch.getLenght());
+        assertEquals(1, batch.getLength());
 
         Transfer getTransfer1 = batch.get(0);
         assertNotNull(getTransfer1);
@@ -143,11 +143,11 @@ public class TransfersBatchTest {
 
         // Set index 1
         batch.set(1, transfer1);
-        assertEquals(2, batch.getLenght());
+        assertEquals(2, batch.getLength());
 
         // Replace same index 0
         batch.set(0, transfer2);
-        assertEquals(2, batch.getLenght());
+        assertEquals(2, batch.getLength());
 
         Transfer getTransfer2 = batch.get(0);
         assertNotNull(getTransfer2);
@@ -165,7 +165,7 @@ public class TransfersBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testSetIndexOutOfBounds() {
 
-        TransfersBatch batch = new TransfersBatch(1);
+        Transfers batch = new Transfers(1);
         batch.set(1, transfer1);
         assert false; // Should be unreachable
     }
@@ -173,7 +173,7 @@ public class TransfersBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testSetIndexNegative() {
 
-        TransfersBatch batch = new TransfersBatch(1);
+        Transfers batch = new Transfers(1);
         batch.set(-1, transfer1);
         assert false; // Should be unreachable
     }
@@ -181,7 +181,7 @@ public class TransfersBatchTest {
     @Test(expected = NullPointerException.class)
     public void testSetNull() {
 
-        TransfersBatch batch = new TransfersBatch(1);
+        Transfers batch = new Transfers(1);
         batch.set(0, null);
         assert false; // Should be unreachable
     }
@@ -189,7 +189,7 @@ public class TransfersBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testGetIndexOutOfBounds() {
 
-        TransfersBatch batch = new TransfersBatch(1);
+        Transfers batch = new Transfers(1);
         batch.get(1);
         assert false; // Should be unreachable
     }
@@ -197,7 +197,7 @@ public class TransfersBatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testGetIndexNegative() {
 
-        TransfersBatch batch = new TransfersBatch(1);
+        Transfers batch = new Transfers(1);
         batch.get(-1);
         assert false; // Should be unreachable
     }
@@ -207,21 +207,21 @@ public class TransfersBatchTest {
 
         Transfer[] array = new Transfer[] {transfer1, transfer2};
 
-        TransfersBatch batch = new TransfersBatch(array);
-        assertEquals(batch.getLenght(), 2);
+        Transfers batch = new Transfers(array);
+        assertEquals(batch.getLength(), 2);
         assertEquals(batch.getCapacity(), 2);
 
         assertTransfers(transfer1, batch.get(0));
         assertTransfers(transfer2, batch.get(1));
 
-        assertBuffer(dummyStream, batch.getBuffer());
+        assertBuffer(dummyStream, batch.getBuffer(0));
     }
 
     @Test
     public void testToArray() {
 
-        TransfersBatch batch = new TransfersBatch(dummyStream.position(0));
-        assertEquals(2, batch.getLenght());
+        Transfers batch = new Transfers(dummyStream.position(0));
+        assertEquals(2, batch.getLength());
 
         Transfer[] array = batch.toArray();
         assertEquals(2, array.length);
@@ -236,13 +236,13 @@ public class TransfersBatchTest {
         var invalidBuffer =
                 ByteBuffer.allocate((Transfer.Struct.SIZE * 2) - 1).order(ByteOrder.LITTLE_ENDIAN);
 
-        var batch = new TransfersBatch(invalidBuffer);
+        var batch = new Transfers(invalidBuffer);
         assert batch == null; // Should be unreachable
     }
 
     @Test
     public void testBufferLen() {
-        var batch = new TransfersBatch(dummyStream.position(0));
+        var batch = new Transfers(dummyStream.position(0));
         assertEquals(dummyStream.capacity(), batch.getBufferLen());
     }
 

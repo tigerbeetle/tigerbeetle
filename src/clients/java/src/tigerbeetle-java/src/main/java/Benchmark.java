@@ -1,5 +1,4 @@
-import java.util.UUID;
-
+import java.util.concurrent.CompletableFuture;
 import com.tigerbeetle.*;
 
 public class Benchmark {
@@ -7,23 +6,35 @@ public class Benchmark {
     public static void main(String[] args) {
         try (var client = new Client(0, new String[] {"127.0.0.1:3001"}, 32)) {
 
-            var accounts = new AccountsBatch(2);
+            var accounts = new Accounts(2);
 
-            var account1 = new Account();
-            account1.setId(UInt128.fromUUID(UUID.randomUUID()));
-            account1.setCode(100);
-            account1.setLedger(720);
-            accounts.add(account1);
+            accounts.add();
+            accounts.setId(100, 1000);
+            accounts.setCode(100);
+            accounts.setLedger(720);
 
-            var account2 = new Account();
-            account2.setId(UInt128.fromUUID(UUID.randomUUID()));
-            account2.setCode(200);
-            account2.setLedger(720);
-            accounts.add(account2);
+            accounts.add();
+            accounts.setId(200, 2000);
+            accounts.setCode(200);
+            accounts.setLedger(720);
 
-            var results = client.createAccounts(accounts);
-            if (results.length > 0)
-                throw new Exception("Unexpected createAccount results");
+            // Async usage:
+            // Start the batch ...
+            CompletableFuture<CreateAccountResults> future = client.createAccountsAsync(accounts);
+
+            // Register something on the application's side while tigerbeetle is processing
+            // UPDATE MyCustomer ...
+
+            var accountErrors = future.get();
+            if (accountErrors.getLength() > 0) {
+
+                while (accountErrors.next()) {
+                    System.out.printf("Error creating account #%d -> %s\n",
+                            accountErrors.getIndex(), accountErrors.getResult());
+                }
+
+                return;
+            }
 
             final int HEADER_SIZE = 128; // @sizeOf(vsr.Header)
             final int TRANSFER_SIZE = 128; // @sizeOf(Transfer)
@@ -33,21 +44,21 @@ public class Benchmark {
             final int TRANSFERS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;
             final int MAX_TRANSFERS = BATCHES_COUNT * TRANSFERS_PER_BATCH;
 
-            var batches = new TransfersBatch[BATCHES_COUNT];
+            var batches = new Transfers[BATCHES_COUNT];
             for (int i = 0; i < BATCHES_COUNT; i++) {
-                var batch = new TransfersBatch(TRANSFERS_PER_BATCH);
+                var transfersBatch = new Transfers(TRANSFERS_PER_BATCH);
                 for (int j = 0; j < TRANSFERS_PER_BATCH; j++) {
-                    var transfer = new Transfer();
-                    transfer.setId(i + 1, j + 1);
-                    transfer.setCreditAccountId(account1.getId());
-                    transfer.setDebitAccountId(account2.getId());
-                    transfer.setCode((short) 1);
-                    transfer.setLedger(720);
-                    transfer.setAmount(100);
-                    batch.add(transfer);
+
+                    transfersBatch.add();
+                    transfersBatch.setId(i + 1, j + 1);
+                    transfersBatch.setCreditAccountId(100, 1000);
+                    transfersBatch.setDebitAccountId(200, 2000);
+                    transfersBatch.setCode((short) 1);
+                    transfersBatch.setLedger(720);
+                    transfersBatch.setAmount(100);
                 }
 
-                batches[i] = batch;
+                batches[i] = transfersBatch;
             }
 
             long totalTime = 0;
@@ -57,16 +68,17 @@ public class Benchmark {
 
                 var now = System.currentTimeMillis();
 
-                // Async usage:
-                // Start the batch ...
-                var request = client.createTransfersAsync(batch);
+                var transfersErrors = client.createTransfers(batch);
+                if (transfersErrors.getLength() > 0) {
 
-                // Register something on the application's side while tigerbeetle is processing
-                // UPDATE MyCustomer ...
+                    while (accountErrors.next()) {
+                        System.out.printf("Error creating transfer #%d -> %s\n",
+                                transfersErrors.getIndex(), transfersErrors.getResult());
+                    }
 
-                var errors = request.get();
-                if (errors.length > 0)
-                    throw new Exception("Unexpected transfer results");
+                    return;
+                }
+
                 var elapsed = System.currentTimeMillis() - now;
 
                 totalTime += elapsed;
