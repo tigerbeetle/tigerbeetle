@@ -28,7 +28,7 @@ public final class Transfers extends Batch {
      * Constructs an empty Transfers batch with the desired maximum capacity.
      * <p>
      * Once created, an instance cannot be resized, however it may contain any number of
-     * transactions between zero and its {@link #getCapacity capacity}.
+     * transfers between zero and its {@link #getCapacity capacity}.
      *
      * @param capacity the maximum capacity.
      *
@@ -43,10 +43,10 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Adds a new transaction at the end of this batch.
+     * Adds a new transfer at the end of this batch.
      * <p>
      * If successfully, moves the current {@link #setPosition position} to the newly created
-     * transaction.
+     * transfer.
      *
      * @throws IllegalStateException if this batch is read-only.
      * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
@@ -57,7 +57,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets a unique identifier for the transaction.
+     * Gets a unique identifier for the transfer.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -67,7 +67,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets a unique identifier for the transaction.
+     * Gets a unique identifier for the transfer.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -81,7 +81,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets a unique identifier for the transaction.
+     * Sets a unique identifier for the transfer.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -94,7 +94,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets a unique identifier for the transaction.
+     * Sets a unique identifier for the transfer.
      *
      * @param id an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code id} is null.
