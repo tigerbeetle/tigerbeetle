@@ -2,6 +2,9 @@ package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
 
+/**
+ * A {@link Batch batch} of transfers.
+ */
 public final class Transfers extends Batch {
 
     interface Struct {
@@ -25,7 +28,7 @@ public final class Transfers extends Batch {
     static final Transfers EMPTY = new Transfers(0);
 
     /**
-     * Constructs an empty Transfers batch with the desired maximum capacity.
+     * Constructs an empty batch of transfers with the desired maximum capacity.
      * <p>
      * Once created, an instance cannot be resized, however it may contain any number of
      * transfers between zero and its {@link #getCapacity capacity}.

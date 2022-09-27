@@ -5,7 +5,11 @@ import java.nio.ByteOrder;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 /**
- * A Batch maintains a cursor pointing to its current element.
+ * A Batch is contiguous memory block representing a colletion of elements of the same type with a
+ * cursor pointing to its current position.
+ * <p>
+ * Initially the cursor is positioned before the first element and must be positioned by calling
+ * {@link #next}, {@link #add}, or {@link #setPosition} prior to reading or writing an element.
  */
 public abstract class Batch {
 
@@ -134,8 +138,6 @@ public abstract class Batch {
 
     /**
      * Tries to move the current {@link #setPosition position} to the next element in this batch.
-     * <p>
-     * Initially the cursor is positioned before the first element.
      *
      * @return true if moved or false if the end of the batch was reached.
      */

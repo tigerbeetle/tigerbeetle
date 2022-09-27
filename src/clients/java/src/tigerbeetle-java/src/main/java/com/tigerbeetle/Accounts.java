@@ -1,7 +1,9 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
-
+/**
+ * A {@link Batch batch} of accounts.
+ */
 public final class Accounts extends Batch {
 
     interface Struct {
@@ -24,7 +26,7 @@ public final class Accounts extends Batch {
     static final Accounts EMPTY = new Accounts(0);
 
     /**
-     * Constructs an empty Accounts batch with the desired maximum capacity.
+     * Constructs an empty batch of accounts with the desired maximum capacity.
      * <p>
      * Once created, an instance cannot be resized, however it may contain any number of accounts
      * between zero and its {@link #getCapacity capacity}.
