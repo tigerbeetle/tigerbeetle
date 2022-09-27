@@ -319,7 +319,11 @@ public final class Client implements AutoCloseable {
         if (clientHandle != 0) {
 
             // Acquire all permits, forcing to wait for any processing thread to release
-            this.maxConcurrencySemaphore.acquireUninterruptibly(maxConcurrency);
+            // Note that "acquireUninterruptibly(maxConcurrency)" atomically acquires the permits
+            // all at once, causing this operation to take longer.
+            for (int i = 0; i < maxConcurrency; i++) {
+                this.maxConcurrencySemaphore.acquireUninterruptibly();
+            }
 
             // Deinit and sinalize that this client is closed by setting the handles to 0
             packetsLock.lock();

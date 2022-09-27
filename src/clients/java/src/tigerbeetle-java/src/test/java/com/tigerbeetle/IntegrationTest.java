@@ -1003,7 +1003,7 @@ public class IntegrationTest {
             // The goal here is to force to have way more threads than the client can
             // process simultaneously
             final int tasks_qty = 8;
-            final int max_concurrency = 1;
+            final int max_concurrency = 2;
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -1011,16 +1011,20 @@ public class IntegrationTest {
                 assertTrue(errors.getLength() == 0);
 
                 var tasks = new TransferTask[tasks_qty];
-                for (int i = 0; i < tasks_qty; i++) {
+                synchronized (client) {
 
-                    // Starting multiple threads submiting transfers,
-                    tasks[i] = new TransferTask(client);
-                    tasks[i].start();
+                    for (int i = 0; i < tasks_qty; i++) {
+
+                        // Starting multiple threads submiting transfers,
+                        tasks[i] = new TransferTask(client);
+                        tasks[i].start();
+                    }
+
+                    // Waiting for any thread to complete
+                    client.wait();
                 }
 
-                tasks[0].join();
-
-                // And them close the client while several threads are still working
+                // And them close the client while several other threads are still working
                 // Some of them have already submited the request, others are waiting due to the
                 // maxConcurrency limit
                 client.close();
@@ -1113,6 +1117,13 @@ public class IntegrationTest {
                 result = client.createTransfers(transfers);
             } catch (Throwable e) {
                 exception = e;
+            } finally {
+
+                // Signal the caller
+                synchronized (client) {
+                    client.notify();
+                }
+
             }
         }
     }
