@@ -235,8 +235,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
-            // Scan and queue tables for removal in descending order to avoid
-            // buffer flushes which update the manifest_level invalidating subsequent iterator entries.
+            // Remove tables in descending order to avoid desynchronizing the iterator from
+            // the ManifestLevel.
             const direction = .descending;
             const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
