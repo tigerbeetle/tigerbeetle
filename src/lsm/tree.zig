@@ -822,10 +822,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback != null);
 
-            // At the end of every beat:
-            // - ensure mutable table can be flushed to immutable table.
-            defer assert(tree.table_mutable.can_commit_batch(tree.options.commit_entries_max));
-
             const compaction_beat = tree.compaction_op % config.lsm_batch_multiple;
             const even_levels = compaction_beat < half_measure_beat_count;
             const compacted_levels_even = compaction_beat == half_measure_beat_count - 1;
@@ -957,8 +953,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tree.compact_finish();
         }
 
+        /// Called at the end of each compaction beat.
         fn compact_finish(tree: *Tree) void {
             assert(tree.compaction_io_pending == 0);
+            assert(tree.table_mutable.can_commit_batch(tree.options.commit_entries_max));
 
             // Invoke the compact() callback after the manifest compacts at the end of the beat.
             const callback = tree.compaction_callback.?;
