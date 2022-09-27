@@ -182,8 +182,10 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new transfers to be created.
      *
-     * @param batch a {@link com.tigerbeetle.Transfers batch} containing all transfers to be created.
-     * @return a read-only {@link com.tigerbeetle.CreateTransferResults batch} describing the result.
+     * @param batch a {@link com.tigerbeetle.Transfers batch} containing all transfers to be
+     *        created.
+     * @return a read-only {@link com.tigerbeetle.CreateTransferResults batch} describing the
+     *         result.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
@@ -199,7 +201,8 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new transfers to be created asynchronously.
      *
-     * @param batch a {@link com.tigerbeetle.Transfers batch} containing all transfers to be created.
+     * @param batch a {@link com.tigerbeetle.Transfers batch} containing all transfers to be
+     *        created.
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.

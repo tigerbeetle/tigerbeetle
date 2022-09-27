@@ -3,10 +3,11 @@ package com.tigerbeetle;
 import java.nio.ByteBuffer;
 
 /**
- * A {@link Batch} of results returned from the {@link Client#createTransfers transfer creation} operation.
+ * A {@link Batch} of results returned from the {@link Client#createTransfers transfer creation}
+ * operation.
  * <p>
- * Successfully executed operations return an empty batch whilst unsuccessful ones return a batch with errors for only the ones that failed.
- * This instance is always ready-only.
+ * Successfully executed operations return an empty batch whilst unsuccessful ones return a batch
+ * with errors for only the ones that failed. This instance is always ready-only.
  */
 public class CreateTransferResults extends Batch {
 
@@ -29,7 +30,9 @@ public class CreateTransferResults extends Batch {
     }
 
     /**
-     * Gets the {@link Transfers#getPosition position} of the related transfer in the submitted batch.
+     * Gets the {@link Transfers#getPosition position} of the related transfer in the submitted
+     * batch.
+     *
      * @return a zero-based index.
      */
     public int getIndex() {
@@ -38,8 +41,9 @@ public class CreateTransferResults extends Batch {
 
     /**
      * Get the error that occurred during the creation of the transfer
+     *
      * @return see {@link CreateTransferResult}.
-     */     
+     */
     public CreateTransferResult getResult() {
         final var value = getUInt32(at(Struct.Result));
         return CreateTransferResult.fromValue(value);

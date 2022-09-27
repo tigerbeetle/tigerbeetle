@@ -1,6 +1,7 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
+
 /**
  * A {@link Batch batch} of accounts.
  */

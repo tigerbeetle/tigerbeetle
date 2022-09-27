@@ -16,13 +16,13 @@ public final class Ids extends Batch {
     /**
      * Constructs an empty batch of ids with the desired maximum capacity.
      * <p>
-     * Once created, an instance cannot be resized, however it may contain any number of ids
-     * between zero and its {@link #getCapacity capacity}.
+     * Once created, an instance cannot be resized, however it may contain any number of ids between
+     * zero and its {@link #getCapacity capacity}.
      *
      * @param capacity the maximum capacity.
      *
      * @throws IllegalArgumentException if capacity is negative.
-     */    
+     */
     public Ids(final int capacity) {
         super(capacity, Struct.SIZE);
     }
@@ -38,7 +38,7 @@ public final class Ids extends Batch {
      *
      * @throws IllegalStateException if this batch is read-only.
      * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
-     */    
+     */
     @Override
     public void add() {
         super.add();
@@ -50,10 +50,10 @@ public final class Ids extends Batch {
      * If successfully, moves the current {@link #setPosition position} to the newly created id.
      *
      * @param id an array of 16 bytes representing the 128-bit value.
-     * 
+     *
      * @throws IllegalStateException if this batch is read-only.
      * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
-     */      
+     */
     public void add(final byte[] id) {
         super.add();
         setId(id);
@@ -67,10 +67,10 @@ public final class Ids extends Batch {
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
      * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
-     * 
+     *
      * @throws IllegalStateException if this batch is read-only.
      * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
-     */       
+     */
     public void add(final long leastSignificant, final long mostSignificant) {
         super.add();
         setId(leastSignificant, mostSignificant);
@@ -95,7 +95,7 @@ public final class Ids extends Batch {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     */    
+     */
     public long getId(final UInt128 part) {
         return getUInt128(at(0), part);
     }
@@ -108,7 +108,7 @@ public final class Ids extends Batch {
      * @throws IllegalArgumentException if {@code id} is not 16 bytes long.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     */    
+     */
     public void setId(final byte[] id) {
         if (id == null)
             throw new NullPointerException("Id cannot be null");
@@ -124,7 +124,7 @@ public final class Ids extends Batch {
      * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     */    
+     */
     public void setId(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(0), leastSignificant, mostSignificant);
     }

@@ -30,8 +30,8 @@ public final class Transfers extends Batch {
     /**
      * Constructs an empty batch of transfers with the desired maximum capacity.
      * <p>
-     * Once created, an instance cannot be resized, however it may contain any number of
-     * transfers between zero and its {@link #getCapacity capacity}.
+     * Once created, an instance cannot be resized, however it may contain any number of transfers
+     * between zero and its {@link #getCapacity capacity}.
      *
      * @param capacity the maximum capacity.
      *

@@ -3,10 +3,11 @@ package com.tigerbeetle;
 import java.nio.ByteBuffer;
 
 /**
- * A {@link Batch} of results returned from the {@link Client#createAccounts account creation} operation.
+ * A {@link Batch} of results returned from the {@link Client#createAccounts account creation}
+ * operation.
  * <p>
- * Successfully executed operations return an empty batch whilst unsuccessful ones return a batch with errors for only the ones that failed.
- * This instance is always ready-only.
+ * Successfully executed operations return an empty batch whilst unsuccessful ones return a batch
+ * with errors for only the ones that failed. This instance is always ready-only.
  */
 public class CreateAccountResults extends Batch {
 
@@ -30,6 +31,7 @@ public class CreateAccountResults extends Batch {
 
     /**
      * Gets the {@link Accounts#getPosition position} of the related account in the submitted batch.
+     *
      * @return a zero-based index.
      */
     public int getIndex() {
@@ -38,8 +40,9 @@ public class CreateAccountResults extends Batch {
 
     /**
      * Get the error that occurred during the creation of the account
+     *
      * @return see {@link CreateAccountResult}.
-     */     
+     */
     public CreateAccountResult getResult() {
         final var value = getUInt32(at(Struct.Result));
         return CreateAccountResult.fromValue(value);

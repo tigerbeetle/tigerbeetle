@@ -1122,7 +1122,7 @@ public class IntegrationTest {
         public static final String TB_EXE = "tigerbeetle";
         public static final String TB_PORT = "3001";
         public static final String TB_FILE = "./java-tests.tigerbeetle";
-        public static final String TB_PATH = "../zig/lib/tigerbeetle/";
+        public static final String TB_PATH = "../zig/lib/tigerbeetle";
         public static final String TB_SERVER = TB_PATH + "/" + TB_EXE;
 
         private Process process;
@@ -1131,8 +1131,18 @@ public class IntegrationTest {
 
             cleanUp();
 
-            var format = Runtime.getRuntime().exec(
-                    new String[] {TB_SERVER, "format", "--cluster=0", "--replica=0", TB_FILE});
+            String exe;
+            switch (JNILoader.OS.getOS()) {
+                case win:
+                    exe = TB_SERVER + ".exe";
+                    break;
+                default:
+                    exe = TB_SERVER;
+                    break;
+            }
+
+            var format = Runtime.getRuntime()
+                    .exec(new String[] {exe, "format", "--cluster=0", "--replica=0", TB_FILE});
             if (format.waitFor() != 0) {
                 var reader = new BufferedReader(new InputStreamReader(format.getErrorStream()));
                 var error = reader.lines().collect(Collectors.joining(". "));
@@ -1140,7 +1150,7 @@ public class IntegrationTest {
             }
 
             this.process = Runtime.getRuntime()
-                    .exec(new String[] {TB_SERVER, "start", "--addresses=" + TB_PORT, TB_FILE});
+                    .exec(new String[] {exe, "start", "--addresses=" + TB_PORT, TB_FILE});
             if (process.waitFor(100, TimeUnit.MILLISECONDS))
                 throw new OperationsException("Start server failed");
         }
