@@ -248,6 +248,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 }
             }
 
+            if (block_entry_count(block) < entry_count_max) {
+                manifest.queue_for_compaction(block_reference.address);
+            }
+
             log.debug("{}: opened: checksum={} address={} entries={}", .{
                 manifest_log.tree_hash,
                 block_reference.checksum,
