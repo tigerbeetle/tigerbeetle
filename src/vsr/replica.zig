@@ -2669,10 +2669,28 @@ pub fn ReplicaType(
             reply.header.set_checksum_body(reply.body());
             reply.header.set_checksum();
 
-            if (reply.header.operation == .register) {
-                self.create_client_table_entry(reply);
+            if (self.op_checkpoint == 0 or
+                prepare.header.op > self.op_checkpoint + config.lsm_batch_multiple)
+            {
+                if (reply.header.operation == .register) {
+                    self.create_client_table_entry(reply);
+                } else {
+                    self.update_client_table_entry(reply);
+                }
             } else {
-                self.update_client_table_entry(reply);
+                // We are recovering from a checkpoint. Prior to the crash, the client table was
+                // updated with entries for one measure beyond the op_checkpoint.
+                assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
+                if (self.client_table().get(prepare.header.client)) |entry| {
+                    assert(entry.reply.header.command == .reply);
+                    assert(entry.reply.header.op >= prepare.header.op);
+                }
+
+                log.debug("{}: commit_op: skip client table update: prepare.op={} checkpoint={}", .{
+                    self.replica,
+                    prepare.header.op,
+                    self.op_checkpoint,
+                });
             }
 
             if (self.leader_index(self.view) == self.replica) {
