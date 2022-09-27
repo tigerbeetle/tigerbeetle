@@ -434,6 +434,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
+            // Compact a single manifest block — to minimize latency spikes, we want to do the bare
+            // minimum of compaction work required.
+            // TODO Compact more than 1 block if fragmentation is outstripping the compaction rate.
             if (manifest.oldest_block_queued_for_compaction(manifest_log.tree_hash)) |block| {
                 assert(block.tree == manifest_log.tree_hash);
                 assert(block.address > 0);
