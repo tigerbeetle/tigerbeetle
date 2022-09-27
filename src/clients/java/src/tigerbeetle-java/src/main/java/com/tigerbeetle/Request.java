@@ -155,13 +155,13 @@ abstract class Request<TResponse extends Batch> {
     /**
      * Copies the message buffer memory to managed memory.
      */
-    private ByteBuffer memcpy(final ByteBuffer source) {
+    static ByteBuffer memcpy(final ByteBuffer source) {
 
         assertTrue(source != null, "Source buffer cannot be null");
         assertTrue(source.isDirect(), "Source buffer must be direct");
 
         final var capacity = source.capacity();
-        assertTrue(capacity >= 0, "Source buffer cannot be empty");
+        assertTrue(capacity > 0, "Source buffer cannot be empty");
 
         final var copy = ByteBuffer.allocate(capacity);
         copy.put(source);

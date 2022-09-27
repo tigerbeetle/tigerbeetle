@@ -1,12 +1,12 @@
 package com.tigerbeetle;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.junit.Test;
-import com.tigerbeetle.UInt128.Bytes;
 
 /**
  * Asserts the memory interpretation from/to a binary stream.
@@ -20,6 +20,23 @@ public class BatchTest {
     private static final DummyTransferDto transfer1;
     private static final DummyTransferDto transfer2;
     private static final ByteBuffer dummyTransfersStream;
+
+    private static final CreateAccountResult createAccountResult1;
+    private static final CreateAccountResult createAccountResult2;
+    private static final ByteBuffer dummyCreateAccountResultsStream;
+
+    private static final CreateTransferResult createTransferResult1;
+    private static final CreateTransferResult createTransferResult2;
+    private static final ByteBuffer dummyCreateTransfersResultsStream;
+
+
+    private static final byte[] id1;
+    private static final long id1LeastSignificant;
+    private static final long id1MostSignificant;
+    private static final byte[] id2;
+    private static final long id2LeastSignificant;
+    private static final long id2MostSignificant;
+    private static final ByteBuffer dummyIdsStream;
 
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithNegativeCapacity() {
@@ -343,8 +360,6 @@ public class BatchTest {
         assert false;
     }
 
-
-
     @Test
     public void testReadTransfers() {
 
@@ -447,6 +462,187 @@ public class BatchTest {
         assert false;
     }
 
+    @Test
+    public void testReadCreateAccountResults() {
+
+        var batch = new CreateAccountResults(dummyCreateAccountResultsStream.position(0));
+        assertEquals(-1, batch.getPosition());
+        assertEquals(2, batch.getLength());
+        assertEquals(2, batch.getCapacity());
+
+        assertTrue(batch.next());
+        assertEquals(0, batch.getIndex());
+        assertEquals(createAccountResult1, batch.getResult());
+
+        assertTrue(batch.next());
+        assertEquals(1, batch.getIndex());
+        assertEquals(createAccountResult2, batch.getResult());
+
+        assertFalse(batch.next());
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testInvalidCreateAccountResultsBuffer() {
+
+        // Invalid size
+        var invalidBuffer = ByteBuffer.allocate((CreateAccountResults.Struct.SIZE * 2) - 1)
+                .order(ByteOrder.LITTLE_ENDIAN);
+
+        @SuppressWarnings("unused")
+        var batch = new CreateAccountResults(invalidBuffer);
+        assert false;
+    }
+
+    @Test
+    public void testReadCreateTransferResults() {
+
+        var batch = new CreateTransferResults(dummyCreateTransfersResultsStream.position(0));
+        assertEquals(-1, batch.getPosition());
+        assertEquals(2, batch.getLength());
+        assertEquals(2, batch.getCapacity());
+
+        assertTrue(batch.next());
+        assertEquals(0, batch.getIndex());
+        assertEquals(createTransferResult1, batch.getResult());
+
+        assertTrue(batch.next());
+        assertEquals(1, batch.getIndex());
+        assertEquals(createTransferResult2, batch.getResult());
+
+        assertFalse(batch.next());
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testInvalidTransferAccountResultsBuffer() {
+
+        // Invalid size
+        var invalidBuffer = ByteBuffer.allocate((CreateTransferResults.Struct.SIZE * 2) - 1)
+                .order(ByteOrder.LITTLE_ENDIAN);
+
+        @SuppressWarnings("unused")
+        var batch = new CreateTransferResults(invalidBuffer);
+        assert false;
+    }
+
+    @Test
+    public void testReadIds() {
+
+        var batch = new Ids(dummyIdsStream.position(0));
+        assertEquals(-1, batch.getPosition());
+        assertEquals(2, batch.getLength());
+        assertEquals(2, batch.getCapacity());
+
+        assertTrue(batch.next());
+        assertEquals(id1LeastSignificant, batch.getId(UInt128.LeastSignificant));
+        assertEquals(id1MostSignificant, batch.getId(UInt128.MostSignificant));
+        assertArrayEquals(id1, batch.getId());
+
+        assertTrue(batch.next());
+        assertEquals(id2LeastSignificant, batch.getId(UInt128.LeastSignificant));
+        assertEquals(id2MostSignificant, batch.getId(UInt128.MostSignificant));
+        assertArrayEquals(id2, batch.getId());
+
+        assertFalse(batch.next());
+    }
+
+    @Test
+    public void testWriteIds() {
+
+        var batch = new Ids(2);
+        assertEquals(-1, batch.getPosition());
+        assertEquals(0, batch.getLength());
+        assertEquals(2, batch.getCapacity());
+
+        batch.add(id1LeastSignificant, id1MostSignificant);
+        assertEquals(0, batch.getPosition());
+        assertEquals(1, batch.getLength());
+
+        batch.add(id2LeastSignificant, id2MostSignificant);
+        assertEquals(1, batch.getPosition());
+        assertEquals(2, batch.getLength());
+
+        batch.reset();
+
+        assertTrue(batch.next());
+        assertEquals(id1LeastSignificant, batch.getId(UInt128.LeastSignificant));
+        assertEquals(id1MostSignificant, batch.getId(UInt128.MostSignificant));
+        assertArrayEquals(id1, batch.getId());
+
+        assertTrue(batch.next());
+        assertEquals(id2LeastSignificant, batch.getId(UInt128.LeastSignificant));
+        assertEquals(id2MostSignificant, batch.getId(UInt128.MostSignificant));
+        assertArrayEquals(id2, batch.getId());
+
+        assertFalse(batch.next());
+
+        assertBuffer(dummyIdsStream, batch.getBuffer());
+    }
+
+    @Test
+    public void testMoveAndSetIds() {
+
+        var batch = new Ids(2);
+        assertEquals(-1, batch.getPosition());
+        assertEquals(0, batch.getLength());
+        assertEquals(2, batch.getCapacity());
+
+        // Set inndex 0
+        batch.add(id1);
+        assertEquals(0, batch.getPosition());
+        assertEquals(1, batch.getLength());
+        assertEquals(2, batch.getCapacity());
+        assertEquals(id1LeastSignificant, batch.getId(UInt128.LeastSignificant));
+        assertEquals(id1MostSignificant, batch.getId(UInt128.MostSignificant));
+        assertArrayEquals(id1, batch.getId());
+
+        // Set index 1 with id1 again
+        batch.add(id1);
+        assertEquals(1, batch.getPosition());
+        assertEquals(2, batch.getLength());
+        assertEquals(2, batch.getCapacity());
+        assertEquals(id1LeastSignificant, batch.getId(UInt128.LeastSignificant));
+        assertEquals(id1MostSignificant, batch.getId(UInt128.MostSignificant));
+        assertArrayEquals(id1, batch.getId());
+
+        // Replace index 0 with id2
+        batch.setPosition(0);
+        assertEquals(0, batch.getPosition());
+        assertEquals(2, batch.getLength());
+        assertEquals(2, batch.getCapacity());
+        batch.setId(id2);
+
+        batch.reset();
+
+        assertTrue(batch.next());
+        assertArrayEquals(id2, batch.getId());
+
+        assertTrue(batch.next());
+        assertArrayEquals(id1, batch.getId());
+
+        assertFalse(batch.next());
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testInvalidIdsBuffer() {
+
+        // Invalid size
+        var invalidBuffer =
+                ByteBuffer.allocate((UInt128.SIZE * 2) - 1).order(ByteOrder.LITTLE_ENDIAN);
+
+        @SuppressWarnings("unused")
+        var batch = new Ids(invalidBuffer);
+        assert false;
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testNullIds() {
+
+        var batch = new Ids(1);
+        batch.add();
+        batch.setId(null);
+        assert false;
+    }
+
     private static void setAccount(Accounts batch, DummyAccountDto account) {
         batch.setId(account.idLeastSignificant, account.idMostSignificant);
         batch.setUserData(account.userDataLeastSignificant, account.userDataMostSignificant);
@@ -461,10 +657,10 @@ public class BatchTest {
     }
 
     private static void assertAccounts(DummyAccountDto account, Accounts batch) {
-        assertEquals(account.idLeastSignificant, batch.getId(Bytes.LeastSignificant));
-        assertEquals(account.idMostSignificant, batch.getId(Bytes.MostSignificant));
-        assertEquals(account.userDataLeastSignificant, batch.getUserData(Bytes.LeastSignificant));
-        assertEquals(account.userDataMostSignificant, batch.getUserData(Bytes.MostSignificant));
+        assertEquals(account.idLeastSignificant, batch.getId(UInt128.LeastSignificant));
+        assertEquals(account.idMostSignificant, batch.getId(UInt128.MostSignificant));
+        assertEquals(account.userDataLeastSignificant, batch.getUserData(UInt128.LeastSignificant));
+        assertEquals(account.userDataMostSignificant, batch.getUserData(UInt128.MostSignificant));
         assertEquals(account.ledger, batch.getLedger());
         assertEquals(account.code, (short) batch.getCode());
         assertEquals(account.flags, (short) batch.getFlags());
@@ -476,26 +672,28 @@ public class BatchTest {
     }
 
     private static void assertTransfers(DummyTransferDto transfer, Transfers batch) {
-        assertEquals(transfer.idLeastSignificant, batch.getId(Bytes.LeastSignificant));
-        assertEquals(transfer.idMostSignificant, batch.getId(Bytes.MostSignificant));
+        assertEquals(transfer.idLeastSignificant, batch.getId(UInt128.LeastSignificant));
+        assertEquals(transfer.idMostSignificant, batch.getId(UInt128.MostSignificant));
         assertEquals(transfer.creditAccountIdLeastSignificant,
-                batch.getCreditAccountId(Bytes.LeastSignificant));
+                batch.getCreditAccountId(UInt128.LeastSignificant));
         assertEquals(transfer.creditAccountIdMostSignificant,
-                batch.getCreditAccountId(Bytes.MostSignificant));
+                batch.getCreditAccountId(UInt128.MostSignificant));
         assertEquals(transfer.debitAccountIdLeastSignificant,
-                batch.getDebitAccountId(Bytes.LeastSignificant));
+                batch.getDebitAccountId(UInt128.LeastSignificant));
         assertEquals(transfer.debitAccountIdMostSignificant,
-                batch.getDebitAccountId(Bytes.MostSignificant));
-        assertEquals(transfer.userDataLeastSignificant, batch.getUserData(Bytes.LeastSignificant));
-        assertEquals(transfer.userDataMostSignificant, batch.getUserData(Bytes.MostSignificant));
+                batch.getDebitAccountId(UInt128.MostSignificant));
+        assertEquals(transfer.userDataLeastSignificant,
+                batch.getUserData(UInt128.LeastSignificant));
+        assertEquals(transfer.userDataMostSignificant, batch.getUserData(UInt128.MostSignificant));
         assertEquals(transfer.ledger, batch.getLedger());
         assertEquals(transfer.code, (short) batch.getCode());
         assertEquals(transfer.flags, (short) batch.getFlags());
         assertEquals(transfer.amount, batch.getAmount());
         assertEquals(transfer.timeout, batch.getTimeout());
         assertEquals(transfer.pendingIdLeastSignificant,
-                batch.getPendingId(Bytes.LeastSignificant));
-        assertEquals(transfer.pendingIdMostSignificant, batch.getPendingId(Bytes.MostSignificant));
+                batch.getPendingId(UInt128.LeastSignificant));
+        assertEquals(transfer.pendingIdMostSignificant,
+                batch.getPendingId(UInt128.MostSignificant));
         assertEquals(transfer.timestamp, batch.getTimestamp());
     }
 
@@ -677,6 +875,37 @@ public class BatchTest {
         dummyTransfersStream.putShort((short) 3); // Flags
         dummyTransfersStream.putLong(200); // Amount
         dummyTransfersStream.putLong(900); // Timestamp
+
+        createAccountResult1 = CreateAccountResult.Ok;
+        createAccountResult2 = CreateAccountResult.Exists;
+
+        // Mimic the the binnary response
+        dummyCreateAccountResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+        dummyCreateAccountResultsStream.putInt(0).putInt(0); // Item 0 - OK
+        dummyCreateAccountResultsStream.putInt(1).putInt(21); // Item 1 - Exists
+
+        createTransferResult1 = CreateTransferResult.Ok;
+        createTransferResult2 = CreateTransferResult.ExceedsDebits;
+
+        // Mimic the the binnary response
+        dummyCreateTransfersResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
+        dummyCreateTransfersResultsStream.putInt(0).putInt(0); // Item 0 - OK
+        dummyCreateTransfersResultsStream.putInt(1).putInt(36); // Item 1 - ExceedsDebits
+
+
+        id1 = new byte[] {10, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0};
+        id1LeastSignificant = 10;
+        id1MostSignificant = 100;
+        id2 = new byte[] {2, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0};
+        id2LeastSignificant = 2;
+        id2MostSignificant = 20;
+
+        // Mimic the the binnary response
+        dummyIdsStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
+        dummyIdsStream.putLong(10).putLong(100); // Item (10,100)
+        dummyIdsStream.putLong(2).putLong(20); // Item (2,20)
+
+
     }
 
 

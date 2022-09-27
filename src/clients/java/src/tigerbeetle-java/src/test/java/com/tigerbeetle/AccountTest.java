@@ -3,7 +3,6 @@ package com.tigerbeetle;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import org.junit.Test;
-import com.tigerbeetle.UInt128.Bytes;
 
 public class AccountTest {
 
@@ -12,10 +11,10 @@ public class AccountTest {
         var accounts = new Accounts(1);
         accounts.add();
 
-        assertEquals(0L, accounts.getId(Bytes.LeastSignificant));
-        assertEquals(0L, accounts.getId(Bytes.MostSignificant));
-        assertEquals(0L, accounts.getUserData(Bytes.LeastSignificant));
-        assertEquals(0L, accounts.getUserData(Bytes.MostSignificant));
+        assertEquals(0L, accounts.getId(UInt128.LeastSignificant));
+        assertEquals(0L, accounts.getId(UInt128.MostSignificant));
+        assertEquals(0L, accounts.getUserData(UInt128.LeastSignificant));
+        assertEquals(0L, accounts.getUserData(UInt128.MostSignificant));
         assertEquals(0, accounts.getLedger());
         assertEquals(AccountFlags.NONE, accounts.getFlags());
         assertEquals((long) 0, accounts.getDebitsPosted());
@@ -31,8 +30,8 @@ public class AccountTest {
         accounts.add();
 
         accounts.setId(100, 200);
-        assertEquals(100L, accounts.getId(Bytes.LeastSignificant));
-        assertEquals(200L, accounts.getId(Bytes.MostSignificant));
+        assertEquals(100L, accounts.getId(UInt128.LeastSignificant));
+        assertEquals(200L, accounts.getId(UInt128.MostSignificant));
     }
 
     @Test
@@ -70,8 +69,8 @@ public class AccountTest {
         accounts.add();
 
         accounts.setUserData(100, 200);
-        assertEquals(100L, accounts.getUserData(Bytes.LeastSignificant));
-        assertEquals(200L, accounts.getUserData(Bytes.MostSignificant));
+        assertEquals(100L, accounts.getUserData(UInt128.LeastSignificant));
+        assertEquals(200L, accounts.getUserData(UInt128.MostSignificant));
     }
 
     @Test
@@ -91,8 +90,8 @@ public class AccountTest {
 
         byte[] userData = null;
         accounts.setUserData(userData);
-        assertEquals(0L, accounts.getUserData(Bytes.LeastSignificant));
-        assertEquals(0L, accounts.getUserData(Bytes.MostSignificant));
+        assertEquals(0L, accounts.getUserData(UInt128.LeastSignificant));
+        assertEquals(0L, accounts.getUserData(UInt128.MostSignificant));
     }
 
     @Test(expected = IllegalArgumentException.class)

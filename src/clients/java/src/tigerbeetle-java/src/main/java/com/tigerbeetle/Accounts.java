@@ -1,7 +1,6 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
-import com.tigerbeetle.UInt128.Bytes;
 
 public final class Accounts extends Batch {
 
@@ -32,6 +31,10 @@ public final class Accounts extends Batch {
         super(buffer, Struct.SIZE);
     }
 
+    @Override
+    public void add() {
+        super.add();
+    }
 
     /**
      * <p>
@@ -48,7 +51,7 @@ public final class Accounts extends Batch {
      *
      * @return
      */
-    public long getId(final Bytes part) {
+    public long getId(final UInt128 part) {
         return getUInt128(at(Struct.Id), part);
     }
 
@@ -93,7 +96,7 @@ public final class Accounts extends Batch {
      *
      * @return
      */
-    public long getUserData(final Bytes part) {
+    public long getUserData(final UInt128 part) {
         return getUInt128(at(Struct.UserData), part);
     }
 

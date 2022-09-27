@@ -3,34 +3,30 @@ package com.tigerbeetle;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
-public final class UInt128 {
+public enum UInt128 {
 
-    public enum Bytes {
-        LeastSignificant,
-        MostSignificant;
+    LeastSignificant,
+    MostSignificant;
 
-        public static final int SIZE = 16;
-    }
+    public static final int SIZE = 16;
 
-    private UInt128() {}
-
-    public static long getLong(final byte[] bytes, final Bytes part) {
+    public static long asLong(final byte[] bytes, final UInt128 part) {
 
         if (bytes == null)
             throw new NullPointerException("Bytes cannot be null");
 
-        if (bytes.length != Bytes.SIZE)
+        if (bytes.length != UInt128.SIZE)
             throw new IllegalArgumentException("Bytes must be 16 bytes long");
 
 
         var buffer = ByteBuffer.wrap(bytes).order(Batch.BYTE_ORDER).position(0);
-        if (part == Bytes.MostSignificant)
+        if (part == UInt128.MostSignificant)
             buffer.position(Long.BYTES);
         return buffer.getLong();
     }
 
-    public static byte[] toBytes(final long leastSignificant, final long mostSignificant) {
-        byte[] bytes = new byte[Bytes.SIZE];
+    public static byte[] asBytes(final long leastSignificant, final long mostSignificant) {
+        byte[] bytes = new byte[UInt128.SIZE];
 
         if (leastSignificant != 0 || mostSignificant != 0) {
             var buffer = ByteBuffer.wrap(bytes).order(Batch.BYTE_ORDER);
@@ -41,14 +37,16 @@ public final class UInt128 {
         return bytes;
     }
 
-    public static byte[] fromUUID(final UUID uuid) {
-        return toBytes(uuid.getLeastSignificantBits(), uuid.getMostSignificantBits());
+    public static byte[] asBytes(final UUID uuid) {
+        if (uuid == null)
+            throw new NullPointerException("Uuid cannot be null");
+
+        return asBytes(uuid.getLeastSignificantBits(), uuid.getMostSignificantBits());
     }
 
-    public static UUID toUUID(final byte[] bytes) {
-        final long leastSignificant = getLong(bytes, Bytes.LeastSignificant);
-        final long mostSignificant = getLong(bytes, Bytes.MostSignificant);
+    public static UUID asUUID(final byte[] bytes) {
+        final long leastSignificant = asLong(bytes, UInt128.LeastSignificant);
+        final long mostSignificant = asLong(bytes, UInt128.MostSignificant);
         return new UUID(mostSignificant, leastSignificant);
     }
-
 }

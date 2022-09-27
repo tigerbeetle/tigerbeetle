@@ -14,7 +14,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.Test;
-import com.tigerbeetle.UInt128.Bytes;
 
 public class AsyncRequestTest {
 
@@ -125,6 +124,34 @@ public class AsyncRequestTest {
             throw e.getCause();
         }
     }
+
+    @Test(expected = AssertionError.class)
+    public void testEndRequestWithUnknownOperation() throws Throwable {
+
+        var client = new Client(0, 1);
+        var batch = new Transfers(1);
+        batch.add();
+
+        final byte UNKNOWN = 99;
+
+        var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResults.Struct.SIZE);
+        var callback = new CallbackSimulator<CreateTransferResults>(
+                new AsyncRequest<CreateTransferResults>(client, UNKNOWN, batch), UNKNOWN,
+                dummyBuffer, 1, RequestException.Status.OK, 250);
+
+        CompletableFuture<CreateTransferResults> future = callback.request.getFuture();
+        callback.start();
+        assertFalse(future.isDone());
+
+        try {
+            future.get();
+            assert false;
+        } catch (ExecutionException e) {
+            assertNotNull(e.getCause());
+            throw e.getCause();
+        }
+    }
+
 
     @Test(expected = AssertionError.class)
     public void testEndRequestWithNullBuffer() throws Throwable {
@@ -355,12 +382,12 @@ public class AsyncRequestTest {
         assertEquals(2, result.getLength());
 
         assertTrue(result.next());
-        assertEquals(100L, result.getId(Bytes.LeastSignificant));
-        assertEquals(1000L, result.getId(Bytes.MostSignificant));
+        assertEquals(100L, result.getId(UInt128.LeastSignificant));
+        assertEquals(1000L, result.getId(UInt128.MostSignificant));
 
         assertTrue(result.next());
-        assertEquals(200L, result.getId(Bytes.LeastSignificant));
-        assertEquals(2000L, result.getId(Bytes.MostSignificant));
+        assertEquals(200L, result.getId(UInt128.LeastSignificant));
+        assertEquals(2000L, result.getId(UInt128.MostSignificant));
     }
 
     @Test
@@ -388,12 +415,12 @@ public class AsyncRequestTest {
         assertEquals(2, result.getLength());
 
         assertTrue(result.next());
-        assertEquals(100L, result.getId(Bytes.LeastSignificant));
-        assertEquals(1000L, result.getId(Bytes.MostSignificant));
+        assertEquals(100L, result.getId(UInt128.LeastSignificant));
+        assertEquals(1000L, result.getId(UInt128.MostSignificant));
 
         assertTrue(result.next());
-        assertEquals(200L, result.getId(Bytes.LeastSignificant));
-        assertEquals(2000L, result.getId(Bytes.MostSignificant));
+        assertEquals(200L, result.getId(UInt128.LeastSignificant));
+        assertEquals(2000L, result.getId(UInt128.MostSignificant));
     }
 
     @Test
@@ -431,12 +458,12 @@ public class AsyncRequestTest {
         assertEquals(2, result.getLength());
 
         assertTrue(result.next());
-        assertEquals(100L, result.getId(Bytes.LeastSignificant));
-        assertEquals(1000L, result.getId(Bytes.MostSignificant));
+        assertEquals(100L, result.getId(UInt128.LeastSignificant));
+        assertEquals(1000L, result.getId(UInt128.MostSignificant));
 
         assertTrue(result.next());
-        assertEquals(200L, result.getId(Bytes.LeastSignificant));
-        assertEquals(2000L, result.getId(Bytes.MostSignificant));
+        assertEquals(200L, result.getId(UInt128.LeastSignificant));
+        assertEquals(2000L, result.getId(UInt128.MostSignificant));
     }
 
     @Test
@@ -466,12 +493,12 @@ public class AsyncRequestTest {
             assertEquals(2, result.getLength());
 
             assertTrue(result.next());
-            assertEquals(100L, result.getId(Bytes.LeastSignificant));
-            assertEquals(1000L, result.getId(Bytes.MostSignificant));
+            assertEquals(100L, result.getId(UInt128.LeastSignificant));
+            assertEquals(1000L, result.getId(UInt128.MostSignificant));
 
             assertTrue(result.next());
-            assertEquals(200L, result.getId(Bytes.LeastSignificant));
-            assertEquals(2000L, result.getId(Bytes.MostSignificant));
+            assertEquals(200L, result.getId(UInt128.LeastSignificant));
+            assertEquals(2000L, result.getId(UInt128.MostSignificant));
 
         } catch (TimeoutException timeout) {
             assert false;

@@ -31,7 +31,7 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
     private TResponse result;
     private Throwable exception;
 
-    private BlockingRequest(final Client client, final byte operation, final Batch batch) {
+    BlockingRequest(final Client client, final byte operation, final Batch batch) {
         super(client, operation, batch);
 
         result = null;

@@ -2,7 +2,6 @@ package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import com.tigerbeetle.UInt128.Bytes;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 public abstract class Batch {
@@ -124,7 +123,7 @@ public abstract class Batch {
      * @throws IllegalStateException if this batch is read-only.
      * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
      */
-    public void add() {
+    void add() {
 
         if (isReadOnly())
             throw new IllegalStateException("Cannot add an element in a read-only batch");
@@ -223,7 +222,7 @@ public abstract class Batch {
         return this.length * ELEMENT_SIZE;
     }
 
-    protected int at(final int fieldOffSet) {
+    protected final int at(final int fieldOffSet) {
 
         if (this.cursorStatus != CursorStatus.Valid)
             throw new IllegalStateException();
@@ -237,14 +236,11 @@ public abstract class Batch {
         return bytes;
     }
 
-    protected final long getUInt128(final int index, final Bytes part) {
-        switch (part) {
-            case LeastSignificant:
-                return buffer.getLong(index);
-            case MostSignificant:
-                return buffer.getLong(index + Long.BYTES);
-            default:
-                throw new IllegalArgumentException();
+    protected final long getUInt128(final int index, final UInt128 part) {
+        if (part == UInt128.LeastSignificant) {
+            return buffer.getLong(index);
+        } else {
+            return buffer.getLong(index + Long.BYTES);
         }
     }
 

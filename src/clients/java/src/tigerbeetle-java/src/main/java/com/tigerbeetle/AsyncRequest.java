@@ -18,7 +18,7 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
 
     private final CompletableFuture<TResponse> future;
 
-    private AsyncRequest(final Client client, final byte operation, final Batch batch) {
+    AsyncRequest(final Client client, final byte operation, final Batch batch) {
         super(client, operation, batch);
 
         future = new CompletableFuture<TResponse>();

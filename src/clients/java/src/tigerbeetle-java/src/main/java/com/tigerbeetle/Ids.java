@@ -1,7 +1,6 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
-import com.tigerbeetle.UInt128.Bytes;
 
 public final class Ids extends Batch {
 
@@ -19,11 +18,26 @@ public final class Ids extends Batch {
         super(buffer, Struct.SIZE);
     }
 
+    @Override
+    public void add() {
+        super.add();
+    }
+
+    public void add(final byte[] id) {
+        super.add();
+        setId(id);
+    }
+
+    public void add(final long leastSignificant, final long mostSignificant) {
+        super.add();
+        setId(leastSignificant, mostSignificant);
+    }
+
     public byte[] getId() {
         return getUInt128(at(0));
     }
 
-    public long getId(final Bytes part) {
+    public long getId(final UInt128 part) {
         return getUInt128(at(0), part);
     }
 

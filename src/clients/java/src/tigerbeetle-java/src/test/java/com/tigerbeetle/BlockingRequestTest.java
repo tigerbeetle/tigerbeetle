@@ -6,7 +6,6 @@ import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.junit.Test;
-import com.tigerbeetle.UInt128.Bytes;
 
 public class BlockingRequestTest {
 
@@ -108,6 +107,28 @@ public class BlockingRequestTest {
         // Invalid operation, should be CREATE_TRANSFERS
         request.endRequest(Request.Operations.LOOKUP_ACCOUNTS, dummyBuffer, 1,
                 RequestException.Status.OK);
+
+        assertTrue(request.isDone());
+
+        request.waitForResult();
+        assert false;
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testEndRequestWithUnknownOperation() throws RequestException {
+
+        var client = new Client(0, 1);
+        var batch = new Transfers(1);
+        batch.add();
+
+        final byte UNKNOWN = 99;
+        var request = new BlockingRequest<CreateTransferResults>(client, UNKNOWN, batch);
+        var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResults.Struct.SIZE);
+
+        assertFalse(request.isDone());
+
+        // Unknown operation
+        request.endRequest(UNKNOWN, dummyBuffer, 1, RequestException.Status.OK);
 
         assertTrue(request.isDone());
 
@@ -361,12 +382,12 @@ public class BlockingRequestTest {
         assertEquals(2, result.getLength());
 
         assertTrue(result.next());
-        assertEquals(100L, result.getId(Bytes.LeastSignificant));
-        assertEquals(1000L, result.getId(Bytes.MostSignificant));
+        assertEquals(100L, result.getId(UInt128.LeastSignificant));
+        assertEquals(1000L, result.getId(UInt128.MostSignificant));
 
         assertTrue(result.next());
-        assertEquals(200L, result.getId(Bytes.LeastSignificant));
-        assertEquals(2000L, result.getId(Bytes.MostSignificant));
+        assertEquals(200L, result.getId(UInt128.LeastSignificant));
+        assertEquals(2000L, result.getId(UInt128.MostSignificant));
     }
 
     @Test
@@ -392,12 +413,12 @@ public class BlockingRequestTest {
         assertEquals(2, result.getLength());
 
         assertTrue(result.next());
-        assertEquals(100L, result.getId(Bytes.LeastSignificant));
-        assertEquals(1000L, result.getId(Bytes.MostSignificant));
+        assertEquals(100L, result.getId(UInt128.LeastSignificant));
+        assertEquals(1000L, result.getId(UInt128.MostSignificant));
 
         assertTrue(result.next());
-        assertEquals(200L, result.getId(Bytes.LeastSignificant));
-        assertEquals(2000L, result.getId(Bytes.MostSignificant));
+        assertEquals(200L, result.getId(UInt128.LeastSignificant));
+        assertEquals(2000L, result.getId(UInt128.MostSignificant));
     }
 
     @Test
@@ -426,12 +447,12 @@ public class BlockingRequestTest {
         assertEquals(2, result.getLength());
 
         assertTrue(result.next());
-        assertEquals(100L, result.getId(Bytes.LeastSignificant));
-        assertEquals(1000L, result.getId(Bytes.MostSignificant));
+        assertEquals(100L, result.getId(UInt128.LeastSignificant));
+        assertEquals(1000L, result.getId(UInt128.MostSignificant));
 
         assertTrue(result.next());
-        assertEquals(200L, result.getId(Bytes.LeastSignificant));
-        assertEquals(2000L, result.getId(Bytes.MostSignificant));
+        assertEquals(200L, result.getId(UInt128.LeastSignificant));
+        assertEquals(2000L, result.getId(UInt128.MostSignificant));
     }
 
     @Test

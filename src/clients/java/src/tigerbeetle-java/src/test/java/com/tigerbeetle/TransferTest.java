@@ -4,7 +4,6 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import java.math.BigInteger;
 import org.junit.Test;
-import com.tigerbeetle.UInt128.Bytes;
 
 public class TransferTest {
 
@@ -12,16 +11,16 @@ public class TransferTest {
     public void testDefaultValues() {
         var transfers = new Transfers(1);
         transfers.add();
-        assertEquals(0L, transfers.getId(Bytes.LeastSignificant));
-        assertEquals(0L, transfers.getId(Bytes.MostSignificant));
-        assertEquals(0L, transfers.getDebitAccountId(Bytes.LeastSignificant));
-        assertEquals(0L, transfers.getDebitAccountId(Bytes.MostSignificant));
-        assertEquals(0L, transfers.getCreditAccountId(Bytes.LeastSignificant));
-        assertEquals(0L, transfers.getCreditAccountId(Bytes.MostSignificant));
-        assertEquals(0L, transfers.getUserData(Bytes.LeastSignificant));
-        assertEquals(0L, transfers.getUserData(Bytes.MostSignificant));
-        assertEquals(0L, transfers.getPendingId(Bytes.LeastSignificant));
-        assertEquals(0L, transfers.getPendingId(Bytes.MostSignificant));
+        assertEquals(0L, transfers.getId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getId(UInt128.MostSignificant));
+        assertEquals(0L, transfers.getDebitAccountId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getDebitAccountId(UInt128.MostSignificant));
+        assertEquals(0L, transfers.getCreditAccountId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getCreditAccountId(UInt128.MostSignificant));
+        assertEquals(0L, transfers.getUserData(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getUserData(UInt128.MostSignificant));
+        assertEquals(0L, transfers.getPendingId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getPendingId(UInt128.MostSignificant));
         assertEquals((long) 0, transfers.getTimeout());
         assertEquals(0, transfers.getLedger());
         assertEquals(0, transfers.getCode());
@@ -36,8 +35,8 @@ public class TransferTest {
         transfers.add();
 
         transfers.setId(100, 200);
-        assertEquals(100L, transfers.getId(Bytes.LeastSignificant));
-        assertEquals(200L, transfers.getId(Bytes.MostSignificant));
+        assertEquals(100L, transfers.getId(UInt128.LeastSignificant));
+        assertEquals(200L, transfers.getId(UInt128.MostSignificant));
     }
 
     @Test
@@ -75,8 +74,8 @@ public class TransferTest {
         transfers.add();
 
         transfers.setDebitAccountId(100, 200);
-        assertEquals(100L, transfers.getDebitAccountId(Bytes.LeastSignificant));
-        assertEquals(200L, transfers.getDebitAccountId(Bytes.MostSignificant));
+        assertEquals(100L, transfers.getDebitAccountId(UInt128.LeastSignificant));
+        assertEquals(200L, transfers.getDebitAccountId(UInt128.MostSignificant));
     }
 
     @Test
@@ -114,8 +113,8 @@ public class TransferTest {
         transfers.add();
 
         transfers.setCreditAccountId(100, 200);
-        assertEquals(100L, transfers.getCreditAccountId(Bytes.LeastSignificant));
-        assertEquals(200L, transfers.getCreditAccountId(Bytes.MostSignificant));
+        assertEquals(100L, transfers.getCreditAccountId(UInt128.LeastSignificant));
+        assertEquals(200L, transfers.getCreditAccountId(UInt128.MostSignificant));
     }
 
     @Test
@@ -153,8 +152,8 @@ public class TransferTest {
         transfers.add();
 
         transfers.setUserData(100, 200);
-        assertEquals(100L, transfers.getUserData(Bytes.LeastSignificant));
-        assertEquals(200L, transfers.getUserData(Bytes.MostSignificant));
+        assertEquals(100L, transfers.getUserData(UInt128.LeastSignificant));
+        assertEquals(200L, transfers.getUserData(UInt128.MostSignificant));
     }
 
     @Test
@@ -174,8 +173,8 @@ public class TransferTest {
 
         byte[] userData = null;
         transfers.setUserData(userData);
-        assertEquals(0L, transfers.getUserData(Bytes.LeastSignificant));
-        assertEquals(0L, transfers.getUserData(Bytes.MostSignificant));
+        assertEquals(0L, transfers.getUserData(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getUserData(UInt128.MostSignificant));
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -194,8 +193,8 @@ public class TransferTest {
         transfers.add();
 
         transfers.setPendingId(100, 200);
-        assertEquals(100L, transfers.getPendingId(Bytes.LeastSignificant));
-        assertEquals(200L, transfers.getPendingId(Bytes.MostSignificant));
+        assertEquals(100L, transfers.getPendingId(UInt128.LeastSignificant));
+        assertEquals(200L, transfers.getPendingId(UInt128.MostSignificant));
     }
 
     @Test
@@ -215,8 +214,8 @@ public class TransferTest {
 
         byte[] pendingId = null;
         transfers.setPendingId(pendingId);
-        assertEquals(0L, transfers.getPendingId(Bytes.LeastSignificant));
-        assertEquals(0L, transfers.getPendingId(Bytes.MostSignificant));
+        assertEquals(0L, transfers.getPendingId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getPendingId(UInt128.MostSignificant));
     }
 
     @Test(expected = IllegalArgumentException.class)

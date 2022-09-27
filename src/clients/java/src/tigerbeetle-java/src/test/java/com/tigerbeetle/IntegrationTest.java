@@ -14,7 +14,6 @@ import javax.management.OperationsException;
 import org.junit.Test;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -186,8 +185,7 @@ public class IntegrationTest {
                 assertEquals(CreateAccountResult.IdMustNotBeZero, errors.getResult());
 
                 var ids = new Ids(1);
-                ids.add();
-                ids.setId(accounts.getId());
+                ids.add(accounts.getId());
 
                 var lookupAccounts = client.lookupAccounts(ids);
                 assertEquals(0, lookupAccounts.getLength());
@@ -291,8 +289,7 @@ public class IntegrationTest {
 
                 // Looking up and asserting the transaction
                 var ids = new Ids(1);
-                ids.add();
-                ids.setId(transaction1Id);
+                ids.add(transaction1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
@@ -371,8 +368,7 @@ public class IntegrationTest {
 
                 // Looking up and asserting the transaction
                 var ids = new Ids(1);
-                ids.add();
-                ids.setId(transaction1Id);
+                ids.add(transaction1Id);
 
                 CompletableFuture<Transfers> lookupTransfersFuture =
                         client.lookupTransfersAsync(ids);
@@ -410,8 +406,7 @@ public class IntegrationTest {
                 assertEquals(CreateTransferResult.IdMustNotBeZero, errors.getResult());
 
                 var ids = new Ids(1);
-                ids.add();
-                ids.setId(accounts.getId());
+                ids.add(accounts.getId());
 
                 var lookupAccounts = client.lookupAccounts(ids);
                 assertEquals(0, lookupAccounts.getLength());
@@ -479,8 +474,7 @@ public class IntegrationTest {
 
                 // Looking up and asserting the peding transaction
                 var ids = new Ids(1);
-                ids.add();
-                ids.setId(transaction1Id);
+                ids.add(transaction1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
@@ -535,8 +529,7 @@ public class IntegrationTest {
 
                 // Looking up and asserting the post_pending transaction
                 ids = new Ids(1);
-                ids.add();
-                ids.setId(transaction2Id);
+                ids.add(transaction2Id);
                 var lookupVoidTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupVoidTransfers.getLength());
 
@@ -610,8 +603,7 @@ public class IntegrationTest {
 
                 // Looking up and asserting the peding transaction
                 var ids = new Ids(1);
-                ids.add();
-                ids.setId(transaction1Id);
+                ids.add(transaction1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
@@ -666,8 +658,7 @@ public class IntegrationTest {
 
                 // Looking up and asserting the void_pending transaction
                 ids = new Ids(1);
-                ids.add();
-                ids.setId(transaction2Id);
+                ids.add(transaction2Id);
                 var lookupVoidTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupVoidTransfers.getLength());
 
@@ -743,11 +734,8 @@ public class IntegrationTest {
 
 
                 var lookupIds = new Ids(2);
-                lookupIds.add();
-                lookupIds.setId(transaction1Id);
-
-                lookupIds.add();
-                lookupIds.setId(transaction2Id);
+                lookupIds.add(transaction1Id);
+                lookupIds.add(transaction2Id);
 
                 var lookupTransfers = client.lookupTransfers(lookupIds);
                 assertEquals(2, lookupTransfers.getLength());
@@ -785,7 +773,7 @@ public class IntegrationTest {
                 for (int i = 0; i < TOO_MUCH_DATA; i++) {
 
                     accounts.add();
-                    accounts.setId(UInt128.fromUUID(UUID.randomUUID()));
+                    accounts.setId(UInt128.asBytes(UUID.randomUUID()));
                     accounts.setCode(1);
                     accounts.setLedger(1);
 
@@ -821,7 +809,7 @@ public class IntegrationTest {
                 for (int i = 0; i < TOO_MUCH_DATA; i++) {
 
                     accounts.add();
-                    accounts.setId(UInt128.fromUUID(UUID.randomUUID()));
+                    accounts.setId(UInt128.asBytes(UUID.randomUUID()));
                     accounts.setCode(1);
                     accounts.setLedger(1);
 
@@ -866,7 +854,7 @@ public class IntegrationTest {
 
                 for (int i = 0; i < TOO_MUCH_DATA; i++) {
                     transfers.add();
-                    transfers.setId(UInt128.fromUUID(UUID.randomUUID()));
+                    transfers.setId(UInt128.asBytes(UUID.randomUUID()));
                     transfers.setDebitAccountId(account1Id);
                     transfers.setDebitAccountId(account2Id);
                     transfers.setCode(1);
@@ -892,7 +880,7 @@ public class IntegrationTest {
         }
     }
 
-
+    @Test
     public void testCreateTransferTooMuchDataAsync() throws Throwable {
 
         try (var server = new Server()) {
@@ -904,7 +892,7 @@ public class IntegrationTest {
 
                 for (int i = 0; i < TOO_MUCH_DATA; i++) {
                     transfers.add();
-                    transfers.setId(UInt128.fromUUID(UUID.randomUUID()));
+                    transfers.setId(UInt128.asBytes(UUID.randomUUID()));
                     transfers.setDebitAccountId(account1Id);
                     transfers.setDebitAccountId(account2Id);
                     transfers.setCode(1);
@@ -942,8 +930,6 @@ public class IntegrationTest {
 
     /**
      * This test asserts that parallel threads will respect client's maxConcurrency.
-     *
-     * @throws Throwable
      */
     @Test
     public void testConcurrentTasks() throws Throwable {
@@ -1008,8 +994,6 @@ public class IntegrationTest {
      * This test asserts that client.close() will wait for all ongoing request to complete And new
      * threads trying to submit a request after the client was closed will fail with
      * IllegalStateException.
-     *
-     * @throws Throwable
      */
     @Test
     public void testCloseWithConcurrentTasks() throws Throwable {
@@ -1118,7 +1102,7 @@ public class IntegrationTest {
             var transfers = new Transfers(1);
             transfers.add();
 
-            transfers.setId(UInt128.fromUUID(UUID.randomUUID()));
+            transfers.setId(UInt128.asBytes(UUID.randomUUID()));
             transfers.setCreditAccountId(account1Id);
             transfers.setDebitAccountId(account2Id);
             transfers.setLedger(720);
