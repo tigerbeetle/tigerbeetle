@@ -14,7 +14,7 @@
 //!   .   op is in mutable table (in memory)
 //!   ,   op is in immutable table (in memory)
 //!   #   op is on disk
-//!   ✓   checkpoint may follow compact()
+//!   ✓   checkpoint() may follow compact()
 //!
 //!   0 2 4 6 8 0 2 4 6
 //!   ┼───┬───┼───┬───┼
@@ -27,7 +27,7 @@
 //!   ...←.→  ╷       ╷     commit;compact( 5) start/end ⎥ - when the LSM is starting on a freshly
 //!   ...←..→ ╷       ╷     commit;compact( 6) start/end ⎥   formatted data file, and also
 //!   ...←...→╷       ╷     commit;compact( 7) start    ⎤⎥ - when the LSM is recovering from a crash
-//!   ,,,,,,,↔╷       ╷  ✓         compact( 7)       end⎦⎦   before any checkpoint.
+//!   ,,,,,,,↔╷       ╷  ✓         compact( 7)       end⎦⎦   before any checkpoint (see below).
 //!   ,,,,,,,←→       ╷     commit;compact( 8) start/end
 //!   ,,,,,,,←.→      ╷     commit;compact( 9) start/end
 //!   ,,,,,,,←..→     ╷     commit;compact(10) start/end
