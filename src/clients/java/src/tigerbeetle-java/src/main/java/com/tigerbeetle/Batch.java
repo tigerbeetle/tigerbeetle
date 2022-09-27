@@ -4,6 +4,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
+/**
+ * A Batch maintains a cursor pointing to its current element.
+ */
 public abstract class Batch {
 
     // @formatter:off
@@ -114,15 +117,6 @@ public abstract class Batch {
         return buffer.isReadOnly();
     }
 
-    /**
-     * Adds a new element to this batch.
-     * <p>
-     * If successfully, moves the current {@link #setPosition position} to the newly created
-     * element.
-     *
-     * @throws IllegalStateException if this batch is read-only.
-     * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
-     */
     void add() {
 
         if (isReadOnly())
@@ -140,6 +134,8 @@ public abstract class Batch {
 
     /**
      * Tries to move the current {@link #setPosition position} to the next element in this batch.
+     * <p>
+     * Initially the cursor is positioned before the first element.
      *
      * @return true if moved or false if the end of the batch was reached.
      */
@@ -160,18 +156,18 @@ public abstract class Batch {
     }
 
     /**
-     * Returns true if the batch has more elements.
+     * Tells if the current position points to an valid element.
      *
-     * @return true if and the batch has a more elements.
+     * @return false if the cursor is positioned before the first element or at the end.
      */
     public final boolean isValidPosition() {
         return cursorStatus == CursorStatus.Valid;
     }
 
     /**
-     * Resets the cursor
+     * Moves the cursor to the front of this Batch, before the first element.
      */
-    public final void reset() {
+    public final void beforeFirst() {
         position = CursorStatus.INVALID_POSITION;
         cursorStatus = length > 0 ? CursorStatus.Begin : CursorStatus.End;
     }

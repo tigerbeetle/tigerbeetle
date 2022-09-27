@@ -23,6 +23,16 @@ public final class Accounts extends Batch {
 
     static final Accounts EMPTY = new Accounts(0);
 
+    /**
+     * Constructs an empty Accounts batch with the desired maximum capacity.
+     * <p>
+     * Once created, an instance cannot be resized, however it may contain any number of accounts
+     * between zero and its {@link #getCapacity capacity}.
+     *
+     * @param capacity the maximum capacity.
+     *
+     * @throws IllegalArgumentException if capacity is negative.
+     */
     public Accounts(final int capacity) {
         super(capacity, Struct.SIZE);
     }
@@ -31,47 +41,65 @@ public final class Accounts extends Batch {
         super(buffer, Struct.SIZE);
     }
 
+    /**
+     * Adds a new account at the end of this batch.
+     * <p>
+     * If successfully, moves the current {@link #setPosition position} to the newly created
+     * account.
+     *
+     * @throws IllegalStateException if this batch is read-only.
+     * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
+     */
     @Override
     public void add() {
         super.add();
     }
 
     /**
-     * <p>
+     * Gets a unique, client-defined identifier for the account.
      *
-     * @return
-     * @throws IllegalStateException
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public byte[] getId() {
         return getUInt128(at(Struct.Id));
     }
 
     /**
-     * <p>
+     * Gets a unique, client-defined identifier for the account.
      *
-     * @return
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
+     *        retrieved.
+     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getId(final UInt128 part) {
         return getUInt128(at(Struct.Id), part);
     }
 
     /**
-     * <p>
+     * Sets a unique, client-defined identifier for the account.
      *
-     * @param leastSignificant
-     * @param mostSignificant
-     * @throws NullPointerException if {@code id} is null.
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setId(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.Id), leastSignificant, mostSignificant);
     }
 
     /**
-     * <p>
+     * Sets a unique, client-defined identifier for the account.
      *
-     * @param id
+     * @param id an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code id} is null.
      * @throws IllegalArgumentException if {@code id} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setId(final byte[] id) {
 
@@ -83,93 +111,108 @@ public final class Accounts extends Batch {
 
 
     /**
-     * <p>
+     * Gets an optional secondary identifier to link this account to an external entity.
      *
-     * @return
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public byte[] getUserData() {
         return getUInt128(at(Struct.UserData));
     }
 
     /**
-     * <p>
+     * Gets an optional secondary identifier to link this account to an external entity.
      *
-     * @return
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
+     *        retrieved.
+     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getUserData(final UInt128 part) {
         return getUInt128(at(Struct.UserData), part);
     }
 
     /**
-     * <p>
+     * Sets an optional secondary identifier to link this account to an external entity.
      *
-     * @param leastSignificant
-     * @param mostSignificant
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setUserData(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.UserData), leastSignificant, mostSignificant);
     }
 
     /**
+     * Sets an optional secondary identifier to link this account to an external entity.
      * <p>
      * May be zero, null values are converted to zero.
      *
-     * @param userData
+     * @param userData an array of 16 bytes representing the 128-bit value.
      * @throws IllegalArgumentException if {@code userData} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setUserData(final byte[] userData) {
         putUInt128(at(Struct.UserData), userData);
     }
 
     /**
-     * Gets an identifier used to enforce transfers between the same ledger.
+     * Gets an identifier that partitions the sets of accounts that can transact.
      *
      * @return a 32-bit integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public int getLedger() {
         return getUInt32(at(Struct.Ledger));
     }
 
     /**
-     * Sets an identifier used to enforce transfers between the same ledger.
+     * Sets an identifier that partitions the sets of accounts that can transact.
      * <p>
-     * Must be non-zero.
-     * <p>
-     * Example: 1 for USD and 2 for EUR.
+     * Must not be zero.
      *
-     * @param ledger a 32-bit integer defined by the user.
+     * @param ledger a 32-bit integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setLedger(final int ledger) {
         putUInt32(at(Struct.Ledger), ledger);
     }
 
     /**
-     * Gets a reason for the transfer.
+     * Gets a user-defined enum denoting the category of the account.
      *
      * @return a 16-bit unsigned integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public int getCode() {
         return getUInt16(at(Struct.Code));
     }
 
     /**
-     * Sets a reason for the transfer.
+     * Sets a user-defined enum denoting the category of the account.
      * <p>
-     * Must be non-zero.
-     * <p>
-     * Example: 1 for deposit, 2 for settlement.
+     * Must not be zero.
      *
-     * @param code a 16-bit unsigned integer defined by the user.
+     * @param code a 16-bit unsigned integer.
      * @throws IllegalArgumentException if code is negative or greater than 65535.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setCode(final int code) {
         putUInt16(at(Struct.Code), code);
     }
 
     /**
-     * Gets the behavior during transfers.
+     * Gets a bitfield that toggles additional behavior.
      *
      * @return a 16-bit unsigned integer bit mask.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @see com.tigerbeetle.AccountFlags
      */
     public int getFlags() {
@@ -177,25 +220,25 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets the behavior during transfers.
-     * <p>
-     * Example: {@code AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS} to force debts not to exceed
-     * credits.
+     * Sets a bitfield that toggles additional behavior.
      *
      * @see com.tigerbeetle.AccountFlags
      * @param flags a 16-bit unsigned integer bit mask.
      * @throws IllegalArgumentException if flags is negative or greater than 65535.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setFlags(final int flags) {
         putUInt16(at(Struct.Flags), flags);
     }
 
     /**
-     * Amount of pending debits.
+     * Gets the amount of debits reserved by pending transfers.
      * <p>
      * Must always be interpreted as a positive integer.
      *
      * @return a 64-bit integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getDebitsPending() {
         return getUInt64(at(Struct.DebitsPending));
@@ -206,11 +249,12 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Amount of non-pending debits.
+     * Gets the amount of posted debits.
      * <p>
      * Must always be interpreted as a positive integer.
      *
      * @return a 64-bit integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getDebitsPosted() {
         return getUInt64(at(Struct.DebitsPosted));
@@ -221,11 +265,12 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Amount of pending credits.
+     * Gets the amount of pending credits.
      * <p>
      * Must always be interpreted as a positive integer.
      *
      * @return a 64-bit integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getCreditsPending() {
         return getUInt64(at(Struct.CreditsPending));
@@ -236,11 +281,12 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Amount of non-pending credits.
+     * Gets the mmount of posted credits.
      * <p>
      * Must always be interpreted as a positive integer.
      *
      * @return a 64-bit integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getCreditsPosted() {
         return getUInt64(at(Struct.CreditsPosted));
@@ -251,11 +297,12 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Time account was created.
+     * Gets the time the account was created.
      * <p>
-     * UNIX timestamp in nanoseconds.
+     * This is set by TigerBeetle. The format is UNIX timestamp in nanoseconds.
      *
      * @return a 64-bit integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getTimestamp() {
         return getUInt64(at(Struct.Timestamp));

@@ -145,7 +145,7 @@ public class IntegrationTest {
         try (var server = new Server()) {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -205,7 +205,7 @@ public class IntegrationTest {
         try (var server = new Server()) {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 CompletableFuture<CreateAccountResults> accountsFuture =
                         client.createAccountsAsync(accounts);
@@ -264,7 +264,7 @@ public class IntegrationTest {
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 // Asserting the first account for the credit
                 assertTrue(accounts.next());
@@ -293,7 +293,7 @@ public class IntegrationTest {
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
-                transfers.reset();
+                transfers.beforeFirst();
 
                 assertTrue(transfers.next());
                 assertTrue(lookupTransfers.next());
@@ -344,7 +344,7 @@ public class IntegrationTest {
                 var lookupAccounts = lookupAccountsFuture.get();
                 assertTrue(lookupAccounts.getLength() == 2);
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 // Asserting the first account for the credit
                 assertTrue(accounts.next());
@@ -375,7 +375,7 @@ public class IntegrationTest {
                 var lookupTransfers = lookupTransfersFuture.get();
                 assertEquals(1, lookupTransfers.getLength());
 
-                transfers.reset();
+                transfers.beforeFirst();
 
                 assertTrue(transfers.next());
                 assertTrue(lookupTransfers.next());
@@ -450,7 +450,7 @@ public class IntegrationTest {
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 // Asserting the first account for the pending credit
                 assertTrue(accounts.next());
@@ -478,7 +478,7 @@ public class IntegrationTest {
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
-                transfers.reset();
+                transfers.beforeFirst();
 
                 assertTrue(transfers.next());
                 assertTrue(lookupTransfers.next());
@@ -504,7 +504,7 @@ public class IntegrationTest {
                 lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 // Asserting the pending credit was posted for the first account
                 assertTrue(accounts.next());
@@ -533,7 +533,7 @@ public class IntegrationTest {
                 var lookupVoidTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupVoidTransfers.getLength());
 
-                confirmTransfers.reset();
+                confirmTransfers.beforeFirst();
 
                 assertTrue(confirmTransfers.next());
                 assertTrue(lookupVoidTransfers.next());
@@ -579,7 +579,7 @@ public class IntegrationTest {
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 // Asserting the first account for the pending credit
                 assertTrue(accounts.next());
@@ -607,7 +607,7 @@ public class IntegrationTest {
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
-                transfers.reset();
+                transfers.beforeFirst();
 
                 assertTrue(transfers.next());
                 assertTrue(lookupTransfers.next());
@@ -633,7 +633,7 @@ public class IntegrationTest {
                 lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 // Asserting the pending credit was voided for the first account
                 assertTrue(accounts.next());
@@ -662,7 +662,7 @@ public class IntegrationTest {
                 var lookupVoidTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupVoidTransfers.getLength());
 
-                voidTransfers.reset();
+                voidTransfers.beforeFirst();
 
                 assertTrue(voidTransfers.next());
                 assertTrue(lookupVoidTransfers.next());
@@ -712,7 +712,7 @@ public class IntegrationTest {
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertEquals(2, lookupAccounts.getLength());
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
@@ -740,7 +740,7 @@ public class IntegrationTest {
                 var lookupTransfers = client.lookupTransfers(lookupIds);
                 assertEquals(2, lookupTransfers.getLength());
 
-                transfers.reset();
+                transfers.beforeFirst();
 
                 assertTrue(transfers.next());
                 assertTrue(lookupTransfers.next());
@@ -965,7 +965,7 @@ public class IntegrationTest {
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertEquals(2, lookupAccounts.getLength());
 
-                accounts.reset();
+                accounts.beforeFirst();
 
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());

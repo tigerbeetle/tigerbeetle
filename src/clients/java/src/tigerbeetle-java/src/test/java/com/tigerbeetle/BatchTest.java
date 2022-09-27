@@ -102,7 +102,7 @@ public class BatchTest {
 
         // reset to the beginning,
         // Expected position -1
-        batch.reset();
+        batch.beforeFirst();
         assertFalse(batch.isValidPosition());
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
@@ -171,7 +171,7 @@ public class BatchTest {
         assertFalse(batch.isValidPosition());
 
         // Reseting an empty batch
-        batch.reset();
+        batch.beforeFirst();
 
         // Still at the end of the batch
         assertFalse(batch.next());
@@ -293,7 +293,7 @@ public class BatchTest {
         assertEquals(2, batch.getLength());
         setAccount(batch, account2);
 
-        batch.reset();
+        batch.beforeFirst();
 
         assertTrue(batch.next());
         assertAccounts(account1, batch);
@@ -337,7 +337,7 @@ public class BatchTest {
         assertEquals(2, batch.getCapacity());
         setAccount(batch, account2);
 
-        batch.reset();
+        batch.beforeFirst();
 
         assertTrue(batch.next());
         assertAccounts(account2, batch);
@@ -395,7 +395,7 @@ public class BatchTest {
         assertEquals(2, batch.getLength());
         setTransfer(batch, transfer2);
 
-        batch.reset();
+        batch.beforeFirst();
 
         assertTrue(batch.next());
         assertTransfers(transfer1, batch);
@@ -439,7 +439,7 @@ public class BatchTest {
         assertEquals(2, batch.getCapacity());
         setTransfer(batch, transfer2);
 
-        batch.reset();
+        batch.beforeFirst();
 
         assertTrue(batch.next());
         assertTransfers(transfer2, batch);
@@ -561,7 +561,7 @@ public class BatchTest {
         assertEquals(1, batch.getPosition());
         assertEquals(2, batch.getLength());
 
-        batch.reset();
+        batch.beforeFirst();
 
         assertTrue(batch.next());
         assertEquals(id1LeastSignificant, batch.getId(UInt128.LeastSignificant));
@@ -611,7 +611,7 @@ public class BatchTest {
         assertEquals(2, batch.getCapacity());
         batch.setId(id2);
 
-        batch.reset();
+        batch.beforeFirst();
 
         assertTrue(batch.next());
         assertArrayEquals(id2, batch.getId());

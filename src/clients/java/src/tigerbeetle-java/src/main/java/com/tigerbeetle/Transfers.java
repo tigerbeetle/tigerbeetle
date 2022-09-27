@@ -24,7 +24,16 @@ public final class Transfers extends Batch {
 
     static final Transfers EMPTY = new Transfers(0);
 
-
+    /**
+     * Constructs an empty Transfers batch with the desired maximum capacity.
+     * <p>
+     * Once created, an instance cannot be resized, however it may contain any number of
+     * transactions between zero and its {@link #getCapacity capacity}.
+     *
+     * @param capacity the maximum capacity.
+     *
+     * @throws IllegalArgumentException if capacity is negative.
+     */
     public Transfers(final int capacity) {
         super(capacity, Struct.SIZE);
     }
@@ -33,46 +42,65 @@ public final class Transfers extends Batch {
         super(buffer, Struct.SIZE);
     }
 
+    /**
+     * Adds a new transaction at the end of this batch.
+     * <p>
+     * If successfully, moves the current {@link #setPosition position} to the newly created
+     * transaction.
+     *
+     * @throws IllegalStateException if this batch is read-only.
+     * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
+     */
     @Override
     public void add() {
         super.add();
     }
 
     /**
-     * <p>
+     * Gets a unique identifier for the transaction.
      *
-     * @return
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public byte[] getId() {
         return getUInt128(at(Struct.Id));
     }
 
     /**
-     * <p>
+     * Gets a unique identifier for the transaction.
      *
-     * @return
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
+     *        retrieved.
+     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getId(final UInt128 part) {
         return getUInt128(at(Struct.Id), part);
     }
 
     /**
-     * <p>
+     * Sets a unique identifier for the transaction.
      *
-     * @param leastSignificant
-     * @param mostSignificant
-     * @throws NullPointerException if {@code id} is null.
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setId(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.Id), leastSignificant, mostSignificant);
     }
 
     /**
-     * <p>
+     * Sets a unique identifier for the transaction.
      *
-     * @param id
+     * @param id an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code id} is null.
      * @throws IllegalArgumentException if {@code id} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setId(final byte[] id) {
 
@@ -84,40 +112,50 @@ public final class Transfers extends Batch {
 
 
     /**
-     * <p>
+     * Gets the id that refers to the account to debit the transfer's {@link #setAmount amount}.
      *
-     * @return
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public byte[] getDebitAccountId() {
         return getUInt128(at(Struct.DebitAccountId));
     }
 
     /**
-     * <p>
+     * Gets the id that refers to the account to debit the transfer's {@link #setAmount amount}.
      *
-     * @return
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
+     *        retrieved.
+     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getDebitAccountId(final UInt128 part) {
         return getUInt128(at(Struct.DebitAccountId), part);
     }
 
     /**
-     * <p>
+     * Sets the id that refers to the account to debit the transfer's {@link #setAmount amount}.
      *
-     * @param leastSignificant
-     * @param mostSignificant
-     * @throws NullPointerException if {@code id} is null.
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setDebitAccountId(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.DebitAccountId), leastSignificant, mostSignificant);
     }
 
     /**
-     * <p>
+     * Sets the id that refers to the account to debit the transfer's {@link #setAmount amount}.
      *
-     * @param debitAccountId
+     * @param debitAccountId an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code debitAccountId} is null.
      * @throws IllegalArgumentException if {@code debitAccountId} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setDebitAccountId(final byte[] debitAccountId) {
 
@@ -128,40 +166,50 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * <p>
+     * Gets the id that refers to the account to credit the transfer's {@link #setAmount amount}.
      *
-     * @return
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public byte[] getCreditAccountId() {
         return getUInt128(at(Struct.CreditAccountId));
     }
 
     /**
-     * <p>
+     * Gets the id that refers to the account to credit the transfer's {@link #setAmount amount}.
      *
-     * @return
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
+     *        retrieved.
+     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getCreditAccountId(final UInt128 part) {
         return getUInt128(at(Struct.CreditAccountId), part);
     }
 
     /**
-     * <p>
+     * Sets the id that refers to the account to credit the transfer's {@link #setAmount amount}.
      *
-     * @param leastSignificant
-     * @param mostSignificant
-     * @throws NullPointerException if {@code id} is null.
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setCreditAccountId(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.CreditAccountId), leastSignificant, mostSignificant);
     }
 
     /**
-     * <p>
+     * Sets the id that refers to the account to credit the transfer's {@link #setAmount amount}.
      *
-     * @param creditAccountId
+     * @param creditAccountId an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code creditAccountId} is null.
      * @throws IllegalArgumentException if {@code creditAccountId} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setCreditAccountId(final byte[] creditAccountId) {
 
@@ -172,89 +220,115 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * <p>
+     * Gets an optional secondary identifier to link this trnasfer to an external entity.
      *
-     * @return
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public byte[] getUserData() {
         return getUInt128(at(Struct.UserData));
     }
 
     /**
-     * <p>
+     * Gets an optional secondary identifier to link this trnasfer to an external entity.
      *
-     * @return
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
+     *        retrieved.
+     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getUserData(final UInt128 part) {
         return getUInt128(at(Struct.UserData), part);
     }
 
     /**
-     * <p>
+     * Sets an optional secondary identifier to link this trnasfer to an external entity.
      *
-     * @param leastSignificant
-     * @param mostSignificant
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setUserData(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.UserData), leastSignificant, mostSignificant);
     }
 
     /**
+     * Sets an optional secondary identifier to link this trnasfer to an external entity.
      * <p>
      * May be zero, null values are converted to zero.
      *
-     * @param userData
+     * @param userData an array of 16 bytes representing the 128-bit value.
      * @throws IllegalArgumentException if {@code userData} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setUserData(final byte[] userData) {
         putUInt128(at(Struct.UserData), userData);
     }
 
 
-
     /**
-     * <p>
+     * Gets the id that references the pending transfer.
      *
-     * @return
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public byte[] getPendingId() {
         return getUInt128(at(Struct.PendingId));
     }
 
     /**
-     * <p>
+     * Gets the id that references the pending transfer.
      *
-     * @return
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
+     *        retrieved.
+     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getPendingId(final UInt128 part) {
         return getUInt128(at(Struct.PendingId), part);
     }
 
     /**
+     * Sets the id that references the pending transfer.
      * <p>
+     * Must be zero if this is not a {@link TransferFlags#POST_PENDING_TRANSFER post} or
+     * {@link TransferFlags#VOID_PENDING_TRANSFER post} transfer.
      *
-     * @param leastSignificant
-     * @param mostSignificant
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setPendingId(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.PendingId), leastSignificant, mostSignificant);
     }
 
     /**
+     * Sets an optional secondary identifier to link this account to an external entity.
      * <p>
-     * May be zero, null values are converted to zero.
+     * Must be zero if this is not a {@link TransferFlags#POST_PENDING_TRANSFER post} or
+     * {@link TransferFlags#VOID_PENDING_TRANSFER post} transfer. Null values are converted to zero.
      *
-     * @param pendingId
+     * @param pendingId an array of 16 bytes representing the 128-bit value.
      * @throws IllegalArgumentException if {@code pendingId} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setPendingId(final byte[] pendingId) {
         putUInt128(at(Struct.PendingId), pendingId);
     }
 
     /**
-     *
-     * <p>
-     * Must always be interpreted as a positive integer.
+     * Gets the the interval (in nanoseconds) after a {@link TransferFlags#PENDING pending}
+     * transfer's creation that it may be posted or voided.
      *
      * @return a 64-bit integer.
      */
@@ -263,14 +337,21 @@ public final class Transfers extends Batch {
     }
 
     /**
+     * Sets the the interval (in nanoseconds) after a {@link TransferFlags#PENDING pending}
+     * transfer's creation that it may be posted or voided.
+     * <p>
+     * Must be zero if this is not a {@link TransferFlags#PENDING pending} transfer.
+     *
      * @param timeout A 64-bit integer.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setTimeout(final long timeout) {
         putUInt64(at(Struct.Timeout), timeout);
     }
 
     /**
-     * Gets an identifier used to enforce transfers between the same ledger.
+     * Gets an identifier used to enforce that transfers must be between accounts of the same
+     * {@link Accounts#setLedger ledger}.
      *
      * @return a 32-bit integer.
      */
@@ -279,20 +360,18 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets an identifier used to enforce transfers between the same ledger.
-     * <p>
-     * Must be non-zero.
-     * <p>
-     * Example: 1 for USD and 2 for EUR.
+     * Sets an identifier used to enforce that transfers must be between accounts of the same
+     * {@link Accounts#setLedger ledger}.
      *
-     * @param ledger a 32-bit integer defined by the user.
+     * @param ledger a 32-bit integer.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setLedger(final int ledger) {
         putUInt32(at(Struct.Ledger), ledger);
     }
 
     /**
-     * Gets a reason for the transfer.
+     * Gets a user-defined enum denoting the reason for (or category of) the transfer.
      *
      * @return a 16-bit unsigned integer.
      */
@@ -301,21 +380,20 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets a reason for the transfer.
+     * Sets a user-defined enum denoting the reason for (or category of) the transfer.
      * <p>
      * Must be non-zero.
-     * <p>
-     * Example: 1 for deposit, 2 for settlement.
      *
      * @param code a 16-bit unsigned integer defined by the user.
      * @throws IllegalArgumentException if code is negative or greater than 65535.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setCode(final int code) {
         putUInt16(at(Struct.Code), code);
     }
 
     /**
-     * Gets the behavior during transfers.
+     * Gets a bitfield that specifies (optional) transfer behavior.
      *
      * @see com.tigerbeetle.TransferFlags
      * @return a 16-bit unsigned integer bit mask.
@@ -325,19 +403,20 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets the behavior during transfers.
-     * <p>
+     * Sets a bitfield that specifies (optional) transfer behavior.
      *
      * @see com.tigerbeetle.TransferFlags
      * @param flags a 16-bit unsigned integer bit mask.
      * @throws IllegalArgumentException if flags is negative or greater than 65535.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setFlags(final int flags) {
         putUInt16(at(Struct.Flags), flags);
     }
 
     /**
-     *
+     * Gets how much should be debited from the {@link #setDebitAccountId debit account} and
+     * credited to the {@link #setCreditAccountId credit account}.
      * <p>
      * Must always be interpreted as a positive integer.
      *
@@ -348,22 +427,25 @@ public final class Transfers extends Batch {
     }
 
     /**
-     *
+     * Sets how much should be debited from the {@link #setDebitAccountId debit account} and
+     * credited to the {@link #setCreditAccountId credit account}.
      * <p>
      * Must always be interpreted as a positive integer.
      *
      * @param amount a 64-bit integer.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setAmount(final long amount) {
         putUInt64(at(Struct.Amount), amount);
     }
 
     /**
-     * Time transfer was created.
+     * Gets the time the transfer was created.
      * <p>
-     * UNIX timestamp in nanoseconds.
+     * This is set by TigerBeetle. The format is UNIX timestamp in nanoseconds.
      *
      * @return a 64-bit integer.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
     public long getTimestamp() {
         return getUInt64(at(Struct.Timestamp));
