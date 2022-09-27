@@ -577,12 +577,17 @@ pub fn GrooveType(
                 if (id_tree_value.tombstone()) {
                     // Do nothing; an explicit ID tombstone indicates that the object was deleted.
                 } else {
-                    const object = groove.objects.lookup_from_memory(
+                    if (groove.objects.lookup_from_memory(
                         groove.prefetch_snapshot.?,
                         id_tree_value.timestamp,
-                    ).?;
-                    assert(!ObjectTreeHelpers(Object).tombstone(object));
-                    groove.prefetch_objects.putAssumeCapacity(object.*, {});
+                    )) |object| {
+                        assert(!ObjectTreeHelpers(Object).tombstone(object));
+                        groove.prefetch_objects.putAssumeCapacity(object.*, {});
+                    } else {
+                        // The id was in the IdTree's value cache, but not in the ObjectTree's
+                        // value cache.
+                        groove.prefetch_ids.putAssumeCapacity(id, {});
+                    }
                 }
             } else {
                 groove.prefetch_ids.putAssumeCapacity(id, {});
@@ -671,19 +676,31 @@ pub fn GrooveType(
                     return;
                 };
 
-                if (config.verify) {
-                    // This was checked in prefetch_enqueue().
-                    assert(worker.context.groove.ids.lookup_from_memory(worker.context.snapshot, id.*) == null);
-                }
-
-                // If not in the LSM tree's cache, the object must be read from disk and added
-                // to the auxiliary prefetch_objects hash map.
-                worker.context.groove.ids.lookup_from_levels(
-                    lookup_id_callback,
-                    &worker.lookup_id,
+                if (worker.context.groove.ids.lookup_from_memory(
                     worker.context.snapshot,
                     id.*,
-                );
+                )) |id_tree_value| {
+                    assert(!id_tree_value.tombstone());
+                    lookup_id_callback(&worker.lookup_id, id_tree_value);
+
+                    if (config.verify) {
+                        // If the id is cached, then we must be prefetching it because the object
+                        // was not also cached.
+                        assert(worker.context.groove.objects.lookup_from_memory(
+                            worker.context.snapshot,
+                            id_tree_value.timestamp,
+                        ) == null);
+                    }
+                } else {
+                    // If not in the LSM tree's cache, the object must be read from disk and added
+                    // to the auxiliary prefetch_objects hash map.
+                    worker.context.groove.ids.lookup_from_levels(
+                        lookup_id_callback,
+                        &worker.lookup_id,
+                        worker.context.snapshot,
+                        id.*,
+                    );
+                }
             }
 
             fn lookup_id_callback(
@@ -693,6 +710,20 @@ pub fn GrooveType(
                 const worker = @fieldParentPtr(PrefetchWorker, "lookup_id", completion);
 
                 if (result) |id_tree_value| {
+                    if (config.verify) {
+                        // This was checked in prefetch_enqueue().
+                        assert(
+                            worker.context.groove.ids.lookup_from_memory(
+                                worker.context.snapshot,
+                                worker.lookup_id.key,
+                            ) == null or
+                            worker.context.groove.objects.lookup_from_memory(
+                                worker.context.snapshot,
+                                id_tree_value.timestamp,
+                            ) == null,
+                        );
+                    }
+
                     if (id_tree_value.tombstone()) {
                         worker.lookup_start_next();
                         return;
