@@ -1571,6 +1571,7 @@ pub fn ReplicaType(
                 var latest = Header.reserved(self.cluster, 0);
                 set_latest_op(leader_headers, &latest);
                 assert(latest.op == leader_response.?.header.op);
+                assert(latest.op >= self.op_checkpoint);
 
                 self.set_latest_op_and_k(&latest, commit, "on_recovery_response");
                 assert(self.op == latest.op);
@@ -3630,7 +3631,7 @@ pub fn ReplicaType(
         ///
         fn op_checkpoint_next(self: *const Self) u64 {
             assert(self.op_checkpoint <= self.commit_min);
-            assert(self.op_checkpoint <= self.op);
+            assert(self.op_checkpoint <= self.op or self.status == .recovering);
             assert(self.op_checkpoint == 0 or
                 (self.op_checkpoint + 1) % config.lsm_batch_multiple == 0);
 
@@ -5040,7 +5041,7 @@ pub fn ReplicaType(
                 .recovering => {
                     // The replica's view hasn't been set yet.
                     // It will be set shortly, when we transition to normal status.
-                    assert(self.view == 0);
+                    assert(self.view == self.superblock.working.vsr_state.view);
                 },
             }
 
@@ -5146,7 +5147,7 @@ pub fn ReplicaType(
 
         fn transition_to_normal_from_recovering_status(self: *Self, new_view: u32) void {
             assert(self.status == .recovering);
-            assert(self.view == 0);
+            assert(self.view == self.superblock.working.vsr_state.view);
             assert(!self.committing);
             assert(self.replica_count > 1 or new_view == 0);
             self.view = new_view;
