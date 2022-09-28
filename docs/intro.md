@@ -22,15 +22,6 @@ Once you've got a TigerBeetle server, check out:
 
 * [Creating accounts and transfers in the Node CLI](./usage/node-cli)
 
-# Clients
-
-When you're ready to integrate your application with TigerBeetle,
-check out the language-specific docs:
-
-* [Node](./clients/node)
-* [Java](./clients/java)
-* [Go](./clients/go)
-
 # Reference
 
 To understand TigerBeetle's data model, see:
