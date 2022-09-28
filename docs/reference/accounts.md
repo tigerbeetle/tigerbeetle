@@ -160,11 +160,11 @@ Constraints:
 
 ### `timestamp`
 
-Time the account was created. This is set by TigerBeetle. The format
-is UNIX timestamp in nanoseconds.
+This is the time the account was created, as nanoseconds since
+UNIX epoch.
 
-It is set by TigerBeetle the moment the account is committed (created
-by consensus).
+It is set by TigerBeetle to the moment the account arrives at
+the cluster.
 
 Constraints:
 

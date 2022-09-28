@@ -1,7 +1,8 @@
 # Transfers
-A `Transfer` is an immutable record of a financial transaction between two accounts.
 
-`Transfer`s use double-entry accounting: each transfer updates the balance of the debit account and the credit account.
+A `transfer` is an immutable record of a financial transaction between
+two accounts.
+
 TigerBeetle uses the same data structures internally and
 externally. This means that sometimes you need to set temporary values
 for fields that TigerBeetle, not you (the user), are responsible.
@@ -243,10 +244,10 @@ and credited to the `credit_account_id` account.
 
 ### `timestamp`
 
-This is the time the account was created, as nanoseconds since
+This is the time the transfer was created, as nanoseconds since
 UNIX epoch.
 
-It is set by TigerBeetle to the moment the account arrives at
+It is set by TigerBeetle to the moment the transfer arrives at
 the cluster.
 
 Constraints:
