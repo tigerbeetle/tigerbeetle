@@ -164,12 +164,23 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         // TODO Use 2 separate header lists: "staging" and "working".
         // When participating in a view change, each replica should only send the headers from its
         // working set that it knows it prepared.
-        // This also addresses the problem of redundant headers being written prematurely due to
-        // batching (after the first log cycle — for the first log cycle we write an invalid message).
         headers: []align(config.sector_size) Header,
 
-        /// Store the redundant headers (unvalidated) during recovery.
-        // TODO When "headers" is split into "staging" and "working", reuse one of those instead.
+        /// Store headers whose prepares are on disk.
+        /// Redundant headers are updated after the corresponding prepare(s) are written,
+        /// whereas `headers` are updated beforehand.
+        ///
+        /// Consider this example:
+        /// 1. Ops 6 and 7 arrive.
+        /// 2. The write of prepare 7 finishes (before prepare 6).
+        /// 3. Op 7 continues on to write the redundant headers.
+        ///    Because prepare 6 is not yet written, header 6 is written as reserved.
+        /// 4. If at this point the replica crashes & restarts, slot 6 is in case `@J`
+        ///    (decision=nil) which can be locally repaired.
+        ///    In contrast, if op 6's prepare header was written in step 3, it would be case `@I`,
+        ///    which requires remote repair.
+        ///
+        /// During recovery, store the redundant (unvalidated) headers.
         headers_redundant: []align(config.sector_size) Header,
 
         /// We copy-on-write to these buffers, as the in-memory headers may change while writing.
@@ -572,11 +583,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Another example: If op 17 is disconnected from op 18, 16 is connected to 17, and 12-15
         /// are missing, returns: `{ .op_min = 12, .op_max = 17 }`.
         pub fn find_latest_headers_break_between(
-            self: *Self,
+            self: *const Self,
             op_min: u64,
             op_max: u64,
         ) ?HeaderRange {
-            assert(op_min <= op_max);
+            assert(op_max >= op_min);
+            assert(op_max - op_min < slot_count);
             var range: ?HeaderRange = null;
 
             // We set B, the op after op_max, to null because we only examine breaks < op_max:
@@ -1173,6 +1185,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             for (cases) |case, index| self.recover_slot(Slot{ .index = index }, case);
             assert(cases.len == slot_count);
 
+            // TODO util.copy_exact
+            std.mem.copy(Header, self.headers_redundant, self.headers);
+
             log.debug("{}: recover_slots: dirty={} faulty={}", .{
                 self.replica,
                 self.dirty.count,
@@ -1385,6 +1400,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             for (self.headers) |*header, index| {
                 assert(header.valid_checksum());
                 assert(header.cluster == replica.cluster);
+                assert(std.meta.eql(header.*, self.headers_redundant[index]));
                 if (header.command == .reserved) {
                     assert(header.op == index);
                 } else {
@@ -1485,6 +1501,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(!self.faulty.bit(slot));
                 assert(self.prepare_inhabited[slot.index]);
                 assert(self.prepare_checksums[slot.index] == message.header.checksum);
+                assert(self.headers_redundant[slot.index].checksum == message.header.checksum);
                 self.write_prepare_debug(message.header, "skipping (clean)");
                 callback(replica, message, trigger);
                 return;
@@ -1537,6 +1554,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(!self.prepare_inhabited[slot.index]);
                 self.prepare_inhabited[slot.index] = true;
                 self.prepare_checksums[slot.index] = message.header.checksum;
+                self.headers_redundant[slot.index] = message.header.*;
             } else {
                 self.write_prepare_debug(message.header, "entry changed while writing sectors");
                 self.write_prepare_release(write, null);
@@ -1607,33 +1625,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                         .command = .reserved,
                     };
                     assert(!buffer_headers[i].valid_checksum());
-                } else if (message.header.op < slot_count and
-                    !self.prepare_inhabited[slot.index] and
-                    message.header.command == .prepare and
-                    self.dirty.bit(slot))
-                {
-                    // When:
-                    // * this is the first wrap of the WAL, and
-                    // * this prepare slot is not inhabited (never has been), and
-                    // * this prepare slot is a dirty prepare,
-                    // write a reserved header instead of the in-memory prepare header.
-                    //
-                    // This can be triggered by the follow sequence of events:
-                    // 1. Ops 6 and 7 arrive.
-                    // 2. The write of prepare 7 finishes (before prepare 6).
-                    // 3. Op 7 continues on to write the redundant headers.
-                    //    Because prepare 6 is not yet written, header 6 is written as reserved.
-                    // 4. (If at this point the replica crashes & restarts, slot 6 is in case `@J`
-                    //    (decision=nil) which can be locally repaired. In contrast, if op 6's
-                    //    header was written in step 3, it would be case `@I`, which requires
-                    //    remote repair.
-                    //
-                    // * When `replica_count=1`, case `@I`, is not recoverable.
-                    // * When `replica_count>1` this marginally improves availability by enabling
-                    //   local repair.
-                    buffer_headers[i] = Header.reserved(replica.cluster, slot.index);
                 } else {
-                    buffer_headers[i] = self.headers[slot.index];
+                    // Write headers from `headers_redundant` instead of `headers` — we need to
+                    // avoid writing (leaking) a redundant header before its corresponding prepare
+                    // is on disk.
+                    buffer_headers[i] = self.headers_redundant[slot.index];
                 }
             }
 
