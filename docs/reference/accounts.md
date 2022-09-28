@@ -1,0 +1,183 @@
+# Accounts
+
+An `Account` is a record storing the cumulative effect of committed
+[transfers](./transfers.md).
+
+`Account`s use double-entry accounting: each tracks debits and credits
+separately.
+
+TigerBeetle uses the same data structures internally and
+externally. This means that sometimes you need to set temporary values
+for fields that TigerBeetle, not you (the user), are responsible.
+
+### Updates
+
+Account fields *cannot be changed by the user* after
+creation. However, debits and credits fields are updated by
+TigerBeetle as transfers move money to and from an account.
+
+## Fields
+
+### `id`
+
+This is a unique, client-defined identifier for the account.
+
+Constraints:
+
+* Type is 128-bit unsigned integer (16 bytes)
+* Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer).
+* Must not conflict with an another account.
+
+### `user_data`
+
+This is an optional secondary identifier to link this account to an
+external entity.
+
+As an example, you might use a UUID that ties together a group of
+accounts.
+
+Constraints:
+
+* Type is 128-bit unsigned integer (16 bytes)
+
+### `reserved`
+
+This space may be used for additional data in the future.
+
+Constraints:
+
+* Type is 48 bytes
+* Must be zero
+
+### `ledger`
+
+This is an identifier that partitions the sets of accounts that can
+transact.
+
+Money cannot transfer between two accounts with different `ledger`
+values. See: `errors.accounts_must_have_the_same_ledger`.
+
+In a typical use case:
+* Map each currency tracked within the database to a distinct ledger. And,
+* Tag each account with the `ledger` indicating the currency in which the balance is denominated.
+
+Constraints:
+* Type is 32-bit unsigned integer (4 bytes)
+* Must not be zero
+
+### `code`
+
+This is a user-defined enum denoting the category of the account.
+
+As an example, you might use codes `1000`-`3340` to indicate asset
+accounts in general, where `1001` is Bank Account and `1002` is Money
+Market Account and `2003` is Motor Vehicles and so on.
+
+Constraints:
+
+* Type is 16-bit unsigned integer (2 bytes)
+* Must not be zero
+
+### `flags`
+
+A bitfield that toggles additional behavior.
+
+Constraints:
+
+* Type is 16-bit unsigned integer (2 bytes)
+
+#### `flags.linked`
+
+When the `linked` flag is specified, it links an account with the next
+account in the batch, to create a chain of account, of arbitrary
+length, which all succeed or fail in creation together. The tail of a
+chain is denoted by the first account without this flag. The last
+account in a batch may therefore never have `flags.linked` set as
+this would leave a chain open-ended.
+
+Multiple chains or individual accounts may coexist within a batch to
+succeed or fail independently. Accounts within a chain are executed
+in order, or are rolled back on error, so that the effect of each
+account in the chain is visible to the next, and so that the chain is
+either visible or invisible as a unit to subsequent accounts after the
+chain. The account that was the first to break the chain will have a
+unique error result. Other accounts in the chain will have their error
+result set to `linked_event_failed`.
+
+#### `flags.debits_must_not_exceed_credits`
+
+When set, transfers will be rejected that would cause this account's
+debits to exceed credits. Specifically when `account.debits_pending +
+account.debits_posted + transfer.amount > account.credits_posted`.
+
+This cannot be set when `credits_must_not_exceed_debits` is also set.
+
+#### `flags.credits_must_not_exceed_debits`
+
+When set, transfers will be rejected that would cause this account's
+credits to exceed debits. Specifically when `account.credits_pending +
+account.credits_posted + transfer.amount > account.debits_posted`.
+
+This cannot be set when `debits_must_not_exceed_credits` is also set.
+
+### `debits_pending`
+
+`debits_pending` counts debits reserved by pending transfers. When a pending transfer posts, voids, or times out, the amount is removed from `debits_pending`.
+
+Money in `debits_pending` is reserved — that is, it cannot be spent until the corresponding pending transfer finishes.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+* Must be zero when the account is created
+
+### `debits_posted`
+
+Amount of posted debits.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+* Must be zero when the account is created
+
+### `credits_pending`
+
+Amount of pending credits.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+* Must be zero when the account is created
+
+### `credits_posted`
+
+Amount of posted credits.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+* Must be zero when the account is created
+
+### `timestamp`
+
+This is the time the account was created, as nanoseconds since
+UNIX epoch.
+
+It is set by TigerBeetle to the moment the account arrives at
+the cluster.
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+* User sets to zero on creation
+
+## Internals
+
+If you're curious and want to learn more, you can find the source code
+for this struct in
+[src/tigerbeetle.zig](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/tigerbeetle.zig). Search
+for `const Account = extern struct {`.
+
+You can find the source code for creating an account in
+[src/state_machine.zig](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/state_machine.zig). Search
+for `fn create_account(`.
