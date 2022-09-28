@@ -24,11 +24,23 @@ pub const ProcessType = enum { replica, client };
 
 pub const Zone = enum {
     superblock,
-    wal,
+    wal_headers,
+    wal_prepares,
     grid,
 
     const size_superblock = @import("vsr/superblock.zig").superblock_zone_size;
-    const size_wal = config.journal_size_max;
+    const size_wal_headers = config.journal_size_headers;
+    const size_wal_prepares = config.journal_size_prepares;
+
+    comptime {
+        for (.{
+            size_superblock,
+            size_wal_headers,
+            size_wal_prepares,
+        }) |zone_size| {
+            assert(zone_size % config.sector_size == 0);
+        }
+    }
 
     pub fn offset(zone: Zone, offset_logical: u64) u64 {
         if (zone.size()) |zone_size| {
@@ -37,15 +49,17 @@ pub const Zone = enum {
 
         return offset_logical + switch (zone) {
             .superblock => 0,
-            .wal => size_superblock,
-            .grid => size_superblock + size_wal,
+            .wal_headers => size_superblock,
+            .wal_prepares => size_superblock + size_wal_headers,
+            .grid => size_superblock + size_wal_headers + size_wal_prepares,
         };
     }
 
     pub fn size(zone: Zone) ?u64 {
         return switch (zone) {
             .superblock => size_superblock,
-            .wal => size_wal,
+            .wal_headers => size_wal_headers,
+            .wal_prepares => size_wal_prepares,
             .grid => null,
         };
     }

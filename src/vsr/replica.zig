@@ -9,7 +9,8 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientTable = @import("superblock_client_table.zig").ClientTable;
-const format_journal = @import("./journal.zig").format_journal;
+const format_wal_headers = @import("./journal.zig").format_wal_headers;
+const format_wal_prepares = @import("./journal.zig").format_wal_prepares;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -5899,18 +5900,46 @@ fn ReplicaFormatType(comptime Storage: type) type {
             );
             errdefer allocator.free(wal_buffer);
 
-            // The logical offset *within the WAL*.
+            // The logical offset *within the Zone*.
             var wal_offset: u64 = 0;
-            while (wal_offset < config.journal_size_max) {
-                const size = format_journal(cluster, wal_offset, wal_buffer);
-                assert(size % config.sector_size == 0);
+            while (wal_offset < config.journal_size_headers) {
+                const size = format_wal_headers(cluster, wal_offset, wal_buffer);
+                assert(size > 0);
+
+                for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
+                    assert(header.valid_checksum());
+                    if (header.op == 0) {
+                        assert(header.command == .prepare);
+                        assert(header.operation == .root);
+                    } else {
+                        assert(header.command == .reserved);
+                        assert(header.operation == .reserved);
+                    }
+                }
+
+                storage.write_sectors(
+                    format_wal_sectors_callback,
+                    &self.wal_write,
+                    wal_buffer[0..size],
+                    .wal_headers,
+                    wal_offset,
+                );
+                self.formatting = true;
+                while (self.formatting) storage.tick();
+                wal_offset += size;
+            }
+            assert(format_wal_headers(cluster, wal_offset, wal_buffer) == 0);
+
+            wal_offset = 0;
+            while (wal_offset < config.journal_size_prepares) {
+                const size = format_wal_prepares(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
                 for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
                     if (std.mem.eql(u8, std.mem.asBytes(header), &header_zeroes)) {
                         // This is the (empty) body of a reserved or root Prepare.
                     } else {
-                        // This is either a Prepare's header or a redundant header.
+                        // This is a Prepare's header.
                         assert(header.valid_checksum());
                         if (header.op == 0) {
                             assert(header.command == .prepare);
@@ -5926,7 +5955,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                     format_wal_sectors_callback,
                     &self.wal_write,
                     wal_buffer[0..size],
-                    .wal,
+                    .wal_prepares,
                     wal_offset,
                 );
                 self.formatting = true;
@@ -5935,7 +5964,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             }
 
             // There is nothing left to write.
-            assert(format_journal(cluster, wal_offset, wal_buffer) == 0);
+            assert(format_wal_prepares(cluster, wal_offset, wal_buffer) == 0);
         }
 
         fn format_wal_sectors_callback(write: *Storage.Write) void {
