@@ -233,6 +233,7 @@ value of the pending transfer's field:
 * `credit_account_id`
 * `ledger`
 * `code`
+* `amount`
 
 ### `amount`
 
