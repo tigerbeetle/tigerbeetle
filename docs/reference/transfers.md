@@ -199,7 +199,7 @@ transfer's amount.
   and the remainder is restored to its original accounts. It must be
   less than or equal to the pending transfer's amount.
 
-Additionally, when this field is set:
+Additionally, when `flags.post_pending_transfer` is set:
 
 * `pending_id` must reference a pending transfer.
 * `flags.void_pending_transfer` must not be set.
