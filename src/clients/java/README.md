@@ -40,7 +40,7 @@ import com.tigerbeetle.CreateAccountResults;
 Accounts batch = new Accounts(100);
 
 // loop adding N elements into the batch
-batch.new();
+batch.add();
 batch.setId(id);
 batch.setCode(100);
 batch.setLedger(720);
@@ -86,7 +86,7 @@ import com.tigerbeetle.CreateTransferResults;
 Transfers batch = new Transfers(100);
 
 // loop adding N elements into the batch
-batch.new();
+batch.add();
 batch.setId(id);
 batch.setCreditAccountId(creditAccountId);
 batch.setDebitAccountId(debitAccountId);
