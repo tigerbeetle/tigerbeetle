@@ -3,9 +3,6 @@
 An `Account` is a record storing the cumulative effect of committed
 [transfers](./transfers.md).
 
-`Account`s use double-entry accounting: each tracks debits and credits
-separately.
-
 TigerBeetle uses the same data structures internally and
 externally. This means that sometimes you need to set temporary values
 for fields that TigerBeetle, not you (the user), are responsible.
