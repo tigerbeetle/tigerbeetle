@@ -25,7 +25,10 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const Environment = struct {
     const cluster = 32;
     const replica = 4;
-    const size_max = vsr.Zone.superblock.size().? + vsr.Zone.wal.size().? + (512 + 64) * 1024 * 1024;
+    const size_max = vsr.Zone.superblock.size().? +
+        vsr.Zone.wal_headers.size().? +
+        vsr.Zone.wal_prepares.size().? +
+        (512 + 64) * 1024 * 1024;
 
     const node_count = 1024;
     const cache_entries_max = 2 * 1024 * 1024;

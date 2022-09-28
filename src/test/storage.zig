@@ -167,7 +167,7 @@ pub const Storage = struct {
         while (storage.writes.peek()) |write| {
             _ = storage.writes.remove();
             // TODO Allow some corruption in other zones.
-            if (write.zone == .wal) {
+            if (write.zone == .wal_headers or write.zone == .wal_prepares) {
                 storage.fault_sectors(write.offset, write.buffer.len);
             }
         }
@@ -242,7 +242,7 @@ pub const Storage = struct {
         mem.copy(u8, read.buffer, storage.memory[read.offset..][0..read.buffer.len]);
 
         // TODO Allow some corruption in other zones.
-        if (read.zone == .wal) {
+        if (read.zone == .wal_headers or read.zone == .wal_prepares) {
             if (storage.x_in_100(storage.options.read_fault_probability)) {
                 storage.fault_sectors(read.offset, read.buffer.len);
             }
@@ -304,7 +304,7 @@ pub const Storage = struct {
         const sector_min = @divExact(write.offset, config.sector_size);
         const sector_max = @divExact(write.offset + write.buffer.len, config.sector_size);
         // TODO Allow some corruption in other zones.
-        if (write.zone == .wal) {
+        if (write.zone == .wal_headers or write.zone == .wal_prepares) {
             var sector: usize = sector_min;
             while (sector < sector_max) : (sector += 1) storage.faults.unset(sector);
 
