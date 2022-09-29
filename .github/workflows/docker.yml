@@ -76,6 +76,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v2
         with:
+          build-args: |
+            DEBUG=true
           tags: ghcr.io/${{ env.IMAGE_NAME }}:debug
           labels: ${{ steps.meta.outputs.labels }}
           target: release
