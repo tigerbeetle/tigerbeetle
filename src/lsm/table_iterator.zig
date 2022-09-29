@@ -91,8 +91,6 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn deinit(it: *TableIterator, allocator: mem.Allocator) void {
-            assert(!it.read_pending);
-
             allocator.free(it.index_block);
             it.values.deinit(allocator);
             for (it.data_blocks.buffer) |block| allocator.free(block);
