@@ -215,7 +215,7 @@ pub const Storage = struct {
         }
 
         const offset_in_storage = zone.offset(offset_in_zone);
-        storage.assert_bounds_and_alignment(buffer, offset_in_storage);
+        storage.verify_bounds_and_alignment(buffer, offset_in_storage);
 
         {
             const sector_min = @divExact(offset_in_storage, config.sector_size);
@@ -277,13 +277,19 @@ pub const Storage = struct {
         }
 
         const offset_in_storage = zone.offset(offset_in_zone);
-        storage.assert_bounds_and_alignment(buffer, offset_in_storage);
+        storage.verify_bounds_and_alignment(buffer, offset_in_storage);
 
         // Verify that there are no concurrent overlapping writes.
         var iterator = storage.writes.iterator();
         while (iterator.next()) |other| {
             assert(offset_in_storage + buffer.len <= other.offset or
                 other.offset + other.buffer.len <= offset_in_storage);
+        }
+
+        if (zone == .wal_headers) {
+            for (std.mem.bytesAsSlice(vsr.Header, buffer)) |header| {
+                storage.verify_write_wal_header(header);
+            }
         }
 
         write.* = .{
@@ -317,17 +323,6 @@ pub const Storage = struct {
         while (sector < sector_max) : (sector += 1) storage.memory_occupied.set(sector);
 
         write.callback(write);
-    }
-
-    fn assert_bounds_and_alignment(storage: *const Storage, buffer: []const u8, offset: u64) void {
-        assert(buffer.len > 0);
-        assert(offset + buffer.len <= storage.size);
-
-        // Ensure that the read or write is aligned correctly for Direct I/O:
-        // If this is not the case, the underlying syscall will return EINVAL.
-        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
-        assert(@mod(buffer.len, config.sector_size) == 0);
-        assert(@mod(offset, config.sector_size) == 0);
     }
 
     fn read_latency(storage: *Storage) u64 {
@@ -484,5 +479,52 @@ pub const Storage = struct {
             storage.replica_index,
         });
         storage.faults.set(faulty_sector);
+    }
+
+    fn verify_bounds_and_alignment(storage: *const Storage, buffer: []const u8, offset: u64) void {
+        assert(buffer.len > 0);
+        assert(offset + buffer.len <= storage.size);
+
+        // Ensure that the read or write is aligned correctly for Direct I/O:
+        // If this is not the case, the underlying syscall will return EINVAL.
+        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
+        assert(@mod(buffer.len, config.sector_size) == 0);
+        assert(@mod(offset, config.sector_size) == 0);
+    }
+
+    /// Each redundant header written must either:
+    /// - match the corresponding (already written) prepare, or
+    /// - be a command=reserved header (due to Journal.remove_entries_from), or
+    /// - match the old redundant header (i.e. no change).
+    ///   This last case applies when an in-memory header is changed after the prepare is written
+    ///   but before the redundant header is written, so the journal defers the redundant header
+    ///   update until after the new prepare has been written.
+    fn verify_write_wal_header(storage: *const Storage, header: vsr.Header) void {
+        // The checksum is zero when writing the header of a faulty prepare.
+        if (header.checksum == 0) return;
+
+        const header_slot = header.op % config.journal_slot_count;
+        const header_offset = vsr.Zone.wal_headers.offset(header_slot * @sizeOf(vsr.Header));
+        const header_old = mem.bytesAsValue(
+            vsr.Header,
+            storage.memory[header_offset..][0..@sizeOf(vsr.Header)],
+        );
+
+        const prepare_offset = vsr.Zone.wal_prepares.offset(header_slot * config.message_size_max);
+        const prepare_sector = @divExact(prepare_offset, config.sector_size);
+        const prepare_header = mem.bytesAsValue(
+            vsr.Header,
+            storage.memory[prepare_offset..][0..@sizeOf(vsr.Header)],
+        );
+
+        assert(storage.memory_occupied.isSet(prepare_sector));
+        if (header.command == .prepare) {
+            assert(
+                header.checksum == header_old.checksum or
+                header.checksum == prepare_header.checksum
+            );
+        } else {
+            assert(header.command == .reserved);
+        }
     }
 };
