@@ -40,7 +40,7 @@ CLI](../usage/node-cli).
 ## Debugging panics
 
 If TigerBeetle panics and you can reproduce the panic, you can get a
-better stacktrace by switching to a debug build.
+better stack trace by switching to a debug build.
 
 ```bash
 $ DEBUG=true scripts/install.sh

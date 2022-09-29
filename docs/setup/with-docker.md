@@ -29,7 +29,7 @@ CLI](../usage/node-cli).
 ## Debugging panics
 
 If TigerBeetle panics and you can reproduce the panic, you can get a
-better stacktrace by switching to a debug image (by using the `:debug`
+better stack trace by switching to a debug image (by using the `:debug`
 Docker image tag).
 
 ```bash
