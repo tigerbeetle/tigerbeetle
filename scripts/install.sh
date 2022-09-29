@@ -10,8 +10,8 @@ set -eEuo pipefail
 scripts/install_zig.sh
 echo "Building TigerBeetle..."
 if [[ "$debug" == "true" ]]; then
-    zig/zig build -Dcpu=baseline -Drelease-safe
-else
     zig/zig build -Dcpu=baseline
+else
+    zig/zig build -Dcpu=baseline -Drelease-safe
 fi
 mv zig-out/bin/tigerbeetle .
