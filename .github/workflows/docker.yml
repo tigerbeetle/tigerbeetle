@@ -78,7 +78,8 @@ jobs:
         with:
           build-args: |
             DEBUG=true
-          push: ${{ github.event_name != 'pull_request' }}
+          # push: ${{ github.event_name != 'pull_request' }}
           tags: ghcr.io/${{ env.IMAGE_NAME }}:debug
+          labels: ${{ steps.meta.outputs.labels }}
           target: release
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm6
