@@ -1832,8 +1832,12 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn writing(self: *Self, op: u64, checksum: u128) bool {
+            const slot = self.slot_for_op(op);
             var it = self.writes.iterate();
+            var found: bool = false;
             while (it.next()) |write| {
+                const write_slot = self.slot_for_op(write.message.header.op);
+
                 // It's possible that we might be writing the same op but with a different checksum.
                 // For example, if the op we are writing did not survive the view change and was
                 // replaced by another op. We must therefore do the search primarily on checksum.
@@ -1841,10 +1845,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 if (write.message.header.op == op and write.message.header.checksum == checksum) {
                     // If we truly are writing, then the dirty bit must be set:
                     assert(self.dirty.bit(self.slot_for_op(op)));
-                    return true;
+                    found = true;
+                } else if (write_slot.index == slot.index) {
+                    // If the in-progress write of '{op, checksum}' will be overwritten by another
+                    // write to the same slot, writing() must return false.
+                    found = false;
                 }
             }
-            return false;
+            return found;
         }
     };
 }
