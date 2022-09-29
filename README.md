@@ -187,10 +187,11 @@ For further reading:
 
 * For Node.js: [tigerbeetle-node](https://github.com/tigerbeetledb/tigerbeetle-node)
 * For Golang: [tigerbeetle-go](https://github.com/tigerbeetledb/tigerbeetle-go)
+* For Java: [tigerbeetle-java](https://github.com/tigerbeetledb/tigerbeetle-java)
 
 ## Community
 
-[Join the TigerBeetle community in Discord.](https://discord.com/invite/uWCGp46uG5)
+[Join the TigerBeetle community on Slack.](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
 
 ## Benchmarks
 
