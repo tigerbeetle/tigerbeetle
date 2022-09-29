@@ -81,4 +81,5 @@ jobs:
           tags: ghcr.io/${{ env.IMAGE_NAME }}:debug
           labels: ${{ steps.meta.outputs.labels }}
           target: release
+          push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
