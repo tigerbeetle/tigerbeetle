@@ -1144,6 +1144,13 @@ pub fn ReplicaType(
         ///   (Reason: the headers bundled with the DVC(s) with the highest view_normal will be
         ///   loaded into the new leader with `replace_header()`, not `repair_header()`).
         ///
+        /// Perhaps unintuitively, it is safe to advertise a header before its message is prepared
+        /// (e.g. the write is still queued). The header is either:
+        ///
+        /// * committed — so another replica in the quorum must have a copy, according to the quorum
+        ///   intersection property. Or,
+        /// * uncommitted — if the header is chosen, but cannot be recovered from any replica, then
+        ///   it will be discarded by the nack protocol.
         fn on_do_view_change(self: *Self, message: *Message) void {
             if (self.ignore_view_change_message(message)) return;
 
