@@ -82,4 +82,4 @@ jobs:
           tags: ghcr.io/${{ env.IMAGE_NAME }}:debug
           labels: ${{ steps.meta.outputs.labels }}
           target: release
-          platforms: linux/amd64,linux/arm6
+          platforms: linux/amd64,linux/arm64
