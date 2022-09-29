@@ -192,9 +192,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// When the slot's header is `reserved`, the header's `op` is the slot index.
         ///
         /// During recovery, store the (unvalidated) headers of the prepare ring.
-        // TODO Use 2 separate header lists: "staging" and "working".
-        // When participating in a view change, each replica should only send the headers from its
-        // working set that it knows it prepared.
         headers: []align(config.sector_size) Header,
 
         /// Store headers whose prepares are on disk.
@@ -1440,8 +1437,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Removes entries from `op_min` (inclusive) onwards.
         /// Used after a view change to remove uncommitted entries discarded by the new leader.
         pub fn remove_entries_from(self: *Self, op_min: u64) void {
-            const replica = @fieldParentPtr(Replica, "journal", self);
-
             assert(self.recovered);
             assert(op_min > 0);
 
@@ -1455,26 +1450,33 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     // TODO Explore scenarios where the data on disk may resurface after a crash.
                     const slot = self.slot_for_op(header.op);
                     assert(slot.index == index);
-                    self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
-                    self.dirty.clear(slot);
-                    self.faulty.clear(slot);
-                    // Do not clear `prepare_inhabited`/`prepare_checksums`. The prepare is
-                    // untouched on disk, and may be useful later. Consider this scenario:
-                    //
-                    // 1. Op 4 is received; start writing it.
-                    // 2. Op 4's prepare is written (setting `prepare_checksums`), start writing
-                    //    the headers.
-                    // 3. View change. Op 4 is discarded by `remove_entries_from`.
-                    // 4. View change. Op 4 (the same one from before) is back, marked as dirty. But
-                    //    we don't start a write, because `journal.writing()` says it is already in
-                    //    progress.
-                    // 5. Op 4's header write finishes (`write_prepare_on_write_header`).
-                    //
-                    // If `remove_entries_from` cleared `prepare_checksums`,
-                    // `write_prepare_on_write_header` would clear `dirty`/`faulty` for a slot with
-                    // `prepare_inhabited=false`.
+                    self.remove_entry(slot);
                 }
             }
+        }
+
+        pub fn remove_entry(self: *Self, slot: Slot) void {
+            const replica = @fieldParentPtr(Replica, "journal", self);
+
+            self.headers[slot.index] = Header.reserved(replica.cluster, slot.index);
+            self.headers_redundant[slot.index] = self.headers[slot.index];
+            self.dirty.clear(slot);
+            self.faulty.clear(slot);
+            // Do not clear `prepare_inhabited`/`prepare_checksums`. The prepare is
+            // untouched on disk, and may be useful later. Consider this scenario:
+            //
+            // 1. Op 4 is received; start writing it.
+            // 2. Op 4's prepare is written (setting `prepare_checksums`), start writing
+            //    the headers.
+            // 3. View change. Op 4 is discarded by `remove_entries_from`.
+            // 4. View change. Op 4 (the same one from before) is back, marked as dirty. But
+            //    we don't start a write, because `journal.writing()` says it is already in
+            //    progress.
+            // 5. Op 4's header write finishes (`write_prepare_on_write_header`).
+            //
+            // If `remove_entries_from` cleared `prepare_checksums`,
+            // `write_prepare_on_write_header` would clear `dirty`/`faulty` for a slot with
+            // `prepare_inhabited=false`.
         }
 
         pub fn set_header_as_dirty(self: *Self, header: *const Header) void {
@@ -1857,7 +1859,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
     };
 }
 
-// TODO Snapshots
 pub const BitSet = struct {
     bits: std.DynamicBitSetUnmanaged,
 

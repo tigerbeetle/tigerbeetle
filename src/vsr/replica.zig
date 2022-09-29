@@ -3937,6 +3937,8 @@ pub fn ReplicaType(
             }
 
             // Assert that all headers are now present and connected with a perfect hash chain:
+            // TODO(State Transfer): This may fail if the commit max is too far ahead and we
+            // couldn't repair it without jumping ahead on the WAL.
             assert(self.op >= self.commit_max);
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
@@ -4363,6 +4365,8 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
+            assert(self.op >= self.commit_min);
+            assert(self.op - self.commit_min < config.journal_slot_count);
 
             // Request enough prepares to utilize our max IO depth:
             var budget = self.journal.writes.available();
@@ -4374,7 +4378,7 @@ pub fn ReplicaType(
             if (self.op < config.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
                 // Therefore, any faulty ops to the right of `replica.op` are corrupt reserved
-                // entries from the initial format.
+                // entries from the initial format, or corrupt prepares which were since truncated.
                 var op: usize = self.op + 1;
                 while (op < config.journal_slot_count) : (op += 1) {
                     const slot = self.journal.slot_for_op(op);
@@ -4382,23 +4386,52 @@ pub fn ReplicaType(
 
                     if (self.journal.faulty.bit(slot)) {
                         assert(self.journal.headers[op].command == .reserved);
+                        assert(self.journal.headers_redundant[op].command == .reserved);
                         self.journal.dirty.clear(slot);
                         self.journal.faulty.clear(slot);
-                        log.debug("{}: repair_prepares: op={} (op known, first cycle)", .{
+                        log.debug("{}: repair_prepares: remove slot={} " ++
+                            "(faulty, op known, first cycle)", .{
                             self.replica,
-                            op,
+                            slot.index,
                         });
                     }
                 }
             }
 
             var op = self.op + 1;
+            // To maximize durability, repair all prepares for which we have a header (not only
+            // uncommitted headers). This in turn enables the replica to help repair other replicas.
             const op_min = op -| config.journal_slot_count;
             while (op > op_min) {
                 op -= 1;
 
                 const slot = self.journal.slot_for_op(op);
                 if (self.journal.dirty.bit(slot)) {
+                    if (self.journal.slot_with_op(op) == null) {
+                        // If this op was between `commit_min` and `replica.op`, we would have
+                        // requested and repaired these headers.
+                        // If this op was between `op_checkpoint` and `commit_min`, we would have
+                        // a header (since we couldn't have committed otherwise).
+                        //
+                        // So this op must be less-than-or-equal-to `op_checkpoint` — we committed
+                        // before checkpointing, but the entry in our WAL was found corrupt after
+                        // recovering from a crash.
+                        //
+                        // Or (indistinguishably) this might originally have been an op greater
+                        // than replica.op, which was truncated, but is now corrupt.
+                        assert(op <= self.commit_min);
+                        assert(op <= self.op_checkpoint);
+                        assert(self.journal.faulty.bit(slot));
+
+                        log.debug("{}: repair_prepares: remove slot={} " ++
+                            "(faulty, precedes checkpoint)", .{
+                            self.replica,
+                            slot.index,
+                        });
+                        self.journal.remove_entry(slot);
+                        continue;
+                    }
+
                     // If this is an uncommitted op, and we are the leader in `view_change` status,
                     // then we will `request_prepare` from the cluster, set `nack_prepare_op`,
                     // and stop repairing any further prepares:
