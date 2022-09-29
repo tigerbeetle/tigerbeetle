@@ -22,8 +22,8 @@ This is a unique, client-defined identifier for the account.
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
-* Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer).
-* Must not conflict with an another account.
+* Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
+* Must not conflict with another account
 
 ### `user_data`
 
