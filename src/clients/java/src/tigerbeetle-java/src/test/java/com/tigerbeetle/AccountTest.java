@@ -158,7 +158,7 @@ public class AccountTest {
     }
 
     @Test
-    public void testFlagsUnsigendValud() {
+    public void testFlagsUnsignedValue() {
         var accounts = new Accounts(1);
         accounts.add();
 

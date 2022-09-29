@@ -170,7 +170,7 @@ public class BatchTest {
         assertFalse(batch.next());
         assertFalse(batch.isValidPosition());
 
-        // Reseting an empty batch
+        // Resting an empty batch
         batch.beforeFirst();
 
         // Still at the end of the batch
@@ -314,7 +314,7 @@ public class BatchTest {
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
 
-        // Set inndex 0
+        // Set index 0
         batch.add();
         assertEquals(0, batch.getPosition());
         assertEquals(1, batch.getLength());
@@ -416,7 +416,7 @@ public class BatchTest {
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
 
-        // Set inndex 0
+        // Set index 0
         batch.add();
         assertEquals(0, batch.getPosition());
         assertEquals(1, batch.getLength());
@@ -586,7 +586,7 @@ public class BatchTest {
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
 
-        // Set inndex 0
+        // Set index 0
         batch.add(id1);
         assertEquals(0, batch.getPosition());
         assertEquals(1, batch.getLength());
@@ -784,7 +784,7 @@ public class BatchTest {
         account2.creditsPosted = 40;
         account2.timestamp = 99;
 
-        // Mimic the the binnary response
+        // Mimic the the binary response
         dummyAccountsStream = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
 
         // Item 1
@@ -845,7 +845,7 @@ public class BatchTest {
         transfer2.timeout = 2500;
         transfer2.timestamp = 900;
 
-        // Mimic the the binnary response
+        // Mimic the the binary response
         dummyTransfersStream = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
 
         // Item 1
@@ -879,7 +879,7 @@ public class BatchTest {
         createAccountResult1 = CreateAccountResult.Ok;
         createAccountResult2 = CreateAccountResult.Exists;
 
-        // Mimic the the binnary response
+        // Mimic the the binary response
         dummyCreateAccountResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyCreateAccountResultsStream.putInt(0).putInt(0); // Item 0 - OK
         dummyCreateAccountResultsStream.putInt(1).putInt(21); // Item 1 - Exists
@@ -887,7 +887,7 @@ public class BatchTest {
         createTransferResult1 = CreateTransferResult.Ok;
         createTransferResult2 = CreateTransferResult.ExceedsDebits;
 
-        // Mimic the the binnary response
+        // Mimic the the binary response
         dummyCreateTransfersResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyCreateTransfersResultsStream.putInt(0).putInt(0); // Item 0 - OK
         dummyCreateTransfersResultsStream.putInt(1).putInt(36); // Item 1 - ExceedsDebits
@@ -900,7 +900,7 @@ public class BatchTest {
         id2LeastSignificant = 2;
         id2MostSignificant = 20;
 
-        // Mimic the the binnary response
+        // Mimic the the binary response
         dummyIdsStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
         dummyIdsStream.putLong(10).putLong(100); // Item (10,100)
         dummyIdsStream.putLong(2).putLong(20); // Item (2,20)

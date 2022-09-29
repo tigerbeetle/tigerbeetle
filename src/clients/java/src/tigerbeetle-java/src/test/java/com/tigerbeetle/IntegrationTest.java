@@ -18,7 +18,7 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Integration tests using a tigerbeetle instance.
+ * Integration tests using a TigerBeetle instance.
  */
 public class IntegrationTest {
 
@@ -472,7 +472,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
 
-                // Looking up and asserting the peding transaction
+                // Looking up and asserting the pending transaction
                 var ids = new Ids(1);
                 ids.add(transaction1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
@@ -601,7 +601,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
 
-                // Looking up and asserting the peding transaction
+                // Looking up and asserting the pending transaction
                 var ids = new Ids(1);
                 ids.add(transaction1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
@@ -949,7 +949,7 @@ public class IntegrationTest {
 
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
-                    // Starting multiple threads submiting transfers,
+                    // Starting multiple threads submitting transfers,
                     tasks[i] = new TransferTask(client);
                     tasks[i].start();
                 }
@@ -961,7 +961,7 @@ public class IntegrationTest {
                     assertEquals(0, tasks[i].result.getLength());
                 }
 
-                // Asserting if all transfers were submited correctly
+                // Asserting if all transfers were submitted correctly
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertEquals(2, lookupAccounts.getLength());
 
@@ -1015,7 +1015,7 @@ public class IntegrationTest {
 
                     for (int i = 0; i < tasks_qty; i++) {
 
-                        // Starting multiple threads submiting transfers,
+                        // Starting multiple threads submitting transfers,
                         tasks[i] = new TransferTask(client);
                         tasks[i].start();
                     }
@@ -1025,7 +1025,7 @@ public class IntegrationTest {
                 }
 
                 // And them close the client while several other threads are still working
-                // Some of them have already submited the request, others are waiting due to the
+                // Some of them have already submitted the request, others are waiting due to the
                 // maxConcurrency limit
                 client.close();
 
@@ -1034,7 +1034,7 @@ public class IntegrationTest {
 
                 for (int i = 0; i < tasks_qty; i++) {
 
-                    // The client.close must wait until all submited requests have completed
+                    // The client.close must wait until all submitted requests have completed
                     // Asserting that either the task succeeded or failed while waiting
                     tasks[i].join();
 

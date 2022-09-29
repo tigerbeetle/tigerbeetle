@@ -223,7 +223,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets an optional secondary identifier to link this trnasfer to an external entity.
+     * Gets an optional secondary identifier to link this transfer to an external entity.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -233,7 +233,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets an optional secondary identifier to link this trnasfer to an external entity.
+     * Gets an optional secondary identifier to link this transfer to an external entity.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -247,7 +247,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets an optional secondary identifier to link this trnasfer to an external entity.
+     * Sets an optional secondary identifier to link this transfer to an external entity.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -260,7 +260,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets an optional secondary identifier to link this trnasfer to an external entity.
+     * Sets an optional secondary identifier to link this transfer to an external entity.
      * <p>
      * May be zero, null values are converted to zero.
      *
@@ -396,7 +396,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets a bitfield that specifies (optional) transfer behavior.
+     * Gets a bit field that specifies (optional) transfer behavior.
      *
      * @see com.tigerbeetle.TransferFlags
      * @return a 16-bit unsigned integer bit mask.
@@ -406,7 +406,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets a bitfield that specifies (optional) transfer behavior.
+     * Sets a bit field that specifies (optional) transfer behavior.
      *
      * @see com.tigerbeetle.TransferFlags
      * @param flags a 16-bit unsigned integer bit mask.

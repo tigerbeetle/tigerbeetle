@@ -212,7 +212,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets a bitfield that toggles additional behavior.
+     * Gets a bit field that toggles additional behavior.
      *
      * @return a 16-bit unsigned integer bit mask.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -223,7 +223,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets a bitfield that toggles additional behavior.
+     * Sets a bit field that toggles additional behavior.
      *
      * @see com.tigerbeetle.AccountFlags
      * @param flags a 16-bit unsigned integer bit mask.
@@ -284,7 +284,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets the mmount of posted credits.
+     * Gets the amount of posted credits.
      * <p>
      * Must always be interpreted as a positive integer.
      *

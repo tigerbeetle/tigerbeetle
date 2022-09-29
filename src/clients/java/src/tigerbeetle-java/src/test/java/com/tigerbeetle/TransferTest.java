@@ -325,7 +325,7 @@ public class TransferTest {
     }
 
     @Test
-    public void testAmountOverlflow() {
+    public void testAmountOverflow() {
 
         // Java long is always signed
         // Larger values must be reinterpreted as signed BigIntegers

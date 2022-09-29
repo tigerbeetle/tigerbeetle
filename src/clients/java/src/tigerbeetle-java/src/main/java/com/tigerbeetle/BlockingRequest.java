@@ -19,9 +19,9 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
      * This BlockingRequest<T> implements a much simpler general-purpose "synchronized" block that relies on the
      * standard Monitor.wait().
      *
-     * This approach is particulary good here for 3 reasons:
+     * This approach is particularly good here for 3 reasons:
      *
-     *   1. We are aways dealing with just one waiter thread, no need for a waiter stack.
+     *   1. We are always dealing with just one waiter thread, no need for a waiter stack.
      *   2. It is expected for a request to be at least 2 io-ticks long, making sense to suspend the waiter thread immediately.
      *   3. To avoid putting more pressure on the GC with additional object allocations required by the CompletableFuture
      *

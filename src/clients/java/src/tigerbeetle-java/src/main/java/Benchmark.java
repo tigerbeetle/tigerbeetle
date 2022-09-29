@@ -22,7 +22,7 @@ public class Benchmark {
             // Start the batch ...
             CompletableFuture<CreateAccountResults> future = client.createAccountsAsync(accounts);
 
-            // Register something on the application's side while tigerbeetle is processing
+            // Register something on the application's side while TigerBeetle is processing
             // UPDATE MyCustomer ...
 
             var accountErrors = future.get();

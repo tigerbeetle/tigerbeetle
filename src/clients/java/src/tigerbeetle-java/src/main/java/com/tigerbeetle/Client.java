@@ -249,33 +249,33 @@ public final class Client implements AutoCloseable {
     }
 
     void submit(final Request<?> request) {
-        final long packet = adquirePacket();
+        final long packet = acquirePacket();
         submit(clientHandle, request, packet);
     }
 
-    private long adquirePacket() {
+    private long acquirePacket() {
 
-        // Assure that only the max number of concurrent requests can adquire a packet
+        // Assure that only the max number of concurrent requests can acquire a packet
         // It forces other threads to wait until a packet became available
         // We also assure that the clientHandle will be zeroed only after all permits
         // have been released
         final int TIMEOUT = 5;
-        boolean adquired = false;
+        boolean acquired = false;
         do {
 
             if (clientHandle == 0)
                 throw new IllegalStateException("Client is closed");
 
             try {
-                adquired = maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS);
+                acquired = maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS);
             } catch (InterruptedException interruptedException) {
 
                 // This exception should never exposed by the API to be handled by the user
                 throw new AssertionError(interruptedException,
-                        "Unexpected thread interruption on adquiring a packet.");
+                        "Unexpected thread interruption on acquiring a packet.");
             }
 
-        } while (!adquired);
+        } while (!acquired);
 
         packetsLock.lock();
         try {
@@ -325,7 +325,7 @@ public final class Client implements AutoCloseable {
                 this.maxConcurrencySemaphore.acquireUninterruptibly();
             }
 
-            // Deinit and sinalize that this client is closed by setting the handles to 0
+            // Deinit and signalize that this client is closed by setting the handles to 0
             packetsLock.lock();
             try {
 

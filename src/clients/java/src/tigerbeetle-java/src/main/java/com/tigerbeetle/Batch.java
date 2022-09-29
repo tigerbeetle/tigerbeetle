@@ -5,7 +5,7 @@ import java.nio.ByteOrder;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 /**
- * A Batch is contiguous memory block representing a colletion of elements of the same type with a
+ * A Batch is contiguous memory block representing a collection of elements of the same type with a
  * cursor pointing to its current position.
  * <p>
  * Initially the cursor is positioned before the first element and must be positioned by calling
@@ -23,31 +23,8 @@ public abstract class Batch {
      * instance points to multiple elements depending on the cursor position, eliminating individual instances
      * for each element.
      *
-     * Intended usage:
-     *
-     * <pre>
-     *
-     * // Populating a batch to send
-     * for(var dto : myDataSource) {
-     *
-     *   requestBatch.add();
-     *   requestBatch.setXyz(dto.Xyz);
-     *
-     * }
-     *
-     * var replyBatch = client.submit(requestBatch);
-     *
-     * // Reading from a reply
-     * while(replyBatch.next()) {
-     *
-     *   var value = replyBatch.getXyz();
-     *
-     * }
-     *
-     * </pre>
      */
     // @formatter:off
-
 
     private enum CursorStatus {
 
