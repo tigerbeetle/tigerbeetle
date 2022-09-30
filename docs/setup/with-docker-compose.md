@@ -29,7 +29,6 @@ version: "3.7"
 
 services:
   tigerbeetle_0:
-    container_name: tigerbeetle_0
     image: ghcr.io/tigerbeetledb/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
     network_mode: host
@@ -37,7 +36,6 @@ services:
       - ./data:/data
 
   tigerbeetle_1:
-    container_name: tigerbeetle_1
     image: ghcr.io/tigerbeetledb/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_1.tigerbeetle"
     network_mode: host
@@ -45,7 +43,6 @@ services:
       - ./data:/data
 
   tigerbeetle_2:
-    container_name: tigerbeetle_2
     image: ghcr.io/tigerbeetledb/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_2.tigerbeetle"
     network_mode: host
@@ -85,3 +82,13 @@ tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
 Now you can connect to the running server with any client. For a quick
 start, try [creating accounts and transfers in the Node
 CLI](../usage/node-cli).
+
+## Debugging panics
+
+If TigerBeetle panics and you can reproduce the panic, you can get a
+better stack trace by switching to a debug image (by using the `:debug`
+Docker image tag).
+
+```bash
+ghcr.io/tigerbeetledb/tigerbeetle:debug
+```
