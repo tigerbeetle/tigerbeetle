@@ -96,7 +96,7 @@ Non-pending transfers cannot have a timeout.
 
 Constraints:
 
-* Type is 64-bit integer (8 bytes)
+* Type is 64-bit unsigned integer (8 bytes)
 * Must be zero if `flags.pending` is *not* set
 * Must be non-zero if `flags.pending` *is* set
 
@@ -132,13 +132,13 @@ Constraints:
 #### `flags.linked`
 
 When the linked flag is specified, it links a transfer with the next
-transfer in the batch, to create a chain of transfer, of arbitrary
+transfer in the batch, to create a chain of transfers, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first transfer without this flag. The last
 transfer in a batch may therefore never have `flags.linked` set as
 this would leave a chain open-ended.
 
-Multiple chains or individual transfers may coexist within a batch to
+Multiple chains of individual transfers may coexist within a batch to
 succeed or fail independently. Transfers within a chain are executed
 within order, or are rolled back on error, so that the effect of each
 transfer in the chain is visible to the next, and so that the chain is

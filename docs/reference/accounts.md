@@ -86,7 +86,7 @@ Constraints:
 #### `flags.linked`
 
 When the `linked` flag is specified, it links an account with the next
-account in the batch, to create a chain of account, of arbitrary
+account in the batch, to create a chain of accounts, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first account without this flag. The last
 account in a batch may therefore never have `flags.linked` set as
