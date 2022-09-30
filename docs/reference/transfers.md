@@ -102,8 +102,10 @@ Constraints:
 
 ### `ledger`
 
-This is an identifier used to enforce that transfers must be between
-accounts of the same ledger.
+This is an identifier that partitions the sets of accounts that can
+transact with each other. Put another way, money cannot transfer
+between two accounts with different `ledger` values. See:
+`errors.accounts_must_have_the_same_ledger`.
 
 Constraints:
 
@@ -250,6 +252,13 @@ UNIX epoch.
 
 It is set by TigerBeetle to the moment the transfer arrives at
 the cluster.
+
+Additionally, all timestamps are unique, immutable and [totally
+ordered](http://book.mixu.net/distsys/time.html). So a transfer that
+is created before another transfer is guaranteed to have an earlier
+timestamp. In other systems this is also called a "physical"
+timestamp, "ingestion" timestamp, "record" timestamp, or "system"
+timestamp.
 
 Constraints:
 

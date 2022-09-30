@@ -22,8 +22,8 @@ This is a unique, client-defined identifier for the account.
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
-* Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer).
-* Must not conflict with an another account.
+* Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
+* Must not conflict with another account
 
 ### `user_data`
 
@@ -49,10 +49,9 @@ Constraints:
 ### `ledger`
 
 This is an identifier that partitions the sets of accounts that can
-transact.
-
-Money cannot transfer between two accounts with different `ledger`
-values. See: `errors.accounts_must_have_the_same_ledger`.
+transact with each other. Put another way, money cannot transfer
+between two accounts with different `ledger` values. See:
+`errors.accounts_must_have_the_same_ledger`.
 
 In a typical use case:
 * Map each currency tracked within the database to a distinct ledger. And,
@@ -162,6 +161,13 @@ UNIX epoch.
 
 It is set by TigerBeetle to the moment the account arrives at
 the cluster.
+
+Additionally, all timestamps are unique, immutable and [totally
+ordered](http://book.mixu.net/distsys/time.html). So an account that
+is created before another account is guaranteed to have an earlier
+timestamp. In other systems this is also called a "physical"
+timestamp, "ingestion" timestamp, "record" timestamp, or "system"
+timestamp.
 
 Constraints:
 
