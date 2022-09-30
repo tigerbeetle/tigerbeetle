@@ -40,19 +40,19 @@ public class BatchTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithNegativeCapacity() {
-        new Accounts(-1);
+        new AccountBatch(-1);
     }
 
     @Test(expected = NullPointerException.class)
     public void testConstructorWithNullBuffer() {
         ByteBuffer buffer = null;
-        new Transfers(buffer);
+        new TransferBatch(buffer);
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
     public void testPositionIndexOutOfBounds() {
 
-        var batch = new Accounts(1);
+        var batch = new AccountBatch(1);
         batch.setPosition(1);
         assert false; // Should be unreachable
     }
@@ -60,21 +60,21 @@ public class BatchTest {
     @Test(expected = IndexOutOfBoundsException.class)
     public void testPositionIndexNegative() {
 
-        var batch = new CreateTransferResults(1);
+        var batch = new CreateTransferResultBatch(1);
         batch.setPosition(-1);
         assert false; // Should be unreachable
     }
 
     @Test
     public void testNextFromCapacity() {
-        var batch = new Accounts(2);
+        var batch = new AccountBatch(2);
 
         // Creating from capacity
         // Expected position = -1 and length = 0
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
-        assertEquals(0 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(0 * AccountBatch.Struct.SIZE, batch.getBufferLen());
 
         assertFalse(batch.isValidPosition());
 
@@ -92,13 +92,13 @@ public class BatchTest {
         assertTrue(batch.isValidPosition());
         assertEquals(0, batch.getPosition());
         assertEquals(1, batch.getLength());
-        assertEquals(1 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(1 * AccountBatch.Struct.SIZE, batch.getBufferLen());
 
         batch.add();
         assertTrue(batch.isValidPosition());
         assertEquals(1, batch.getPosition());
         assertEquals(2, batch.getLength());
-        assertEquals(2 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(2 * AccountBatch.Struct.SIZE, batch.getBufferLen());
 
         // reset to the beginning,
         // Expected position -1
@@ -126,7 +126,7 @@ public class BatchTest {
 
     @Test
     public void testNextFromBuffer() {
-        var batch = new Accounts(dummyAccountsStream.position(0));
+        var batch = new AccountBatch(dummyAccountsStream.position(0));
 
         // Creating from a existing buffer
         // Expected position = -1 and length = 2
@@ -156,7 +156,7 @@ public class BatchTest {
 
     @Test
     public void testNextEmptyBatch() {
-        var batch = Transfers.EMPTY;
+        var batch = TransferBatch.EMPTY;
 
         // Empty batch
         // Expected position = -1 and length = 0
@@ -185,34 +185,34 @@ public class BatchTest {
 
     @Test
     public void testAdd() {
-        var batch = new Accounts(2);
+        var batch = new AccountBatch(2);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
-        assertEquals(0 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(0 * AccountBatch.Struct.SIZE, batch.getBufferLen());
 
         batch.add();
 
         assertEquals(0, batch.getPosition());
         assertEquals(1, batch.getLength());
         assertEquals(2, batch.getCapacity());
-        assertEquals(1 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(1 * AccountBatch.Struct.SIZE, batch.getBufferLen());
 
         batch.add();
 
         assertEquals(1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
-        assertEquals(2 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(2 * AccountBatch.Struct.SIZE, batch.getBufferLen());
     }
 
     @Test(expected = IllegalStateException.class)
     public void testAddReadOnly() {
-        var batch = new Accounts(dummyAccountsStream.asReadOnlyBuffer().position(0));
+        var batch = new AccountBatch(dummyAccountsStream.asReadOnlyBuffer().position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
-        assertEquals(2 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(2 * AccountBatch.Struct.SIZE, batch.getBufferLen());
 
         batch.add();
     }
@@ -220,7 +220,7 @@ public class BatchTest {
     @Test(expected = IllegalStateException.class)
     public void testReadInvalidPosition() {
 
-        Accounts batch = new Accounts(dummyAccountsStream.position(0));
+        AccountBatch batch = new AccountBatch(dummyAccountsStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -232,7 +232,7 @@ public class BatchTest {
     @Test(expected = IllegalStateException.class)
     public void testWriteInvalidPosition() {
 
-        Accounts batch = new Accounts(2);
+        AccountBatch batch = new AccountBatch(2);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -243,17 +243,17 @@ public class BatchTest {
 
     @Test(expected = IndexOutOfBoundsException.class)
     public void testAddExceedCapacity() {
-        var batch = new Accounts(1);
+        var batch = new AccountBatch(1);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(1, batch.getCapacity());
-        assertEquals(0 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(0 * AccountBatch.Struct.SIZE, batch.getBufferLen());
 
         batch.add();
 
         assertEquals(0, batch.getPosition());
         assertEquals(1, batch.getLength());
-        assertEquals(1 * Accounts.Struct.SIZE, batch.getBufferLen());
+        assertEquals(1 * AccountBatch.Struct.SIZE, batch.getBufferLen());
 
         batch.add();
     }
@@ -261,7 +261,7 @@ public class BatchTest {
     @Test
     public void testReadAccounts() {
 
-        Accounts batch = new Accounts(dummyAccountsStream.position(0));
+        AccountBatch batch = new AccountBatch(dummyAccountsStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -278,7 +278,7 @@ public class BatchTest {
     @Test
     public void testWriteAccounts() {
 
-        Accounts batch = new Accounts(2);
+        AccountBatch batch = new AccountBatch(2);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -309,7 +309,7 @@ public class BatchTest {
     @Test
     public void testMoveAndSetAccounts() {
 
-        Accounts batch = new Accounts(2);
+        AccountBatch batch = new AccountBatch(2);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -352,18 +352,18 @@ public class BatchTest {
     public void testInvalidAccountBuffer() {
 
         // Invalid size
-        var invalidBuffer =
-                ByteBuffer.allocate((Accounts.Struct.SIZE * 2) - 1).order(ByteOrder.LITTLE_ENDIAN);
+        var invalidBuffer = ByteBuffer.allocate((AccountBatch.Struct.SIZE * 2) - 1)
+                .order(ByteOrder.LITTLE_ENDIAN);
 
         @SuppressWarnings("unused")
-        var batch = new Accounts(invalidBuffer);
+        var batch = new AccountBatch(invalidBuffer);
         assert false;
     }
 
     @Test
     public void testReadTransfers() {
 
-        var batch = new Transfers(dummyTransfersStream.position(0));
+        var batch = new TransferBatch(dummyTransfersStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -380,7 +380,7 @@ public class BatchTest {
     @Test
     public void testWriteTransfers() {
 
-        var batch = new Transfers(2);
+        var batch = new TransferBatch(2);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -411,7 +411,7 @@ public class BatchTest {
     @Test
     public void testMoveAndSetTransfers() {
 
-        var batch = new Transfers(2);
+        var batch = new TransferBatch(2);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -454,18 +454,18 @@ public class BatchTest {
     public void testInvalidTransfersBuffer() {
 
         // Invalid size
-        var invalidBuffer =
-                ByteBuffer.allocate((Transfers.Struct.SIZE * 2) - 1).order(ByteOrder.LITTLE_ENDIAN);
+        var invalidBuffer = ByteBuffer.allocate((TransferBatch.Struct.SIZE * 2) - 1)
+                .order(ByteOrder.LITTLE_ENDIAN);
 
         @SuppressWarnings("unused")
-        var batch = new Transfers(invalidBuffer);
+        var batch = new TransferBatch(invalidBuffer);
         assert false;
     }
 
     @Test
     public void testReadCreateAccountResults() {
 
-        var batch = new CreateAccountResults(dummyCreateAccountResultsStream.position(0));
+        var batch = new CreateAccountResultBatch(dummyCreateAccountResultsStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -485,18 +485,18 @@ public class BatchTest {
     public void testInvalidCreateAccountResultsBuffer() {
 
         // Invalid size
-        var invalidBuffer = ByteBuffer.allocate((CreateAccountResults.Struct.SIZE * 2) - 1)
+        var invalidBuffer = ByteBuffer.allocate((CreateAccountResultBatch.Struct.SIZE * 2) - 1)
                 .order(ByteOrder.LITTLE_ENDIAN);
 
         @SuppressWarnings("unused")
-        var batch = new CreateAccountResults(invalidBuffer);
+        var batch = new CreateAccountResultBatch(invalidBuffer);
         assert false;
     }
 
     @Test
     public void testReadCreateTransferResults() {
 
-        var batch = new CreateTransferResults(dummyCreateTransfersResultsStream.position(0));
+        var batch = new CreateTransferResultBatch(dummyCreateTransfersResultsStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -516,18 +516,18 @@ public class BatchTest {
     public void testInvalidTransferAccountResultsBuffer() {
 
         // Invalid size
-        var invalidBuffer = ByteBuffer.allocate((CreateTransferResults.Struct.SIZE * 2) - 1)
+        var invalidBuffer = ByteBuffer.allocate((CreateTransferResultBatch.Struct.SIZE * 2) - 1)
                 .order(ByteOrder.LITTLE_ENDIAN);
 
         @SuppressWarnings("unused")
-        var batch = new CreateTransferResults(invalidBuffer);
+        var batch = new CreateTransferResultBatch(invalidBuffer);
         assert false;
     }
 
     @Test
     public void testReadIds() {
 
-        var batch = new Ids(dummyIdsStream.position(0));
+        var batch = new IdBatch(dummyIdsStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -548,7 +548,7 @@ public class BatchTest {
     @Test
     public void testWriteIds() {
 
-        var batch = new Ids(2);
+        var batch = new IdBatch(2);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -581,7 +581,7 @@ public class BatchTest {
     @Test
     public void testMoveAndSetIds() {
 
-        var batch = new Ids(2);
+        var batch = new IdBatch(2);
         assertEquals(-1, batch.getPosition());
         assertEquals(0, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -630,20 +630,20 @@ public class BatchTest {
                 ByteBuffer.allocate((UInt128.SIZE * 2) - 1).order(ByteOrder.LITTLE_ENDIAN);
 
         @SuppressWarnings("unused")
-        var batch = new Ids(invalidBuffer);
+        var batch = new IdBatch(invalidBuffer);
         assert false;
     }
 
     @Test(expected = NullPointerException.class)
     public void testNullIds() {
 
-        var batch = new Ids(1);
+        var batch = new IdBatch(1);
         batch.add();
         batch.setId(null);
         assert false;
     }
 
-    private static void setAccount(Accounts batch, DummyAccountDto account) {
+    private static void setAccount(AccountBatch batch, DummyAccountDto account) {
         batch.setId(account.idLeastSignificant, account.idMostSignificant);
         batch.setUserData(account.userDataLeastSignificant, account.userDataMostSignificant);
         batch.setLedger(account.ledger);
@@ -656,7 +656,7 @@ public class BatchTest {
         batch.setTimestamp(account.timestamp);
     }
 
-    private static void assertAccounts(DummyAccountDto account, Accounts batch) {
+    private static void assertAccounts(DummyAccountDto account, AccountBatch batch) {
         assertEquals(account.idLeastSignificant, batch.getId(UInt128.LeastSignificant));
         assertEquals(account.idMostSignificant, batch.getId(UInt128.MostSignificant));
         assertEquals(account.userDataLeastSignificant, batch.getUserData(UInt128.LeastSignificant));
@@ -671,7 +671,7 @@ public class BatchTest {
         assertEquals(account.timestamp, batch.getTimestamp());
     }
 
-    private static void assertTransfers(DummyTransferDto transfer, Transfers batch) {
+    private static void assertTransfers(DummyTransferDto transfer, TransferBatch batch) {
         assertEquals(transfer.idLeastSignificant, batch.getId(UInt128.LeastSignificant));
         assertEquals(transfer.idMostSignificant, batch.getId(UInt128.MostSignificant));
         assertEquals(transfer.creditAccountIdLeastSignificant,
@@ -697,7 +697,7 @@ public class BatchTest {
         assertEquals(transfer.timestamp, batch.getTimestamp());
     }
 
-    private static void setTransfer(Transfers batch, DummyTransferDto transfer) {
+    private static void setTransfer(TransferBatch batch, DummyTransferDto transfer) {
         batch.setId(transfer.idLeastSignificant, transfer.idMostSignificant);
         batch.setDebitAccountId(transfer.debitAccountIdLeastSignificant,
                 transfer.debitAccountIdMostSignificant);

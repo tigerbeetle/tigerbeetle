@@ -9,7 +9,7 @@ public class TransferTest {
 
     @Test
     public void testDefaultValues() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
         assertEquals(0L, transfers.getId(UInt128.LeastSignificant));
         assertEquals(0L, transfers.getId(UInt128.MostSignificant));
@@ -31,7 +31,7 @@ public class TransferTest {
 
     @Test
     public void testId() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setId(100, 200);
@@ -41,7 +41,7 @@ public class TransferTest {
 
     @Test
     public void testIdAsBytes() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
@@ -51,7 +51,7 @@ public class TransferTest {
 
     @Test(expected = NullPointerException.class)
     public void testIdNull() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] id = null;
@@ -60,7 +60,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testIdInvalid() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
@@ -70,7 +70,7 @@ public class TransferTest {
 
     @Test
     public void testDebitAccountId() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setDebitAccountId(100, 200);
@@ -80,7 +80,7 @@ public class TransferTest {
 
     @Test
     public void testDebitAccountIdAsBytes() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
@@ -90,7 +90,7 @@ public class TransferTest {
 
     @Test(expected = NullPointerException.class)
     public void testDebitAccountIdNull() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] debitAccountId = null;
@@ -99,7 +99,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testDebitAccountIdInvalid() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
@@ -109,7 +109,7 @@ public class TransferTest {
 
     @Test
     public void testCreditAccountId() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setCreditAccountId(100, 200);
@@ -119,7 +119,7 @@ public class TransferTest {
 
     @Test
     public void testCreditAccountIdAsBytes() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
@@ -129,7 +129,7 @@ public class TransferTest {
 
     @Test(expected = NullPointerException.class)
     public void testCreditAccountIdNull() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] creditAccountId = null;
@@ -138,7 +138,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testCreditAccountIdInvalid() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
@@ -148,7 +148,7 @@ public class TransferTest {
 
     @Test
     public void testUserData() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setUserData(100, 200);
@@ -158,7 +158,7 @@ public class TransferTest {
 
     @Test
     public void testUserDataAsBytes() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var userData = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
@@ -168,7 +168,7 @@ public class TransferTest {
 
     @Test
     public void testUserDataNull() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] userData = null;
@@ -179,7 +179,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testUserDataInvalid() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
@@ -189,7 +189,7 @@ public class TransferTest {
 
     @Test
     public void testPendingId() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setPendingId(100, 200);
@@ -199,7 +199,7 @@ public class TransferTest {
 
     @Test
     public void testPendingIdAsBytes() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
@@ -209,7 +209,7 @@ public class TransferTest {
 
     @Test
     public void testPendingIdNull() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] pendingId = null;
@@ -220,7 +220,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testPendingIdInvalid() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
@@ -230,7 +230,7 @@ public class TransferTest {
 
     @Test
     public void testTimeout() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setTimeout(9999);
@@ -239,7 +239,7 @@ public class TransferTest {
 
     @Test
     public void testLedger() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setLedger(200);
@@ -248,7 +248,7 @@ public class TransferTest {
 
     @Test
     public void testCode() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setCode(30);
@@ -257,7 +257,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testCodeNegative() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setCode(-1);
@@ -265,7 +265,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testCodeOverflow() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setCode(Integer.MAX_VALUE);
@@ -273,7 +273,7 @@ public class TransferTest {
 
     @Test
     public void testCodeUnsigned() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setCode(53000);
@@ -282,7 +282,7 @@ public class TransferTest {
 
     @Test
     public void testFlags() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER | TransferFlags.LINKED);
@@ -292,7 +292,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testFlagsNegative() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setFlags(-1);
@@ -300,7 +300,7 @@ public class TransferTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testFlagsOverflow() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setFlags(Integer.MAX_VALUE);
@@ -308,7 +308,7 @@ public class TransferTest {
 
     @Test
     public void testFlagsUnsigned() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setFlags(60000);
@@ -317,7 +317,7 @@ public class TransferTest {
 
     @Test
     public void testAmount() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setAmount(999);
@@ -334,7 +334,7 @@ public class TransferTest {
                 BigInteger.ONE.shiftLeft(Long.SIZE).subtract(BigInteger.ONE);
         BigInteger largeAmount = BigInteger.valueOf(Long.MAX_VALUE + 999).and(UNSIGNED_LONG_MASK);
 
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setAmount(largeAmount.longValue());
@@ -344,7 +344,7 @@ public class TransferTest {
 
     @Test
     public void testTimestamp() {
-        var transfers = new Transfers(1);
+        var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setTimestamp(1234567890);

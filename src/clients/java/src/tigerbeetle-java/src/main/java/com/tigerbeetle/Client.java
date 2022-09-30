@@ -116,15 +116,18 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new accounts to be created.
      *
-     * @param batch a {@link com.tigerbeetle.Accounts batch} containing all accounts to be created.
-     * @return a read-only {@link com.tigerbeetle.CreateAccountResults batch} describing the result.
+     * @param batch a {@link com.tigerbeetle.AccountBatch batch} containing all accounts to be
+     *        created.
+     * @return a read-only {@link com.tigerbeetle.CreateAccountResultBatch batch} describing the
+     *         result.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CreateAccountResults createAccounts(final Accounts batch) throws RequestException {
+    public CreateAccountResultBatch createAccounts(final AccountBatch batch)
+            throws RequestException {
         final var request = BlockingRequest.createAccounts(this, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -133,14 +136,16 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new accounts to be created asynchronously.
      *
-     * @see Client#createAccounts(Accounts)
-     * @param batch a {@link com.tigerbeetle.Accounts batch} containing all accounts to be created.
+     * @see Client#createAccounts(AccountBatch)
+     * @param batch a {@link com.tigerbeetle.AccountBatch batch} containing all accounts to be
+     *        created.
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<CreateAccountResults> createAccountsAsync(final Accounts batch) {
+    public CompletableFuture<CreateAccountResultBatch> createAccountsAsync(
+            final AccountBatch batch) {
         final var request = AsyncRequest.createAccounts(this, batch);
         request.beginRequest();
         return request.getFuture();
@@ -149,15 +154,15 @@ public final class Client implements AutoCloseable {
     /**
      * Looks up a batch of accounts.
      *
-     * @param batch an {@link com.tigerbeetle.Ids batch} containing all account ids.
-     * @return a read-only {@link com.tigerbeetle.Accounts batch} containing all accounts found.
+     * @param batch an {@link com.tigerbeetle.IdBatch batch} containing all account ids.
+     * @return a read-only {@link com.tigerbeetle.AccountBatch batch} containing all accounts found.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public Accounts lookupAccounts(final Ids batch) throws RequestException {
+    public AccountBatch lookupAccounts(final IdBatch batch) throws RequestException {
         final var request = BlockingRequest.lookupAccounts(this, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -167,13 +172,13 @@ public final class Client implements AutoCloseable {
      * Looks up a batch of accounts asynchronously.
      *
      * @see Client#lookupAccounts
-     * @param batch a {@link com.tigerbeetle.Ids batch} containing all account ids.
+     * @param batch a {@link com.tigerbeetle.IdBatch batch} containing all account ids.
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<Accounts> lookupAccountsAsync(final Ids batch) {
+    public CompletableFuture<AccountBatch> lookupAccountsAsync(final IdBatch batch) {
         final var request = AsyncRequest.lookupAccounts(this, batch);
         request.beginRequest();
         return request.getFuture();
@@ -182,9 +187,9 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new transfers to be created.
      *
-     * @param batch a {@link com.tigerbeetle.Transfers batch} containing all transfers to be
+     * @param batch a {@link com.tigerbeetle.TransferBatch batch} containing all transfers to be
      *        created.
-     * @return a read-only {@link com.tigerbeetle.CreateTransferResults batch} describing the
+     * @return a read-only {@link com.tigerbeetle.CreateTransferResultBatch batch} describing the
      *         result.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
@@ -192,7 +197,8 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CreateTransferResults createTransfers(final Transfers batch) throws RequestException {
+    public CreateTransferResultBatch createTransfers(final TransferBatch batch)
+            throws RequestException {
         final var request = BlockingRequest.createTransfers(this, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -201,14 +207,15 @@ public final class Client implements AutoCloseable {
     /**
      * Submits a batch of new transfers to be created asynchronously.
      *
-     * @param batch a {@link com.tigerbeetle.Transfers batch} containing all transfers to be
+     * @param batch a {@link com.tigerbeetle.TransferBatch batch} containing all transfers to be
      *        created.
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<CreateTransferResults> createTransfersAsync(final Transfers batch) {
+    public CompletableFuture<CreateTransferResultBatch> createTransfersAsync(
+            final TransferBatch batch) {
         final var request = AsyncRequest.createTransfers(this, batch);
         request.beginRequest();
         return request.getFuture();
@@ -218,15 +225,16 @@ public final class Client implements AutoCloseable {
     /**
      * Looks up a batch of transfers.
      *
-     * @param batch a {@link com.tigerbeetle.Ids batch} containing all transfer ids.
-     * @return a read-only {@link com.tigerbeetle.Transfers batch} containing all transfers found.
+     * @param batch a {@link com.tigerbeetle.IdBatch batch} containing all transfer ids.
+     * @return a read-only {@link com.tigerbeetle.TransferBatch batch} containing all transfers
+     *         found.
      * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
      *         details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public Transfers lookupTransfers(final Ids batch) throws RequestException {
+    public TransferBatch lookupTransfers(final IdBatch batch) throws RequestException {
         final var request = BlockingRequest.lookupTransfers(this, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -235,14 +243,14 @@ public final class Client implements AutoCloseable {
     /**
      * Looks up a batch of transfers asynchronously.
      *
-     * @see Client#lookupTransfers(Ids)
-     * @param batch a {@link com.tigerbeetle.Ids batch} containing all transfer ids.
+     * @see Client#lookupTransfers(IdBatch)
+     * @param batch a {@link com.tigerbeetle.IdBatch batch} containing all transfer ids.
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<Transfers> lookupTransfersAsync(final Ids batch) {
+    public CompletableFuture<TransferBatch> lookupTransfersAsync(final IdBatch batch) {
         final var request = AsyncRequest.lookupTransfers(this, batch);
         request.beginRequest();
         return request.getFuture();

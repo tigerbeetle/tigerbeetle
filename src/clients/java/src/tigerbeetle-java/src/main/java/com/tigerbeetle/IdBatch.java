@@ -5,13 +5,13 @@ import java.nio.ByteBuffer;
 /**
  * A {@link Batch batch} of 128-bit unsigned integers.
  */
-public final class Ids extends Batch {
+public final class IdBatch extends Batch {
 
     interface Struct {
         public static final int SIZE = 16;
     }
 
-    static final Ids EMPTY = new Ids(0);
+    static final IdBatch EMPTY = new IdBatch(0);
 
     /**
      * Constructs an empty batch of ids with the desired maximum capacity.
@@ -23,11 +23,11 @@ public final class Ids extends Batch {
      *
      * @throws IllegalArgumentException if capacity is negative.
      */
-    public Ids(final int capacity) {
+    public IdBatch(final int capacity) {
         super(capacity, Struct.SIZE);
     }
 
-    Ids(final ByteBuffer buffer) {
+    IdBatch(final ByteBuffer buffer) {
         super(buffer, Struct.SIZE);
     }
 

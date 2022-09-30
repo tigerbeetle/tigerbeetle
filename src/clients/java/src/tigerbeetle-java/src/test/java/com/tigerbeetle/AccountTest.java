@@ -8,7 +8,7 @@ public class AccountTest {
 
     @Test
     public void testDefaultValues() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         assertEquals(0L, accounts.getId(UInt128.LeastSignificant));
@@ -26,7 +26,7 @@ public class AccountTest {
 
     @Test
     public void testId() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setId(100, 200);
@@ -36,7 +36,7 @@ public class AccountTest {
 
     @Test
     public void testIdAsBytes() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
@@ -47,7 +47,7 @@ public class AccountTest {
     @Test(expected = NullPointerException.class)
     public void testIdNull() {
         byte[] id = null;
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
 
         accounts.add();
         accounts.setId(id);
@@ -55,7 +55,7 @@ public class AccountTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testIdInvalid() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
@@ -65,7 +65,7 @@ public class AccountTest {
 
     @Test
     public void testUserData() {
-        var accounts = new Accounts(2);
+        var accounts = new AccountBatch(2);
         accounts.add();
 
         accounts.setUserData(100, 200);
@@ -75,7 +75,7 @@ public class AccountTest {
 
     @Test
     public void testUserDataAsBytes() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
@@ -85,7 +85,7 @@ public class AccountTest {
 
     @Test
     public void testUserDataNull() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         byte[] userData = null;
@@ -96,7 +96,7 @@ public class AccountTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testUserDataInvalid() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
@@ -106,7 +106,7 @@ public class AccountTest {
 
     @Test
     public void testLedger() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setLedger(200);
@@ -115,7 +115,7 @@ public class AccountTest {
 
     @Test
     public void testCode() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setCode(30);
@@ -124,7 +124,7 @@ public class AccountTest {
 
     @Test
     public void testCodeUnsignedValue() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setCode(60000);
@@ -133,7 +133,7 @@ public class AccountTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testCodeNegative() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setCode(-1);
@@ -141,7 +141,7 @@ public class AccountTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testCodeOverflow() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setCode(Integer.MAX_VALUE);
@@ -149,7 +149,7 @@ public class AccountTest {
 
     @Test
     public void testFlags() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setFlags(AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS | AccountFlags.LINKED);
@@ -159,7 +159,7 @@ public class AccountTest {
 
     @Test
     public void testFlagsUnsignedValue() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setFlags(60000);
@@ -168,7 +168,7 @@ public class AccountTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testFlagsNegative() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setFlags(-1);
@@ -176,7 +176,7 @@ public class AccountTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testFlagsOverflow() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setFlags(Integer.MAX_VALUE);
@@ -184,7 +184,7 @@ public class AccountTest {
 
     @Test
     public void testCreditsPending() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setCreditsPending(999);
@@ -193,7 +193,7 @@ public class AccountTest {
 
     @Test
     public void testCreditsPosted() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setCreditsPosted(999);
@@ -202,7 +202,7 @@ public class AccountTest {
 
     @Test
     public void testDebitsPosted() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setDebitsPosted(999);
@@ -211,7 +211,7 @@ public class AccountTest {
 
     @Test
     public void testDebitsPending() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setDebitsPending(999);
@@ -220,7 +220,7 @@ public class AccountTest {
 
     @Test
     public void testTimestamp() {
-        var accounts = new Accounts(1);
+        var accounts = new AccountBatch(1);
         accounts.add();
 
         accounts.setTimestamp(1234567890);

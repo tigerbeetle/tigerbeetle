@@ -24,24 +24,26 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
         future = new CompletableFuture<TResponse>();
     }
 
-    public static AsyncRequest<CreateAccountResults> createAccounts(final Client client,
-            final Accounts batch) {
-        return new AsyncRequest<CreateAccountResults>(client, Request.Operations.CREATE_ACCOUNTS,
-                batch);
+    public static AsyncRequest<CreateAccountResultBatch> createAccounts(final Client client,
+            final AccountBatch batch) {
+        return new AsyncRequest<CreateAccountResultBatch>(client,
+                Request.Operations.CREATE_ACCOUNTS, batch);
     }
 
-    public static AsyncRequest<Accounts> lookupAccounts(final Client client, final Ids batch) {
-        return new AsyncRequest<Accounts>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
+    public static AsyncRequest<AccountBatch> lookupAccounts(final Client client,
+            final IdBatch batch) {
+        return new AsyncRequest<AccountBatch>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
     }
 
-    public static AsyncRequest<CreateTransferResults> createTransfers(final Client client,
-            final Transfers batch) {
-        return new AsyncRequest<CreateTransferResults>(client, Request.Operations.CREATE_TRANSFERS,
-                batch);
+    public static AsyncRequest<CreateTransferResultBatch> createTransfers(final Client client,
+            final TransferBatch batch) {
+        return new AsyncRequest<CreateTransferResultBatch>(client,
+                Request.Operations.CREATE_TRANSFERS, batch);
     }
 
-    public static AsyncRequest<Transfers> lookupTransfers(final Client client, final Ids batch) {
-        return new AsyncRequest<Transfers>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
+    public static AsyncRequest<TransferBatch> lookupTransfers(final Client client,
+            final IdBatch batch) {
+        return new AsyncRequest<TransferBatch>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
     }
 
     public CompletableFuture<TResponse> getFuture() {

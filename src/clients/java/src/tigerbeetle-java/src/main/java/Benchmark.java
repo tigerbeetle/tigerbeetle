@@ -6,7 +6,7 @@ public class Benchmark {
     public static void main(String[] args) {
         try (var client = new Client(0, new String[] {"127.0.0.1:3001"}, 32)) {
 
-            var accounts = new Accounts(2);
+            var accounts = new AccountBatch(2);
 
             accounts.add();
             accounts.setId(100, 1000);
@@ -20,7 +20,8 @@ public class Benchmark {
 
             // Async usage:
             // Start the batch ...
-            CompletableFuture<CreateAccountResults> future = client.createAccountsAsync(accounts);
+            CompletableFuture<CreateAccountResultBatch> future =
+                    client.createAccountsAsync(accounts);
 
             // Register something on the application's side while TigerBeetle is processing
             // UPDATE MyCustomer ...
@@ -29,7 +30,7 @@ public class Benchmark {
             if (accountErrors.getLength() > 0) {
 
                 while (accountErrors.next()) {
-                    System.out.printf("Error creating account #%d -> %s\n",
+                    System.err.printf("Error creating account #%d -> %s\n",
                             accountErrors.getIndex(), accountErrors.getResult());
                 }
 
@@ -44,9 +45,9 @@ public class Benchmark {
             final int TRANSFERS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;
             final int MAX_TRANSFERS = BATCHES_COUNT * TRANSFERS_PER_BATCH;
 
-            var batches = new Transfers[BATCHES_COUNT];
+            var batches = new TransferBatch[BATCHES_COUNT];
             for (int i = 0; i < BATCHES_COUNT; i++) {
-                var transfersBatch = new Transfers(TRANSFERS_PER_BATCH);
+                var transfersBatch = new TransferBatch(TRANSFERS_PER_BATCH);
                 for (int j = 0; j < TRANSFERS_PER_BATCH; j++) {
 
                     transfersBatch.add();
@@ -72,7 +73,7 @@ public class Benchmark {
                 if (transfersErrors.getLength() > 0) {
 
                     while (accountErrors.next()) {
-                        System.out.printf("Error creating transfer #%d -> %s\n",
+                        System.err.printf("Error creating transfer #%d -> %s\n",
                                 transfersErrors.getIndex(), transfersErrors.getResult());
                     }
 

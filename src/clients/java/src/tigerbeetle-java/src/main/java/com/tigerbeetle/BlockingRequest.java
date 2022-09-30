@@ -38,24 +38,27 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
         exception = null;
     }
 
-    public static BlockingRequest<CreateAccountResults> createAccounts(final Client client,
-            final Accounts batch) {
-        return new BlockingRequest<CreateAccountResults>(client, Request.Operations.CREATE_ACCOUNTS,
-                batch);
+    public static BlockingRequest<CreateAccountResultBatch> createAccounts(final Client client,
+            final AccountBatch batch) {
+        return new BlockingRequest<CreateAccountResultBatch>(client,
+                Request.Operations.CREATE_ACCOUNTS, batch);
     }
 
-    public static BlockingRequest<Accounts> lookupAccounts(final Client client, final Ids batch) {
-        return new BlockingRequest<Accounts>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
+    public static BlockingRequest<AccountBatch> lookupAccounts(final Client client,
+            final IdBatch batch) {
+        return new BlockingRequest<AccountBatch>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
     }
 
-    public static BlockingRequest<CreateTransferResults> createTransfers(final Client client,
-            final Transfers batch) {
-        return new BlockingRequest<CreateTransferResults>(client,
+    public static BlockingRequest<CreateTransferResultBatch> createTransfers(final Client client,
+            final TransferBatch batch) {
+        return new BlockingRequest<CreateTransferResultBatch>(client,
                 Request.Operations.CREATE_TRANSFERS, batch);
     }
 
-    public static BlockingRequest<Transfers> lookupTransfers(final Client client, final Ids batch) {
-        return new BlockingRequest<Transfers>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
+    public static BlockingRequest<TransferBatch> lookupTransfers(final Client client,
+            final IdBatch batch) {
+        return new BlockingRequest<TransferBatch>(client, Request.Operations.LOOKUP_TRANSFERS,
+                batch);
     }
 
     public boolean isDone() {

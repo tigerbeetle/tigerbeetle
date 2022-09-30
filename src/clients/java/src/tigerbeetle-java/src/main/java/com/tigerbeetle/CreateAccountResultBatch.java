@@ -3,34 +3,34 @@ package com.tigerbeetle;
 import java.nio.ByteBuffer;
 
 /**
- * A {@link Batch} of results returned from the {@link Client#createTransfers transfer creation}
+ * A {@link Batch} of results returned from the {@link Client#createAccounts account creation}
  * operation.
  * <p>
  * Successfully executed operations return an empty batch whilst unsuccessful ones return a batch
  * with errors for only the ones that failed. This instance is always ready-only.
  */
-public class CreateTransferResults extends Batch {
+public class CreateAccountResultBatch extends Batch {
 
     interface Struct {
 
         public static final int Index = 0;
         public static final int Result = 4;
 
-        public final static int SIZE = 8;
+        public static final int SIZE = 8;
     }
 
-    static final CreateTransferResults EMPTY = new CreateTransferResults(0);
+    static final CreateAccountResultBatch EMPTY = new CreateAccountResultBatch(0);
 
-    CreateTransferResults(final int capacity) {
+    CreateAccountResultBatch(final int capacity) {
         super(capacity, Struct.SIZE);
     }
 
-    CreateTransferResults(ByteBuffer buffer) {
+    CreateAccountResultBatch(ByteBuffer buffer) {
         super(buffer, Struct.SIZE);
     }
 
     /**
-     * Gets the {@link Transfers#getPosition position} of the related transfer in the submitted
+     * Gets the {@link AccountBatch#getPosition position} of the related account in the submitted
      * batch.
      *
      * @return a zero-based index.
@@ -40,12 +40,12 @@ public class CreateTransferResults extends Batch {
     }
 
     /**
-     * Get the error that occurred during the creation of the transfer
+     * Get the error that occurred during the creation of the account
      *
-     * @return see {@link CreateTransferResult}.
+     * @return see {@link CreateAccountResult}.
      */
-    public CreateTransferResult getResult() {
+    public CreateAccountResult getResult() {
         final var value = getUInt32(at(Struct.Result));
-        return CreateTransferResult.fromValue(value);
+        return CreateAccountResult.fromValue(value);
     }
 }

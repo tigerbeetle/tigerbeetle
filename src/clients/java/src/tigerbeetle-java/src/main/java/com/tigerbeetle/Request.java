@@ -100,26 +100,26 @@ abstract class Request<TResponse extends Batch> {
             try {
                 switch (operation) {
                     case Operations.CREATE_ACCOUNTS: {
-                        result = buffer.capacity() == 0 ? CreateAccountResults.EMPTY
-                                : new CreateAccountResults(memcpy(buffer));
+                        result = buffer.capacity() == 0 ? CreateAccountResultBatch.EMPTY
+                                : new CreateAccountResultBatch(memcpy(buffer));
                         break;
                     }
 
                     case Operations.CREATE_TRANSFERS: {
-                        result = buffer.capacity() == 0 ? CreateTransferResults.EMPTY
-                                : new CreateTransferResults(memcpy(buffer));
+                        result = buffer.capacity() == 0 ? CreateTransferResultBatch.EMPTY
+                                : new CreateTransferResultBatch(memcpy(buffer));
                         break;
                     }
 
                     case Operations.LOOKUP_ACCOUNTS: {
-                        result = buffer.capacity() == 0 ? Accounts.EMPTY
-                                : new Accounts(memcpy(buffer));
+                        result = buffer.capacity() == 0 ? AccountBatch.EMPTY
+                                : new AccountBatch(memcpy(buffer));
                         break;
                     }
 
                     case Operations.LOOKUP_TRANSFERS: {
-                        result = buffer.capacity() == 0 ? Transfers.EMPTY
-                                : new Transfers(memcpy(buffer));
+                        result = buffer.capacity() == 0 ? TransferBatch.EMPTY
+                                : new TransferBatch(memcpy(buffer));
                         break;
                     }
 

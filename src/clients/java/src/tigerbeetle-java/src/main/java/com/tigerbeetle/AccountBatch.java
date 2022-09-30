@@ -4,8 +4,10 @@ import java.nio.ByteBuffer;
 
 /**
  * A {@link Batch batch} of accounts.
+ *
+ * @see <a href="https://docs.tigerbeetle.com/reference/accounts">TigerBeetle Docs</a>.
  */
-public final class Accounts extends Batch {
+public final class AccountBatch extends Batch {
 
     interface Struct {
 
@@ -24,7 +26,7 @@ public final class Accounts extends Batch {
         public static final int SIZE = 128;
     }
 
-    static final Accounts EMPTY = new Accounts(0);
+    static final AccountBatch EMPTY = new AccountBatch(0);
 
     /**
      * Constructs an empty batch of accounts with the desired maximum capacity.
@@ -36,11 +38,11 @@ public final class Accounts extends Batch {
      *
      * @throws IllegalArgumentException if capacity is negative.
      */
-    public Accounts(final int capacity) {
+    public AccountBatch(final int capacity) {
         super(capacity, Struct.SIZE);
     }
 
-    Accounts(final ByteBuffer buffer) {
+    AccountBatch(final ByteBuffer buffer) {
         super(buffer, Struct.SIZE);
     }
 
@@ -59,7 +61,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets a unique, client-defined identifier for the account.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#id">id</a>.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -69,7 +71,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets a unique, client-defined identifier for the account.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#id">id</a>.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -83,7 +85,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets a unique, client-defined identifier for the account.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/accounts#id">id</a>.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -96,7 +98,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets a unique, client-defined identifier for the account.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/accounts#id">id</a>.
      *
      * @param id an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code id} is null.
@@ -114,7 +116,7 @@ public final class Accounts extends Batch {
 
 
     /**
-     * Gets an optional secondary identifier to link this account to an external entity.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#user_data">user data</a>.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -124,7 +126,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets an optional secondary identifier to link this account to an external entity.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#user_data">user data</a>.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -138,7 +140,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets an optional secondary identifier to link this account to an external entity.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/accounts#user_data">user data</a>.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -151,7 +153,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets an optional secondary identifier to link this account to an external entity.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/accounts#user_data">user data</a>.
      * <p>
      * May be zero, null values are converted to zero.
      *
@@ -165,7 +167,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets an identifier that partitions the sets of accounts that can transact.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#ledger">ledger</a>.
      *
      * @return a 32-bit integer.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -175,7 +177,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets an identifier that partitions the sets of accounts that can transact.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/accounts#ledger">ledger</a>.
      * <p>
      * Must not be zero.
      *
@@ -188,7 +190,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets a user-defined enum denoting the category of the account.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#code">code</a>.
      *
      * @return a 16-bit unsigned integer.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -198,7 +200,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets a user-defined enum denoting the category of the account.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/accounts#code">code</a>.
      * <p>
      * Must not be zero.
      *
@@ -212,7 +214,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets a bit field that toggles additional behavior.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#flags">flags</a>.
      *
      * @return a 16-bit unsigned integer bit mask.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -223,7 +225,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Sets a bit field that toggles additional behavior.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/accounts#flags">flags</a>.
      *
      * @see com.tigerbeetle.AccountFlags
      * @param flags a 16-bit unsigned integer bit mask.
@@ -236,9 +238,10 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets the amount of debits reserved by pending transfers.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#debits_pending">debits
+     * pending</a>.
      * <p>
-     * Must always be interpreted as a positive integer.
+     * Must always be interpreted as an unsigned integer.
      *
      * @return a 64-bit integer.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -252,9 +255,10 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets the amount of posted debits.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#debits_posted">debits
+     * posted</a>.
      * <p>
-     * Must always be interpreted as a positive integer.
+     * Must always be interpreted as an unsigned integer.
      *
      * @return a 64-bit integer.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -268,9 +272,10 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets the amount of pending credits.
+     * Gets the <a href=
+     * "https://docs.tigerbeetle.com/reference/accounts#credits_pending">credits_pending</a>.
      * <p>
-     * Must always be interpreted as a positive integer.
+     * Must always be interpreted as an unsigned integer.
      *
      * @return a 64-bit integer.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -284,9 +289,10 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets the amount of posted credits.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#credits_posted">credits
+     * posted</a>.
      * <p>
-     * Must always be interpreted as a positive integer.
+     * Must always be interpreted as an unsigned integer.
      *
      * @return a 64-bit integer.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -300,9 +306,7 @@ public final class Accounts extends Batch {
     }
 
     /**
-     * Gets the time the account was created.
-     * <p>
-     * This is set by TigerBeetle. The format is UNIX timestamp in nanoseconds.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/accounts#timestamp">timestamp</a>
      *
      * @return a 64-bit integer.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.

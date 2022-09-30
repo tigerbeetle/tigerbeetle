@@ -4,8 +4,10 @@ import java.nio.ByteBuffer;
 
 /**
  * A {@link Batch batch} of transfers.
+ *
+ * @see <a href="https://docs.tigerbeetle.com/reference/transfers">TigerBeetle Docs</a>.
  */
-public final class Transfers extends Batch {
+public final class TransferBatch extends Batch {
 
     interface Struct {
 
@@ -25,7 +27,7 @@ public final class Transfers extends Batch {
         public static final int SIZE = 128;
     }
 
-    static final Transfers EMPTY = new Transfers(0);
+    static final TransferBatch EMPTY = new TransferBatch(0);
 
     /**
      * Constructs an empty batch of transfers with the desired maximum capacity.
@@ -37,11 +39,11 @@ public final class Transfers extends Batch {
      *
      * @throws IllegalArgumentException if capacity is negative.
      */
-    public Transfers(final int capacity) {
+    public TransferBatch(final int capacity) {
         super(capacity, Struct.SIZE);
     }
 
-    Transfers(final ByteBuffer buffer) {
+    TransferBatch(final ByteBuffer buffer) {
         super(buffer, Struct.SIZE);
     }
 
@@ -60,7 +62,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets a unique identifier for the transfer.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#id">id</a>.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -70,7 +72,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets a unique identifier for the transfer.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#id">id</a>.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -84,7 +86,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets a unique identifier for the transfer.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#id">id</a>.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -97,7 +99,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets a unique identifier for the transfer.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#id">id</a>.
      *
      * @param id an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code id} is null.
@@ -115,7 +117,8 @@ public final class Transfers extends Batch {
 
 
     /**
-     * Gets the id that refers to the account to debit the transfer's {@link #setAmount amount}.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#debit_account_id">debit
+     * account id</a>.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -125,7 +128,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets the id that refers to the account to debit the transfer's {@link #setAmount amount}.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#debit_account_id">debit
+     * account id</a>.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -139,7 +143,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets the id that refers to the account to debit the transfer's {@link #setAmount amount}.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#debit_account_id">debit
+     * account id</a>.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -152,7 +157,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets the id that refers to the account to debit the transfer's {@link #setAmount amount}.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#debit_account_id">debit
+     * account id</a>.
      *
      * @param debitAccountId an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code debitAccountId} is null.
@@ -169,7 +175,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets the id that refers to the account to credit the transfer's {@link #setAmount amount}.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#credit_account_id">credit
+     * account id</a>.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -179,7 +186,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets the id that refers to the account to credit the transfer's {@link #setAmount amount}.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#credit_account_id">credit
+     * account id</a>.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -193,7 +201,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets the id that refers to the account to credit the transfer's {@link #setAmount amount}.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#credit_account_id">credit
+     * account id</a>.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -206,7 +215,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets the id that refers to the account to credit the transfer's {@link #setAmount amount}.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#credit_account_id">credit
+     * account id</a>.
      *
      * @param creditAccountId an array of 16 bytes representing the 128-bit value.
      * @throws NullPointerException if {@code creditAccountId} is null.
@@ -223,7 +233,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets an optional secondary identifier to link this transfer to an external entity.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#user_data">user_data</a>.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -233,7 +243,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets an optional secondary identifier to link this transfer to an external entity.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#user_data">user_data</a>.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -247,7 +257,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets an optional secondary identifier to link this transfer to an external entity.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#user_data">user_data</a>.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -260,7 +270,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets an optional secondary identifier to link this transfer to an external entity.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#user_data">user_data</a>.
      * <p>
      * May be zero, null values are converted to zero.
      *
@@ -275,7 +285,8 @@ public final class Transfers extends Batch {
 
 
     /**
-     * Gets the id that references the pending transfer.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#pending_id">pending
+     * id</a>.
      *
      * @return an array of 16 bytes representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -285,7 +296,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets the id that references the pending transfer.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#pending_id">pending
+     * id</a>.
      *
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
@@ -299,10 +311,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets the id that references the pending transfer.
-     * <p>
-     * Must be zero if this is not a {@link TransferFlags#POST_PENDING_TRANSFER post} or
-     * {@link TransferFlags#VOID_PENDING_TRANSFER post} transfer.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#pending_id">pending
+     * id</a>.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -315,10 +325,8 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets an optional secondary identifier to link this account to an external entity.
-     * <p>
-     * Must be zero if this is not a {@link TransferFlags#POST_PENDING_TRANSFER post} or
-     * {@link TransferFlags#VOID_PENDING_TRANSFER post} transfer. Null values are converted to zero.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#pending_id">pending
+     * id</a>.
      *
      * @param pendingId an array of 16 bytes representing the 128-bit value.
      * @throws IllegalArgumentException if {@code pendingId} is not 16 bytes long.
@@ -330,8 +338,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets the the interval (in nanoseconds) after a {@link TransferFlags#PENDING pending}
-     * transfer's creation that it may be posted or voided.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#timeout">timeout</a>.
      *
      * @return a 64-bit integer.
      */
@@ -340,10 +347,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets the the interval (in nanoseconds) after a {@link TransferFlags#PENDING pending}
-     * transfer's creation that it may be posted or voided.
-     * <p>
-     * Must be zero if this is not a {@link TransferFlags#PENDING pending} transfer.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#timeout">timeout</a>.
      *
      * @param timeout A 64-bit integer.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
@@ -353,8 +357,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets an identifier used to enforce that transfers must be between accounts of the same
-     * {@link Accounts#setLedger ledger}.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#ledger">ledger</a>.
      *
      * @return a 32-bit integer.
      */
@@ -363,8 +366,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets an identifier used to enforce that transfers must be between accounts of the same
-     * {@link Accounts#setLedger ledger}.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#ledger">ledger</a>.
      *
      * @param ledger a 32-bit integer.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
@@ -374,7 +376,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets a user-defined enum denoting the reason for (or category of) the transfer.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#code">code</a>.
      *
      * @return a 16-bit unsigned integer.
      */
@@ -383,9 +385,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets a user-defined enum denoting the reason for (or category of) the transfer.
-     * <p>
-     * Must be non-zero.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#code">code</a>.
      *
      * @param code a 16-bit unsigned integer defined by the user.
      * @throws IllegalArgumentException if code is negative or greater than 65535.
@@ -396,7 +396,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets a bit field that specifies (optional) transfer behavior.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#flags">flags</a>.
      *
      * @see com.tigerbeetle.TransferFlags
      * @return a 16-bit unsigned integer bit mask.
@@ -406,7 +406,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets a bit field that specifies (optional) transfer behavior.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#flags">flags</a>.
      *
      * @see com.tigerbeetle.TransferFlags
      * @param flags a 16-bit unsigned integer bit mask.
@@ -418,10 +418,9 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets how much should be debited from the {@link #setDebitAccountId debit account} and
-     * credited to the {@link #setCreditAccountId credit account}.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#amount">amount</a>.
      * <p>
-     * Must always be interpreted as a positive integer.
+     * Must always be interpreted as an unsigned integer.
      *
      * @return A 64-bit integer.
      */
@@ -430,10 +429,9 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Sets how much should be debited from the {@link #setDebitAccountId debit account} and
-     * credited to the {@link #setCreditAccountId credit account}.
+     * Sets the <a href="https://docs.tigerbeetle.com/reference/transfers#amount">amount</a>.
      * <p>
-     * Must always be interpreted as a positive integer.
+     * Must always be interpreted as an unsigned integer.
      *
      * @param amount a 64-bit integer.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
@@ -443,9 +441,7 @@ public final class Transfers extends Batch {
     }
 
     /**
-     * Gets the time the transfer was created.
-     * <p>
-     * This is set by TigerBeetle. The format is UNIX timestamp in nanoseconds.
+     * Gets the <a href="https://docs.tigerbeetle.com/reference/transfers#timestamp">timestamp</a>.
      *
      * @return a 64-bit integer.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
