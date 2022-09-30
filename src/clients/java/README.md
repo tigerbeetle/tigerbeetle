@@ -31,8 +31,8 @@ All TigerBeetle's IDs are 128-bit unsigned integers that can be represented as a
 
 ```java
 import com.tigerbeetle.Client;
-import com.tigerbeetle.Accounts;
-import com.tigerbeetle.CreateAccountResults;
+import com.tigerbeetle.AccountBatch;
+import com.tigerbeetle.CreateAccountResultBatch;
 
 // ...
 
@@ -54,7 +54,7 @@ while(errors.next()) {
 
     switch (accountErrors.getResult()) {
 
-        Exists:
+        case Exists:
             System.err.printf("Account at %d already exists.\n",
                 errors.getIndex());        
             break;
@@ -77,8 +77,9 @@ Amounts are 64-bit unsigned integers values.
 
 ```java
 import com.tigerbeetle.Client;
-import com.tigerbeetle.Transfers;
-import com.tigerbeetle.CreateTransferResults;
+import com.tigerbeetle.TransferBatch;
+import com.tigerbeetle.CreateTransferResultBatch;
+import java.util.concurrent.CompletableFuture;
 
 // ...
 
@@ -90,7 +91,7 @@ transfers.add();
 transfers.setId(id);
 transfers.setCreditAccountId(creditAccountId);
 transfers.setDebitAccountId(debitAccountId);
-transfers.setCode(1);
+transfers.setCode(3001);
 transfers.setLedger(720);
 transfers.setAmount(100);
 
@@ -98,7 +99,7 @@ transfers.setAmount(100);
 // Submit the batch and returns immediately
 CompletableFuture<CreateTransferResultBatch> request = client.createTransfersAsync(transfers);
 
-// Register something on the application's side while tigerbeetle is processing
+// Register something on the application's side while TigerBeetle is processing
 // UPDATE MyCustomer ...
 
 // Gets the reply
@@ -109,7 +110,7 @@ while(errors.next()) {
 
     switch (accountErrors.getResult()) {
 
-        ExceedsCredits:
+        case ExceedsCredits:
             System.err.printf("Transfer at %d exceeds credits.\n",
                 errors.getIndex());        
             break;
