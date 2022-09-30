@@ -49,10 +49,9 @@ Constraints:
 ### `ledger`
 
 This is an identifier that partitions the sets of accounts that can
-transact.
-
-Money cannot transfer between two accounts with different `ledger`
-values. See: `errors.accounts_must_have_the_same_ledger`.
+transact with each other. Put another way, money cannot transfer
+between two accounts with different `ledger` values. See:
+`errors.accounts_must_have_the_same_ledger`.
 
 In a typical use case:
 * Map each currency tracked within the database to a distinct ledger. And,
