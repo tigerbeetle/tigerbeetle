@@ -3,9 +3,9 @@
 First, provision the data file for each node:
 
 ```
-$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
-$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=1 /data/0_1.tigerbeetle
-$ docker run -v $(pwd)/data:/data ghcr.io/coilhq/tigerbeetle format --cluster=0 --replica=2 /data/0_2.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=1 /data/0_1.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=2 /data/0_2.tigerbeetle
 ```
 
 Then create a docker-compose.yml file:
@@ -30,7 +30,7 @@ version: "3.7"
 services:
   tigerbeetle_0:
     container_name: tigerbeetle_0
-    image: ghcr.io/coilhq/tigerbeetle
+    image: ghcr.io/tigerbeetledb/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
     network_mode: host
     volumes:
@@ -38,7 +38,7 @@ services:
 
   tigerbeetle_1:
     container_name: tigerbeetle_1
-    image: ghcr.io/coilhq/tigerbeetle
+    image: ghcr.io/tigerbeetledb/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_1.tigerbeetle"
     network_mode: host
     volumes:
@@ -46,7 +46,7 @@ services:
 
   tigerbeetle_2:
     container_name: tigerbeetle_2
-    image: ghcr.io/coilhq/tigerbeetle
+    image: ghcr.io/tigerbeetledb/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_2.tigerbeetle"
     network_mode: host
     volumes:
