@@ -163,6 +163,13 @@ UNIX epoch.
 It is set by TigerBeetle to the moment the account arrives at
 the cluster.
 
+Additionally, all timestamps are unique, immutable and [totally
+ordered](http://book.mixu.net/distsys/time.html). So an account that
+is created before another account is guaranteed to have an earlier
+timestamp. In other systems this is also called a "physical"
+timestamp, "ingestion" timestamp, "record" timestamp, or "system"
+timestamp.
+
 Constraints:
 
 * Type is 64-bit unsigned integer (8 bytes)

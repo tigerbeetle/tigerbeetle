@@ -181,7 +181,7 @@ accounted for!
 
 For further reading:
 
-* [Running a 3-node cluster locally with docker-compose](./docs/DOCKER_COMPOSE.md)
+* [Running a 3-node cluster locally with docker-compose](./docs/setup/with-docker-compose.md)
 
 ## Clients
 
