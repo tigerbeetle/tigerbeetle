@@ -56,7 +56,7 @@ sleep 1
 
 echo ""
 echo "Benchmarking..."
-java -cp ./src/tigerbeetle-java/target/classes Benchmark
+java -cp ./src/tigerbeetle-java/target/classes benchmark/Benchmark
 echo ""
 
 for I in 0

@@ -110,7 +110,7 @@
               <exclude>com/tigerbeetle/JNILoader$Arch.class</exclude>
 
               <!-- Excluding the benchmark -->
-              <exclude>Benchmark.class</exclude>
+              <exclude>benchmark/Benchmark.class</exclude>
             </excludes>
           </configuration>
         </plugin>

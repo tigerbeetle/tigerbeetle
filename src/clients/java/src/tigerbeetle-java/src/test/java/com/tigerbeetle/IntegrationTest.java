@@ -10,7 +10,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import javax.management.OperationsException;
 import org.junit.Test;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -1139,7 +1138,7 @@ public class IntegrationTest {
 
         private Process process;
 
-        public Server() throws IOException, OperationsException, InterruptedException {
+        public Server() throws IOException, Exception, InterruptedException {
 
             cleanUp();
 
@@ -1158,13 +1157,13 @@ public class IntegrationTest {
             if (format.waitFor() != 0) {
                 var reader = new BufferedReader(new InputStreamReader(format.getErrorStream()));
                 var error = reader.lines().collect(Collectors.joining(". "));
-                throw new OperationsException("Format failed. " + error);
+                throw new Exception("Format failed. " + error);
             }
 
             this.process = Runtime.getRuntime()
                     .exec(new String[] {exe, "start", "--addresses=" + TB_PORT, TB_FILE});
             if (process.waitFor(100, TimeUnit.MILLISECONDS))
-                throw new OperationsException("Start server failed");
+                throw new Exception("Start server failed");
         }
 
         @Override
@@ -1172,7 +1171,7 @@ public class IntegrationTest {
             cleanUp();
         }
 
-        private void cleanUp() throws OperationsException {
+        private void cleanUp() throws Exception {
             try {
 
                 if (process != null && process.isAlive()) {
@@ -1182,7 +1181,7 @@ public class IntegrationTest {
                 var file = new File("./" + TB_FILE);
                 file.delete();
             } catch (Throwable any) {
-                throw new OperationsException("Cleanup has failed");
+                throw new Exception("Cleanup has failed");
             }
         }
     }
