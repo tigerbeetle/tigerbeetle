@@ -29,6 +29,7 @@ version: "3.7"
 
 services:
   tigerbeetle_0:
+    container_name: tigerbeetle_0
     image: ghcr.io/coilhq/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
     network_mode: host
@@ -36,6 +37,7 @@ services:
       - ./data:/data
 
   tigerbeetle_1:
+    container_name: tigerbeetle_1
     image: ghcr.io/coilhq/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_1.tigerbeetle"
     network_mode: host
@@ -43,6 +45,7 @@ services:
       - ./data:/data
 
   tigerbeetle_2:
+    container_name: tigerbeetle_2
     image: ghcr.io/coilhq/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_2.tigerbeetle"
     network_mode: host
