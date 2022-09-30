@@ -36,18 +36,18 @@ import com.tigerbeetle.CreateAccountResults;
 
 // ...
 
-// Creates a batch with the desired capacity
-Accounts batch = new Accounts(100);
+// Creates a batch of accounts with the desired capacity
+AccountBatch accounts = new AccountBatch(100);
 
 // loop adding N elements into the batch
-batch.add();
-batch.setId(id);
-batch.setCode(100);
-batch.setLedger(720);
+accounts.add();
+accounts.setId(id);
+accounts.setCode(100);
+accounts.setLedger(720);
 
 // Blocking usage:
 // Submit the batch and waits for reply
-CreateAccountResults errors = client.createAccounts(batch);
+CreateAccountResultBatch errors = client.createAccounts(accounts);
 
 // Results are returned only for the accounts that failed.
 while(errors.next()) {
@@ -55,13 +55,13 @@ while(errors.next()) {
     switch (accountErrors.getResult()) {
 
         Exists:
-            System.out.println("Account at %d already exists.",
+            System.err.printf("Account at %d already exists.\n",
                 errors.getIndex());        
             break;
 
         default:
 
-            System.out.println("Error creating account at %d: %s",
+            System.err.printf("Error creating account at %d: %s\n",
                 errors.getIndex(),
                 errors.getResult());
             break;
@@ -82,27 +82,27 @@ import com.tigerbeetle.CreateTransferResults;
 
 // ...
 
-// Creates a batch with the desired capacity
-Transfers batch = new Transfers(100);
+// Creates a batch of transfers with the desired capacity
+TransferBatch transfers = new TransferBatch(100);
 
 // loop adding N elements into the batch
-batch.add();
-batch.setId(id);
-batch.setCreditAccountId(creditAccountId);
-batch.setDebitAccountId(debitAccountId);
-batch.setCode(1);
-batch.setLedger(720);
-batch.setAmount(100);
+transfers.add();
+transfers.setId(id);
+transfers.setCreditAccountId(creditAccountId);
+transfers.setDebitAccountId(debitAccountId);
+transfers.setCode(1);
+transfers.setLedger(720);
+transfers.setAmount(100);
 
 // Async usage:
 // Submit the batch and returns immediately
-CompletableFuture<CreateTransferResults> request = client.createTransfersAsync(batch);
+CompletableFuture<CreateTransferResultBatch> request = client.createTransfersAsync(transfers);
 
 // Register something on the application's side while tigerbeetle is processing
 // UPDATE MyCustomer ...
 
 // Gets the reply
-CreateTransferResults errors = request.get();
+CreateTransferResultBatch errors = request.get();
 
 // Results are returned only for the transfers that failed.
 while(errors.next()) {
@@ -110,13 +110,13 @@ while(errors.next()) {
     switch (accountErrors.getResult()) {
 
         ExceedsCredits:
-            System.out.println("Transfer at %d exceeds credits.",
+            System.err.printf("Transfer at %d exceeds credits.\n",
                 errors.getIndex());        
             break;
 
         default:
 
-            System.out.println("Error creating transfer at %d: %s",
+            System.err.printf("Error creating transfer at %d: %s\n",
                 errors.getIndex(),
                 errors.getResult());
             break;
