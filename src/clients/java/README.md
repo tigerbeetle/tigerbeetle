@@ -27,32 +27,46 @@ Client client = new Client(0, new String[] { "127.0.0.1:3001", "127.0.0.1:3002",
 
 ### Account Creation
 
-All TigerBeetle's ID are 128-bit integer, and `tigerbeetle-java` uses a `java.util.UUID` to represent this value.
+All TigerBeetle's IDs are 128-bit unsigned integers that can be represented as a `byte[]` array of 16 bytes, a pair of `long` or a `java.util.UUID`.
 
 ```java
 import com.tigerbeetle.Client;
-import com.tigerbeetle.Account;
-import com.tigerbeetle.AccountsBatch;
-import com.tigerbeetle.CreateAccountsResult;
+import com.tigerbeetle.Accounts;
+import com.tigerbeetle.CreateAccountResults;
 
 // ...
 
-// Creates a batch with the desired capacity
-AccountsBatch batch = new AccountsBatch(100);
+// Creates a batch of accounts with the desired capacity
+AccountBatch accounts = new AccountBatch(100);
 
-Account account1 = new Account();
-account1.setId(UUID.randomUUID());
-account1.setCode(100);
-account1.setLedger(720);
-
-// Add N elements into the batch
-batch.add(account1);
+// loop adding N elements into the batch
+accounts.add();
+accounts.setId(id);
+accounts.setCode(100);
+accounts.setLedger(720);
 
 // Blocking usage:
 // Submit the batch and waits for reply
-CreateAccountsResult[] errors = client.createAccounts(batch);
-if (errors.length > 0)
-    throw new Exception("Unexpected createAccount results");
+CreateAccountResultBatch errors = client.createAccounts(accounts);
+
+// Results are returned only for the accounts that failed.
+while(errors.next()) {
+
+    switch (accountErrors.getResult()) {
+
+        Exists:
+            System.err.printf("Account at %d already exists.\n",
+                errors.getIndex());        
+            break;
+
+        default:
+
+            System.err.printf("Error creating account at %d: %s\n",
+                errors.getIndex(),
+                errors.getResult());
+            break;
+    }
+}
 ```
 
 Successfully executed events return an empty array whilst unsuccessful ones return an array with errors for only the ones that failed. An error will point to the index in the submitted array of the failed event.
@@ -63,38 +77,51 @@ Amounts are 64-bit unsigned integers values.
 
 ```java
 import com.tigerbeetle.Client;
-import com.tigerbeetle.Transfer;
-import com.tigerbeetle.TransfersBatch;
-import com.tigerbeetle.CreateTransfersResult;
+import com.tigerbeetle.Transfers;
+import com.tigerbeetle.CreateTransferResults;
 
 // ...
 
-// Creates a batch with the desired capacity
-TransfersBatch batch = new TransfersBatch(100);
+// Creates a batch of transfers with the desired capacity
+TransferBatch transfers = new TransferBatch(100);
 
-Transfer transfer1 = new Transfer();
-transfer1.setId(UUID.randomUUID());
-transfer1.setCreditAccountId(account1.getId());
-transfer1.setDebitAccountId(account2.getId());
-transfer1.setCode(1);
-transfer1.setLedger(720);
-transfer1.setAmount(100);
-
-// Add N elements into the batch
-batch.add(transfer1);
+// loop adding N elements into the batch
+transfers.add();
+transfers.setId(id);
+transfers.setCreditAccountId(creditAccountId);
+transfers.setDebitAccountId(debitAccountId);
+transfers.setCode(1);
+transfers.setLedger(720);
+transfers.setAmount(100);
 
 // Async usage:
 // Submit the batch and returns immediately
-Future<CreateTransfersResult[]> request = client.createTransfersAsync(batch);
+CompletableFuture<CreateTransferResultBatch> request = client.createTransfersAsync(transfers);
 
 // Register something on the application's side while tigerbeetle is processing
 // UPDATE MyCustomer ...
 
 // Gets the reply
-CreateTransfersResult[] errors = request.get();
-if (errors.length > 0)
-    throw new Exception("Unexpected transfer results");
+CreateTransferResultBatch errors = request.get();
 
+// Results are returned only for the transfers that failed.
+while(errors.next()) {
+
+    switch (accountErrors.getResult()) {
+
+        ExceedsCredits:
+            System.err.printf("Transfer at %d exceeds credits.\n",
+                errors.getIndex());        
+            break;
+
+        default:
+
+            System.err.printf("Error creating transfer at %d: %s\n",
+                errors.getIndex(),
+                errors.getResult());
+            break;
+    }
+}    
 ```
 
 ## Building from source 

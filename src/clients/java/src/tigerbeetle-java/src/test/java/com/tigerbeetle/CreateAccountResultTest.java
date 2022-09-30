@@ -18,9 +18,15 @@ public class CreateAccountResultTest {
         Assert.assertEquals(CreateAccountResult.ExistsWithDifferentLedger.ordinal(), value);
     }
 
-    @Test(expected = AssertionError.class)
+    @Test(expected = IllegalArgumentException.class)
     public void testInvalidValue() {
         var value = 999;
+        CreateAccountResult.fromValue(value);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testNegativeValue() {
+        var value = -1;
         CreateAccountResult.fromValue(value);
     }
 

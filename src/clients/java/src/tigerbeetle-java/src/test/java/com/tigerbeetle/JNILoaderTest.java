@@ -25,7 +25,7 @@ public class JNILoaderTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testUnsuportedPlatform() {
+    public void testUnsupportedPlatform() {
         JNILoader.getResourcesPath(JNILoader.OS.win, JNILoader.Arch.aarch64);
     }
 

@@ -24,7 +24,7 @@ final class JNILoader {
             } else if (osName.startsWith("linux")) {
                 return OS.linux;
             } else {
-                throw new AssertionError(String.format("Unsuported OS %s", osName));
+                throw new AssertionError(String.format("Unsupported OS %s", osName));
             }
         }
     }
@@ -42,7 +42,7 @@ final class JNILoader {
             } else if (osArch.startsWith("aarch64")) {
                 return Arch.aarch64;
             } else {
-                throw new AssertionError(String.format("Unsuported OS arch %s", osArch));
+                throw new AssertionError(String.format("Unsupported OS arch %s", osArch));
             }
         }
     }
@@ -76,7 +76,7 @@ final class JNILoader {
 
         } catch (IOException ioException) {
             throw new AssertionError(ioException,
-                    "Tigerbeetle jni %s could not be extracted from jar.", fileName);
+                    "TigerBeetle jni %s could not be extracted from jar.", fileName);
         }
 
         System.load(temp.getAbsolutePath());

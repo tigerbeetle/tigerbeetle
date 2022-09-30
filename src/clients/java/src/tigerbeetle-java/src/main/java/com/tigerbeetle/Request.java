@@ -2,12 +2,29 @@ package com.tigerbeetle;
 
 import java.lang.annotation.Native;
 import java.nio.ByteBuffer;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import static com.tigerbeetle.AssertionError.assertTrue;
 
-abstract class Request<T> implements Future<T[]> {
+abstract class Request<TResponse extends Batch> {
+
+    // @formatter:off
+    /*
+     * Overview:
+     *
+     * Implements a context that will be used to submit the request and to signal the completion.
+     * A reference to this class is stored by the JNI side in the "user_data" field when calling "tb_client_submit",
+     * meaning that no GC will occur before the callback completion
+     *
+     * Memory:
+     *
+     * - Holds the request body until the completion to be accessible by the C client.
+     * - Copies the response body to be exposed to the application.
+     *
+     * Completion:
+     *
+     * - See AsyncRequest.java and BlockingRequest.java
+     *
+     */
+    // @formatter:on
 
     interface Operations {
         public final static byte CREATE_ACCOUNTS = 3;
@@ -27,10 +44,7 @@ abstract class Request<T> implements Future<T[]> {
     private final byte operation;
     private final int requestLen;
 
-    // This request must finish either with a result or an exception
-    private Object result;
-
-    protected Request(Client client, byte operation, Batch batch) {
+    protected Request(final Client client, final byte operation, final Batch batch) {
 
         if (client == null)
             throw new NullPointerException("Client cannot be null");
@@ -39,11 +53,9 @@ abstract class Request<T> implements Future<T[]> {
 
         this.client = client;
         this.operation = operation;
-        this.requestLen = batch.getLenght();
+        this.requestLen = batch.getLength();
         this.buffer = batch.getBuffer();
         this.bufferLen = batch.getBufferLen();
-
-        this.result = null;
 
         if (this.bufferLen == 0 || this.requestLen == 0)
             throw new IllegalArgumentException("Empty batch");
@@ -53,187 +65,111 @@ abstract class Request<T> implements Future<T[]> {
         client.submit(this);
     }
 
-    // Used by the JNI side
-    void endRequest(byte receivedOperation, ByteBuffer buffer, long packet, byte status) {
+    // Unchecked: Since we just support a limited set of operations, it is safe to cast the
+    // result to T[]
+    @SuppressWarnings("unchecked")
+    void endRequest(final byte receivedOperation, final ByteBuffer buffer, final long packet,
+            final byte status) {
 
         // This method is called from the JNI side, on the tb_client thread
         // We CAN'T throw any exception here, any event must be stored and
         // handled from the user's thread on the completion.
 
-        Object result = null;
+        Batch result = null;
+        Throwable exception = null;
 
         if (receivedOperation != operation) {
 
-            result = new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
+            exception = new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
                     operation, receivedOperation);
 
         } else if (packet == 0) {
 
-            result = new AssertionError("Unexpected callback packet: packet=null");
+            exception = new AssertionError("Unexpected callback packet: packet=null");
 
         } else if (status != RequestException.Status.OK) {
 
-            result = new RequestException(status);
-
-        } else if (isDone()) {
-
-            result = new AssertionError("This request has already been completed");
+            exception = new RequestException(status);
 
         } else if (buffer == null) {
 
-            result = new AssertionError("Unexpected callback buffer: buffer=null");
+            exception = new AssertionError("Unexpected callback buffer: buffer=null");
 
         } else {
 
             try {
                 switch (operation) {
                     case Operations.CREATE_ACCOUNTS: {
-                        var batch = new CreateAccountsResultBatch(buffer.asReadOnlyBuffer());
-                        result = batch.toArray();
+                        result = buffer.capacity() == 0 ? CreateAccountResultBatch.EMPTY
+                                : new CreateAccountResultBatch(memcpy(buffer));
                         break;
                     }
 
                     case Operations.CREATE_TRANSFERS: {
-                        var batch = new CreateTransfersResultBatch(buffer.asReadOnlyBuffer());
-                        result = batch.toArray();
+                        result = buffer.capacity() == 0 ? CreateTransferResultBatch.EMPTY
+                                : new CreateTransferResultBatch(memcpy(buffer));
                         break;
                     }
 
                     case Operations.LOOKUP_ACCOUNTS: {
-                        var batch = new AccountsBatch(buffer.asReadOnlyBuffer());
-                        result = batch.toArray();
+                        result = buffer.capacity() == 0 ? AccountBatch.EMPTY
+                                : new AccountBatch(memcpy(buffer));
                         break;
                     }
+
                     case Operations.LOOKUP_TRANSFERS: {
-                        var batch = new TransfersBatch(buffer.asReadOnlyBuffer());
-                        result = batch.toArray();
+                        result = buffer.capacity() == 0 ? TransferBatch.EMPTY
+                                : new TransferBatch(memcpy(buffer));
+                        break;
+                    }
+
+                    default: {
+                        exception = new AssertionError("Unknown operation %d", operation);
                         break;
                     }
                 }
             } catch (Throwable any) {
 
-                // The amount of data received can be incorrect and cause a INVALID_DATA_SIZE
-                result = any;
+                exception = any;
             }
         }
 
         client.returnPacket(packet);
 
-        // Notify the waiting thread
-        synchronized (this) {
-            this.result = result;
-            this.notifyAll();
-        }
-    }
-
-    @Override
-    public boolean cancel(boolean mayInterruptIfRunning) {
-        // Canceling a request is not supported
-        return false;
-    }
-
-    @Override
-    public boolean isCancelled() {
-        return false;
-    }
-
-    @Override
-    public boolean isDone() {
-        return result != null;
-    }
-
-    void waitForCompletionUninterruptibly() {
-        try {
-            waitForCompletion();
-        } catch (InterruptedException interruptedException) {
-            // Since we don't support canceling an ongoing request
-            // this exception should never exposed by the API to be handled by the user
-            throw new AssertionError(interruptedException,
-                    "Unexpected thread interruption on waitForCompletion.");
-        }
-    }
-
-    void waitForCompletion() throws InterruptedException {
-
-        synchronized (this) {
-            while (!isDone()) {
-                wait();
-            }
-        }
-    }
-
-    boolean waitForCompletion(long timeoutMillis) throws InterruptedException {
-
-        synchronized (this) {
-            if (!isDone()) {
-                wait(timeoutMillis);
-                return isDone();
-            } else {
-                return true;
-            }
-        }
-    }
-
-    // Since we just support a limited set of operations, it is safe to cast the
-    // result to T[]
-    @SuppressWarnings("unchecked")
-    T[] getResult() throws RequestException {
-
-        if (result == null)
-            throw new AssertionError("Unexpected request result: result=null");
-
-        // Handling checked and unchecked exceptions accordingly
-        if (result instanceof Throwable) {
-
-            if (result instanceof RequestException)
-                throw (RequestException) result;
-
-            if (result instanceof RuntimeException)
-                throw (RuntimeException) result;
-
-            if (result instanceof Error)
-                throw (Error) result;
-
-            // If we can't determine the type of the exception,
-            // throw a generic RuntimeException pointing as a cause
-            throw new RuntimeException((Throwable) result);
-
+        if (exception != null) {
+            setException(exception);
         } else {
 
-            var result = (T[]) this.result;
+            if (result.getLength() > requestLen) {
 
-            if (result.length > requestLen)
-                throw new AssertionError(
+                setException(new AssertionError(
                         "Amount of results is greater than the amount of requests: resultLen=%d, requestLen=%d",
-                        result.length, requestLen);
-
-            return result;
+                        result.getLength(), requestLen));
+            } else {
+                setResult((TResponse) result);
+            }
         }
     }
 
-    @Override
-    public T[] get() throws InterruptedException, ExecutionException {
 
-        waitForCompletion();
+    /**
+     * Copies the message buffer memory to managed memory.
+     */
+    static ByteBuffer memcpy(final ByteBuffer source) {
 
-        try {
-            return getResult();
-        } catch (RequestException exception) {
-            throw new ExecutionException(exception);
-        }
+        assertTrue(source != null, "Source buffer cannot be null");
+        assertTrue(source.isDirect(), "Source buffer must be direct");
+
+        final var capacity = source.capacity();
+        assertTrue(capacity > 0, "Source buffer cannot be empty");
+
+        final var copy = ByteBuffer.allocate(capacity);
+        copy.put(source);
+
+        return copy.position(0).asReadOnlyBuffer();
     }
 
-    @Override
-    public T[] get(long timeout, TimeUnit unit)
-            throws InterruptedException, ExecutionException, TimeoutException {
+    protected abstract void setResult(final TResponse result);
 
-        if (!waitForCompletion(unit.convert(timeout, TimeUnit.MILLISECONDS)))
-            throw new TimeoutException();
-
-        try {
-            return getResult();
-        } catch (RequestException exception) {
-            throw new ExecutionException(exception);
-        }
-    }
+    protected abstract void setException(final Throwable exception);
 }
