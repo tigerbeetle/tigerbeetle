@@ -1,11 +1,11 @@
 package com.tigerbeetle;
 
+import java.util.Objects;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
-
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 public final class Client implements AutoCloseable {
@@ -48,16 +48,14 @@ public final class Client implements AutoCloseable {
     public Client(final int clusterID, final String[] replicaAddresses, final int maxConcurrency) {
         this(clusterID, maxConcurrency);
 
-        if (replicaAddresses == null)
-            throw new NullPointerException("Replica addresses cannot be null");
+        Objects.requireNonNull(replicaAddresses, "Replica addresses cannot be null");
 
         if (replicaAddresses.length == 0)
             throw new IllegalArgumentException("Empty replica addresses");
 
         var joiner = new StringJoiner(",");
         for (var address : replicaAddresses) {
-            if (address == null)
-                throw new NullPointerException("Replica address cannot be null");
+            Objects.requireNonNull(address, "Replica address cannot be null");
             joiner.add(address);
         }
 

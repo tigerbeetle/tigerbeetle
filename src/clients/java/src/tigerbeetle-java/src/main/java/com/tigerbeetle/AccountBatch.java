@@ -1,6 +1,7 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
 /**
  * A {@link Batch batch} of accounts.
@@ -11,19 +12,19 @@ public final class AccountBatch extends Batch {
 
     interface Struct {
 
-        public static final int Id = 0;
-        public static final int UserData = 16;
-        public static final int Reserved = 32;
-        public static final int Ledger = 80;
-        public static final int Code = 84;
-        public static final int Flags = 86;
-        public static final int DebitsPending = 88;
-        public static final int DebitsPosted = 96;
-        public static final int CreditsPending = 104;
-        public static final int CreditsPosted = 112;
-        public static final int Timestamp = 120;
+        int Id = 0;
+        int UserData = 16;
+        int Reserved = 32;
+        int Ledger = 80;
+        int Code = 84;
+        int Flags = 86;
+        int DebitsPending = 88;
+        int DebitsPosted = 96;
+        int CreditsPending = 104;
+        int CreditsPosted = 112;
+        int Timestamp = 120;
 
-        public static final int SIZE = 128;
+        int SIZE = 128;
     }
 
     static final AccountBatch EMPTY = new AccountBatch(0);
@@ -107,10 +108,7 @@ public final class AccountBatch extends Batch {
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setId(final byte[] id) {
-
-        if (id == null)
-            throw new NullPointerException("Id cannot be null");
-
+        Objects.requireNonNull(id, "Id cannot be null");
         putUInt128(at(Struct.Id), id);
     }
 

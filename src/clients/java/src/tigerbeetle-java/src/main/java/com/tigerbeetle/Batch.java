@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Objects;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 /**
@@ -69,9 +70,7 @@ public abstract class Batch {
     Batch(final ByteBuffer buffer, final int ELEMENT_SIZE) {
 
         assertTrue(ELEMENT_SIZE > 0, "Element size cannot be zero or negative");
-
-        if (buffer == null)
-            throw new NullPointerException("Buffer cannot be null");
+        Objects.requireNonNull(buffer, "Buffer cannot be null");
 
         this.ELEMENT_SIZE = ELEMENT_SIZE;
         final var bufferLen = buffer.capacity();
@@ -202,7 +201,8 @@ public abstract class Batch {
         if (this.cursorStatus != CursorStatus.Valid)
             throw new IllegalStateException();
 
-        return (this.position * ELEMENT_SIZE) + fieldOffSet;
+        final var elementPosition = this.position * ELEMENT_SIZE;
+        return elementPosition + fieldOffSet;
     }
 
     protected final byte[] getUInt128(final int index) {

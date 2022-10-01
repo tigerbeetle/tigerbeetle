@@ -3,10 +3,10 @@ package com.tigerbeetle;
 public final class RequestException extends Exception {
 
     public interface Status {
-        public final static byte OK = 0;
-        public final static byte TOO_MUCH_DATA = 1;
-        public final static byte INVALID_OPERATION = 2;
-        public final static byte INVALID_DATA_SIZE = 3;
+        byte OK = 0;
+        byte TOO_MUCH_DATA = 1;
+        byte INVALID_OPERATION = 2;
+        byte INVALID_DATA_SIZE = 3;
     }
 
     private final byte status;

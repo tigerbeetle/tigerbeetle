@@ -1,6 +1,7 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
+import java.util.Objects;
 import java.util.UUID;
 
 public enum UInt128 {
@@ -24,9 +25,7 @@ public enum UInt128 {
      * @throws IllegalArgumentException if {@code bytes} is not 16 bytes long.
      */
     public static long asLong(final byte[] bytes, final UInt128 part) {
-
-        if (bytes == null)
-            throw new NullPointerException("Bytes cannot be null");
+        Objects.requireNonNull(bytes, "Bytes cannot be null");
 
         if (bytes.length != UInt128.SIZE)
             throw new IllegalArgumentException("Bytes must be 16 bytes long");
@@ -66,9 +65,7 @@ public enum UInt128 {
      * @return an array of 16 bytes representing the 128-bit value.
      */
     public static byte[] asBytes(final UUID uuid) {
-        if (uuid == null)
-            throw new NullPointerException("Uuid cannot be null");
-
+        Objects.requireNonNull(uuid, "Uuid cannot be null");
         return asBytes(uuid.getLeastSignificantBits(), uuid.getMostSignificantBits());
     }
 
