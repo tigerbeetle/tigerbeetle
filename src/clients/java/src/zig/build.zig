@@ -34,6 +34,14 @@ pub fn build(b: *std.build.Builder) void {
             lib.linkLibC();
         }
 
+        // Hit some issue with the build cache between cross compilations:
+        // - From Linux, it runs fine
+        // - From Windows it fails on libc "invalid object"
+        // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
+        // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
+        b.cache_root = "zig-cache/" ++ platform[1];
+        b.global_cache_root = "zig-cache/global";
+
         lib.install();
     }
 }
