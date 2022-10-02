@@ -2,7 +2,7 @@
 
 This folder contains the following examples:
 
-## 1. [QuickStart.java](src/main/java/com/tigerbeetle/samples/QuickStart.java)
+### 1. [QuickStart.java](src/main/java/com/tigerbeetle/samples/QuickStart.java)
 
 A quick overview of TigerBeetle's operation, creating two accounts and a single transfer between them.
 
@@ -27,7 +27,7 @@ Looking up accounts ...
 ╚════╧══════════╧═════════════════╧═══════════╧══════════════╧═══════════════╧══════════════╧════════════════╝
 ```
  
-## 2. LinkedEvents.java
+### 2. LinkedEvents.java
 
 Demonstrates how to create groups of linked accounts and transfers that succeed or fail atomically.
 
@@ -43,7 +43,7 @@ Output:
 ...
 ```
 
-## 3. PendingTransfers.java
+### 3. PendingTransfers.java
 
 Demonstrates how pending transfers works: pending credits/debits, timeouts, and posting or voiding a pending transfer.
 

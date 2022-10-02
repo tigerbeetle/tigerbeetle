@@ -46,7 +46,7 @@ public final class Util {
 
 
     /**
-     * Naive conversion from an array of 16 bytes to a BigInteger
+     * Naive conversion from an array of 16 bytes to a BigInteger.
      */
     public static BigInteger toBigInteger(byte[] uint128) {
 
