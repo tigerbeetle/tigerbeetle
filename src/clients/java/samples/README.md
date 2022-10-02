@@ -34,29 +34,29 @@ Demonstrates how to create groups of linked accounts and transfers that succeed 
 How to run:
 
 ```bash
-java ...
+mvn run LinkedEvents
 ```
 
 Output:
 
 ```bash
-...
+TODO ...
 ```
 
 ### 3. PendingTransfers.java
 
-Demonstrates how pending transfers works: pending credits/debits, timeouts, and posting or voiding a pending transfer.
+Demonstrates how pending transfers work: pending credits/debits, timeouts, and posting/voiding a transfer.
 
 How to run:
 
 ```bash
-java ...
+mvn run PendingTransfers
 ```
 
 Output:
 
 ```bash
-...
+TODO ...
 ```
 
 
