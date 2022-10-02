@@ -3,5 +3,8 @@ zig-out/
 src/tigerbeetle-java/build
 src/tigerbeetle-java/target
 src/tigerbeetle-java/src/main/resources/lib/**
+samples/build
+samples/target
 *tigerbeetle.benchmark
+*tigerbeetle.samples
 *.log

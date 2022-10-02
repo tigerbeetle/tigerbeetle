@@ -313,9 +313,10 @@ public final class Client implements AutoCloseable {
         maxConcurrencySemaphore.release();
     }
 
-    /*
-     * Closes the client, freeing all resources. <p> This method causes the current thread to wait
-     * for all ongoing requests to finish.
+    /**
+     * Closes the client, freeing all resources.
+     * <p>
+     * This method causes the current thread to wait for all ongoing requests to finish.
      *
      * @see java.lang.AutoCloseable#close()
      */
