@@ -59,6 +59,17 @@ public enum UInt128 {
     }
 
     /**
+     * Gets an array of 16 bytes representing the 128-bit value.
+     *
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     * @return an array of 16 bytes representing the 128-bit value.
+     */
+    public static byte[] asBytes(final long leastSignificant) {
+        return asBytes(leastSignificant, 0);
+    }
+
+    /**
      * Gets an array of 16 bytes representing the UUID.
      *
      * @param uuid a {@link java.util.UUID}

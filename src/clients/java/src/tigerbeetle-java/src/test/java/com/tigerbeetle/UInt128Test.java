@@ -47,6 +47,15 @@ public class UInt128Test {
     }
 
     @Test
+    public void testAsBytesFromSingleLong() {
+
+        byte[] singleLong = UInt128.asBytes(100L);
+
+        assertEquals(100L, UInt128.asLong(singleLong, UInt128.LeastSignificant));
+        assertEquals(0L, UInt128.asLong(singleLong, UInt128.MostSignificant));
+    }
+
+    @Test
     public void testAsBytesZero() {
 
         byte[] reverse = UInt128.asBytes(0, 0);

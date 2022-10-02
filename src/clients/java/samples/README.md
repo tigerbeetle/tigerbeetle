@@ -2,50 +2,32 @@
 
 This folder contains the following examples:
 
-## 1. [StartHere.java](src/main/java/com/tigerbeetle/samples/StartHere.java)
+## 1. [QuickStart.java](src/main/java/com/tigerbeetle/samples/QuickStart.java)
 
-A basic overview of TigerBeetle's operation, creating two accounts and a single transfer between them.
+A quick overview of TigerBeetle's operation, creating two accounts and a single transfer between them.
 
 How to run:
 
 ```bash
-java ...
+mvn run QuickStart
 ```
 
 Output:
 
 ```bash
-Account ID: 2a8c7db4-81d2-4f4c-a4ba-5ed88e3ff107
-Code: 1001 - CUSTOMER
-Ledger: 978 - EUR
-Credits posted: 0
-Debits posted: 9900
----------------------------------------------
-Account ID: b41595c4-6616-406b-8d3e-6cd659cc73b0
-Code: 2001 - SUPPLIER
-Ledger: 978 - EUR
-Credits posted: 9900
-Debits posted: 0
----------------------------------------------
+Creating accounts ...
+Creating transfer ...
+Looking up accounts ...
+╔════╤══════════╤═════════════════╤═══════════╤══════════════╤═══════════════╤══════════════╤════════════════╗
+║ ID │ UserData │ Code            │ Ledger    │ DebitsPosted │ DebitsPending │ CreditPosted │ CreditsPending ║
+╠════╪══════════╪═════════════════╪═══════════╪══════════════╪═══════════════╪══════════════╪════════════════╣
+║ 1  │ 0        │ 1001 - CUSTOMER │ 978 - EUR │ 9900         │ 0             │ 0            │ 0              ║
+╟────┼──────────┼─────────────────┼───────────┼──────────────┼───────────────┼──────────────┼────────────────╢
+║ 2  │ 0        │ 2001 - SUPPLIER │ 978 - EUR │ 0            │ 0             │ 9900         │ 0              ║
+╚════╧══════════╧═════════════════╧═══════════╧══════════════╧═══════════════╧══════════════╧════════════════╝
 ```
  
-## 2. ResultHandling.java
-
-Demonstrates how to handle the result codes returned from the `createAccounts` and `createTransfers` methods. 
-
-How to run:
-
-```bash
-java ...
-```
-
-Output:
-
-```bash
-...
-```
-
-## 3. LinkedEvents.java
+## 2. LinkedEvents.java
 
 Demonstrates how to create groups of linked accounts and transfers that succeed or fail atomically.
 
@@ -61,7 +43,7 @@ Output:
 ...
 ```
 
-## 4. PendingTransfers.java
+## 3. PendingTransfers.java
 
 Demonstrates how pending transfers works: pending credits/debits, timeouts, and posting or voiding a pending transfer.
 
@@ -76,10 +58,6 @@ Output:
 ```bash
 ...
 ```
-
-## 5. DataTypes.java
-
-Demonstrates how to work with TigerBeetle's data types `UInt128` and how to handle unsigned integers properly.
 
 
 

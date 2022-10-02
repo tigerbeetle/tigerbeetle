@@ -21,7 +21,7 @@ public enum CreateAccountResult {
     ExceedsDebits,
 
     ExistsWithDifferentFlags,
-    ExistsWithDifferentUser_data,
+    ExistsWithDifferentUserData,
     ExistsWithDifferentLedger,
     ExistsWithDifferentCode,
     ExistsWithDifferentDebitsPending,

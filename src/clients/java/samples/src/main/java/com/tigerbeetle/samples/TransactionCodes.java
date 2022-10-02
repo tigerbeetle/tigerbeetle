@@ -1,7 +1,7 @@
 package com.tigerbeetle.samples;
 
 /**
- * Example of transaction codes
+ * Example of transaction codes.
  */
 public enum TransactionCodes {
     DEPOSIT(1001),
