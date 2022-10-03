@@ -39,9 +39,6 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         /// out of blocks in the blocks ring buffer but haven't buffered a full block of
         /// values in memory. In this case, we copy values from the head of blocks to this
         /// ring buffer to make that block available for reading further values.
-        /// Thus, we guarantee that iterators will always have at least a block's worth of
-        /// values buffered. This simplifies the peek() interface as null always means that
-        /// iteration is complete.
         values: ValuesRingBuffer,
 
         data_blocks: RingBuffer(Grid.BlockPtr, 2, .array),
@@ -185,14 +182,14 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
             assert(it.read_table_index);
             it.read_table_index = false;
 
+            // Copy the bytes read into a buffer owned by the iterator since the Grid
+            // only guarantees the provided pointer to be valid in this callback.
+            mem.copy(u8, it.index_block, block);
+
             if (it.index_block_callback) |callback| {
                 it.index_block_callback = null;
                 callback(it, block);
             }
-
-            // Copy the bytes read into a buffer owned by the iterator since the Grid
-            // only guarantees the provided pointer to be valid in this callback.
-            mem.copy(u8, it.index_block, block);
 
             const read_pending = it.tick();
             // After reading the table index, we always read at least one data block.
@@ -267,7 +264,11 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
             if (it.values.head_ptr_const()) |value| return Table.key_from_value(value);
 
             const block = it.data_blocks.head() orelse {
-                assert(it.data_block_index == Table.index_data_blocks_used(it.index_block));
+                // NOTE No values to peek may still mean some are unbuffered.
+                // The caller should use buffered_all_values() to distinguish between 
+                // the iterator being empty and having to tick() to refill values.
+                // 
+                // assert(it.buffered_all_values());
                 return null;
             };
 
