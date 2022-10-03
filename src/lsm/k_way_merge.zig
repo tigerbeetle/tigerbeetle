@@ -14,7 +14,7 @@ pub fn KWayMergeIterator(
     comptime k_max: u32,
     /// Peek the next key in the stream identified by stream_index.
     /// For example, peek(stream_index=2) returns user_streams[2][0].
-    comptime stream_peek: fn (context: *const Context, stream_index: u32) ?Key,
+    comptime stream_peek: fn (context: *const Context, stream_index: u32) error{Empty, Pending}!Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
     /// Returns true if stream A has higher precedence than stream B.
     /// This is used to deduplicate values across streams.
@@ -63,7 +63,7 @@ pub fn KWayMergeIterator(
             // TODO Do we have test coverage for this edge case?
             var stream_index: u32 = 0;
             while (stream_index < stream_count_max) : (stream_index += 1) {
-                it.keys[it.k] = stream_peek(context, stream_index) orelse continue;
+                it.keys[it.k] = stream_peek(context, stream_index) catch continue;
                 it.streams[it.k] = stream_index;
                 it.up_heap(it.k);
                 it.k += 1;
@@ -105,10 +105,13 @@ pub fn KWayMergeIterator(
             if (stream_peek(it.context, root)) |key| {
                 it.keys[0] = key;
                 it.down_heap();
-            } else {
-                it.swap(0, it.k - 1);
-                it.k -= 1;
-                it.down_heap();
+            } else |err| switch (err) {
+                error.Pending => return null,
+                error.Empty => {
+                    it.swap(0, it.k - 1);
+                    it.k -= 1;
+                    it.down_heap();
+                },
             }
 
             return value;
@@ -210,9 +213,9 @@ fn TestContext(comptime k_max: u32) type {
             return math.order(a, b);
         }
 
-        fn stream_peek(context: *const Self, stream_index: u32) ?u32 {
+        fn stream_peek(context: *const Self, stream_index: u32) error{Empty, Pending}!u32 {
             const stream = context.streams[stream_index];
-            if (stream.len == 0) return null;
+            if (stream.len == 0) return error.Empty;
             return stream[0].key;
         }
 

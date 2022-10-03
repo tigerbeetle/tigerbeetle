@@ -85,12 +85,19 @@ pub fn CompactionType(
         );
 
         const MergeStreamSelector = struct {
-            fn peek(compaction: *const Compaction, stream_id: u32) ?Key {
-                return switch (stream_id) {
-                    0 => compaction.iterator_a.peek(),
-                    1 => compaction.iterator_b.peek(),
+            fn peek(compaction: *const Compaction, stream_id: u32) error{Empty, Pending}!Key {
+                switch (stream_id) {
+                    0 => {
+                        if (compaction.iterator_a.peek()) |key| return key;
+                        if (!compaction.iterator_a.buffered_all_values()) return error.Pending;
+                    },
+                    1 => {
+                        if (compaction.iterator_b.peek()) |key| return key;
+                        if (!compaction.iterator_b.buffered_all_values()) return error.Pending;
+                    },
                     else => unreachable,
-                };
+                }
+                return error.Empty;
             }
 
             fn pop(compaction: *Compaction, stream_id: u32) Value {
