@@ -240,10 +240,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             const commit_min = grid.superblock.working.vsr_state.commit_min;
             // Compaction is one measure ahead of superblock's commit_min.
-            // The commits from the measure following commit_min were in the mutable table, and
-            // thus not preserved in the checkpoint.
-            // But the corresponding `compact()` updates were preserved, and must not be repeated
-            // to ensure determinstic storage.
             const compaction_op = if (commit_min == 0) 0 else commit_min + config.lsm_batch_multiple;
 
             return Tree{
@@ -594,7 +590,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(op <= tree.compaction_op + 1);
             assert(op > tree.grid.superblock.working.vsr_state.commit_min);
 
-            if (op != tree.compaction_op + 1) {
+            if (tree.grid.superblock.working.vsr_state.op_compacted(op)) {
                 // We recovered from a checkpoint, and must avoid replaying one measure of
                 // compactions that were applied before the checkpoint.
                 assert(tree.compaction_op == tree.prefetch_snapshot_max);
@@ -604,6 +600,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 callback(tree);
                 return;
             }
+            assert(op == tree.compaction_op + 1);
 
             tree.compact_start(callback, op);
             tree.compact_drive();

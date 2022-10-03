@@ -140,6 +140,15 @@ pub const SuperBlockSector = extern struct {
             assert(state.would_be_updated_by(new));
             state.* = new;
         }
+
+        /// Compaction is one measure ahead of superblock's commit_min.
+        /// The commits from the measure following commit_min were in the mutable table, and
+        /// thus not preserved in the checkpoint.
+        /// But the corresponding `compact()` updates were preserved, and must not be repeated
+        /// to ensure determinstic storage.
+        pub fn op_compacted(state: VSRState, op: u64) bool {
+            return state.commit_min > 0 and op <= state.commit_min + config.lsm_batch_multiple;
+        }
     };
 
     pub const Snapshot = extern struct {
