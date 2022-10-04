@@ -409,7 +409,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                     chain = index;
                     assert(chain_broken == false);
                 }
-
                 const result = if (chain_broken)
                     .linked_event_failed
                 else if (event.flags.linked and index == events.len - 1)
@@ -419,7 +418,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .create_transfers => self.create_transfer(event),
                     else => unreachable,
                 };
-
                 log.debug("{s} {}/{}: {}: {}", .{
                     @tagName(operation),
                     index + 1,
