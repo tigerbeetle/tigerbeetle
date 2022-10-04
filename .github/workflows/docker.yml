@@ -19,10 +19,9 @@ jobs:
   # development-mostly scripts like scripts/benchmark.sh
   shellcheck_install_scripts:
     runs-on: ubuntu-latest
-    container: koalaman/shellcheck
     steps:
       - uses: actions/checkout@v2
-      - run: shellcheck scripts/install*.sh
+      - run: docker run -v $(pwd):/wrk -w /wrk koalaman/shellcheck scripts/install*.sh
 
   test_on_linux:
     name: Run tests on Ubuntu
