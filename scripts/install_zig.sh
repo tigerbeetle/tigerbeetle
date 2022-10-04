@@ -68,9 +68,9 @@ if command -v wget; then
     if [ -f /etc/alpine-release ]; then
 	ipv4=""
     fi
-    wget $ipv4 --quiet --show-progress --output-document="$ZIG_TARBALL" "$ZIG_URL"
+    wget $ipv4 --quiet --output-document="$ZIG_TARBALL" "$ZIG_URL"
 else
-    curl --silent --progress-bar --output "$ZIG_TARBALL" "$ZIG_URL"
+    curl --silent --output "$ZIG_TARBALL" "$ZIG_URL"
 fi
 
 # Extract and then remove the downloaded tarball:

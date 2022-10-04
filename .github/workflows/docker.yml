@@ -28,17 +28,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - run: ./scripts/install_zig.sh
-      - run: zig/zig build test
+        # Short script but encapsulates the docker command to make it easier to run/debug locally
+      - run: ./scripts/tests_on_ubuntu.sh
 
   test_on_alpine:
     name: Run tests on Alpine
     runs-on: ubuntu-latest
-    container: alpine:latest
     steps:
       - uses: actions/checkout@v2
-      - run: ./scripts/install_zig.sh
-      - run: zig/zig build test
+        # Short script but encapsulates the docker command to make it easier to run/debug locally
+      - run: ./scripts/tests_on_alpine.sh
 
   test_on_macos:
     name: Run tests on macOS
@@ -47,6 +46,7 @@ jobs:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
       - run: zig/zig build test
+      - run: ./scripts/install.sh
 
   build-and-push:
     runs-on: ubuntu-latest
