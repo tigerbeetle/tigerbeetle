@@ -55,7 +55,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           target: release
           platforms: linux/amd64,linux/arm64
-        run: ./scripts/confirm_image_is_production_build.sh ${{ steps.docker_build.outputs.imageid }}
+      - run: ./scripts/confirm_image_is_production_build.sh ${{ steps.docker_build.outputs.imageid }}
 
   build-and-push-debug:
     runs-on: ubuntu-latest
@@ -86,5 +86,4 @@ jobs:
           target: release
           push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
-      - name: "Test it's a debug build"
-        run: ./scripts/confirm_image_is_debug_build.sh ${{ steps.docker_build.outputs.imageid }}
+      - run: ./scripts/confirm_image_is_debug_build.sh ${{ steps.docker_build.outputs.imageid }}
