@@ -1,14 +1,17 @@
 name: Docker CI
 
 on:
+  # Run CI against any commits pushed to 'main'.
   push:
     branches:
-      - '**'
-    tags:
-      - '*'
+      - 'main'
+  # Run CI for any PRs that target 'main' when they are opened or updated.
   pull_request:
     branches:
       - 'main'
+    types:
+      - opened
+      - synchronize
 
 env:
   IMAGE_NAME: ${{ github.repository }}
