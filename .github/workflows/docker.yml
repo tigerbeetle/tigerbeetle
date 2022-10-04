@@ -14,6 +14,16 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Additional checks to make sure we're only committing POSIX ok sh
+  # scripts that users will run.  Does not need to include
+  # development-mostly scripts like scripts/benchmark.sh
+  shellcheck_install_scripts:
+    runs-on: ubuntu-latest
+    container: koalaman/shellcheck
+    steps:
+      - uses: actions/checkout@v2
+      - run: shellcheck scripts/install*.sh
+
   test_on_linux:
     name: Run tests on Ubuntu
     runs-on: ubuntu-latest

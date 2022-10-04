@@ -1,14 +1,18 @@
 #!/bin/sh
 
+if [ -z "$DEBUG" ]; then
+    debug="$DEBUG"
+fi
+
 debug="$DEBUG"
-if [[ "$1" == "--debug" ]]; then
+if [ "$1" = "--debug" ]; then
     debug="true"
 fi
 
-set -eEuo pipefail
+set -eu
 
 scripts/install_zig.sh
-if [[ "$debug" == "true" ]]; then
+if [ "$debug" = "true" ]; then
     echo "Building Tigerbeetle debug..."
     zig/zig build -Dcpu=baseline
 else

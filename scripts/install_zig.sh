@@ -1,17 +1,17 @@
 #!/bin/sh
-set -eEu
+set -eu
 
 ZIG_RELEASE_DEFAULT="0.9.1"
 # Default to the release build, or allow the latest dev build, or an explicit release version:
 ZIG_RELEASE=${1:-$ZIG_RELEASE_DEFAULT}
-if [ "$ZIG_RELEASE" == "latest" ]; then
+if [ "$ZIG_RELEASE" = "latest" ]; then
     ZIG_RELEASE="builds"
 fi
 
 # Validate the release version explicitly:
-if [[ $ZIG_RELEASE =~ ^builds$ ]]; then
+if echo "$ZIG_RELEASE" | grep -Pq '^builds$'; then
     echo "Installing Zig latest build..."
-elif [[ $ZIG_RELEASE =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+elif echo "$ZIG_RELEASE" | grep -Pq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     echo "Installing Zig $ZIG_RELEASE release build..."
 else
     echo "Release version invalid"
@@ -19,14 +19,14 @@ else
 fi
 
 # Determine the architecture:
-if [[ $(uname -m) == 'arm64' ]] || [[ $(uname -m) == 'aarch64' ]]; then
+if [ "$(uname -m)" = 'arm64' ] || [ "$(uname -m)" = 'aarch64' ]; then
     ZIG_ARCH="aarch64"
 else
     ZIG_ARCH="x86_64"
 fi
 
 # Determine the operating system:
-if [[ "(uname)" == "Linux" ]]; then
+if [ "$(uname)" = "Linux" ]; then
     ZIG_OS="linux"
 else
     ZIG_OS="macos"
@@ -35,7 +35,7 @@ fi
 ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
 
 # Determine the build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
-if command -v wget &> /dev/null; then
+if command -v wget; then
     # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
     # Only A records (for ipv4) are used in DNS:
     ZIG_URL=$(wget -4 --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
@@ -55,7 +55,7 @@ ZIG_DIRECTORY=$(basename "$ZIG_TARBALL" .tar.xz)
 
 # Download, making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
 echo "Downloading $ZIG_URL..."
-if command -v wget &> /dev/null; then
+if command -v wget; then
     # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
     # Only A records (for ipv4) are used in DNS:
     wget -4 --quiet --show-progress --output-document="$ZIG_TARBALL" "$ZIG_URL"
