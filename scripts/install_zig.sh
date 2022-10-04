@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eEuo pipefail
+set -eEu
 
 ZIG_RELEASE_DEFAULT="0.9.1"
 # Default to the release build, or allow the latest dev build, or an explicit release version:
