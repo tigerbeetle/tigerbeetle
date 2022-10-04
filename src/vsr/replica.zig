@@ -2548,8 +2548,13 @@ pub fn ReplicaType(
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
+            assert(op <= self.op_checkpoint_trigger());
 
-            if (op == self.op_checkpoint_trigger()) {
+            // If op_checkpoint_next == vsr_state.commit_min, we checkpointed at op,
+            // then crashed and have now recovered.
+            if (op == self.op_checkpoint_trigger() and
+                self.op_checkpoint_next() != self.superblock.staging.vsr_state.commit_min)
+            {
                 assert(op == self.op);
                 assert((op + 1) % config.lsm_batch_multiple == 0);
                 log.debug("{}: commit_op_compact_callback: checkpoint start " ++
@@ -2561,7 +2566,6 @@ pub fn ReplicaType(
                 });
                 self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
-                assert(op < self.op_checkpoint_trigger());
                 self.commit_op_done();
             }
         }

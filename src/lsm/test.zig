@@ -363,8 +363,11 @@ const Environment = struct {
             defer op += 1;
 
             // Checkpoint when the forest finishes compaction.
+            // Don't repeat a checkpoint (commit_min must always advance).
             const checkpoint_op = op -| config.lsm_batch_multiple;
-            if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
+            if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1 and
+                checkpoint_op != env.superblock.staging.vsr_state.commit_min)
+            {
                 // Checkpoint the forest then superblock
                 env.superblock.staging.vsr_state.commit_min = checkpoint_op;
                 env.superblock.staging.vsr_state.commit_max = checkpoint_op;
