@@ -56,11 +56,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
       - name: "Test it's a production build"
         run: |
-          bash -c '
+          bash -c "
           if [[ $(docker run --entrypoint nm ghcr.io/${{env.IMAGE_NAME}}:latest -an /opt/beta-beetle/tigerbeetle | grep getSymbolFromDward) ]]; then
-            echo "Does not seem to be a production build"
+            echo 'Does not seem to be a production build'
             exit 1
-          end'
+          end"
 
   build-and-push-debug:
     runs-on: ubuntu-latest
@@ -92,8 +92,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
       - name: "Test it's a debug build"
         run: |
-          bash -c '
+          bash -c "
           if ! [[ $(docker run --entrypoint nm ghcr.io/${{env.IMAGE_NAME}}:debug -an /opt/beta-beetle/tigerbeetle | grep getSymbolFromDward) ]]; then
-            echo "Does not seem to be a debug build"
+            echo 'Does not seem to be a debug build'
             exit 1
-          end'
+          end"
