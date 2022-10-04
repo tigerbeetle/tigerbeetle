@@ -120,6 +120,8 @@ pub const CreateAccountResult = enum(u32) {
     exists_with_different_credits_pending,
     exists_with_different_credits_posted,
     exists,
+
+    malformed_linked_chain,
 };
 
 pub const CreateTransferResult = enum(u32) {
@@ -193,6 +195,8 @@ pub const CreateTransferResult = enum(u32) {
     pending_transfer_already_voided,
 
     pending_transfer_expired,
+
+    malformed_linked_chain,
 };
 
 pub const CreateAccountsResult = extern struct {

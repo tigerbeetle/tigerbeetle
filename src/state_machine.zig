@@ -403,17 +403,47 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             var chain: ?usize = null;
             var chain_broken = false;
+            const chain_malformed_start_index: ?usize = blk: {
+
+                // Checking if there is an open chain in this batch.
+                // We must not execute linked event chains that are not correctly closed.
+                if (events.len > 0) {
+                    const last_index = events.len - 1;
+                    if (events[last_index].flags.linked) {
+                        var index = last_index;
+                        while (index > 0) {
+                            const prev_index = index - 1;
+                            if (!events[prev_index].flags.linked) {
+                                break;
+                            }
+                            index = prev_index;
+                        }
+
+                        break :blk index;
+                    }
+                }
+
+                break :blk null;
+            };
 
             for (events) |*event, index| {
-                if (event.flags.linked and chain == null) {
+                const chain_is_malformed = if (chain_malformed_start_index) |malformed_start_index| index >= malformed_start_index else false;
+
+                if (event.flags.linked and chain == null and !chain_is_malformed) {
                     chain = index;
                     assert(chain_broken == false);
                 }
-                const result = if (chain_broken) .linked_event_failed else switch (operation) {
+
+                const result = if (chain_is_malformed)
+                    .malformed_linked_chain
+                else if (chain_broken)
+                    .linked_event_failed
+                else switch (operation) {
                     .create_accounts => self.create_account(event),
                     .create_transfers => self.create_transfer(event),
                     else => unreachable,
                 };
+
                 log.debug("{s} {}/{}: {}: {}", .{
                     @tagName(operation),
                     index + 1,
@@ -448,8 +478,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     chain_broken = false;
                 }
             }
-            // TODO client.zig: Validate that batch chains are always well-formed and closed.
-            // This is programming error and we should raise an exception for this in the client ASAP.
+
             assert(chain == null);
             assert(chain_broken == false);
 
@@ -1549,6 +1578,78 @@ test "linked accounts" {
 
     // TODO How can we test that events were in fact rolled back in LIFO order?
     // All our rollback handlers appear to be commutative.
+}
+
+test "malformed linked accounts" {
+    var accounts = [_]Account{
+
+        // A chain of 3 events (the last event in the chain closes the chain with linked=false)
+        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+        mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+        mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1 }),
+
+        // An open chain of 2 events
+        mem.zeroInit(Account, .{ .id = 4, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+        mem.zeroInit(Account, .{ .id = 5, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+    };
+
+    var context: TestContext = undefined;
+    try context.init(testing.allocator);
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
+
+    const input = mem.asBytes(&accounts);
+
+    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
+    defer testing.allocator.free(output);
+
+    _ = state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+
+    try expectEqualSlices(
+        CreateAccountsResult,
+        &[_]CreateAccountsResult{
+            .{ .index = 3, .result = .malformed_linked_chain },
+            .{ .index = 4, .result = .malformed_linked_chain },
+        },
+        results,
+    );
+
+    try expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
+    try expectEqual(accounts[1], state_machine.get_account(accounts[1].id).?.*);
+    try expectEqual(accounts[2], state_machine.get_account(accounts[2].id).?.*);
+}
+
+test "single linked account batch" {
+    var accounts = [_]Account{
+        // Just one event with linked = true
+        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+    };
+
+    var context: TestContext = undefined;
+    try context.init(testing.allocator);
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
+
+    const input = mem.asBytes(&accounts);
+
+    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
+    defer testing.allocator.free(output);
+
+    _ = state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+
+    try expectEqualSlices(
+        CreateAccountsResult,
+        &[_]CreateAccountsResult{
+            .{ .index = 0, .result = .malformed_linked_chain },
+        },
+        results,
+    );
 }
 
 // The goal is to ensure that:
