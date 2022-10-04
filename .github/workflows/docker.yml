@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - run: docker run -v $(pwd):/wrk -w /wrk koalaman/shellcheck scripts/install*.sh
+      - run: ./scripts/shellcheck.sh
 
   test_on_linux:
     name: Run tests on Ubuntu

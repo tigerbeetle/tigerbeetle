@@ -38,7 +38,12 @@ ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
 if command -v wget; then
     # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
     # Only A records (for ipv4) are used in DNS:
-    ZIG_URL=$(wget -4 --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
+    ipv4="-4"
+    # But Alpine doesn't support this argument
+    if [ -f /etc/alpine-release ]; then
+	ipv4=""
+    fi
+    ZIG_URL=$(wget "$ipv4" --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
 else
     ZIG_URL=$(curl --silent https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
 fi
@@ -58,7 +63,12 @@ echo "Downloading $ZIG_URL..."
 if command -v wget; then
     # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
     # Only A records (for ipv4) are used in DNS:
-    wget -4 --quiet --show-progress --output-document="$ZIG_TARBALL" "$ZIG_URL"
+    ipv4="-4"
+    # But Alpine doesn't support this argument
+    if [ -f /etc/alpine-release ]; then
+	ipv4=""
+    fi
+    wget "$ipv4" --quiet --show-progress --output-document="$ZIG_TARBALL" "$ZIG_URL"
 else
     curl --silent --progress-bar --output "$ZIG_TARBALL" "$ZIG_URL"
 fi
