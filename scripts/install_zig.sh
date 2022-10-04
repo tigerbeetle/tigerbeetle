@@ -9,9 +9,9 @@ if [ "$ZIG_RELEASE" = "latest" ]; then
 fi
 
 # Validate the release version explicitly:
-if echo "$ZIG_RELEASE" | grep -Pq '^builds$'; then
+if echo "$ZIG_RELEASE" | grep -q '^builds$'; then
     echo "Installing Zig latest build..."
-elif echo "$ZIG_RELEASE" | grep -Pq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+elif echo "$ZIG_RELEASE" | grep -q '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     echo "Installing Zig $ZIG_RELEASE release build..."
 else
     echo "Release version invalid"
