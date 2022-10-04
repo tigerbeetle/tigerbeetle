@@ -1586,7 +1586,6 @@ test "linked accounts" {
 
 test "malformed linked accounts" {
     var accounts = [_]Account{
-
         // A chain of 3 events (the last event in the chain closes the chain with linked=false)
         mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
         mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
