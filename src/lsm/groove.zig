@@ -717,7 +717,7 @@ pub fn GrooveType(
                                 worker.context.snapshot,
                                 worker.lookup_id.key,
                             ) == null or
-                            worker.context.groove.objects.lookup_from_memory(
+                                worker.context.groove.objects.lookup_from_memory(
                                 worker.context.snapshot,
                                 id_tree_value.timestamp,
                             ) == null,

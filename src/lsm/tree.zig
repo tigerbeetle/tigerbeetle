@@ -596,6 +596,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 assert(tree.compaction_op == tree.prefetch_snapshot_max);
                 assert(tree.compaction_op >= op);
                 assert(tree.compaction_op - op <= config.lsm_batch_multiple);
+
+                if (tree.compaction_op == op) {
+                    // This is the last op of the skipped compaction measure.
+                    // Prepare the immutable table for the next measure — since this state is
+                    // in-memory, it cannot be skipped.
+                    tree.compact_mutable_table_into_immutable();
+                }
+
                 // TODO Defer this callback until tick() to avoid stack growth.
                 callback(tree);
                 return;
@@ -962,11 +970,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         }
 
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
-            // Assert no outstanding compact_tick() work..
+            // Assert no outstanding compact_tick() work.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
             assert(tree.compaction_op > 0);
             assert(tree.compaction_op == tree.prefetch_snapshot_max);
+            // Don't re-run the checkpoint we recovered from.
+            assert(!tree.grid.superblock.working.vsr_state.op_compacted(tree.compaction_op));
 
             // Assert that this is the last beat in the compaction measure.
             const compaction_beat = tree.compaction_op % config.lsm_batch_multiple;

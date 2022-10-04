@@ -1,3 +1,13 @@
+//! SuperBlock invariants:
+//!
+//!   * vsr_state
+//!     - vsr_state.commit_min ≤ vsr_state.commit_max
+//!     - vsr_state.view_normal ≤ vsr_state.view
+//!     - vsr_state.commit_min is initially 0 (for a newly-formatted replica).
+//!     - checkpoint() must advance the superblock's vsr_state.commit_min.
+//!     - view_change() must not advance the superblock's vsr_state.commit_min.
+//!     - All fields of vsr_state are monotonically increasing over view_change()/checkpoint().
+//!
 const std = @import("std");
 const assert = std.debug.assert;
 const crypto = std.crypto;
@@ -147,6 +157,7 @@ pub const SuperBlockSector = extern struct {
         /// But the corresponding `compact()` updates were preserved, and must not be repeated
         /// to ensure determinstic storage.
         pub fn op_compacted(state: VSRState, op: u64) bool {
+            // If commit_min is 0, we have never checkpointed, so no compactions are checkpointed.
             return state.commit_min > 0 and op <= state.commit_min + config.lsm_batch_multiple;
         }
     };
@@ -594,6 +605,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             context: *Context,
         ) void {
             assert(superblock.opened);
+            // Checkpoint must advance commit_min.
+            assert(superblock.staging.vsr_state.commit_min >
+                superblock.working.vsr_state.commit_min);
 
             context.* = .{
                 .superblock = superblock,
@@ -612,20 +626,21 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state: SuperBlockSector.VSRState,
         ) void {
             assert(superblock.opened);
+            assert(vsr_state.commit_min == superblock.staging.vsr_state.commit_min);
 
             log.debug(
                 "view_change: commit_min={}..{} commit_max={}..{} view_normal={}..{} view={}..{}",
                 .{
-                    superblock.working.vsr_state.commit_min,
+                    superblock.staging.vsr_state.commit_min,
                     vsr_state.commit_min,
 
-                    superblock.working.vsr_state.commit_max,
+                    superblock.staging.vsr_state.commit_max,
                     vsr_state.commit_max,
 
-                    superblock.working.vsr_state.view_normal,
+                    superblock.staging.vsr_state.view_normal,
                     vsr_state.view_normal,
 
-                    superblock.working.vsr_state.view,
+                    superblock.staging.vsr_state.view,
                     vsr_state.view,
                 },
             );
@@ -640,10 +655,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .vsr_state = vsr_state,
             };
 
-            // Only this view_change() function may change the VSR state.
-            assert(meta.eql(superblock.working.vsr_state, superblock.staging.vsr_state));
-
-            if (!superblock.working.vsr_state.would_be_updated_by(context.vsr_state)) {
+            if (!superblock.staging.vsr_state.would_be_updated_by(context.vsr_state)) {
                 log.debug("view_change: no change", .{});
                 callback(context);
                 return;
@@ -1697,10 +1709,10 @@ const TestRunner = struct {
             view_change_callback,
             &runner.context_view_change,
             .{
-                .commit_min = runner.superblock.working.vsr_state.commit_min + 1,
-                .commit_max = runner.superblock.working.vsr_state.commit_max + 2,
-                .view_normal = runner.superblock.working.vsr_state.view_normal + 3,
-                .view = runner.superblock.working.vsr_state.view + 4,
+                .commit_min = runner.superblock.staging.vsr_state.commit_min,
+                .commit_max = runner.superblock.staging.vsr_state.commit_max + 2,
+                .view_normal = runner.superblock.staging.vsr_state.view_normal + 3,
+                .view = runner.superblock.staging.vsr_state.view + 4,
             },
         );
     }
@@ -1708,11 +1720,14 @@ const TestRunner = struct {
     fn view_change_callback(context: *TestSuperBlock.Context) void {
         const runner = @fieldParentPtr(TestRunner, "context_view_change", context);
         runner.pending -= 1;
+
         runner.checkpoint();
     }
 
     fn checkpoint(runner: *TestRunner) void {
         runner.pending += 1;
+        runner.superblock.staging.vsr_state.commit_min += 1;
+        runner.superblock.staging.vsr_state.commit_max += 2;
         runner.superblock.checkpoint(checkpoint_callback, &runner.context_checkpoint);
     }
 
