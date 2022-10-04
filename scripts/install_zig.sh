@@ -43,7 +43,7 @@ if command -v wget; then
     if [ -f /etc/alpine-release ]; then
 	ipv4=""
     fi
-    ZIG_URL=$(wget "$ipv4" --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
+    ZIG_URL=$(wget $ipv4 --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
 else
     ZIG_URL=$(curl --silent https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
 fi
@@ -68,7 +68,7 @@ if command -v wget; then
     if [ -f /etc/alpine-release ]; then
 	ipv4=""
     fi
-    wget "$ipv4" --quiet --show-progress --output-document="$ZIG_TARBALL" "$ZIG_URL"
+    wget $ipv4 --quiet --show-progress --output-document="$ZIG_TARBALL" "$ZIG_URL"
 else
     curl --silent --progress-bar --output "$ZIG_TARBALL" "$ZIG_URL"
 fi
