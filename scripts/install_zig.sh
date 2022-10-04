@@ -26,10 +26,10 @@ else
 fi
 
 # Determine the operating system:
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    ZIG_OS="macos"
-else
+if [[ "(uname)" == "Linux" ]]; then
     ZIG_OS="linux"
+else
+    ZIG_OS="macos"
 fi
 
 ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"

@@ -15,7 +15,7 @@ env:
 
 jobs:
   test_on_linux:
-    name: Run tests on Linux
+    name: Run tests on Ubuntu
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -23,7 +23,7 @@ jobs:
       - run: zig/zig build test
 
   test_on_alpine:
-    name: Run tests on macOS
+    name: Run tests on Alpine
     runs-on: ubuntu-latest
     container: alpine:latest
     steps:
