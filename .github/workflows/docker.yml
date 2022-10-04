@@ -55,13 +55,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           target: release
           platforms: linux/amd64,linux/arm64
-      - name: "Test it's a production build"
-        run: |
-          bash -c "
-          if [[ $(docker run --entrypoint nm ${{ steps.docker_build.outputs.imageid }} -an /opt/beta-beetle/tigerbeetle | grep getSymbolFromDward) ]]; then
-            echo 'Does not seem to be a production build'
-            exit 1
-          end"
+        run: ./scripts/confirm_image_is_production_build.sh ${{ steps.docker_build.outputs.imageid }}
 
   build-and-push-debug:
     runs-on: ubuntu-latest
@@ -93,9 +87,4 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
       - name: "Test it's a debug build"
-        run: |
-          bash -c "
-          if ! [[ $(docker run --entrypoint nm ${{ steps.docker_build.outputs.imageid }} -an /opt/beta-beetle/tigerbeetle | grep getSymbolFromDward) ]]; then
-            echo 'Does not seem to be a debug build'
-            exit 1
-          end"
+        run: ./scripts/confirm_image_is_debug_build.sh ${{ steps.docker_build.outputs.imageid }}
