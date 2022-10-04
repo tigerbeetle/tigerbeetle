@@ -519,10 +519,8 @@ pub const Storage = struct {
 
         assert(storage.memory_occupied.isSet(prepare_sector));
         if (header.command == .prepare) {
-            assert(
-                header.checksum == header_old.checksum or
-                header.checksum == prepare_header.checksum
-            );
+            assert(header.checksum == header_old.checksum or
+                header.checksum == prepare_header.checksum);
         } else {
             assert(header.command == .reserved);
         }
