@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 debug="$DEBUG"
 if [[ "$1" == "--debug" ]]; then

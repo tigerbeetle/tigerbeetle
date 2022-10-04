@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -eEuo pipefail
 
 ZIG_RELEASE_DEFAULT="0.9.1"

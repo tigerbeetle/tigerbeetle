@@ -14,8 +14,26 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  test:
+  test_on_linux:
+    name: Run tests on Linux
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build test
+
+  test_on_alpine:
+    name: Run tests on macOS
+    runs-on: ubuntu-latest
+    container: alpine:latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build test
+
+  test_on_macos:
+    name: Run tests on macOS
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
@@ -23,7 +41,7 @@ jobs:
 
   build-and-push:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test_on_linux, test_on_macos]
     permissions:
       contents: read
       packages: write
@@ -57,7 +75,7 @@ jobs:
 
   build-and-push-debug:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test_on_linux, test_on_macos]
     permissions:
       contents: read
       packages: write
