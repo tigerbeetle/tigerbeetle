@@ -429,7 +429,11 @@ pub fn StateMachineType(comptime Storage: type) type {
             for (events) |*event, index| {
                 const chain_is_malformed = if (chain_malformed_start_index) |malformed_start_index| index >= malformed_start_index else false;
 
-                if (event.flags.linked and chain == null and !chain_is_malformed) {
+                if (chain_is_malformed) {
+                    assert(chain == null);
+                    assert(chain_broken == false);
+                    assert(event.flags.linked);
+                } else if (event.flags.linked and chain == null) {
                     chain = index;
                     assert(chain_broken == false);
                 }
