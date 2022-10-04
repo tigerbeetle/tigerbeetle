@@ -403,45 +403,17 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             var chain: ?usize = null;
             var chain_broken = false;
-            const chain_malformed_start_index: ?usize = blk: {
-
-                // Checking if there is an open chain in this batch.
-                // We must not execute linked event chains that are not correctly closed.
-                if (events.len > 0) {
-                    const last_index = events.len - 1;
-                    if (events[last_index].flags.linked) {
-                        var index = last_index;
-                        while (index > 0) {
-                            const prev_index = index - 1;
-                            if (!events[prev_index].flags.linked) {
-                                break;
-                            }
-                            index = prev_index;
-                        }
-
-                        break :blk index;
-                    }
-                }
-
-                break :blk null;
-            };
 
             for (events) |*event, index| {
-                const chain_is_malformed = if (chain_malformed_start_index) |malformed_start_index| index >= malformed_start_index else false;
-
-                if (chain_is_malformed) {
-                    assert(chain == null);
-                    assert(chain_broken == false);
-                    assert(event.flags.linked);
-                } else if (event.flags.linked and chain == null) {
+                if (event.flags.linked and chain == null) {
                     chain = index;
                     assert(chain_broken == false);
                 }
 
-                const result = if (chain_is_malformed)
-                    .malformed_linked_chain
-                else if (chain_broken)
+                const result = if (chain_broken)
                     .linked_event_failed
+                else if (event.flags.linked and index == events.len - 1)
+                    .linked_chain_open
                 else switch (operation) {
                     .create_accounts => self.create_account(event),
                     .create_transfers => self.create_transfer(event),
@@ -482,9 +454,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                     chain_broken = false;
                 }
             }
-
-            assert(chain == null);
-            assert(chain_broken == false);
 
             return @sizeOf(Result(operation)) * count;
         }
@@ -1614,8 +1583,8 @@ test "malformed linked accounts" {
     try expectEqualSlices(
         CreateAccountsResult,
         &[_]CreateAccountsResult{
-            .{ .index = 3, .result = .malformed_linked_chain },
-            .{ .index = 4, .result = .malformed_linked_chain },
+            .{ .index = 3, .result = .linked_event_failed },
+            .{ .index = 4, .result = .linked_chain_open },
         },
         results,
     );
@@ -1623,6 +1592,9 @@ test "malformed linked accounts" {
     try expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
     try expectEqual(accounts[1], state_machine.get_account(accounts[1].id).?.*);
     try expectEqual(accounts[2], state_machine.get_account(accounts[2].id).?.*);
+
+    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[3].id));
+    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[4].id));
 }
 
 test "single linked account batch" {
@@ -1649,10 +1621,12 @@ test "single linked account batch" {
     try expectEqualSlices(
         CreateAccountsResult,
         &[_]CreateAccountsResult{
-            .{ .index = 0, .result = .malformed_linked_chain },
+            .{ .index = 0, .result = .linked_chain_open },
         },
         results,
     );
+
+    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[0].id));
 }
 
 // The goal is to ensure that:

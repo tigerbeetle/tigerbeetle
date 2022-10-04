@@ -94,6 +94,7 @@ pub const TransferFlags = packed struct {
 pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
+    linked_chain_open,
 
     reserved_flag,
     reserved_field,
@@ -120,13 +121,12 @@ pub const CreateAccountResult = enum(u32) {
     exists_with_different_credits_pending,
     exists_with_different_credits_posted,
     exists,
-
-    malformed_linked_chain,
 };
 
 pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
+    linked_chain_open,
 
     reserved_flag,
     reserved_field,
@@ -195,8 +195,6 @@ pub const CreateTransferResult = enum(u32) {
     pending_transfer_already_voided,
 
     pending_transfer_expired,
-
-    malformed_linked_chain,
 };
 
 pub const CreateAccountsResult = extern struct {
