@@ -1595,7 +1595,7 @@ test "malformed linked accounts" {
     try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[4].id));
 }
 
-test "single linked account batch" {
+test "linked_event_chain_open for a batch of 1" {
     var accounts = [_]Account{
         // Just one event with linked = true
         mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
