@@ -12,12 +12,9 @@ if [[ "$2" != "--want-production" ]] && [[ "$2" != "--want-debug" ]]; then
     exit 2
 fi
 
-# We accept a passed-in arg 
-docker run --entrypoint bash "$1" -c "
+check="
 set -eu
 
-# We're running an older version of Ubuntu, so update the repos
-sed -i -e 's/archive.ubuntu.com\|security.ubuntu.com/old-releases.ubuntu.com/g' /etc/apt/sources.list
 apt-get update -y
 apt-get install -y binutils
 
@@ -27,14 +24,21 @@ is_production=false
 if ! [[ \$(nm -an /opt/beta-beetle/tigerbeetle | grep getSymbolFromDwarf) ]]; then
   is_production=true
 fi
+"
 
-if [[ \$is_production == false ]] && [[ "$2" == '--want-production' ]]; then
+if [[ "$2" == '--want-production' ]]; then
+    cmd+="
+if [[ \$is_production == false ]]; then
   echo 'Does not seem to be a production build'
   exit 1
-fi
-
-if [[ \$is_production == true ]] && [[ "$2" == '--want-debug' ]]; then
+fi"
+else
+    cmd+="
+if [[ \$is_production == true ]]; then
   echo 'Does not seem to be a debug build'
   exit 1
+fi"
 fi
-"
+
+# We accept a passed-in arg 
+docker run --entrypoint bash "$1" -c "$check"

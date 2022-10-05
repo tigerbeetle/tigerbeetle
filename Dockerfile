@@ -1,4 +1,4 @@
-FROM ubuntu:20.04 AS build
+FROM ubuntu:22.04 AS build
 
 RUN  apt-get update \
   && apt-get install -y wget xz-utils
@@ -15,7 +15,7 @@ ENV PATH="${PATH}:/opt/beta-beetle/zig"
 ARG DEBUG=false
 RUN ./scripts/install.sh
 
-FROM ubuntu:20.10 AS release
+FROM ubuntu:22.04 AS release
 WORKDIR /opt/beta-beetle
 
 COPY --from=build /opt/beta-beetle/tigerbeetle ./tigerbeetle
