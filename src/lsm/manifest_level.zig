@@ -42,9 +42,10 @@
 //! * The sides of each rectangle depict:
 //!   * left:   table.key_min (the diagram is inclusive, and the table.key_min is inclusive)
 //!   * right:  table.key_max (the diagram is EXCLUSIVE, but the table.key_max is INCLUSIVE)
-//!   * bottom: table.snapshot_min (exclusive)
-//!   * top:    table.snapshot_max (exclusive)
+//!   * bottom: table.snapshot_min (inclusive)
+//!   * top:    table.snapshot_max (inclusive)
 //! * (Not depicted: tables may have `table.key_min == table.key_max`.)
+//! * (Not depicted: the newest set of tables would have `table.snapshot_max == maxInt(u64)`.)
 //!
 const std = @import("std");
 const assert = std.debug.assert;
@@ -404,6 +405,22 @@ pub fn ManifestLevelType(
             assert(compare_keys(start_key, level.keys.element_at_cursor(adjusted)) == .eq);
 
             return adjusted;
+        }
+
+        /// The function is only used for verification; it is not performance-critical.
+        pub fn contains(level: Self, table: *const TableInfo) bool {
+            assert(config.verify);
+
+            var level_tables = level.iterator(.visible, &.{
+                table.snapshot_min,
+            }, .ascending, KeyRange{
+                .key_min = table.key_min,
+                .key_max = table.key_max,
+            });
+            while (level_tables.next()) |level_table| {
+                if (level_table.equal(table)) return true;
+            }
+            return false;
         }
     };
 }

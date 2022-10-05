@@ -116,6 +116,10 @@ pub const Manifest = struct {
     }
 
     pub fn decode(manifest: *Manifest, source: []align(@alignOf(u128)) const u8) void {
+        assert(manifest.count == 0);
+        assert(manifest.tables.count() == 0);
+        assert(manifest.compaction_set.count() == 0);
+
         manifest.count = @intCast(u32, @divExact(source.len, BlockReferenceSize));
         assert(manifest.count <= manifest.count_max);
 

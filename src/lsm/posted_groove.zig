@@ -12,6 +12,7 @@ const GridType = @import("grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
+const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_op;
 
 /// This type wraps a single LSM tree in the API needed to integrate it with the Forest.
 /// TigerBeetle's state machine requires a map from u128 ID to posted boolean for transfers
@@ -74,7 +75,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         const PrefetchIDs = std.AutoHashMapUnmanaged(u128, void);
         const PrefetchObjects = std.AutoHashMapUnmanaged(u128, bool); // true:posted, false:voided
 
-        cache: *Tree.ValueCache,
+        cache: *Tree.TableMutable.ValuesCache,
         tree: Tree,
 
         /// Object IDs enqueued to be prefetched.
@@ -88,6 +89,9 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         /// the commit are both passed to the LSM trees and mirrored in this hash map. It is always
         /// sufficient to query this hashmap alone to know the state of the LSM trees.
         prefetch_objects: PrefetchObjects,
+
+        /// The snapshot to prefetch from.
+        prefetch_snapshot: ?u64,
 
         /// This field is necessary to expose the same open()/compact()/checkpoint() function
         /// signatures as the real Groove type.
@@ -107,11 +111,10 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             options: Options,
         ) !PostedGroove {
             // Cache is heap-allocated to pass a pointer into the Object tree.
-            const cache = try allocator.create(Tree.ValueCache);
+            const cache = try allocator.create(Tree.TableMutable.ValuesCache);
             errdefer allocator.destroy(cache);
 
-            cache.* = .{};
-            try cache.ensureTotalCapacity(allocator, options.cache_entries_max);
+            cache.* = try Tree.TableMutable.ValuesCache.init(allocator, options.cache_entries_max);
             errdefer cache.deinit(allocator);
 
             var tree = try Tree.init(
@@ -139,6 +142,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
                 .prefetch_ids = prefetch_ids,
                 .prefetch_objects = prefetch_objects,
+                .prefetch_snapshot = null,
             };
         }
 
@@ -157,10 +161,24 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             return groove.prefetch_objects.get(id);
         }
 
-        /// Must be called directly after the state machine commit is finished and prefetch results
-        /// are no longer needed.
-        pub fn prefetch_clear(groove: *PostedGroove) void {
-            groove.prefetch_objects.clearRetainingCapacity();
+        /// Must be called directly before the state machine begins queuing ids for prefetch.
+        /// When `snapshot` is null, prefetch from the current snapshot.
+        pub fn prefetch_setup(groove: *PostedGroove, snapshot: ?u64) void {
+            // We may query the input tables of an ongoing compaction, but must not query the
+            // output tables until the compaction is complete. (Until then, the output tables may
+            // be in the manifest but not yet on disk).
+            const snapshot_max = groove.tree.prefetch_snapshot_max;
+            const snapshot_target = snapshot orelse snapshot_max;
+            assert(snapshot_target <= snapshot_max);
+
+            if (groove.prefetch_snapshot == null) {
+                groove.prefetch_objects.clearRetainingCapacity();
+            } else {
+                // If there is a snapshot already set from the previous prefetch_setup(), then its
+                // prefetch() was never called, so there must already be no queued objects or ids.
+            }
+
+            groove.prefetch_snapshot = snapshot_target;
             assert(groove.prefetch_objects.count() == 0);
             assert(groove.prefetch_ids.count() == 0);
         }
@@ -169,7 +187,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         /// We tolerate duplicate IDs enqueued by the state machine.
         /// For example, if all unique operations require the same two dependencies.
         pub fn prefetch_enqueue(groove: *PostedGroove, id: u128) void {
-            if (groove.tree.get_cached(id)) |value| {
+            if (groove.tree.lookup_from_memory(groove.prefetch_snapshot.?, id)) |value| {
                 switch (value.data) {
                     .posted => groove.prefetch_objects.putAssumeCapacity(value.id, true),
                     .voided => groove.prefetch_objects.putAssumeCapacity(value.id, false),
@@ -181,8 +199,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         }
 
         /// Ensure the objects corresponding to all ids enqueued with prefetch_enqueue() are
-        /// in memory, either in the value cache of the object tree or in the prefetch_objects
-        /// backup hash map.
+        /// available in `prefetch_objects`.
         pub fn prefetch(
             groove: *PostedGroove,
             callback: fn (*PrefetchContext) void,
@@ -191,14 +208,17 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             context.* = .{
                 .groove = groove,
                 .callback = callback,
+                .snapshot = groove.prefetch_snapshot.?,
                 .id_iterator = groove.prefetch_ids.keyIterator(),
             };
+            groove.prefetch_snapshot = null;
             context.start_workers();
         }
 
         pub const PrefetchContext = struct {
             groove: *PostedGroove,
             callback: fn (*PrefetchContext) void,
+            snapshot: u64,
 
             id_iterator: PrefetchIDs.KeyIterator,
 
@@ -259,18 +279,18 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 };
 
                 if (config.verify) {
-                    // This is checked in prefetch_enqueue()
-                    assert(worker.context.groove.tree.get_cached(id.*) == null);
+                    // This was checked in prefetch_enqueue().
+                    assert(worker.context.groove.tree.lookup_from_memory(worker.context.snapshot, id.*) == null);
                 }
 
                 // If not in the LSM tree's cache, the object must be read from disk and added
                 // to the auxillary prefetch_objects hash map.
                 // TODO: this LSM tree function needlessly checks the LSM tree's cache a
                 // second time. Adding API to the LSM tree to avoid this may be worthwhile.
-                worker.context.groove.tree.lookup(
+                worker.context.groove.tree.lookup_from_levels(
                     lookup_id_callback,
                     &worker.lookup_id,
-                    snapshot_latest,
+                    worker.context.snapshot,
                     id.*,
                 );
             }
@@ -360,7 +380,7 @@ test "PostedGroove" {
 
     _ = PostedGroove.prefetch_enqueue;
     _ = PostedGroove.prefetch;
-    _ = PostedGroove.prefetch_clear;
+    _ = PostedGroove.prefetch_setup;
 
     std.testing.refAllDecls(PostedGroove.PrefetchWorker);
     std.testing.refAllDecls(PostedGroove.PrefetchContext);

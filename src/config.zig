@@ -49,16 +49,16 @@ pub const memory_size_max_default = 1024 * 1024 * 1024;
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const cache_accounts_max = switch (deployment_environment) {
-    .production => 100_000,
-    else => 10_000,
+    .production => 64 * 1024,
+    else => 8 * 1024,
 };
 
 /// The maximum number of transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 /// We allocate more capacity than the number of transfers for a safe hash table load factor.
 pub const cache_transfers_max = switch (deployment_environment) {
-    .production => 1_000_000,
-    else => 100_000,
+    .production => 1024 * 1024,
+    else => 64 * 1024,
 };
 
 /// The maximum number of two-phase transfers to store in memory:
@@ -358,6 +358,11 @@ comptime {
 
     // The LSM tree uses half-measures to balance compaction.
     assert(lsm_batch_multiple % 2 == 0);
+
+    // SetAssociativeCache requires a power-of-two cardinality.
+    assert(std.math.isPowerOfTwo(cache_accounts_max));
+    assert(std.math.isPowerOfTwo(cache_transfers_max));
+    assert(std.math.isPowerOfTwo(cache_transfers_pending_max));
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.

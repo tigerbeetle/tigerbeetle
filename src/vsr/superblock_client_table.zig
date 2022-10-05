@@ -194,17 +194,15 @@ pub const ClientTable = struct {
 
         size = std.mem.alignForward(size, @alignOf(u8));
         var bodies = source[size .. source.len - @sizeOf(u32)];
-        assert(bodies.len > 0);
 
-        var i: u32 = 0;
-        while (i < entries_count) : (i += 1) {
+        for (headers) |header, i| {
             // Prepare the entry with a message.
             var entry: Entry = undefined;
             entry.reply = client_table.message_pool.get_message();
 
             // Read the header and session for the entry.
             entry.session = sessions[i];
-            entry.reply.header.* = headers[i];
+            entry.reply.header.* = header;
             assert(entry.reply.header.valid_checksum());
             assert(entry.reply.header.command == .reply);
             assert(entry.reply.header.commit >= entry.session);

@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
+const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 /// Range queries are not supported on the TableMutable, it must first be made immutable.
 pub fn TableMutableType(comptime Table: type) type {
@@ -20,11 +21,47 @@ pub fn TableMutableType(comptime Table: type) type {
         const load_factor = 50;
         const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
 
+        pub const ValuesCache = SetAssociativeCache(
+            Key,
+            Value,
+            Table.key_from_value,
+            struct {
+                inline fn hash(key: Key) u64 {
+                    return std.hash.Wyhash.hash(0, mem.asBytes(&key));
+                }
+            }.hash,
+            struct {
+                inline fn equal(a: Key, b: Key) bool {
+                    return compare_keys(a, b) == .eq;
+                }
+            }.equal,
+            .{},
+        );
+
         value_count_max: u32,
         values: Values = .{},
 
+        /// This is used to accelerate point lookups and is not used for range queries.
+        /// Secondary index trees used only for range queries can therefore set this to null.
+        ///
+        /// The values cache is only used for the latest snapshot for simplicity.
+        /// Earlier snapshots will still be able to utilize the block cache.
+        ///
+        /// The values cache is updated (in bulk) when the mutable table is sorted and frozen,
+        /// rather than updating on every `put()`/`remove()`.
+        /// This amortizes cache inserts for hot keys in the mutable table, and avoids redundantly
+        /// storing duplicate values in both the mutable table and values cache.
+        // TODO Share cache between trees of different grooves:
+        // "A set associative cache of values shared by trees with the same key/value sizes.
+        // The value type will be []u8 and this will be shared by trees with the same value size."
+        values_cache: ?*ValuesCache,
+
         /// `commit_entries_max` is the maximum number of Values that can be inserted by a single commit.
-        pub fn init(allocator: mem.Allocator, commit_entries_max: u32) !TableMutable {
+        pub fn init(
+            allocator: mem.Allocator,
+            values_cache: ?*ValuesCache,
+            commit_entries_max: u32,
+        ) !TableMutable {
             comptime assert(config.lsm_batch_multiple > 0);
             assert(commit_entries_max > 0);
 
@@ -39,6 +76,7 @@ pub fn TableMutableType(comptime Table: type) type {
             return TableMutable{
                 .value_count_max = value_count_max,
                 .values = values,
+                .values_cache = values_cache,
             };
         }
 
@@ -47,7 +85,14 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
-            return table.values.getKeyPtr(tombstone_from_key(key));
+            if (table.values.getKeyPtr(tombstone_from_key(key))) |value| {
+                return value;
+            }
+            if (table.values_cache) |cache| {
+                // Check the cache after the mutable table (see `values_cache` for explanation).
+                if (cache.get(key)) |value| return value;
+            }
+            return null;
         }
 
         pub fn put(table: *TableMutable, value: *const Value) void {
@@ -59,6 +104,10 @@ pub fn TableMutableType(comptime Table: type) type {
 
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
+
+            if (table.values_cache) |cache| {
+                cache.insert(key_from_value(value)).* = value.*;
+            }
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
@@ -104,6 +153,8 @@ pub fn TableMutableType(comptime Table: type) type {
             var it = table.values.keyIterator();
             while (it.next()) |value| : (i += 1) {
                 values_max[i] = value.*;
+
+                if (table.values_cache) |cache| cache.insert(key_from_value(value)).* = value.*;
             }
 
             const values = values_max[0..i];

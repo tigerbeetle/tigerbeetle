@@ -31,11 +31,13 @@ pub fn TableInfoType(comptime Table: type) type {
         flags: u64 = 0,
 
         /// The minimum snapshot that can see this table (with exclusive bounds).
-        /// This value is set to the current snapshot tick on table creation.
+        /// - This value is set to the current snapshot tick on table creation.
         snapshot_min: u64,
 
-        /// The maximum snapshot that can see this table (with exclusive bounds).
-        /// This value is set to the current snapshot tick on table deletion.
+        /// The maximum snapshot that can see this table (with inclusive bounds).
+        /// - This value is set to maxInt(64) when the table is created (output) by compaction.
+        /// - This value is set to the current snapshot tick when the table is processed (input) by
+        ///   compaction.
         snapshot_max: u64 = math.maxInt(u64),
 
         key_min: Key, // Inclusive.
@@ -44,29 +46,35 @@ pub fn TableInfoType(comptime Table: type) type {
         comptime {
             assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
             assert(@alignOf(TableInfo) == 16);
-            // Assert that there is no implicit padding in the struct.
             assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
         }
 
+        /// Every query targets a particular snapshot. The snapshot determines which tables are
+        /// visible to the query — i.e., which tables are accessed to answer the query.
+        ///
+        /// A table is "visible" to a snapshot if the snapshot lies within the table's
+        /// snapshot_min/snapshot_max interval.
+        ///
+        /// Snapshot visibility is:
+        /// - inclusive to snapshot_min.
+        ///   (New tables are inserted with `snapshot_min = compaction.snapshot + 1`).
+        /// - inclusive to snapshot_max.
+        ///   (Tables are made invisible by setting `snapshot_max = compaction.snapshot`).
+        ///
+        /// Prefetch does not query the output tables of an ongoing compaction, because the output
+        /// tables are not ready. Output tables are added to the manifest before being written to
+        /// disk.
+        ///
+        /// Instead, prefetch will continue to query the compaction's input tables until the
+        /// half-measure of compaction completes. At that point `tree.prefetch_snapshot_max` is
+        /// updated (to the compaction's `compaction_op`), simultaneously rendering the old (input)
+        /// tables invisible, and the new (output) tables visible.
         pub fn visible(table: *const TableInfo, snapshot: u64) bool {
             assert(table.address != 0);
-            assert(table.snapshot_min < table.snapshot_max);
+            assert(table.snapshot_min <= table.snapshot_max);
             assert(snapshot <= snapshot_latest);
 
-            // Snapshots are no longer as unique as they were before,
-            // with Compaction and the like committing to snapshots "in the past" / before current op.
-            //
-            // For example, Compaction may update the snapshot_max of tables during removal to make
-            // them invisible. It will also scan for tables that are invisible with the same snapshot.
-            //
-            // We can then relax this range check to be
-            // - inclusive to snapshot_min (new tables are inserted with snapshot=snapshot_min)
-            // - exclusive to snapshot_max (tables are removed / made invisible by setting snapshot_max)
-
-            // assert(snapshot != table.snapshot_min);
-            // assert(snapshot != table.snapshot_max);
-
-            return table.snapshot_min <= snapshot and snapshot < table.snapshot_max;
+            return table.snapshot_min <= snapshot and snapshot <= table.snapshot_max;
         }
 
         pub fn invisible(table: *const TableInfo, snapshots: []const u64) bool {
@@ -195,11 +203,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
 
-            // TODO Verify that tables can be found exactly before returning.
+            if (config.verify) {
+                assert(manifest_level.contains(table));
+            }
         }
 
         /// Updates the snapshot_max on the provide table for the given level.
-        /// The table provided is mutable to allow their snapshots to be updated.
+        /// The table provided is mutable to allow its snapshot_max to be updated.
         pub fn update_table(
             manifest: *Manifest,
             level: u8,
@@ -225,8 +235,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(level < config.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
-            // Scan and queue tables for removal in descending order to avoid
-            // buffer flushes which update the manifest_level invalidating subsequent iterator entries.
+            // Remove tables in descending order to avoid desynchronizing the iterator from
+            // the ManifestLevel.
             const direction = .descending;
             const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
@@ -319,6 +329,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         /// Returns the next table in the range, after `key_exclusive` if provided.
+        ///
+        /// * The table returned is visible to `snapshot`.
         pub fn next_table(
             manifest: *const Manifest,
             level: u8,

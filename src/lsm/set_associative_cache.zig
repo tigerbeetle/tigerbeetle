@@ -8,6 +8,7 @@ const meta = std.meta;
 const Vector = meta.Vector;
 
 const config = @import("../config.zig");
+const div_ceil = @import("../util.zig").div_ceil;
 const verify = config.verify;
 
 pub const Layout = struct {
@@ -205,6 +206,15 @@ pub fn SetAssociativeCache(
             self.counts.set(set.offset + way, 0);
         }
 
+        /// Hint that the key is less likely to be accessed in the future, without actually removing
+        /// it from the cache.
+        pub fn demote(self: *Self, key: Key) void {
+            const set = self.associate(key);
+            const way = self.search(set, key) orelse return;
+
+            self.counts.set(set.offset + way, 1);
+        }
+
         /// If the key is present in the set, returns the way. Otherwise returns null.
         inline fn search(self: *const Self, set: Set, key: Key) ?usize {
             const ways = search_tags(set.tags, set.tag);
@@ -231,8 +241,8 @@ pub fn SetAssociativeCache(
             return @ptrCast(*const Ways, &result).*;
         }
 
-        pub fn put_no_clobber(self: *Self, key: Key) *align(value_alignment) Value {
-            return self.put_no_clobber_preserve_locked(
+        pub fn insert(self: *Self, key: Key) *align(value_alignment) Value {
+            return self.insert_preserve_locked(
                 void,
                 struct {
                     inline fn locked(_: void, _: *const Value) bool {
@@ -248,7 +258,7 @@ pub fn SetAssociativeCache(
         /// The key must not already be in the cache.
         /// Never evicts keys for which locked() returns true.
         /// The caller must guarantee that locked() returns true for less than layout.ways keys.
-        pub fn put_no_clobber_preserve_locked(
+        pub fn insert_preserve_locked(
             self: *Self,
             comptime Context: type,
             comptime locked: fn (
@@ -259,8 +269,12 @@ pub fn SetAssociativeCache(
             key: Key,
         ) *align(value_alignment) Value {
             const set = self.associate(key);
-
-            if (verify) assert(self.search(set, key) == null);
+            if (self.search(set, key)) |way| {
+                // Remove the old entry for this key.
+                // It should be a different value, but since we are returning a value pointer we
+                // can't check against the new one.
+                self.counts.set(set.offset + way, 0);
+            }
 
             const clock_index = @divExact(set.offset, layout.ways);
 
@@ -409,7 +423,7 @@ fn set_associative_cache_test(
                     try expectEqual(i, sac.clocks.get(0));
 
                     const key = i * sac.sets;
-                    sac.put_no_clobber(key).* = key;
+                    sac.insert(key).* = key;
                     try expect(sac.counts.get(i) == 1);
                     try expectEqual(key, sac.get(key).?.*);
                     try expect(sac.counts.get(i) == 2);
@@ -422,7 +436,7 @@ fn set_associative_cache_test(
             // Insert another element into the first set, causing key 0 to be evicted.
             {
                 const key = layout.ways * sac.sets;
-                sac.put_no_clobber(key).* = key;
+                sac.insert(key).* = key;
                 try expect(sac.counts.get(0) == 1);
                 try expectEqual(key, sac.get(key).?.*);
                 try expect(sac.counts.get(0) == 2);
@@ -451,7 +465,7 @@ fn set_associative_cache_test(
                 const key = (layout.ways + 1) * sac.sets;
                 const expect_evicted = layout.ways * sac.sets;
 
-                sac.put_no_clobber_preserve_locked(
+                sac.insert_preserve_locked(
                     u64,
                     struct {
                         inline fn locked(only_unlocked: u64, value: *const Value) bool {
@@ -491,7 +505,7 @@ fn set_associative_cache_test(
                     try expectEqual(i, sac.clocks.get(0));
 
                     const key = i * sac.sets;
-                    sac.put_no_clobber(key).* = key;
+                    sac.insert(key).* = key;
                     try expect(sac.counts.get(i) == 1);
                     var j: usize = 2;
                     while (j <= math.maxInt(SAC.Count)) : (j += 1) {
@@ -509,7 +523,7 @@ fn set_associative_cache_test(
             // Insert another element into the first set, causing key 0 to be evicted.
             {
                 const key = layout.ways * sac.sets;
-                sac.put_no_clobber(key).* = key;
+                sac.insert(key).* = key;
                 try expect(sac.counts.get(0) == 1);
                 try expectEqual(key, sac.get(key).?.*);
                 try expect(sac.counts.get(0) == 2);
