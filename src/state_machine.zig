@@ -1551,7 +1551,7 @@ test "linked accounts" {
     // All our rollback handlers appear to be commutative.
 }
 
-test "malformed linked accounts" {
+test "linked_event_chain_open" {
     var accounts = [_]Account{
         // A chain of 3 events (the last event in the chain closes the chain with linked=false):
         mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
