@@ -1558,7 +1558,7 @@ test "malformed linked accounts" {
         mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
         mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1 }),
 
-        // An open chain of 2 events
+        // An open chain of 2 events:
         mem.zeroInit(Account, .{ .id = 4, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
         mem.zeroInit(Account, .{ .id = 5, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
     };
