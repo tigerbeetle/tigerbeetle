@@ -43,6 +43,8 @@ info(main): 0: cluster=0: listening on 0.0.0.0:3000
 
 To build from source, clone the repo and run the install script.
 
+You will need POSIX userland, curl or wget, tar, and xz.
+
 ```bash
 $ git clone https://github.com/tigerbeetledb/tigerbeetle.git
 $ cd tigerbeetle
