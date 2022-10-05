@@ -200,7 +200,8 @@ pub const Header = extern struct {
 
     /// The commit number of the latest committed prepare. Committed ops are immutable.
     ///
-    /// * A `do_view_change` sets this to `commit_min`.
+    /// * A `do_view_change` sets this to `commit_min`, to indicate the sending replica's progress.
+    ///   The sending replica may continue to commit after sending the DVC.
     /// * A `start_view` sets this to `commit_max`.
     commit: u64 = 0,
 
