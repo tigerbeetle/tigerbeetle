@@ -94,11 +94,19 @@ pub const connections_max = replicas_max + clients_max;
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 2 MiB / 125 * 1000ms = 16ms for the next request.
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const message_size_max = switch (deployment_environment) {
-    // Use a small message size during the simulator for improved performance.
-    // (*2 so that there is room for pipeline_max headers in the DVC).
-    .simulation => sector_size * 2,
+    .simulation => message_size_max_min,
     else => 1 * 1024 * 1024,
 };
+
+/// The smallest possible message_size_max (for use in the simulator to improve performance).
+/// The message body must have room for pipeline_max headers in the DVC.
+const message_size_max_min = std.math.max(
+    sector_size,
+    std.mem.alignForward(
+        128 + pipeline_max * 128, // 128 == @sizeOf(vsr.Header)
+        sector_size,
+    ),
+);
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
