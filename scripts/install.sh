@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 if [ -z "$DEBUG" ]; then
     debug="$DEBUG"

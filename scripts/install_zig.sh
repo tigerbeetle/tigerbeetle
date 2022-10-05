@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 set -eu
 
 ZIG_RELEASE_DEFAULT="0.9.1"
