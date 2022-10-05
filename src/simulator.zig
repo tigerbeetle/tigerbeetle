@@ -145,9 +145,9 @@ pub fn main() !void {
             .faulty_superblock = true,
         },
         .health_options = .{
-            .crash_probability = 0.0001,
+            .crash_probability = 0.000001,
             .crash_stability = random.uintLessThan(u32, 1_000),
-            .restart_probability = 0.01,
+            .restart_probability = 0.0001,
             .restart_stability = random.uintLessThan(u32, 1_000),
         },
         .state_machine_options = .{
@@ -431,7 +431,7 @@ fn fatal(exit_code: ExitCode, comptime fmt_string: []const u8, args: anytype) no
 /// Returns true, `p` percent of the time, else false.
 fn chance_f64(random: std.rand.Random, p: f64) bool {
     assert(p <= 100.0);
-    return random.float(f64) < p;
+    return random.float(f64) * 100.0 < p;
 }
 
 /// Returns the next argument for the simulator or null (if none available)
