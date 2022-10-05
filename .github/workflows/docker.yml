@@ -114,3 +114,6 @@ jobs:
   # Keep this around because Github CI looks for this job of this name.
   test:
     needs: [test_on_linux]
+    steps:
+      - run: echo "done"
+      
