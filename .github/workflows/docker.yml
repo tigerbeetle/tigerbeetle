@@ -58,6 +58,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           target: release
           platforms: linux/amd64,linux/arm64
+
+      # Validate the image
+      - uses: actions/checkout@v2
       - run: ./scripts/confirm_image_is_production_build.sh ${{ steps.docker_build.outputs.imageid }}
 
   build-and-push-debug:
@@ -89,4 +92,7 @@ jobs:
           target: release
           push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
+
+      # Validate the image
+      - uses: actions/checkout@v2
       - run: ./scripts/confirm_image_is_debug_build.sh ${{ steps.docker_build.outputs.imageid }}
