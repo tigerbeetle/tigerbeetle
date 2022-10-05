@@ -17,10 +17,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Additional checks to make sure we're only committing POSIX ok sh
-  # scripts that users will run.  Does not need to include
-  # development-mostly scripts like scripts/benchmark.sh
-  shellcheck_install_scripts:
+  shellcheck_scripts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
