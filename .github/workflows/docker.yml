@@ -110,3 +110,7 @@ jobs:
           target: release
           push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
+
+  # Keep this around because Github CI looks for this job of this name.
+  test:
+    depends-on: [test_on_linux]
