@@ -54,6 +54,8 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           push: ${{ github.event_name != 'pull_request' }}
+          # Load makes it available to the confirm step after this
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: release
@@ -91,6 +93,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           target: release
           push: ${{ github.event_name != 'pull_request' }}
+          # Load makes it available to the confirm step after this
+          load: true
           platforms: linux/amd64,linux/arm64
 
       # Validate the image
