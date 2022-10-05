@@ -61,7 +61,7 @@ jobs:
 
       # Validate the image
       - uses: actions/checkout@v2
-      - run: ./scripts/confirm_image_is_production_build.sh ${{ steps.docker_build.outputs.imageid }}
+      - run: ./scripts/confirm_image.sh ${{ steps.docker_build.outputs.imageid }} --want-production
 
   build-and-push-debug:
     runs-on: ubuntu-latest
@@ -95,4 +95,4 @@ jobs:
 
       # Validate the image
       - uses: actions/checkout@v2
-      - run: ./scripts/confirm_image_is_debug_build.sh ${{ steps.docker_build.outputs.imageid }}
+      - run: ./scripts/confirm_image.sh ${{ steps.docker_build.outputs.imageid }} --want-debug
