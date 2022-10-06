@@ -1,15 +1,16 @@
 package com.tigerbeetle.samples;
 
-import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.StringJoiner;
 import com.tigerbeetle.AccountBatch;
+import com.tigerbeetle.AccountFlags;
 import com.tigerbeetle.UInt128;
 import com.jakewharton.fliptables.FlipTable;
 
 public final class Util {
 
     private final static String[] ACCOUNT_HEADERS = new String[] {"ID", "UserData", "Code",
-            "Ledger", "DebitsPosted", "DebitsPending", "CreditPosted", "CreditsPending"};
+            "Ledger", "Flags", "DebitsPosted", "DebitsPending", "CreditPosted", "CreditsPending"};
 
     private Util() {}
 
@@ -26,12 +27,25 @@ public final class Util {
 
             ArrayList<String> row = new ArrayList<String>();
 
-            row.add(toBigInteger(batch.getId()).toString());
-            row.add(toBigInteger(batch.getUserData()).toString());
+            row.add(UInt128.asBigInteger(batch.getId()).toString());
+            row.add(UInt128.asBigInteger(batch.getUserData()).toString());
             row.add(String.format("%d - %s", batch.getCode(),
                     AccountCodes.fromCode(batch.getCode())));
             row.add(String.format("%d - %s", batch.getLedger(),
                     Ledgers.fromCode(batch.getLedger())));
+
+
+            var flags = new StringJoiner(System.lineSeparator());
+            if (AccountFlags.hasCreditsMustNotExceedDebits(batch.getFlags()))
+                flags.add("credits_must_not_exceed_debits");
+            if (AccountFlags.hasDebitsMustNotExceedCredits(batch.getFlags()))
+                flags.add("debits_must_not_exceed_credits");
+            if (AccountFlags.hasLinked(batch.getFlags()))
+                flags.add("linked");
+            if (flags.length() == 0)
+                flags.add("none");
+            row.add(flags.toString());
+
             row.add(Long.toUnsignedString(batch.getDebitsPosted()));
             row.add(Long.toUnsignedString(batch.getDebitsPending()));
             row.add(Long.toUnsignedString(batch.getCreditsPosted()));
@@ -43,19 +57,4 @@ public final class Util {
         final var table = FlipTable.of(ACCOUNT_HEADERS, data.toArray(new String[0][]));
         System.out.println(table);
     }
-
-
-    /**
-     * Naive conversion from an array of 16 bytes to a BigInteger.
-     */
-    public static BigInteger toBigInteger(byte[] uint128) {
-
-        final long leastSignificant = UInt128.asLong(uint128, UInt128.LeastSignificant);
-        final long mostSignificant = UInt128.asLong(uint128, UInt128.MostSignificant);
-
-        // BigInteger is stored as BIG ENDIAN
-        return new BigInteger(Long.toBinaryString(mostSignificant), 2).shiftLeft(64)
-                .add(new BigInteger(Long.toBinaryString(leastSignificant), 2));
-    }
-
 }

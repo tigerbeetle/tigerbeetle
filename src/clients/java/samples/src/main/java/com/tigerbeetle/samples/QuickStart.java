@@ -41,7 +41,7 @@ public final class QuickStart {
             accounts.setUserData(null);
             accounts.setCode(AccountCodes.SUPPLIER.Code);
             accounts.setLedger(Ledgers.EUR.Code);
-            accounts.setFlags(AccountFlags.NONE);
+            accounts.setFlags(AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
 
             // Submitting the accounts for creation.
             final var accountErrors = client.createAccounts(accounts);
@@ -63,13 +63,13 @@ public final class QuickStart {
                     case ExistsWithDifferentCreditsPosted:
                     case ExistsWithDifferentCreditsPending:
                         System.out.printf("Account %s already exists.%n",
-                                Util.toBigInteger(accounts.getId()));
+                                UInt128.asBigInteger(accounts.getId()));
                         break;
 
                     // For any other result, we abort.
                     default:
                         System.err.printf("Error creating account %s: %s%n.",
-                                Util.toBigInteger(accounts.getId()), accountErrors.getResult());
+                                UInt128.asBigInteger(accounts.getId()), accountErrors.getResult());
                         return;
                 }
             }

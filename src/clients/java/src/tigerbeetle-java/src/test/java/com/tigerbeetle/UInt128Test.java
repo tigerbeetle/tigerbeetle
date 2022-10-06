@@ -2,12 +2,13 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import java.math.BigInteger;
 import java.util.UUID;
 import org.junit.Test;
 
 public class UInt128Test {
 
-    // pair (100, 1000)
+    // bytes representing a pair of longs (100, 1000):
     final static byte[] bytes = new byte[] {100, 0, 0, 0, 0, 0, 0, 0, -24, 3, 0, 0, 0, 0, 0, 0};
 
     @Test(expected = NullPointerException.class)
@@ -101,5 +102,65 @@ public class UInt128Test {
         assert false;
     }
 
+    @Test(expected = NullPointerException.class)
+    public void testAsBytesBigIntegerNull() {
 
+        BigInteger bigint = null;
+        @SuppressWarnings("unused")
+        var nop = UInt128.asBytes(bigint);
+        assert false;
+    }
+
+    @Test
+    public void testAsBigIntegerFromLong() {
+        var bigint = UInt128.asBigInteger(100, 1000);
+
+        // Bigint representation of a pair of longs (100, 1000)
+        var reverse = BigInteger.valueOf(100)
+                .add(BigInteger.valueOf(1000).multiply(BigInteger.ONE.shiftLeft(64)));
+
+        assertEquals(reverse, bigint);
+        assertArrayEquals(bytes, UInt128.asBytes(bigint));
+    }
+
+    @Test
+    public void testAsBigIntegerFromBytes() {
+        var bigint = UInt128.asBigInteger(bytes);
+
+        assertEquals(UInt128.asBigInteger(100, 1000), bigint);
+        assertArrayEquals(bytes, UInt128.asBytes(bigint));
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testAsBigIntegerNull() {
+
+        @SuppressWarnings("unused")
+        var nop = UInt128.asBigInteger(null);
+        assert false;
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testAsBigIntegerInvalid() {
+
+        byte[] bytes = new byte[] {1, 2, 3, 4, 5, 6};
+        @SuppressWarnings("unused")
+        var nop = UInt128.asBigInteger(bytes);
+        assert false;
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testAsBigIntegerUnsigned() {
+
+        // @bitCast(u64, @as(i64,-1)) == 18446744073709551615
+        final var u64 = new BigInteger(Long.toUnsignedString(-1L));
+        assertEquals(u64, UInt128.asBigInteger(-1L, 0L));
+
+        // Unsigned bigint representation of a pair of longs (-100, -1000):
+        final var bigint = new BigInteger(Long.toUnsignedString(-100L))
+                .add(new BigInteger(Long.toUnsignedString(-100L))
+                        .multiply(BigInteger.ONE.shiftLeft(64)));
+
+        assertEquals(UInt128.asBigInteger(-100, -1000), bigint);
+        assertArrayEquals(UInt128.asBytes(-100, -1000), UInt128.asBytes(bigint));
+    }
 }
