@@ -63,10 +63,10 @@
 //!      T₃ I         $────                   ⎤
 //!      T₄  O        $    ?───────────────── ⎦
 //!                            ┅┅┅┅
-//!      T₄ I             $?───────·········· ⎤  In this compaction, T₃ was untouched by the
-//!      T₅  O            $        ·········· ⎦  previous compaction (ops 12…15), so its snapshots
-//!      T₄ I             $────────           ⎤  cover a wider interval.
-//!      T₅  O            $        ?───────── ⎦
+//!      T₄ I              ?──$────·········· ⎤  In this compaction, T₃ was untouched by the
+//!      T₅  O                $    ·········· ⎦  previous compaction (ops 12…15), so its snapshots
+//!      T₄ I              ───$────           ⎤  cover a wider interval.
+//!      T₅  O                $    ?───────── ⎦
 //!                                ┅┅┅┅
 //!      T₅ I                     $?───······ ⎤  During compaction, prefetch() queries the old input
 //!      T₆  O                    $    ······ ⎦  tables until the compaction half-measure completes.

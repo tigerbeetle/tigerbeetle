@@ -868,7 +868,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tree.prefetch_snapshot_max = tree.compaction_op;
 
             // Reset the immutable table Compaction.
-            // Also clear any invisible tables it created during compaction.
+            // Also clear any tables made invisible by the compaction.
             if (!even_levels) {
                 switch (tree.compaction_table_immutable.status) {
                     // The compaction wasn't started for this half measure.
@@ -879,7 +879,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         tree.table_immutable.clear();
                         tree.manifest.remove_invisible_tables(
                             tree.compaction_table_immutable.level_b,
-                            tree.compaction_table_immutable.snapshot,
+                            tree.prefetch_snapshot_max,
                             tree.compaction_table_immutable.range.key_min,
                             tree.compaction_table_immutable.range.key_max,
                         );
@@ -888,7 +888,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
 
             // Reset all the other Compactions.
-            // Also clear any invisible tables they create during compaction.
+            // Also clear any tables made invisible by the compactions.
             var it = CompactionTableIterator{ .tree = tree };
             while (it.next()) |context| {
                 switch (context.compaction.status) {
@@ -898,10 +898,18 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         context.compaction.reset();
                         tree.manifest.remove_invisible_tables(
                             context.compaction.level_b,
-                            context.compaction.snapshot,
+                            tree.prefetch_snapshot_max,
                             context.compaction.range.key_min,
                             context.compaction.range.key_max,
                         );
+                        if (context.compaction.level_b > 0) {
+                            tree.manifest.remove_invisible_tables(
+                                context.compaction.level_b - 1,
+                                tree.prefetch_snapshot_max,
+                                context.compaction.range.key_min,
+                                context.compaction.range.key_max,
+                            );
+                        }
                     },
                 }
             }
