@@ -258,6 +258,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 manifest.manifest_log.remove(log_level, table);
                 manifest_level.remove_table(manifest.node_pool, &snapshots, table);
             }
+
+            if (config.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
         }
 
         /// Returns an iterator over tables that might contain `key` (but are not guaranteed to).
@@ -317,15 +319,23 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshot: u64) void {
-            for (manifest.levels) |*manifest_level| {
-                var it = manifest_level.iterator(
-                    .invisible,
-                    @as(*const [1]u64, &snapshot),
-                    .ascending,
-                    null,
-                );
-                assert(it.next() == null);
+            for (manifest.levels) |_, level| {
+                manifest.assert_no_invisible_tables_at_level(@intCast(u8, level), snapshot);
             }
+        }
+
+        fn assert_no_invisible_tables_at_level(
+            manifest: *const Manifest,
+            level: u8,
+            snapshot: u64,
+        ) void {
+            var it = manifest.levels[level].iterator(
+                .invisible,
+                @as(*const [1]u64, &snapshot),
+                .ascending,
+                null,
+            );
+            assert(it.next() == null);
         }
 
         /// Returns the next table in the range, after `key_exclusive` if provided.
