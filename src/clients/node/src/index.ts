@@ -43,6 +43,7 @@ export enum AccountFlags {
 export enum CreateAccountError {
   // ok = 0 (No Error)
   linked_event_failed = 1,
+  linked_event_chain_open,
 
   reserved_flag,
   reserved_field,
@@ -101,6 +102,7 @@ export enum TransferFlags {
 export enum CreateTransferError {
   // ok = 0 (No Error)
   linked_event_failed = 1,
+  linked_event_chain_open,
 
   reserved_flag,
   reserved_field,
