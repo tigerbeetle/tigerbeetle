@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 import java.math.BigInteger;
 import java.util.UUID;
 import org.junit.Test;
@@ -148,19 +149,20 @@ public class UInt128Test {
         assert false;
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testAsBigIntegerUnsigned() {
 
-        // @bitCast(u64, @as(i64,-1)) == 18446744073709551615
-        final var u64 = new BigInteger(Long.toUnsignedString(-1L));
-        assertEquals(u64, UInt128.asBigInteger(-1L, 0L));
+        // @bitCast(u128, [2]i64{ -100, -1000 }) == 340282366920938445035077277795926146972
+        final var expected = new BigInteger("340282366920938445035077277795926146972");
 
-        // Unsigned bigint representation of a pair of longs (-100, -1000):
-        final var bigint = new BigInteger(Long.toUnsignedString(-100L))
-                .add(new BigInteger(Long.toUnsignedString(-100L))
-                        .multiply(BigInteger.ONE.shiftLeft(64)));
+        assertEquals(expected, UInt128.asBigInteger(-100, -1000));
+        assertArrayEquals(UInt128.asBytes(expected), UInt128.asBytes(-100, -1000));
+    }
 
-        assertEquals(UInt128.asBigInteger(-100, -1000), bigint);
-        assertArrayEquals(UInt128.asBytes(-100, -1000), UInt128.asBytes(bigint));
+    @Test
+    public void testAsBigIntegerZero() {
+        assertSame(BigInteger.ZERO, UInt128.asBigInteger(0, 0));
+        assertSame(BigInteger.ZERO, UInt128.asBigInteger(new byte[16]));
+        assertArrayEquals(new byte[16], UInt128.asBytes(BigInteger.ZERO));
     }
 }
