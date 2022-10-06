@@ -43,7 +43,7 @@ public class Benchmark {
             final int TRANSFER_SIZE = 128; // @sizeOf(Transfer)
             final int MESSAGE_SIZE_MAX = 1024 * 1024; // config.message_size_max
 
-            final int BATCHES_COUNT = 3;
+            final int BATCHES_COUNT = 5;
             final int TRANSFERS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;
             final int MAX_TRANSFERS = BATCHES_COUNT * TRANSFERS_PER_BATCH;
 

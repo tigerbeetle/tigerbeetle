@@ -7,14 +7,14 @@ public class CreateTransferResultTest {
 
     @Test
     public void testFromValue() {
-        var value = 7;
+        var value = 8;
         Assert.assertEquals(CreateTransferResult.DebitAccountIdMustNotBeIntMax,
                 CreateTransferResult.fromValue(value));
     }
 
     @Test
     public void testOrdinal() {
-        var value = 15;
+        var value = 16;
         Assert.assertEquals(CreateTransferResult.AmountMustNotBeZero.ordinal(), value);
     }
 
