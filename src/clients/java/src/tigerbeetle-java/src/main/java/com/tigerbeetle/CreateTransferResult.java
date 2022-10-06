@@ -3,6 +3,7 @@ package com.tigerbeetle;
 public enum CreateTransferResult {
     Ok,
     LinkedEventFailed,
+    LinkedEventChainOpen,
 
     ReservedFlag,
     ReservedField,
