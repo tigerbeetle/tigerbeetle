@@ -407,12 +407,12 @@ pub fn StateMachineType(comptime Storage: type) type {
             for (events) |*event, index| {
                 const result = blk: {
                     if (event.flags.linked) {
-                        if (index == events.len - 1) {
-                            break :blk .linked_event_chain_open;
-                        } else if (chain == null) {
+                        if (chain == null) {
                             chain = index;
                             assert(chain_broken == false);
                         }
+
+                        if (index == events.len - 1) break :blk .linked_event_chain_open;
                     }
 
                     break :blk if (chain_broken) .linked_event_failed else switch (operation) {
@@ -450,9 +450,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     results[count] = .{ .index = @intCast(u32, index), .result = result };
                     count += 1;
                 }
-                if ((!event.flags.linked and chain != null) or
-                    result == .linked_event_chain_open)
-                {
+                if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
                     chain = null;
                     chain_broken = false;
                 }
