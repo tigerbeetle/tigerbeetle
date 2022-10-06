@@ -1523,6 +1523,23 @@ pub fn ReplicaType(
                 // more useful (i.e. older) headers.
                 self.replace_headers(leader_headers);
 
+                if (self.op < config.journal_slot_count) {
+                    if (self.journal.header_with_op(0)) |header| {
+                        assert(header.command == .prepare);
+                        assert(header.operation == .root);
+                    } else {
+                        // This is the first wrap of the log, and the root prepare is corrupt.
+                        // Repair the root repair. This is necessary to maintain the invariant that
+                        // the op=commit_min exists in-memory.
+                        //
+                        // op=0 wouldn't have been repaired by replace_headers above, because it is
+                        // already "checkpointed".
+                        const header = Header.root_prepare(self.cluster);
+                        self.journal.set_header_as_dirty(&header);
+                        log.debug("{}: on_recovery_response: repair root op", .{self.replica});
+                    }
+                }
+
                 assert(self.op == op);
                 assert(self.journal.header_with_op(self.op) != null);
             }
@@ -1531,20 +1548,6 @@ pub fn ReplicaType(
             self.transition_to_normal_from_recovering_status(view);
             assert(self.status == .normal);
             assert(self.follower());
-
-            if (self.op < config.journal_slot_count) {
-                if (self.journal.header_with_op(0)) |header| {
-                    assert(header.command == .prepare);
-                    assert(header.operation == .root);
-                } else {
-                    // This is the first wrap of the log, and the root prepare is corrupt.
-                    // Repair the root repair. This is necessary to maintain the invariant that the
-                    // op=commit_min exists in-memory.
-                    const header = Header.root_prepare(self.cluster);
-                    self.journal.set_header_as_dirty(&header);
-                    log.debug("{}: on_recovery_response: repair root op", .{self.replica});
-                }
-            }
 
             log.info("{}: on_recovery_response: recovery done responses={} view={} headers={}..{}" ++
                 " commit={} dirty={} faulty={}", .{
@@ -2986,9 +2989,7 @@ pub fn ReplicaType(
             if (uncanonical_op_count == 0) return self.op;
 
             // * When uncanonical_op_count = self.op - self.commit_min,
-            //   self.op - (uncanonical_op_count - 1) =
-            //   (self.op - uncanonical_op_count) + 1 =
-            //   commit_min + 1.
+            //   self.op - uncanonical_op_count = self.commit_min.
             // * When uncanonical_op_count = config.pipeline_max,
             //   config.pipeline_max < self.op - self.commit_min holds.
             const canonical_op_max = self.op - uncanonical_op_count;
@@ -5150,6 +5151,8 @@ pub fn ReplicaType(
                     assert(message.header.cluster == self.cluster);
                     assert(message.header.replica == replica);
                     assert(message.header.view == self.view);
+                    assert(message.header.op >= message.header.commit);
+                    assert(message.header.op - message.header.commit <= config.journal_slot_count);
 
                     // The view when this replica was last in normal status, which:
                     // * may be higher than the view in any of the prepare headers.
@@ -5222,14 +5225,13 @@ pub fn ReplicaType(
             };
         }
 
-        /// Identify uncommitted headers that to discard during a view change before the primary
-        /// starts the view.
+        /// Identify headers to discard during a view change before the primary starts the view.
         /// This is required to maximize availability in the presence of storage faults.
         /// Refer to the CTRL protocol from Protocol-Aware Recovery for Consensus-Based Storage.
         ///
         /// Returns the highest op that:
         /// - precedes any hash chain breaks in the uncanonical headers, and
-        /// - precedes any header gaps.
+        /// - precedes any gaps in the uncommitted headers.
         ///
         /// Breaks
         ///
@@ -5259,7 +5261,10 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum);
             assert(!self.repair_timeout.ticking);
             assert(self.op >= self.commit_max);
+            // At least one replica in the new quorum committed in the new replica.op's WAL wrap —
+            // wrapping implies a checkpoint (which implies a commit).
             assert(self.op - self.commit_max <= config.journal_slot_count);
+            assert(self.op - self.commit_min <= config.journal_slot_count);
 
             assert(op_canonical <= self.op);
             assert(op_canonical >= self.commit_min);
@@ -5275,7 +5280,7 @@ pub fn ReplicaType(
             // disconnected headers do not remain in place in lieu of gaps.
             const op_before_break = blk: {
                 var op: u64 = op_canonical;
-                while (op <= self.op) : (op += 1) {
+                while (op < self.op) : (op += 1) {
                     if (self.journal.header_with_op(op)) |header| {
                         if (self.journal.header_with_op(op + 1)) |next| {
                             // Broken hash chain.
@@ -5295,9 +5300,9 @@ pub fn ReplicaType(
                 const op_committed = std.math.max(self.commit_max, self.op -| config.pipeline_max);
                 assert(op_committed <= self.op);
 
-                var op = op_committed + 1;
-                while (op <= self.op) : (op += 1) {
-                    if (self.journal.header_with_op(op) == null) break :blk op - 1;
+                var op = op_committed;
+                while (op < self.op) : (op += 1) {
+                    if (self.journal.header_with_op(op + 1) == null) break :blk op;
                 } else break :blk self.op;
             };
 
@@ -5347,6 +5352,7 @@ pub fn ReplicaType(
             assert(self.view == 0);
             assert(!self.committing);
             assert(self.replica_count > 1 or new_view == 0);
+            assert(self.journal.header_with_op(self.op) != null);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
@@ -5396,6 +5402,7 @@ pub fn ReplicaType(
             // For example, this could happen after a state transfer triggered by an op jump.
             assert(self.status == .view_change);
             assert(new_view >= self.view);
+            assert(self.journal.header_with_op(self.op) != null);
             self.view = new_view;
             self.view_normal = new_view;
             self.status = .normal;
