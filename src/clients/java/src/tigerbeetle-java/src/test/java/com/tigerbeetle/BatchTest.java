@@ -882,7 +882,7 @@ public class BatchTest {
         // Mimic the the binary response
         dummyCreateAccountResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyCreateAccountResultsStream.putInt(0).putInt(0); // Item 0 - OK
-        dummyCreateAccountResultsStream.putInt(1).putInt(21); // Item 1 - Exists
+        dummyCreateAccountResultsStream.putInt(1).putInt(22); // Item 1 - Exists
 
         createTransferResult1 = CreateTransferResult.Ok;
         createTransferResult2 = CreateTransferResult.ExceedsDebits;
@@ -890,7 +890,7 @@ public class BatchTest {
         // Mimic the the binary response
         dummyCreateTransfersResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyCreateTransfersResultsStream.putInt(0).putInt(0); // Item 0 - OK
-        dummyCreateTransfersResultsStream.putInt(1).putInt(36); // Item 1 - ExceedsDebits
+        dummyCreateTransfersResultsStream.putInt(1).putInt(37); // Item 1 - ExceedsDebits
 
 
         id1 = new byte[] {10, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0};

@@ -3,6 +3,7 @@ package com.tigerbeetle;
 public enum CreateAccountResult {
     Ok,
     LinkedEventFailed,
+    LinkedEventChainOpen,
 
     ReservedFlag,
     ReservedField,
