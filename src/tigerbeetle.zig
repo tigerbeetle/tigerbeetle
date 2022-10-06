@@ -94,6 +94,7 @@ pub const TransferFlags = packed struct {
 pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
+    linked_event_chain_open,
 
     reserved_flag,
     reserved_field,
@@ -125,6 +126,7 @@ pub const CreateAccountResult = enum(u32) {
 pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
+    linked_event_chain_open,
 
     reserved_flag,
     reserved_field,
