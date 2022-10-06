@@ -22,7 +22,10 @@ pub const replicas_max = 6;
 /// This impacts the amount of memory allocated at initialization by the server.
 /// This determines the size of the VR client table used to cache replies to clients by client ID.
 /// Each client has one entry in the VR client table to store the latest `message_size_max` reply.
-pub const clients_max = 32;
+pub const clients_max = switch (deployment_environment) {
+    .production => 32,
+    else => 8,
+};
 
 /// The minimum number of nodes required to form a quorum for replication:
 /// Majority quorums are only required across view change and replication phases (not within).
@@ -71,7 +74,7 @@ pub const cache_transfers_pending_max = cache_transfers_max;
 /// These header copies enable us to disentangle corruption from crashes and recover accordingly.
 pub const journal_slot_count = switch (deployment_environment) {
     .production => 1024,
-    else => 128,
+    else => 32,
 };
 
 /// The maximum size of the journal file:
@@ -347,6 +350,10 @@ comptime {
     // The WAL format requires messages to be a multiple of the sector size.
     assert(message_size_max % sector_size == 0);
     assert(message_size_max >= sector_size);
+
+    assert(superblock_copies % 2 == 0);
+    assert(superblock_copies >= 4);
+    assert(superblock_copies <= 8);
 
     // ManifestLog serializes the level as a u7.
     assert(lsm_levels > 0);

@@ -896,7 +896,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
 
             // Reset all the other Compactions.
-            // Also clear any invisible tables they create during compaction.
+            // Also clear any invisible tables they created during compaction.
             var it = CompactionTableIterator{ .tree = tree };
             while (it.next()) |context| {
                 switch (context.compaction.status) {

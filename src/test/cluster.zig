@@ -30,7 +30,8 @@ pub const ClusterOptions = struct {
     grid_size_max: usize,
 
     seed: u64,
-    on_change_state: fn (replica: *Replica) void,
+    on_change_state: fn (replica: *const Replica) void,
+    on_checkpoint: fn (replica: *const Replica) void,
 
     network_options: NetworkOptions,
     storage_options: Storage.Options,
@@ -360,6 +361,7 @@ pub const Cluster = struct {
         assert(replica.status == .recovering);
 
         replica.on_change_state = cluster.options.on_change_state;
+        replica.on_checkpoint = cluster.options.on_checkpoint;
         cluster.network.link(replica.message_bus.process, &replica.message_bus);
     }
 };

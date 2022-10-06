@@ -5,6 +5,8 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+const superblock = @import("../vsr/superblock.zig");
+const BlockType = @import("../lsm/grid.zig").BlockType;
 
 const log = std.log.scoped(.storage);
 
@@ -88,6 +90,8 @@ pub const Storage = struct {
         period: u64,
     };
 
+    allocator: mem.Allocator,
+
     memory: []align(config.sector_size) u8,
     /// Set bits correspond to sectors that have ever been written to.
     memory_occupied: std.DynamicBitSetUnmanaged,
@@ -149,6 +153,7 @@ pub const Storage = struct {
         try writes.ensureTotalCapacity(config.io_depth_write);
 
         return Storage{
+            .allocator = allocator,
             .memory = memory,
             .memory_occupied = memory_occupied,
             .size = size,
@@ -286,10 +291,14 @@ pub const Storage = struct {
                 other.offset + other.buffer.len <= offset_in_storage);
         }
 
-        if (zone == .wal_headers) {
-            for (std.mem.bytesAsSlice(vsr.Header, buffer)) |header| {
-                storage.verify_write_wal_header(header);
-            }
+        switch (zone) {
+            .superblock => storage.verify_write_superblock(buffer, offset_in_zone),
+            .wal_headers => {
+                for (std.mem.bytesAsSlice(vsr.Header, buffer)) |header| {
+                    storage.verify_write_wal_header(header);
+                }
+            },
+            else => {},
         }
 
         write.* = .{
@@ -523,6 +532,65 @@ pub const Storage = struct {
                 header.checksum == prepare_header.checksum);
         } else {
             assert(header.command == .reserved);
+        }
+    }
+
+    /// When a SuperBlock sector is written, verify:
+    ///
+    /// - There are no other pending writes to the superblock zone.
+    /// - All trailers are written.
+    /// - All trailers' checksums validate.
+    /// - All blocks referenced by the Manifest trailer exist.
+    ///
+    fn verify_write_superblock(storage: *const Storage, buffer: []const u8, offset: u64) void {
+        // Ignore trailer writes; only check the superblock sector writes.
+        if (offset % superblock.superblock_size != 0) return;
+
+        for (storage.writes.items[0..storage.writes.len]) |write| assert(write.zone != .superblock);
+
+        const sector = mem.bytesAsSlice(superblock.SuperBlockSector, buffer)[0];
+        assert(sector.valid_checksum());
+        assert(sector.vsr_state.internally_consistent());
+
+        const Format = superblock.Format;
+        const manifest_offset = vsr.Zone.superblock.offset(
+            Format.offset_manifest(sector.copy, sector.sequence));
+        const manifest_buffer = storage.memory[manifest_offset..][0..sector.manifest_size];
+        assert(vsr.checksum(manifest_buffer) == sector.manifest_checksum);
+
+        const free_set_offset = vsr.Zone.superblock.offset(
+            Format.offset_free_set(sector.copy, sector.sequence));
+        const free_set_buffer = storage.memory[free_set_offset..][0..sector.free_set_size];
+        assert(vsr.checksum(free_set_buffer) == sector.free_set_checksum);
+
+        const client_table_offset = vsr.Zone.superblock.offset(
+            Format.offset_client_table(sector.copy, sector.sequence));
+        const client_table_buffer =
+            storage.memory[client_table_offset..][0..sector.client_table_size];
+        assert(vsr.checksum(client_table_buffer) == sector.client_table_checksum);
+
+        const Manifest = superblock.SuperBlockManifest;
+        var manifest = Manifest.init(
+            storage.allocator,
+            @divExact(
+                superblock.superblock_trailer_manifest_size_max,
+                Manifest.BlockReferenceSize,
+            ),
+            @import("../lsm/tree.zig").table_count_max,
+        ) catch unreachable;
+        defer manifest.deinit(storage.allocator);
+
+        manifest.decode(manifest_buffer);
+
+        for (manifest.addresses[0..manifest.count]) |block_address, i| {
+            const block_offset = vsr.Zone.grid.offset((block_address - 1) * config.block_size);
+            const block_header = mem.bytesAsValue(
+                vsr.Header,
+                storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
+            );
+            assert(block_header.op == block_address);
+            assert(block_header.checksum == manifest.checksums[i]);
+            assert(block_header.operation == BlockType.manifest.operation());
         }
     }
 };

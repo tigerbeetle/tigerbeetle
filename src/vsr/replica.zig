@@ -129,8 +129,12 @@ pub fn ReplicaType(
         /// Invariants (not applicable during status=recovering):
         /// * `replica.op` exists in the Journal.
         /// * `replica.op ≥ replica.commit_min`.
-        /// * `replica.op ≤ replica.op_checkpoint_trigger`: don't wrap the WAL until we are sure
-        ///   that the overwritten entry will not be required for recovery.
+        /// * `replica.op - replica.commit_min    ≤ journal_slot_count`
+        /// * `replica.op - replica.op_checkpoint ≤ journal_slot_count`
+        ///   It is safe to overwrite `op_checkpoint` itself.
+        /// * `replica.op ≤ replica.op_checkpoint_trigger`:
+        ///   Don't wrap the WAL until we are sure that the overwritten entry will not be required
+        ///   for recovery.
         // TODO: When recovery protocol is removed, load the `op` from the WAL, and verify that it is ≥op_checkpoint.
         // Also verify that a corresponding header exists in the WAL.
         op: u64,
@@ -244,7 +248,15 @@ pub fn ReplicaType(
         /// Seeded with the replica's index number.
         prng: std.rand.DefaultPrng,
 
-        on_change_state: ?fn (replica: *Self) void = null,
+        /// Simulator hooks.
+        on_change_state: ?fn (replica: *const Self) void = null,
+        /// Called immediately after a checkpoint.
+        /// Note: The replica may checkpoint without calling this function:
+        /// 1. Begin checkpoint.
+        /// 2. Write 2/4 SuperBlock copies.
+        /// 3. Crash.
+        /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
+        on_checkpoint: ?fn (replica: *const Self) void = null,
 
         /// Called when `commit_prepare` finishes committing.
         commit_callback: ?fn (*Self) void = null,
@@ -2610,8 +2622,10 @@ pub fn ReplicaType(
             // They will only be compacted to disk in the next measure.
             // Therefore, only ops "A..D" are committed to disk.
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
+            const vsr_state_commit_min = self.op_checkpoint_next();
             const vsr_state_new = .{
-                .commit_min = self.op_checkpoint_next(),
+                .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
+                .commit_min = vsr_state_commit_min,
                 .commit_max = self.commit_max,
                 .view_normal = self.view_normal,
                 .view = self.view,
@@ -2643,6 +2657,8 @@ pub fn ReplicaType(
                 self.op_checkpoint,
             });
 
+            std.debug.print("commit_op_compact_callback: {}\n", .{@ptrToInt(self)});
+            if (self.on_checkpoint) |on_checkpoint| on_checkpoint(self);
             self.commit_op_done();
         }
 
@@ -3871,7 +3887,7 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
 
-            assert(self.journal.header_with_op(self.commit_min) != null);
+            assert(self.journal.header_with_op(self.commit_min) != null); // XXX amend this invariant
             assert(self.journal.header_with_op(self.op) != null);
 
             // The replica repairs backwards from `commit_max`. But if `commit_max` is too high
@@ -5102,6 +5118,7 @@ pub fn ReplicaType(
             assert(latest.op >= self.commit_max);
             assert(latest.op >= latest.commit);
             assert(latest.op >= k);
+            // TODO: This assertion may fail until recovery protocol is removed.
             assert(latest.op <= self.op_checkpoint_trigger());
             // We expect that `commit_max` (and `commit_min`) may be greater than `latest.commit`
             // because `latest.commit` is the commit number at the time the `latest.op` prepared.
