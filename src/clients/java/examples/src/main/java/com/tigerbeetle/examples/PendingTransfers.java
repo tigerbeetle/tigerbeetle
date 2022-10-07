@@ -15,7 +15,7 @@ public final class PendingTransfers {
         final var cluster = Util.getCluster(args);
         final var addresses = Util.getAddresses(args);
 
-        System.out.println("TigerBeetle PendingTransfers demo program");
+        System.out.println("TigerBeetle PendingTransfers example");
 
         try (var client = new Client(cluster, addresses)) {
 

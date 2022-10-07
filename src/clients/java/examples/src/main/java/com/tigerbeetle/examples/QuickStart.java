@@ -14,7 +14,7 @@ public final class QuickStart {
         final var cluster = Util.getCluster(args);
         final var addresses = Util.getAddresses(args);
 
-        System.out.println("TigerBeetle QuickStart demo program");
+        System.out.println("TigerBeetle QuickStart example");
 
         try (var client = new Client(cluster, addresses)) {
 
