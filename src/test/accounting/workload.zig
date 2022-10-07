@@ -391,6 +391,10 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             for (accounts) |*account, i| {
                 const account_index = self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
                 account.* = self.auditor.accounts[account_index];
+                account.debits_pending = 0;
+                account.debits_posted = 0;
+                account.credits_pending = 0;
+                account.credits_posted = 0;
                 account.timestamp = 0;
                 results[i] = accounting_auditor.CreateAccountResultSet{};
 
@@ -403,10 +407,6 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
                     }
                     // Even if the account doesn't exist yet, we may race another request.
                     results[i].insert(.exists);
-                    results[i].insert(.exists_with_different_debits_pending);
-                    results[i].insert(.exists_with_different_debits_posted);
-                    results[i].insert(.exists_with_different_credits_pending);
-                    results[i].insert(.exists_with_different_credits_posted);
                 }
                 assert(results[i].count() > 0);
             }

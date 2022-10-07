@@ -44,6 +44,10 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub fn deinit(_: *StateMachine, _: std.mem.Allocator) void {}
 
+        // TODO This is dead code — tick() has been removed from the StateMachine
+        // interface. If we start using the test StateMachine again, tick will need
+        // to be called explicitly from the simulator to ensure async operations can
+        // finish.
         pub fn tick(state_machine: *StateMachine) void {
             if (state_machine.callback) |callback| {
                 if (state_machine.callback_ticks == 0) {
