@@ -11,9 +11,12 @@ public final class QuickStart {
 
     public static void main(String[] args) {
 
-        System.out.printf("TigerBeetle QuickStart demo program.%n");
+        final var cluster = Util.getCluster(args);
+        final var addresses = Util.getAddresses(args);
 
-        try (var client = new Client(0, new String[] {"3001"})) {
+        System.out.println("TigerBeetle QuickStart demo program");
+
+        try (var client = new Client(cluster, addresses)) {
 
             /*
              * ## Step 1 - Creating accounts.

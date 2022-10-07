@@ -19,4 +19,4 @@ fi
 
 echo "Starting tigerbeetle ..."
 FILE="./0_0.tigerbeetle.samples"
-./src/zig/lib/tigerbeetle/tigerbeetle start --addresses=3001 "$FILE"
+./src/zig/lib/tigerbeetle/tigerbeetle start --addresses=3000 "$FILE"

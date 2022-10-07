@@ -1,6 +1,9 @@
 # TigerBeetle Java examples
 
-This folder contains the following examples:
+- The examples require the client library to be compiled. See [the project README](../README.md) for specifics on building from source.
+
+- All examples require the cluster ID and addresses as part of the command line. If not supplied, the program will use the default `cluster=0` and `addresses=127.0.0.1:3000`.
+See [the documentation](https://docs.tigerbeetle.com) for more details on how running TigerBeetle.
 
 ### 1. [QuickStart.java](src/main/java/com/tigerbeetle/samples/QuickStart.java)
 
@@ -9,22 +12,8 @@ A quick overview of TigerBeetle's operation, creating two accounts and a single 
 How to run:
 
 ```bash
-mvn exec:java@QuickStart 
-```
-
-Output:
-
-```bash
-Creating accounts ...
-Creating transfer ...
-Looking up accounts ...
-╔════╤══════════╤═════════════════╤═══════════╤═══════╤══════════════╤═══════════════╤══════════════╤════════════════╗
-║ ID │ UserData │ Code            │ Ledger    │ Flags │ DebitsPosted │ DebitsPending │ CreditPosted │ CreditsPending ║
-╠════╪══════════╪═════════════════╪═══════════╪═══════╪══════════════╪═══════════════╪══════════════╪════════════════╣
-║ 1  │ 0        │ 1001 - CUSTOMER │ 978 - EUR │ none  │ 9900         │ 0             │ 0            │ 0              ║
-╟────┼──────────┼─────────────────┼───────────┼───────┼──────────────┼───────────────┼──────────────┼────────────────╢
-║ 2  │ 0        │ 2001 - SUPPLIER │ 978 - EUR │ none  │ 0            │ 0             │ 9900         │ 0              ║
-╚════╧══════════╧═════════════════╧═══════════╧═══════╧══════════════╧═══════════════╧══════════════╧════════════════╝
+cd samples
+mvn compile exec:java@QuickStart -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
  
 ### 2. LinkedEvents.java

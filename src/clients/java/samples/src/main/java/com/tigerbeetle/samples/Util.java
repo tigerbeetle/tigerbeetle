@@ -9,10 +9,59 @@ import com.jakewharton.fliptables.FlipTable;
 
 public final class Util {
 
+
+    private final static int DEFAULT_CLUSTER_ID = 0;
+
+    private final static String[] DEFAULT_CLUSTER_ADDRESSES = new String[] {"127.0.0.1:3000"};
+
     private final static String[] ACCOUNT_HEADERS = new String[] {"ID", "UserData", "Code",
             "Ledger", "Flags", "DebitsPosted", "DebitsPending", "CreditPosted", "CreditsPending"};
 
     private Util() {}
+
+    public static int getCluster(final String[] args) {
+
+        final var arg = getCommandLineArg("cluster", args);
+        if (arg != null) {
+
+            try {
+                return Integer.parseInt(arg);
+            } catch (NumberFormatException e) {
+            }
+        }
+
+        return DEFAULT_CLUSTER_ID;
+    }
+
+    public static String[] getAddresses(final String[] args) {
+
+        final var arg = getCommandLineArg("addresses", args);
+        if (arg != null) {
+            return arg.split(",");
+        }
+
+        return DEFAULT_CLUSTER_ADDRESSES;
+    }
+
+    private static String getCommandLineArg(final String key, final String[] args) {
+
+        if (args != null) {
+
+            for (final var arg : args) {
+                final var parts = arg.split("=");
+                if (parts != null && parts.length > 1) {
+
+                    if (key.equals(parts[0])) {
+                        return parts[1];
+                    }
+                }
+            }
+        }
+
+        return null;
+    };
+
+
 
     /**
      * Prints a table of all accounts to the standard output.

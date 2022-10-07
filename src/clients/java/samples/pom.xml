@@ -24,7 +24,17 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.source>11</maven.compiler.source>
     <maven.compiler.target>11</maven.compiler.target>
+    <cluster>0</cluster>
+    <addresses>127.0.0.1:3000</addresses>
   </properties>
+
+  <repositories>
+    <repository>
+      <id>build</id>
+      <name>Local build repository</name>
+      <url>file://${pom.basedir}/../src/tigerbeetle-java/target</url>
+    </repository>
+  </repositories>
 
   <dependencies>
     <dependency>
@@ -36,11 +46,8 @@
       <groupId>com.tigerbeetle</groupId>
       <artifactId>tigerbeetle-java</artifactId>
       <version>0.0.1-SNAPSHOT</version>
-      <systemPath>${pom.basedir}/../src/tigerbeetle-java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar</systemPath>
-      <scope>system</scope>
     </dependency>
   </dependencies>
-
   <build>
     <pluginManagement>
       <plugins>
@@ -110,20 +117,35 @@
           </execution>
         </executions>
       </plugin>
-
-
-      <!-- Demo -->
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
         <executions>
           <execution>
-            <?m2e ignore?>
+            <!-- Building the java client dependency -->
+            <?m2e execute onConfiguration,onIncremental?>
+            <id>build</id>
+            <phase>validate</phase>
+            <configuration>
+              <workingDirectory>${project.basedir}/../src/tigerbeetle-java</workingDirectory>
+              <executable>mvn</executable>
+              <arguments>
+                <argument>package</argument>
+                <argument>-Dmaven.test.skip=true</argument>
+                <argument>-Dmaven.javadoc.skip=true</argument>
+              </arguments>
+            </configuration>
+          </execution>
+          <!-- QuickStart demo -->
+          <execution>
             <id>QuickStart</id>
-            <phase>compile</phase>
             <configuration>
               <mainClass>com.tigerbeetle.samples.QuickStart</mainClass>
               <classpathScope>test</classpathScope>
+              <arguments>
+                <argument>cluster=${cluster}</argument>
+                <argument>addresses=${addresses}</argument>
+              </arguments>
             </configuration>
           </execution>
         </executions>
