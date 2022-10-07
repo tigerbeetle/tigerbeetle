@@ -355,10 +355,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             return result;
         }
 
-        pub fn tick(self: *StateMachine) void {
-            _ = self;
-        }
-
         pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
@@ -1490,7 +1486,7 @@ test "linked_event_chain_open" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const size = state_machine.commit(0, 1, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try expectEqualSlices(
@@ -1533,7 +1529,7 @@ test "linked_event_chain_open for an already failed batch" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const size = state_machine.commit(0, 1, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try expectEqualSlices(
@@ -1570,7 +1566,7 @@ test "linked_event_chain_open for a batch of 1" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const size = state_machine.commit(0, 1, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
     try expectEqualSlices(

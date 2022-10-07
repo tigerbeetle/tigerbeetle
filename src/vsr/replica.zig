@@ -585,7 +585,6 @@ pub fn ReplicaType(
             // self.journal.storage.tick();
 
             self.grid.tick();
-            self.state_machine.tick();
             self.message_bus.tick();
 
             if (!self.journal.recovered) {
