@@ -1,4 +1,4 @@
-package com.tigerbeetle.samples;
+package com.tigerbeetle.examples;
 
 import java.util.UUID;
 import com.tigerbeetle.*;

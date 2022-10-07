@@ -1,4 +1,4 @@
-package com.tigerbeetle.samples;
+package com.tigerbeetle.examples;
 
 import java.util.ArrayList;
 import java.util.StringJoiner;

@@ -10,12 +10,12 @@ See [the documentation](https://docs.tigerbeetle.com) for more details on how to
 A quick overview of TigerBeetle's operation, creating two accounts and a single transfer between them.
 
 Source code:
-[QuickStart.java](src/main/java/com/tigerbeetle/samples/QuickStart.java)
+[QuickStart.java](src/main/java/com/tigerbeetle/examples/QuickStart.java)
 
 How to run:
 
 ```bash
-cd samples
+cd examples
 mvn compile exec:java@QuickStart -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
 
@@ -28,12 +28,12 @@ Output:
 Demonstrates how to create groups of linked accounts and transfers that succeed or fail atomically.
 
 Source code:
-[LinkedEvents.java](src/main/java/com/tigerbeetle/samples/LinkedEvents.java)
+[LinkedEvents.java](src/main/java/com/tigerbeetle/examples/LinkedEvents.java)
 
 How to run:
 
 ```bash
-cd samples
+cd examples
 mvn compile exec:java@LinkedEvents -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
 
@@ -44,15 +44,13 @@ mvn compile exec:java@LinkedEvents -Dcluster=0 -Daddresses=127.0.0.1:3000
 Demonstrates how pending transfers work: pending credits/debits, timeouts, and posting/voiding a transfer.
 
 Source code:
-[PendingTransfers.java](src/main/java/com/tigerbeetle/samples/PendingTransfers.java)
+[PendingTransfers.java](src/main/java/com/tigerbeetle/examples/PendingTransfers.java)
 
 How to run:
 
 ```bash
-cd samples
+cd examples
 mvn compile exec:java@PendingTransfers -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
 
 ![PendingTransfers](assets/PendingTransfers.png)
-
-

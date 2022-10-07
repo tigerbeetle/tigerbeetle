@@ -4,9 +4,9 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.tigerbeetle</groupId>
-  <artifactId>samples</artifactId>
+  <artifactId>examples</artifactId>
   <version>0.0.1-SNAPSHOT</version>
-  <name>Samples</name>
+  <name>TigerBeetle Java examples</name>
   <url>https://www.tigerbeetle.com</url>
   <scm>
     <url>https://github.com/tigerbeetledb/tigerbeetle-java</url>
@@ -104,25 +104,11 @@
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
         <executions>
-          <execution>
-            <!-- Building the java client dependency -->
-            <id>build</id>
-            <phase>clean</phase>
-            <configuration>
-              <workingDirectory>${project.basedir}/../src/tigerbeetle-java</workingDirectory>
-              <executable>mvn</executable>
-              <arguments>
-                <argument>package</argument>
-                <argument>-Dmaven.test.skip=true</argument>
-                <argument>-Dmaven.javadoc.skip=true</argument>
-              </arguments>
-            </configuration>
-          </execution>
           <!-- QuickStart demo -->
           <execution>
             <id>QuickStart</id>
             <configuration>
-              <mainClass>com.tigerbeetle.samples.QuickStart</mainClass>
+              <mainClass>com.tigerbeetle.examples.QuickStart</mainClass>
               <classpathScope>test</classpathScope>
               <arguments>
                 <argument>cluster=${cluster}</argument>
@@ -134,7 +120,7 @@
           <execution>
             <id>LinkedEvents</id>
             <configuration>
-              <mainClass>com.tigerbeetle.samples.LinkedEvents</mainClass>
+              <mainClass>com.tigerbeetle.examples.LinkedEvents</mainClass>
               <classpathScope>test</classpathScope>
               <arguments>
                 <argument>cluster=${cluster}</argument>
@@ -146,7 +132,7 @@
           <execution>
             <id>PendingTransfers</id>
             <configuration>
-              <mainClass>com.tigerbeetle.samples.PendingTransfers</mainClass>
+              <mainClass>com.tigerbeetle.examples.PendingTransfers</mainClass>
               <classpathScope>test</classpathScope>
               <arguments>
                 <argument>cluster=${cluster}</argument>

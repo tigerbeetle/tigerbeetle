@@ -1,4 +1,4 @@
-package com.tigerbeetle.samples;
+package com.tigerbeetle.examples;
 
 /**
  * Example of ledgers
