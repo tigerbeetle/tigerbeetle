@@ -130,12 +130,13 @@ pub const Cluster = struct {
         assert(faulty_areas.len == options.replica_count);
 
         for (cluster.storages) |*storage, replica_index| {
+            var storage_options = options.storage_options;
+            storage_options.replica_index = @intCast(u8, replica_index);
+            storage_options.faulty_areas = faulty_areas[replica_index];
             storage.* = try Storage.init(
                 allocator,
                 superblock_zone_size + config.journal_size_max + options.grid_size_max,
-                options.storage_options,
-                @intCast(u8, replica_index),
-                faulty_areas[replica_index],
+                storage_options,
             );
         }
         errdefer for (cluster.storages) |*storage| storage.deinit(allocator);

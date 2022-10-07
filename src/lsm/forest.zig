@@ -331,23 +331,14 @@ fn test_forest_in_memory() !void {
             comptime size_max: u32,
             comptime callback: fn (*Storage) anyerror!void,
         ) !void {
-            const replica_index = 0;
             var storage = try Storage.init(
                 allocator,
                 size_max,
                 Storage.Options{
-                    .seed = 0xdeadbeef,
                     .read_latency_min = 0,
                     .read_latency_mean = 0,
                     .write_latency_min = 0,
                     .write_latency_mean = 0,
-                    .read_fault_probability = 0,
-                    .write_fault_probability = 0,
-                },
-                replica_index,
-                Storage.FaultyAreas{
-                    .first_offset = 0,
-                    .period = 0,
                 },
             );
             defer storage.deinit(allocator);

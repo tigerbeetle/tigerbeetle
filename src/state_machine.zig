@@ -1056,18 +1056,10 @@ const TestContext = struct {
             allocator,
             4096,
             .{
-                .seed = 0,
                 .read_latency_min = 0,
                 .read_latency_mean = 0,
                 .write_latency_min = 0,
                 .write_latency_mean = 0,
-                .read_fault_probability = 0,
-                .write_fault_probability = 0,
-            },
-            0,
-            .{
-                .first_offset = 0,
-                .period = 0,
             },
         );
         errdefer ctx.storage.deinit(allocator);

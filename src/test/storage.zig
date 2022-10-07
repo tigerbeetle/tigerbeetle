@@ -23,8 +23,13 @@ const log = std.log.scoped(.storage);
 pub const Storage = struct {
     /// Options for fault injection during fuzz testing
     pub const Options = struct {
-        /// Seed for the storage PRNG
-        seed: u64,
+        /// Seed for the storage PRNG.
+        seed: u64 = 0,
+
+        /// Only used for logging.
+        replica_index: ?u8 = null,
+
+        // TODO defaults for all options
 
         /// Minimum number of ticks it may take to read data.
         read_latency_min: u64,
@@ -37,10 +42,15 @@ pub const Storage = struct {
 
         /// Chance out of 100 that a read will return incorrect data, if the target memory is within
         /// the faulty area of this replica.
-        read_fault_probability: u8,
+        read_fault_probability: u8 = 0,
         /// Chance out of 100 that a read will return incorrect data, if the target memory is within
         /// the faulty area of this replica.
-        write_fault_probability: u8,
+        write_fault_probability: u8 = 0,
+
+        // In the WAL, we can't allow storage faults for the same message in a majority of
+        // the replicas as that would make recovery impossible. Instead, we only
+        // allow faults in certain areas which differ between replicas.
+        faulty_areas: ?FaultyAreas = null,
     };
 
     /// See usage in Journal.write_sectors() for details.
@@ -95,19 +105,14 @@ pub const Storage = struct {
     memory: []align(config.sector_size) u8,
     /// Set bits correspond to sectors that have ever been written to.
     memory_occupied: std.DynamicBitSetUnmanaged,
-
-    size: u64,
     /// Set bits correspond to faulty sectors. The underlying sectors of `memory` is left clean.
     faults: std.DynamicBitSetUnmanaged,
 
+    size: u64,
+
     options: Options,
-    replica_index: u8,
     prng: std.rand.DefaultPrng,
 
-    // We can't allow storage faults for the same message in a majority of
-    // the replicas as that would make recovery impossible. Instead, we only
-    // allow faults in certain areas which differ between replicas.
-    faulty_areas: FaultyAreas,
     /// Whether to enable faults (when false, this supersedes `faulty_areas`).
     /// This is used to disable faults during the replica's first startup.
     faulty: bool = true,
@@ -117,13 +122,7 @@ pub const Storage = struct {
 
     ticks: u64 = 0,
 
-    pub fn init(
-        allocator: mem.Allocator,
-        size: u64,
-        options: Storage.Options,
-        replica_index: u8,
-        faulty_areas: FaultyAreas,
-    ) !Storage {
+    pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(options.write_latency_mean >= options.write_latency_min);
         assert(options.read_latency_mean >= options.read_latency_min);
 
@@ -156,12 +155,10 @@ pub const Storage = struct {
             .allocator = allocator,
             .memory = memory,
             .memory_occupied = memory_occupied,
-            .size = size,
             .faults = faults,
+            .size = size,
             .options = options,
-            .replica_index = replica_index,
             .prng = std.rand.DefaultPrng.init(options.seed),
-            .faulty_areas = faulty_areas,
             .reads = reads,
             .writes = writes,
         };
@@ -187,6 +184,17 @@ pub const Storage = struct {
         storage.faults.deinit(allocator);
         storage.reads.deinit();
         storage.writes.deinit();
+    }
+
+    pub fn copy(storage: *Storage, target: *const Storage) void {
+        assert(storage.size == target.size);
+
+        // TODO copyExact
+        std.mem.copy(u8, storage.memory, target.memory);
+        storage.memory_occupied.toggleSet(storage.memory_occupied);
+        storage.memory_occupied.toggleSet(target.memory_occupied);
+        storage.faults.toggleSet(storage.faults);
+        storage.faults.toggleSet(target.faults);
     }
 
     pub fn tick(storage: *Storage) void {
@@ -461,10 +469,11 @@ pub const Storage = struct {
     /// Given an offset and size of a read/write, returns the range of any faulty sectors touched
     /// by the read/write.
     fn faulty_sectors(storage: *const Storage, offset: u64, size: u64) ?SectorRange {
+        const faulty_areas = storage.options.faulty_areas  orelse return null;
         const message_size_max = config.message_size_max;
-        const period = storage.faulty_areas.period;
+        const period = faulty_areas.period;
 
-        const faulty_offset = storage.faulty_areas.first_offset + (offset / period) * period;
+        const faulty_offset = faulty_areas.first_offset + (offset / period) * period;
 
         const start = std.math.max(offset, faulty_offset);
         const end = std.math.min(offset + size, faulty_offset + message_size_max);
@@ -483,10 +492,12 @@ pub const Storage = struct {
         // Randomly corrupt one of the faulty sectors the operation targeted.
         // TODO: inject more realistic and varied storage faults as described above.
         const faulty_sector = storage.random_uint_between(usize, faulty.min, faulty.max);
-        log.info("corrupting sector {} by replica {}", .{
-            faulty_sector,
-            storage.replica_index,
-        });
+        if (storage.options.replica_index) |replica_index| {
+            log.info("corrupting sector {} by replica {}", .{
+                faulty_sector,
+                replica_index,
+            });
+        }
         storage.faults.set(faulty_sector);
     }
 

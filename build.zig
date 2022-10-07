@@ -132,4 +132,18 @@ pub fn build(b: *std.build.Builder) void {
         const step = b.step("vopr", "Run the VOPR");
         step.dependOn(&run_cmd.step);
     }
+
+    {
+        const fuzz_superblock = b.addExecutable("fuzz_vsr_superblock", "src/vsr/superblock_fuzz.zig");
+        fuzz_superblock.setMainPkgPath("src");
+        fuzz_superblock.setTarget(target);
+        fuzz_superblock.setBuildMode(mode);
+
+        const run_cmd = fuzz_superblock.run();
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("fuzz_superblock", "Fuzz the SuperBlock. Args: [seed]");
+        run_step.dependOn(&run_cmd.step);
+    }
 }

@@ -337,6 +337,43 @@ pub const data_file_size_min = blk: {
 };
 
 pub fn SuperBlockType(comptime Storage: type) type {
+    //const dispatch_format = .{
+    //    .{ .op = .write_staging, 
+    //    .{ .op = .write_trailers,
+    //    .{ .op = .write_sectors,
+    //    // .working.* = .writing.*;
+    //    .{ .op = .write_staging,
+    //    .{ .op = .write_trailers,
+    //    .{ .op = .write_sectors,
+    //    .{ .op = .read_working,
+    //};
+
+    //const dispatch_open = .{
+    //    .{ .op = .read_working, .threshold = .read
+    //    // .copy = starting_for_sequence(...
+    //    // .repair = quorum.repair()
+    //    .{ .op = .read_trailers
+    //    .{ .op = .write_repair
+    //    // repair:
+    //        .{ .op = .write_trailers
+    //        .{ .op = .write_sector
+    //    .{ .op = .read_verify, .threshold = .write
+    //};
+
+    //const dispatch_checkpoint = .{
+    //    .{ .op = .write_staging
+    //    .{ .op = .write_trailers
+    //    .{ .op = .write_sector
+    //    .{ .op = .read_working, .threshold = .write
+    //        free_set.checkpoint()
+    //};
+
+    //const dispatch_view_change = .{
+    //    .{ .op = .write_view_change
+    //    .{ .op = .write_sectors,
+    //    .{ .op = .read_working, .threshold = .write
+    //};
+
     return struct {
         const SuperBlock = @This();
 
@@ -628,6 +665,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
+        // TODO maybe return an error if already in progress (for testing)?
+        // TODO if vsr_state.commit* can't be modified, maybe use a different struct for an arg?
         pub fn view_change(
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
@@ -942,7 +981,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // The staging superblock should always be one ahead, with VSR state in sync:
             assert(superblock.staging.sequence == superblock.writing.sequence + 1);
             assert(superblock.staging.parent == superblock.writing.checksum);
-            assert(meta.eql(superblock.staging.vsr_state, superblock.writing.vsr_state));
+            std.debug.print("DEBUG_A: {}\n", .{superblock.staging.vsr_state});
+            std.debug.print("DEBUG_B: {}\n", .{superblock.writing.vsr_state});
+            //assert(meta.eql(superblock.staging.vsr_state, superblock.writing.vsr_state)); // TODO maybe remove?
 
             // The superblock cluster and replica should never change once formatted:
             assert(superblock.writing.cluster == superblock.working.cluster);
@@ -1360,7 +1401,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 assert(repair_copy >= starting_copy_for_sequence(superblock.working.sequence));
                 assert(repair_copy <= stopping_copy_for_sequence(superblock.working.sequence));
                 assert(context.repair.count() <=
-                    config.superblock_copies - threshold_for_caller(context.caller)); // TODO stricter 3/4
+                    config.superblock_copies - threshold_for_caller(context.caller));
 
                 context.copy = @intCast(u8, repair_copy);
                 superblock.writing.* = superblock.working.*;
@@ -1421,7 +1462,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 }
             } else if (context.caller == .view_change) {
                 assert(meta.eql(superblock.working.vsr_state, context.vsr_state));
-                assert(meta.eql(superblock.staging.vsr_state, context.vsr_state));
+                //assert(meta.eql(superblock.staging.vsr_state, context.vsr_state)); // TODO maybe remove?
             }
 
             const queue_tail = superblock.queue_tail;
@@ -1503,12 +1544,29 @@ pub const Format = struct {
     }
 };
 
+test "SuperBlockSector" {
+    const expect = std.testing.expect;
+
+    var a = std.mem.zeroInit(SuperBlockSector, .{});
+    a.set_checksum();
+
+    assert(a.copy == 0);
+    try expect(a.valid_checksum());
+
+    a.copy += 1;
+    try expect(a.valid_checksum());
+
+    a.replica += 1;
+    try expect(!a.valid_checksum());
+}
+
 const Quorums = struct {
     const Quorum = struct {
         sector: *const SuperBlockSector,
         count: QuorumCount = QuorumCount.initEmpty(),
         valid: bool = false,
 
+        /// Returns a bitset of any missing/damaged copies.
         pub fn repair(quorum: Quorum) QuorumCount {
             assert(quorum.valid);
 
@@ -1570,7 +1628,7 @@ const Quorums = struct {
                     quorum.valid,
                 });
             } else {
-                log.err("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
+                log.warn("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
                     quorum.sector.checksum,
                     quorum.sector.parent,
                     quorum.sector.sequence,
@@ -1602,13 +1660,13 @@ const Quorums = struct {
         // Verify that the parent copy exists:
         for (quorums.slice()[1..]) |a| {
             if (a.sector.cluster != b.sector.cluster) {
-                log.err("superblock copy={} has cluster={} instead of {}", .{
+                log.warn("superblock copy={} has cluster={} instead of {}", .{
                     a.sector.copy,
                     a.sector.cluster,
                     b.sector.cluster,
                 });
             } else if (a.sector.replica != b.sector.replica) {
-                log.err("superblock copy={} has replica={} instead of {}", .{
+                log.warn("superblock copy={} has replica={} instead of {}", .{
                     a.sector.copy,
                     a.sector.replica,
                     b.sector.replica,
@@ -1670,7 +1728,7 @@ const Quorums = struct {
         } else {
             // If our read was misdirected, we definitely still want to count the copy.
             // We must just be careful to count it idempotently.
-            log.err(
+            log.warn(
                 "copy: {}/{}: checksum={x} parent={x} sequence={} misdirected from copy={}",
                 .{
                     index,
@@ -1734,125 +1792,200 @@ const Quorums = struct {
     }
 };
 
-test "SuperBlockSector" {
-    const expect = std.testing.expect;
+test "Quorums.working" {
+    // Don't print warnings from the Quorums.
+    var level = std.log.Level.err;
+    std.testing.log_level = std.log.Level.err;
+    defer std.testing.log_level = level;
 
-    var a = std.mem.zeroInit(SuperBlockSector, .{});
-    a.set_checksum();
+    const t = test_quorums_working;
+    const o = CopyTemplate.make_valid;
+    const x = CopyTemplate.make_invalid_broken;
+    const X = {}; // Ignored, just for alignment + contrast.
 
-    assert(a.copy == 0);
-    try expect(a.valid_checksum());
+    // No faults:
+    try t(2, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
+    try t(3, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
+    try t(4, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
 
-    a.copy += 1;
-    try expect(a.valid_checksum());
+    // Single fault:
+    try t(3, &.{ x(X), o(3), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
+    try t(3, &.{ o(3), o(3), o(3), o(3), x(X), o(4), o(4), o(4) }, 4);
+    // Double fault, same quorum:
+    try t(2, &.{ x(X), x(X), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
+    try t(3, &.{ x(X), x(X), o(3), o(3), o(4), o(4), o(4), o(4) }, error.ParentQuorumLost);
+    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), x(X), o(4), o(4) }, 4);
+    try t(3, &.{ o(3), o(3), o(3), o(3), x(X), x(X), o(4), o(4) }, error.ParentNotFound);
+    // Double fault, different quorums:
+    try t(3, &.{ x(X), o(3), o(3), o(3), x(X), o(4), o(4), o(4) }, 4);
+    // Triple fault, different quorums:
+    try t(3, &.{ x(X), x(X), o(3), o(3), x(X), o(4), o(4), o(4) }, error.ParentQuorumLost);
+    try t(3, &.{ x(X), o(3), o(3), o(3), x(X), x(X), o(4), o(4) }, error.ParentNotFound);
 
-    a.replica += 1;
-    try expect(!a.valid_checksum());
+    // Partial format (broken sequence=1):
+    try t(2, &.{ x(X), o(1), o(1), o(1), o(2), o(2), o(2), o(2) }, 2);
+    try t(3, &.{ x(X), o(1), o(1), o(1), o(2), o(2), o(2), o(2) }, 2);
+    try t(2, &.{ x(X), x(X), o(1), o(1), o(2), o(2), o(2), o(2) }, 2);
+    try t(3, &.{ x(X), x(X), o(1), o(1), o(2), o(2), o(2), o(2) }, error.ParentQuorumLost);
+    try t(2, &.{ x(X), x(X), x(X), o(1), o(2), o(2), o(2), o(2) }, error.ParentQuorumLost);
+    try t(2, &.{ x(X), x(X), x(X), x(X), o(2), o(2), o(2), o(2) }, error.ParentNotFound);
+    // Partial format (broken sequence=2):
+    try t(2, &.{ o(1), o(1), o(1), o(1), x(X), o(2), o(2), o(2) }, 2);
+    try t(2, &.{ o(1), o(1), o(1), o(1), x(X), x(X), o(2), o(2) }, 2);
+    try t(2, &.{ o(1), o(1), o(1), o(1), x(X), x(X), x(X), o(2) }, error.NotFound);
+    try t(2, &.{ o(1), o(1), o(1), o(1), x(X), x(X), x(X), x(X) }, error.NotFound);
+    try t(2, &.{ x(X), x(X), x(X), x(X), x(X), x(X), x(X), x(X) }, error.NotFound);
+
+    // Partial checkpoint() to sequence=4 (3 quorums):
+    try t(2, &.{ o(3), o(3), o(3), o(3), o(4), o(2), o(2), o(2) }, 3); // open after 1/4
+    try t(2, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(2), o(2) }, 4); // open after 2/4
+    try t(2, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(4), o(2) }, 4); // open after 3/4
+    // Partial checkpoint() to sequence=4 (4 quorums):
+    try t(2, &.{ o(1), o(1), o(3), o(3), o(2), o(2), o(4), o(4) }, 4);
+    try t(3, &.{ o(1), o(1), o(3), o(3), o(2), o(2), o(4), o(4) }, error.QuorumLost);
+
+    // Partial view_change() to sequence=6:
+    const s = CopyTemplate.make_valid_skip;
+    try t(2, &.{ o(3), o(3), o(3), o(3), s(6), o(4), o(4), o(4) }, 4); // open after 1/4
+    try t(2, &.{ o(3), o(3), o(3), o(3), s(6), s(6), o(4), o(4) }, 6); // open after 1/4
+    try t(2, &.{ o(3), o(3), o(3), o(3), s(6), s(6), s(6), o(4) }, 6); // open after 1/4
+    // Invalid view_change() to sequence=6:
+    const c = CopyTemplate.make_invalid_skip;
+    try t(2, &.{ o(3), o(3), o(3), o(3), c(6), c(6), o(4), o(4) }, error.SequenceNotMonotonic);
+
+    // Damaged checkpoint of sequence=4:
+    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), o(4), o(4), o(4) }, 4);
+    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), x(X), o(4), o(4) }, 4);
+    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), x(X), x(X), o(4) }, error.ParentNotFound);
+    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), x(X), x(X), x(X) }, error.ParentNotFound);
+
+    // Parent has wrong cluster|replica.
+    const m = CopyTemplate.make_invalid_misdirect;
+    try t(2, &.{ o(3), o(3), o(3), o(3), m(2), m(2), m(2), m(2) }, error.ParentNotFound);
+    try t(2, &.{ o(3), o(3), o(3), o(3), o(2), o(2), m(2), m(2) }, 3);
+    // Parent view is greater than child view.
+    const v = CopyTemplate.make_invalid_vsr_state;
+    try t(2, &.{ o(3), o(3), o(3), o(3), v(2), v(2), v(2), v(2) }, error.VSRStateNotMonotonic);
+
+    // Missing parent for sequence=4:
+    try t(2, &.{ o(1), o(1), o(1), o(1), o(2), o(2), o(4), o(4) }, error.ParentNotFound);
 }
 
-// TODO Add unit tests for Quorums.
-// TODO Test invariants and transitions across TestRunner functions.
-const TestStorage = @import("../test/storage.zig").Storage;
-const TestSuperBlock = SuperBlockType(TestStorage);
+const CopyTemplate = struct {
+    sequence: u64,
+    variant: enum {
+        valid,
+        valid_skip,
+        invalid_broken,
+        invalid_skip,
+        invalid_misdirect,
+        invalid_vsr_state,
+    },
 
-const TestRunner = struct {
-    superblock: *TestSuperBlock,
-    context_format: TestSuperBlock.Context = undefined,
-    context_open: TestSuperBlock.Context = undefined,
-    context_checkpoint: TestSuperBlock.Context = undefined,
-    context_view_change: TestSuperBlock.Context = undefined,
-    pending: usize = 0,
-
-    fn format(runner: *TestRunner, options: TestSuperBlock.FormatOptions) void {
-        runner.pending += 1;
-        runner.superblock.format(format_callback, &runner.context_format, options);
+    fn make_valid(sequence: u64) CopyTemplate {
+        return .{ .sequence = sequence, .variant = .valid };
     }
 
-    fn format_callback(context: *TestSuperBlock.Context) void {
-        const runner = @fieldParentPtr(TestRunner, "context_format", context);
-        runner.pending -= 1;
-        runner.open();
+    /// Constructs a valid copy, which skips a sequence number (view_change()).
+    fn make_valid_skip(sequence: u64) CopyTemplate {
+        return .{ .sequence = sequence, .variant = .valid_skip };
     }
 
-    fn open(runner: *TestRunner) void {
-        runner.pending += 1;
-        runner.superblock.open(open_callback, &runner.context_open);
+    /// Constructs a copy that is corrupt (invalid checksum) or a duplicate.
+    fn make_invalid_broken(_: void) CopyTemplate {
+        // Use a high sequence so that invalid copies are the last generated by
+        // test_quorums_working(), so that they can become duplicates of (earlier) valid copies.
+        return .{ .sequence = 6, .variant = .invalid_broken };
     }
 
-    fn open_callback(context: *TestSuperBlock.Context) void {
-        const runner = @fieldParentPtr(TestRunner, "context_open", context);
-        runner.pending -= 1;
-        runner.checkpoint();
-        runner.view_change();
+    /// Constructs a copy with a parent in the same copyset (sequence-2).
+    fn make_invalid_skip(sequence: u64) CopyTemplate {
+        return .{ .sequence = sequence, .variant = .invalid_skip };
     }
 
-    fn view_change(runner: *TestRunner) void {
-        runner.pending += 1;
-        runner.superblock.view_change(
-            view_change_callback,
-            &runner.context_view_change,
-            .{
-                .commit_min_checksum = runner.superblock.staging.vsr_state.commit_min_checksum,
-                .commit_min = runner.superblock.staging.vsr_state.commit_min,
-                .commit_max = runner.superblock.staging.vsr_state.commit_max + 3,
-                .view_normal = runner.superblock.staging.vsr_state.view_normal + 4,
-                .view = runner.superblock.staging.vsr_state.view + 5,
-            },
-        );
+    /// Constructs a copy with either an incorrect "cluster" or "replica".
+    fn make_invalid_misdirect(sequence: u64) CopyTemplate {
+        return .{ .sequence = sequence, .variant = .invalid_misdirect };
     }
 
-    fn view_change_callback(context: *TestSuperBlock.Context) void {
-        const runner = @fieldParentPtr(TestRunner, "context_view_change", context);
-        runner.pending -= 1;
-
-        runner.checkpoint();
+    /// Constructs a copy with a newer `VSRState` than its parent.
+    fn make_invalid_vsr_state(sequence: u64) CopyTemplate {
+        return .{ .sequence = sequence, .variant = .invalid_vsr_state };
     }
 
-    fn checkpoint(runner: *TestRunner) void {
-        runner.pending += 1;
-        runner.superblock.staging.vsr_state.commit_min_checksum += 1;
-        runner.superblock.staging.vsr_state.commit_min += 1;
-        runner.superblock.staging.vsr_state.commit_max += 1;
-        runner.superblock.checkpoint(checkpoint_callback, &runner.context_checkpoint);
-    }
-
-    fn checkpoint_callback(context: *TestSuperBlock.Context) void {
-        const runner = @fieldParentPtr(TestRunner, "context_checkpoint", context);
-        runner.pending -= 1;
+    fn less_than(_: void, a: CopyTemplate, b: CopyTemplate) bool {
+        return a.sequence < b.sequence;
     }
 };
 
-test "SuperBlock" {
-    const cluster = 32;
-    const replica = 4;
-    const size_max = data_file_size_min;
+fn test_quorums_working(
+    threshold: u8,
+    copies: *[8]CopyTemplate,
+    result: Quorums.Error!u64,
+) !void {
+    var prng = std.rand.DefaultPrng.init(@intCast(u64, std.time.milliTimestamp()));
+    const random = prng.random();
+    const misdirect = random.boolean(); // true:cluster false:replica
+    var quorums: Quorums = undefined;
+    var sectors: [8]SuperBlockSector = undefined;
+    var checksums: [6]u128 = undefined;
 
-    var storage = try TestStorage.init(std.testing.allocator, superblock_zone_size, .{
-        .seed = 0,
-        .read_latency_min = 1,
-        .read_latency_mean = 1,
-        .write_latency_min = 1,
-        .write_latency_mean = 1,
-        .read_fault_probability = 0,
-        .write_fault_probability = 0,
-    }, replica, .{
-        .first_offset = superblock_zone_size,
-        .period = 1,
-    });
-    defer storage.deinit(std.testing.allocator);
+    // Create sectors in ascending-sequence order to build the checksum/parent hash chain.
+    std.sort.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
 
-    var message_pool = try MessagePool.init(std.testing.allocator, .replica);
-    defer message_pool.deinit(std.testing.allocator);
+    for (sectors) |*sector, i| {
+        const parent = blk: {
+            if (copies[i].sequence == 0) break :blk 0;
+            if (copies[i].variant == .invalid_skip) break :blk checksums[copies[i].sequence - 2];
+            if (copies[i].variant == .valid_skip) break :blk checksums[copies[i].sequence - 3];
+            break :blk checksums[copies[i].sequence - 1];
+        };
 
-    var superblock = try TestSuperBlock.init(std.testing.allocator, &storage, &message_pool);
-    defer superblock.deinit(std.testing.allocator);
+        sector.* = mem.zeroInit(SuperBlockSector, .{
+            .copy = @intCast(u8, i),
+            .magic = .superblock,
+            .version = SuperBlockVersion,
+            .replica = 1,
+            .size_max = data_file_size_min,
+            .sequence = copies[i].sequence,
+            .parent = parent,
+        });
 
-    var runner = TestRunner{ .superblock = &superblock };
-    runner.format(.{
-        .cluster = cluster,
-        .replica = replica,
-        .size_max = size_max,
-    });
+        switch (copies[i].variant) {
+            .valid, .valid_skip, .invalid_skip => sector.set_checksum(),
+            .invalid_broken => {
+                if (random.boolean() and i > 0) {
+                    // Error: duplicate sector (if available).
+                    sector.* = sectors[random.uintLessThanBiased(usize, i)];
+                } else {
+                    // Error: invalid checksum.
+                    sector.checksum = random.int(u128);
+                }
+            },
+            .invalid_vsr_state => {
+                sector.vsr_state.view += 1;
+                sector.set_checksum();
+            },
+            .invalid_misdirect => {
+                if (misdirect) {
+                    sector.cluster += 1;
+                } else {
+                    sector.replica += 1;
+                }
+                sector.set_checksum();
+            },
+        }
 
-    while (runner.pending > 0) storage.tick();
+        if (copies[i].variant == .valid or copies[i].variant == .invalid_vsr_state) {
+            checksums[sector.sequence] = sector.checksum;
+        }
+    }
+
+    // Shuffling the copies must never change the working quorum.
+    random.shuffle(SuperBlockSector, &sectors);
+
+    try std.testing.expectEqual(
+        result,
+        if (quorums.working(&sectors, threshold)) |working| working.sector.sequence else |err| err,
+    );
 }
