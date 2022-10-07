@@ -40,7 +40,7 @@ pub fn build(b: *std.build.Builder) void {
         // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
         // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
         b.cache_root = "zig-cache/" ++ platform[1];
-        b.global_cache_root = "zig-cache/global";
+        b.global_cache_root = "zig-cache/global-" ++ platform[1];
 
         lib.install();
     }

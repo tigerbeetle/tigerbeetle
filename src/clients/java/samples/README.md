@@ -1,9 +1,9 @@
 # TigerBeetle Java examples
 
-- The examples require the client library to be compiled. See [the project README](../README.md) for specifics on building from source.
+- The examples require the client library to be compiled. See [the project README](../README.md#building-from-source) for specifics on building from source.
 
 - All examples require the cluster ID and addresses as part of the command line. If not supplied, the program will use the default `cluster=0` and `addresses=127.0.0.1:3000`.
-See [the documentation](https://docs.tigerbeetle.com) for more details on how running TigerBeetle.
+See [the documentation](https://docs.tigerbeetle.com) for more details on how to run TigerBeetle.
 
 ### 1. Quick start
 

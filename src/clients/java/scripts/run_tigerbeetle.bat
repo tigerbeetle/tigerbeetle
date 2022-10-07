@@ -14,4 +14,4 @@ if exist "!ZIG_FILE!" DEL /F "!ZIG_FILE!"
 .\src\zig\lib\tigerbeetle\tigerbeetle.exe format --cluster=0 --replica=0 !ZIG_FILE!
 
 echo Starting replica
-.\src\zig\lib\tigerbeetle\tigerbeetle.exe start --addresses=3001 !ZIG_FILE!
+.\src\zig\lib\tigerbeetle\tigerbeetle.exe start --addresses=3000 !ZIG_FILE!
