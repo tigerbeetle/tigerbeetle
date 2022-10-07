@@ -15,6 +15,10 @@ How to run:
 cd samples
 mvn compile exec:java@QuickStart -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
+
+Output:
+
+![QuickStart](assets/QuickStart.png)
  
 ### 2. [LinkedEvents.java](src/main/java/com/tigerbeetle/samples/LinkedEvents.java)
 
@@ -26,6 +30,8 @@ How to run:
 cd samples
 mvn compile exec:java@LinkedEvents -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
+
+![LinkedEvents](assets/LinkedEvents.png)
 
 ### 3. PendingTransfers.java
 
