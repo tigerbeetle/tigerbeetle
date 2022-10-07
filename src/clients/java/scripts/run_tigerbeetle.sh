@@ -8,7 +8,7 @@ echo "Building TigerBeetle..."
 echo "Formatting replica ..."
 
 # Be careful to use a benchmark-specific filename so that we don't erase a real data file:
-FILE="./0_0.tigerbeetle.samples"
+FILE="./0_0.tigerbeetle.examples"
 if [ -f "$FILE" ]; then
     rm "$FILE"
 fi
@@ -16,5 +16,5 @@ fi
 ./src/zig/lib/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 "$FILE"
 
 echo "Starting tigerbeetle ..."
-FILE="./0_0.tigerbeetle.samples"
+FILE="./0_0.tigerbeetle.examples"
 ./src/zig/lib/tigerbeetle/tigerbeetle start --addresses=3000 "$FILE"

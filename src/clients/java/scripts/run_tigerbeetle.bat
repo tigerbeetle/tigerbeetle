@@ -7,7 +7,7 @@ cd .\src\zig\lib\tigerbeetle
 move .\zig-out\bin\tigerbeetle.exe .
 cd ..\..\..\..
 
-set ZIG_FILE=.\0_0.tigerbeetle.samples
+set ZIG_FILE=.\0_0.tigerbeetle.examples
 
 echo Initializing replica
 if exist "!ZIG_FILE!" DEL /F "!ZIG_FILE!"

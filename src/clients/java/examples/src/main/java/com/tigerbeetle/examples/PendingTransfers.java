@@ -1,4 +1,4 @@
-package com.tigerbeetle.samples;
+package com.tigerbeetle.examples;
 
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -147,8 +147,8 @@ public final class PendingTransfers {
             /*
              * ################### Step 5 ###################
              */
-            System.out.printf(
-                    "Checking the account's balance after posting the pending transfer:%n");
+            System.out
+                    .printf("Checking the account's balance after posting the pending transfer:%n");
 
             // Creating a batch with the account's ids.
             ids = new IdBatch(2);
