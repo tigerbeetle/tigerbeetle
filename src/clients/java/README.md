@@ -15,7 +15,7 @@ A client needs to be configured with a `clusterID` and `replicaAddresses`.
 The `Client` class is thread-safe and for better performance, a single instance should be shared between multiple concurrent tasks.
 Multiple clients can be instantiated in case of connecting to more than one TigerBeetle cluster.
 
-> Your operating system should be Linux (kernel >= v5.6) or macOS. Windows support is not yet available.
+> Your operating system should be Linux (kernel >= v5.6), macOS or Windows.
 
 ```java
 import com.tigerbeetle.Client;
@@ -27,7 +27,7 @@ Client client = new Client(0, new String[] { "127.0.0.1:3001", "127.0.0.1:3002",
 
 ### Account Creation
 
-All TigerBeetle's IDs are 128-bit unsigned integers that can be represented as a `byte[]` array of 16 bytes, a pair of `long` or a `java.util.UUID`.
+All TigerBeetle's IDs are 128-bit unsigned integers that can be represented as a `byte[]` array of 16 bytes or a pair of `long`.
 
 ```java
 import com.tigerbeetle.Client;
@@ -134,17 +134,8 @@ while(errors.next()) {
 
 ### 1. Clone this repository
 
-Clone loading the submodules
-
 ```bash
 git clone --recurse-submodules https://github.com/tigerbeetledb/tigerbeetle-java.git
-```
-
-Or initialize the submodules after cloning
-
-```bash
-git submodule init
-git submodule update 
 ```
 ### 2. Install Zig and Tigerbeetle
 
