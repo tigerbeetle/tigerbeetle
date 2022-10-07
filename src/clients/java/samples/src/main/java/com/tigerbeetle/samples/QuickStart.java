@@ -41,7 +41,7 @@ public final class QuickStart {
             accounts.setUserData(null);
             accounts.setCode(AccountCodes.SUPPLIER.Code);
             accounts.setLedger(Ledgers.EUR.Code);
-            accounts.setFlags(AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS);
+            accounts.setFlags(AccountFlags.NONE);
 
             // Submitting the accounts for creation.
             final var accountErrors = client.createAccounts(accounts);
