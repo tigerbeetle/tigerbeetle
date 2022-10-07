@@ -148,6 +148,18 @@
               </arguments>
             </configuration>
           </execution>
+          <!-- LinkedEvents demo -->
+          <execution>
+            <id>LinkedEvents</id>
+            <configuration>
+              <mainClass>com.tigerbeetle.samples.LinkedEvents</mainClass>
+              <classpathScope>test</classpathScope>
+              <arguments>
+                <argument>cluster=${cluster}</argument>
+                <argument>addresses=${addresses}</argument>
+              </arguments>
+            </configuration>
+          </execution>          
         </executions>
       </plugin>
     </plugins>

@@ -6,7 +6,8 @@ package com.tigerbeetle.samples;
 public enum AccountCodes {
     CUSTOMER(1001),
     SUPPLIER(2001),
-    AGENTS(3001);
+    AGENTS(3001),
+    BANK_RESERVE(9001);
 
     public final int Code;
 

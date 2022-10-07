@@ -16,20 +16,15 @@ cd samples
 mvn compile exec:java@QuickStart -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
  
-### 2. LinkedEvents.java
+### 2. [LinkedEvents.java](src/main/java/com/tigerbeetle/samples/LinkedEvents.java)
 
 Demonstrates how to create groups of linked accounts and transfers that succeed or fail atomically.
 
 How to run:
 
 ```bash
-mvn run LinkedEvents
-```
-
-Output:
-
-```bash
-TODO ...
+cd samples
+mvn compile exec:java@LinkedEvents -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
 
 ### 3. PendingTransfers.java
@@ -39,13 +34,8 @@ Demonstrates how pending transfers work: pending credits/debits, timeouts, and p
 How to run:
 
 ```bash
-mvn run PendingTransfers
-```
-
-Output:
-
-```bash
-TODO ...
+cd samples
+mvn compile exec:java@PendingTransfers -Dcluster=0 -Daddresses=127.0.0.1:3000
 ```
 
 

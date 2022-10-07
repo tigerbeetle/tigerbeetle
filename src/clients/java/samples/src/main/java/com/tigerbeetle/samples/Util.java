@@ -76,13 +76,12 @@ public final class Util {
 
             ArrayList<String> row = new ArrayList<String>();
 
-            row.add(UInt128.asBigInteger(batch.getId()).toString());
-            row.add(UInt128.asBigInteger(batch.getUserData()).toString());
+            row.add(idToString(batch.getId()));
+            row.add(idToString(batch.getUserData()));
             row.add(String.format("%d - %s", batch.getCode(),
                     AccountCodes.fromCode(batch.getCode())));
             row.add(String.format("%d - %s", batch.getLedger(),
                     Ledgers.fromCode(batch.getLedger())));
-
 
             var flags = new StringJoiner(System.lineSeparator());
             if (AccountFlags.hasCreditsMustNotExceedDebits(batch.getFlags()))
@@ -105,5 +104,16 @@ public final class Util {
 
         final var table = FlipTable.of(ACCOUNT_HEADERS, data.toArray(new String[0][]));
         System.out.println(table);
+    }
+
+    private static String idToString(final byte[] id) {
+
+        final int MAX_LEN = 6;
+        final var str = UInt128.asBigInteger(id).toString();
+        if (str.length() <= MAX_LEN) {
+            return str;
+        } else {
+            return String.format("***%s", str.substring(str.length() - MAX_LEN, str.length() - 1));
+        }
     }
 }

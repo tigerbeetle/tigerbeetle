@@ -19,7 +19,7 @@ public final class QuickStart {
         try (var client = new Client(cluster, addresses)) {
 
             /*
-             * ## Step 1 - Creating accounts.
+             * ################### Step 1 ###################
              */
             System.out.printf("Creating accounts ...%n");
 
@@ -29,7 +29,7 @@ public final class QuickStart {
             // Adding account 1.
             accounts.add();
 
-            final var customerId = UInt128.asBytes(1L);
+            final var customerId = UInt128.asBytes(UUID.randomUUID());
             accounts.setId(customerId);
             accounts.setUserData(null);
             accounts.setCode(AccountCodes.CUSTOMER.Code);
@@ -39,7 +39,7 @@ public final class QuickStart {
             // Adding account 2.
             accounts.add();
 
-            final var supplierId = UInt128.asBytes(2L);
+            final var supplierId = UInt128.asBytes(UUID.randomUUID());
             accounts.setId(supplierId);
             accounts.setUserData(null);
             accounts.setCode(AccountCodes.SUPPLIER.Code);
@@ -50,63 +50,50 @@ public final class QuickStart {
             final var accountErrors = client.createAccounts(accounts);
 
             // Checking for errors during the creation.
-            while (accountErrors.next()) {
+            if (accountErrors.getLength() > 0) {
 
-                final var errorIndex = accountErrors.getIndex();
-                accounts.setPosition(errorIndex);
+                while (accountErrors.next()) {
 
-                switch (accountErrors.getResult()) {
+                    final var errorIndex = accountErrors.getIndex();
+                    accounts.setPosition(errorIndex);
 
-                    // Checking if TigerBeetle already has this account created.
-                    // It's probably from the last time you ran this program, so it ok to
-                    // continue.
-                    case Exists:
-                    case ExistsWithDifferentDebitsPosted:
-                    case ExistsWithDifferentDebitsPending:
-                    case ExistsWithDifferentCreditsPosted:
-                    case ExistsWithDifferentCreditsPending:
-                        System.out.printf("Account %s already exists.%n",
-                                UInt128.asBigInteger(accounts.getId()));
-                        break;
-
-                    // For any other result, we abort.
-                    default:
-                        System.err.printf("Error creating account %s: %s%n.",
-                                UInt128.asBigInteger(accounts.getId()), accountErrors.getResult());
-                        return;
+                    System.err.printf("Error creating account %s: %s.%n",
+                            UInt128.asBigInteger(accounts.getId()), accountErrors.getResult());
                 }
-            }
 
-            /*
-             * ## Step 2 - Creating a transfer.
-             */
-            System.out.printf("Creating transfer ...%n");
-
-            // Creating a batch of just one transfer.
-            var transfers = new TransferBatch(1);
-
-            // Example: The customer wants to pay 99.00 EUR to the supplier.
-            transfers.add();
-            transfers.setId(UInt128.asBytes(UUID.randomUUID()));
-            transfers.setDebitAccountId(customerId);
-            transfers.setCreditAccountId(supplierId);
-            transfers.setCode(TransactionCodes.PAYMENT.Code);
-            transfers.setLedger(Ledgers.EUR.Code);
-            transfers.setAmount(9900L);
-
-            // Submitting the transaction
-            var transferErrors = client.createTransfers(transfers);
-
-            // Checking for any errors during the transfer.
-            if (transferErrors.next()) {
-                System.err.printf("Error creating the transfer: %s%n.", transferErrors.getResult());
                 return;
             }
 
             /*
-             * ## Step 3 - Checking the balance.
+             * ################### Step 2 ###################
              */
-            System.out.printf("Looking up accounts ...%n");
+            System.out.printf("Creating a transfer ...%n");
+
+            // Creating a batch of just one transfer.
+            var transfers = new TransferBatch(1);
+
+            // Example: The customer wants to pay EUR 99.00 to the supplier.
+            transfers.add();
+            transfers.setId(UInt128.asBytes(UUID.randomUUID()));
+            transfers.setDebitAccountId(customerId);
+            transfers.setCreditAccountId(supplierId);
+            transfers.setCode(TransferCodes.PAYMENT.Code);
+            transfers.setLedger(Ledgers.EUR.Code);
+            transfers.setAmount(9900L);
+
+            // Submitting the transfer
+            var transferErrors = client.createTransfers(transfers);
+
+            // Checking for any errors during the transfer.
+            if (transferErrors.next()) {
+                System.err.printf("Error creating the transfer: %s.%n", transferErrors.getResult());
+                return;
+            }
+
+            /*
+             * ################### Step 3 ###################
+             */
+            System.out.printf("Checking the account's balance after the transfer:%n");
 
             // Creating a batch with the account's ids.
             final var ids = new IdBatch(2);

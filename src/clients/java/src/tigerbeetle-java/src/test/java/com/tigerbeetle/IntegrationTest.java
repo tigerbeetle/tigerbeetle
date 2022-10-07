@@ -26,8 +26,8 @@ public class IntegrationTest {
 
     private static final byte[] account1Id;
     private static final byte[] account2Id;
-    private static final byte[] transaction1Id;
-    private static final byte[] transaction2Id;
+    private static final byte[] transfer1Id;
+    private static final byte[] transfer2Id;
 
     static {
 
@@ -35,9 +35,9 @@ public class IntegrationTest {
 
         account2Id = new byte[] {2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-        transaction1Id = new byte[] {10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        transfer1Id = new byte[] {10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-        transaction2Id = new byte[] {20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        transfer2Id = new byte[] {20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
         accounts = new AccountBatch(2);
 
@@ -249,7 +249,7 @@ public class IntegrationTest {
                 var transfers = new TransferBatch(2);
 
                 transfers.add();
-                transfers.setId(transaction1Id);
+                transfers.setId(transfer1Id);
                 transfers.setCreditAccountId(account1Id);
                 transfers.setDebitAccountId(account2Id);
                 transfers.setLedger(720);
@@ -287,9 +287,9 @@ public class IntegrationTest {
                 assertEquals(100L, lookupAccounts.getDebitsPosted());
 
 
-                // Looking up and asserting the transaction
+                // Looking up and asserting the transfer
                 var ids = new IdBatch(1);
-                ids.add(transaction1Id);
+                ids.add(transfer1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
@@ -326,7 +326,7 @@ public class IntegrationTest {
                 var transfers = new TransferBatch(2);
 
                 transfers.add();
-                transfers.setId(transaction1Id);
+                transfers.setId(transfer1Id);
                 transfers.setCreditAccountId(account1Id);
                 transfers.setDebitAccountId(account2Id);
                 transfers.setLedger(720);
@@ -366,9 +366,9 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
                 assertEquals(100L, lookupAccounts.getDebitsPosted());
 
-                // Looking up and asserting the transaction
+                // Looking up and asserting the transfer
                 var ids = new IdBatch(1);
-                ids.add(transaction1Id);
+                ids.add(transfer1Id);
 
                 CompletableFuture<TransferBatch> lookupTransfersFuture =
                         client.lookupTransfersAsync(ids);
@@ -434,7 +434,7 @@ public class IntegrationTest {
                 var transfers = new TransferBatch(1);
                 transfers.add();
 
-                transfers.setId(transaction1Id);
+                transfers.setId(transfer1Id);
                 transfers.setCreditAccountId(account1Id);
                 transfers.setDebitAccountId(account2Id);
                 transfers.setLedger(720);
@@ -472,9 +472,9 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
 
-                // Looking up and asserting the pending transaction
+                // Looking up and asserting the pending transfer
                 var ids = new IdBatch(1);
-                ids.add(transaction1Id);
+                ids.add(transfer1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
@@ -488,14 +488,14 @@ public class IntegrationTest {
                 // Creating a post_pending transfer
                 var confirmTransfers = new TransferBatch(1);
                 confirmTransfers.add();
-                confirmTransfers.setId(transaction2Id);
+                confirmTransfers.setId(transfer2Id);
                 confirmTransfers.setCreditAccountId(account1Id);
                 confirmTransfers.setDebitAccountId(account2Id);
                 confirmTransfers.setLedger(720);
                 confirmTransfers.setCode((short) 1);
                 confirmTransfers.setAmount(100);
                 confirmTransfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
-                confirmTransfers.setPendingId(transaction1Id);
+                confirmTransfers.setPendingId(transfer1Id);
 
                 var postResults = client.createTransfers(confirmTransfers);
                 assertEquals(0, postResults.getLength());
@@ -527,9 +527,9 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
                 assertEquals(100L, lookupAccounts.getDebitsPosted());
 
-                // Looking up and asserting the post_pending transaction
+                // Looking up and asserting the post_pending transfer
                 ids = new IdBatch(1);
-                ids.add(transaction2Id);
+                ids.add(transfer2Id);
                 var lookupVoidTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupVoidTransfers.getLength());
 
@@ -563,7 +563,7 @@ public class IntegrationTest {
                 var transfers = new TransferBatch(1);
                 transfers.add();
 
-                transfers.setId(transaction1Id);
+                transfers.setId(transfer1Id);
                 transfers.setCreditAccountId(account1Id);
                 transfers.setDebitAccountId(account2Id);
                 transfers.setLedger(720);
@@ -601,9 +601,9 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
 
-                // Looking up and asserting the pending transaction
+                // Looking up and asserting the pending transfer
                 var ids = new IdBatch(1);
-                ids.add(transaction1Id);
+                ids.add(transfer1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupTransfers.getLength());
 
@@ -617,14 +617,14 @@ public class IntegrationTest {
                 // Creating a void_pending transfer
                 var voidTransfers = new TransferBatch(2);
                 voidTransfers.add();
-                voidTransfers.setId(transaction2Id);
+                voidTransfers.setId(transfer2Id);
                 voidTransfers.setCreditAccountId(account1Id);
                 voidTransfers.setDebitAccountId(account2Id);
                 voidTransfers.setLedger(720);
                 voidTransfers.setCode((short) 1);
                 voidTransfers.setAmount(100);
                 voidTransfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
-                voidTransfers.setPendingId(transaction1Id);
+                voidTransfers.setPendingId(transfer1Id);
 
                 var voidResults = client.createTransfers(voidTransfers);
                 assertEquals(0, voidResults.getLength());
@@ -656,9 +656,9 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
-                // Looking up and asserting the void_pending transaction
+                // Looking up and asserting the void_pending transfer
                 ids = new IdBatch(1);
-                ids.add(transaction2Id);
+                ids.add(transfer2Id);
                 var lookupVoidTransfers = client.lookupTransfers(ids);
                 assertEquals(1, lookupVoidTransfers.getLength());
 
@@ -689,7 +689,7 @@ public class IntegrationTest {
 
                 var transfers = new TransferBatch(2);
                 transfers.add();
-                transfers.setId(transaction1Id);
+                transfers.setId(transfer1Id);
                 transfers.setCreditAccountId(account1Id);
                 transfers.setDebitAccountId(account2Id);
                 transfers.setLedger(720);
@@ -698,7 +698,7 @@ public class IntegrationTest {
                 transfers.setFlags(TransferFlags.LINKED);
 
                 transfers.add();
-                transfers.setId(transaction2Id);
+                transfers.setId(transfer2Id);
                 transfers.setCreditAccountId(account2Id);
                 transfers.setDebitAccountId(account1Id);
                 transfers.setLedger(720);
@@ -734,8 +734,8 @@ public class IntegrationTest {
 
 
                 var lookupIds = new IdBatch(2);
-                lookupIds.add(transaction1Id);
-                lookupIds.add(transaction2Id);
+                lookupIds.add(transfer1Id);
+                lookupIds.add(transfer2Id);
 
                 var lookupTransfers = client.lookupTransfers(lookupIds);
                 assertEquals(2, lookupTransfers.getLength());
