@@ -27,6 +27,7 @@ public final class Util {
             try {
                 return Integer.parseInt(arg);
             } catch (NumberFormatException e) {
+                // Ignore invalid integers
             }
         }
 
@@ -50,7 +51,6 @@ public final class Util {
             for (final var arg : args) {
                 final var parts = arg.split("=");
                 if (parts != null && parts.length > 1) {
-
                     if (key.equals(parts[0])) {
                         return parts[1];
                     }
@@ -59,9 +59,7 @@ public final class Util {
         }
 
         return null;
-    };
-
-
+    }
 
     /**
      * Prints a table of all accounts to the standard output.

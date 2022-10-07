@@ -101,31 +101,13 @@
         </executions>
       </plugin>
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-pmd-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>pdm-check</id>
-            <phase>test</phase>
-            <goals>
-              <goal>check</goal>
-            </goals>
-            <configuration>
-              <verbose>true</verbose>
-              <excludeFromFailureFile>${project.basedir}/exclude-pmd.properties</excludeFromFailureFile>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
         <executions>
           <execution>
             <!-- Building the java client dependency -->
-            <?m2e execute onConfiguration,onIncremental?>
             <id>build</id>
-            <phase>validate</phase>
+            <phase>clean</phase>
             <configuration>
               <workingDirectory>${project.basedir}/../src/tigerbeetle-java</workingDirectory>
               <executable>mvn</executable>

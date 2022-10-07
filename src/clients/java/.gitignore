@@ -7,4 +7,5 @@ samples/build
 samples/target
 *tigerbeetle.benchmark
 *tigerbeetle.samples
+*tigerbeetle.tests
 *.log
