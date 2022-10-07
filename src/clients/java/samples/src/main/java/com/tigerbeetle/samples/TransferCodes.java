@@ -6,7 +6,8 @@ package com.tigerbeetle.samples;
 public enum TransferCodes {
     DEPOSIT(1001),
     PAYMENT(2001),
-    FEE(3001);
+    FEE(3001),
+    WITHDRAW(9001);
 
     public final int Code;
 

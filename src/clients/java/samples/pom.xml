@@ -159,7 +159,19 @@
                 <argument>addresses=${addresses}</argument>
               </arguments>
             </configuration>
-          </execution>          
+          </execution>
+          <!-- PendingTransfers demo -->
+          <execution>
+            <id>PendingTransfers</id>
+            <configuration>
+              <mainClass>com.tigerbeetle.samples.PendingTransfers</mainClass>
+              <classpathScope>test</classpathScope>
+              <arguments>
+                <argument>cluster=${cluster}</argument>
+                <argument>addresses=${addresses}</argument>
+              </arguments>
+            </configuration>
+          </execution>                    
         </executions>
       </plugin>
     </plugins>
