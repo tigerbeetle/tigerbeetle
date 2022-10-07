@@ -14,7 +14,7 @@ public final class LinkedEvents {
         final var cluster = Util.getCluster(args);
         final var addresses = Util.getAddresses(args);
 
-        System.out.println("TigerBeetle LinkedEvents demo program");
+        System.out.println("TigerBeetle LinkedEvents example");
 
         try (var client = new Client(cluster, addresses)) {
 

@@ -104,7 +104,7 @@
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
         <executions>
-          <!-- QuickStart demo -->
+          <!-- QuickStart example -->
           <execution>
             <id>QuickStart</id>
             <configuration>
@@ -116,7 +116,7 @@
               </arguments>
             </configuration>
           </execution>
-          <!-- LinkedEvents demo -->
+          <!-- LinkedEvents example -->
           <execution>
             <id>LinkedEvents</id>
             <configuration>
@@ -128,7 +128,7 @@
               </arguments>
             </configuration>
           </execution>
-          <!-- PendingTransfers demo -->
+          <!-- PendingTransfers example -->
           <execution>
             <id>PendingTransfers</id>
             <configuration>
