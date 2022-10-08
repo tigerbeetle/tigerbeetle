@@ -228,6 +228,37 @@ pub const Storage = struct {
         storage.writes.deinit();
     }
 
+    /// Copy state from `origin` to `storage`:
+    ///
+    /// - ticks
+    /// - memory
+    /// - occupied memory
+    /// - faulty sectors
+    /// - reads in-progress
+    /// - writes in-progress
+    ///
+    /// Both instances must have an identical size.
+    pub fn copy(storage: *Storage, origin: *const Storage) void {
+        assert(storage.size == origin.size);
+
+        storage.ticks = origin.ticks;
+        std.mem.copy(u8, storage.memory, origin.memory);
+        storage.memory_occupied.toggleSet(storage.memory_occupied);
+        storage.memory_occupied.toggleSet(origin.memory_occupied);
+        storage.faults.toggleSet(storage.faults);
+        storage.faults.toggleSet(origin.faults);
+
+        storage.reads.len = 0;
+        for (origin.reads.items[0..origin.reads.len]) |read| {
+            storage.reads.add(read) catch unreachable;
+        }
+
+        storage.writes.len = 0;
+        for (origin.writes.items[0..origin.writes.len]) |write| {
+            storage.writes.add(write) catch unreachable;
+        }
+    }
+
     pub fn tick(storage: *Storage) void {
         storage.ticks += 1;
 
