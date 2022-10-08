@@ -14,6 +14,7 @@ const ClusterOptions = @import("test/cluster.zig").ClusterOptions;
 const Replica = @import("test/cluster.zig").Replica;
 const StateMachine = @import("test/cluster.zig").StateMachine;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
+const StorageChecker = @import("test/storage_checker.zig").StorageChecker;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
 const MessageBus = @import("test/message_bus.zig").MessageBus;
 const auditor = @import("test/accounting/auditor.zig");
@@ -44,6 +45,7 @@ const cluster_id = 0;
 
 var cluster: *Cluster = undefined;
 var state_checker: *StateChecker = undefined;
+var storage_checker: *StorageChecker = undefined;
 
 pub fn main() !void {
     comptime {
@@ -106,7 +108,8 @@ pub fn main() !void {
         // TODO Compute an upper-bound for this based on committed_requests_max.
         .grid_size_max = 1024 * 1024 * 256,
         .seed = random.int(u64),
-        .on_change_state = on_change_replica,
+        .on_change_state = on_replica_change_state,
+        .on_checkpoint = on_replica_checkpoint,
         .network_options = .{
             .packet_simulator_options = .{
                 .replica_count = replica_count,
@@ -292,6 +295,12 @@ pub fn main() !void {
     );
     defer state_checker.deinit();
 
+    storage_checker = try allocator.create(StorageChecker);
+    defer allocator.destroy(storage_checker);
+
+    storage_checker.* = StorageChecker.init(allocator);
+    defer storage_checker.deinit();
+
     // The minimum number of healthy replicas required for a crashed replica to be able to recover.
     const replica_normal_min = replicas: {
         if (replica_count == 1) {
@@ -432,9 +441,15 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
     return err_or_bytes catch @panic("Unable to extract next value from args");
 }
 
-fn on_change_replica(replica: *Replica) void {
+fn on_replica_change_state(replica: *const Replica) void {
     state_checker.check_state(replica.replica) catch |err| {
         fatal(.correctness, "state checker error: {}", .{err});
+    };
+}
+
+fn on_replica_checkpoint(replica: *const Replica) void {
+    storage_checker.check_storage(replica) catch |err| {
+        fatal(.correctness, "storage checker error: {}", .{err});
     };
 }
 

@@ -263,7 +263,15 @@ pub fn ReplicaType(
         /// Seeded with the replica's index number.
         prng: std.rand.DefaultPrng,
 
-        on_change_state: ?fn (replica: *Self) void = null,
+        /// Simulator hooks.
+        on_change_state: ?fn (replica: *const Self) void = null,
+        /// Called immediately after a checkpoint.
+        /// Note: The replica may checkpoint without calling this function:
+        /// 1. Begin checkpoint.
+        /// 2. Write 2/4 SuperBlock copies.
+        /// 3. Crash.
+        /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
+        on_checkpoint: ?fn (replica: *const Self) void = null,
 
         /// Called when `commit_prepare` finishes committing.
         commit_callback: ?fn (*Self) void = null,
@@ -2630,6 +2638,7 @@ pub fn ReplicaType(
                 self.op_checkpoint,
             });
 
+            if (self.on_checkpoint) |on_checkpoint| on_checkpoint(self);
             self.commit_op_done();
         }
 
