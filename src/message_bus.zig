@@ -811,7 +811,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             /// Acquires a free message if necessary and then calls `recv()`.
-            /// Terminates the connection if a free message cannot be obtained.
             /// If the connection has a `recv_message` and the message being parsed is
             /// at pole position then calls `recv()` immediately, otherwise copies any
             /// partially received message into a new Message and sets `recv_message`,
