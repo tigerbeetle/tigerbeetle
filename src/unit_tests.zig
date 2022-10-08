@@ -28,4 +28,5 @@ test {
     _ = @import("test/id.zig");
     _ = @import("test/accounting/auditor.zig");
     _ = @import("test/accounting/workload.zig");
+    _ = @import("test/storage.zig");
 }
