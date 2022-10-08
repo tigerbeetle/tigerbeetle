@@ -237,6 +237,8 @@ pub fn ThreadType(
             while (self.available_messages > 0) {
                 const packet = pending.pop() orelse self.submitted.pop() orelse break;
                 const message = self.client.get_message();
+                defer self.client.unref(message);
+
                 self.available_messages -= 1;
                 self.request(packet, message);
             }
@@ -245,19 +247,19 @@ pub fn ThreadType(
         fn request(self: *Self, packet: *Packet, message: *Message) void {
             // Get the size of each request structure in the packet.data
             const request_size: usize = operation_size_of(packet.operation) orelse {
-                return self.on_complete(packet, message, error.InvalidOperation);
+                return self.on_complete(packet, error.InvalidOperation);
             };
 
             // Make sure the packet.data size is correct.
             const readable = packet.data[0..packet.data_size];
             if (readable.len == 0 or readable.len % request_size != 0) {
-                return self.on_complete(packet, message, error.InvalidDataSize);
+                return self.on_complete(packet, error.InvalidDataSize);
             }
 
             // Make sure the packet.data wouldn't overflow a message.
             const writable = message.buffer[@sizeOf(Header)..];
             if (readable.len > writable.len) {
-                return self.on_complete(packet, message, error.TooMuchData);
+                return self.on_complete(packet, error.TooMuchData);
             }
 
             // Write the packet data to the message
@@ -287,9 +289,8 @@ pub fn ThreadType(
             const self = user_data.self;
             const packet = user_data.packet;
 
-            // Complete the packet without a message as it's already unref()'s by the Client.
             assert(packet.operation == @enumToInt(op));
-            self.on_complete(packet, null, results);
+            self.on_complete(packet, results);
         }
 
         const PacketError = Client.Error || error{
@@ -301,11 +302,8 @@ pub fn ThreadType(
         fn on_complete(
             self: *Self,
             packet: *Packet,
-            message: ?*Message,
             result: PacketError![]const u8,
         ) void {
-            // Mark the message as completed
-            if (message) |m| self.client.unref(m);
             assert(self.available_messages < message_pool.messages_max_client);
             self.available_messages += 1;
 
