@@ -279,11 +279,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
         /// Returns the value from the mutable or immutable table (possibly a tombstone),
         /// if one is available for the specified snapshot.
-        pub fn lookup_from_memory(
-            tree: *Tree,
-            snapshot: u64,
-            key: Key,
-        ) ?*const Value {
+        pub fn lookup_from_memory(tree: *Tree, snapshot: u64, key: Key) ?*const Value {
             assert(snapshot <= tree.prefetch_snapshot_max);
 
             if (snapshot == tree.prefetch_snapshot_max) {
@@ -294,7 +290,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 // This simplifies the mutable table and eliminates compaction for duplicate puts.
             }
 
-            if (!tree.table_immutable.free and tree.table_immutable.snapshot_min < snapshot) {
+            if (!tree.table_immutable.free and tree.table_immutable.snapshot_min <= snapshot) {
                 if (tree.table_immutable.get(key)) |value| return value;
             }
 
@@ -933,18 +929,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tree.manifest.compact(compact_manifest_callback);
         }
 
+        /// Called after the fourth/last beat.
         fn compact_mutable_table_into_immutable(tree: *Tree) void {
-            // Ensure mutable table can be flushed into immutable table.
             if (tree.table_mutable.count() == 0) return;
             assert(tree.table_immutable.free);
+            assert((tree.compaction_op + 1) % config.lsm_batch_multiple == 0);
 
             // Sort the mutable table values directly into the immutable table's array.
             const values_max = tree.table_immutable.values_max();
             const values = tree.table_mutable.sort_into_values_and_clear(values_max);
             assert(values.ptr == values_max.ptr);
 
-            // Take a manifest snapshot and setup the immutable table with the sorted values.
-            const snapshot_min = tree.compaction_table_immutable.snapshot;
+            const snapshot_min = compaction_snapshot_for_op(tree.compaction_op) + 1;
+            assert(snapshot_min <= tree.prefetch_snapshot_max);
             tree.table_immutable.reset_with_sorted_values(snapshot_min, values);
 
             assert(tree.table_mutable.count() == 0);
