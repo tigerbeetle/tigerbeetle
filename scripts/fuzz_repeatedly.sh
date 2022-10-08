@@ -2,8 +2,8 @@
 set -eEuo pipefail
 
 # Repeatedly runs some zig build command with different seeds and stores the output in the current directory.
-# Eg `fuzz_repeatedly lsm_forest_fuzz` will run `zig build lsm_forest_fuzz -- seed $SEED > fuzz_lsm_forest_fuzz_${SEED}`
-# Use ./unique_fuzz_errors to analyze the results.
+# Eg `fuzz_repeatedly.sh lsm_forest_fuzz` will run `zig build lsm_forest_fuzz -- seed $SEED > fuzz_lsm_forest_fuzz_${SEED}`
+# Use ./fuzz_unique_errors.sh to analyze the results.
 
 FUZZ_COMMAND=$1
 
