@@ -18,7 +18,7 @@ pub fn binary_search_values_raw(
     values: []const Value,
     key: Key,
 ) u32 {
-    assert(values.len > 0);
+    if (values.len == 0) return 0;
 
     var offset: usize = 0;
     var length: usize = values.len;
@@ -99,6 +99,10 @@ const test_binary_search = struct {
         return math.order(a, b);
     }
 
+    fn less_than_key(_: void, a: u32, b: u32) bool {
+        return a < b;
+    }
+
     fn exhaustive_search(keys_count: u32) !void {
         const keys = try gpa.alloc(u32, keys_count);
         defer gpa.free(keys);
@@ -164,6 +168,40 @@ const test_binary_search = struct {
             try std.testing.expectEqual(expect.exact, actual.exact);
         }
     }
+
+    fn random_search(random: std.rand.Random, iter: usize) !void {
+        const keys_count = @floatToInt(usize, @trunc(random.floatExp(f64) * @intToFloat(f64, iter)));
+
+        const keys = try std.testing.allocator.alloc(u32, keys_count);
+        defer std.testing.allocator.free(keys);
+
+        for (keys) |*key| key.* = @floatToInt(u32, @trunc(random.floatExp(f64) * 100));
+        std.sort.sort(u32, keys, {}, less_than_key);
+        const target_key = @floatToInt(u32, @trunc(random.floatExp(f64) * 100));
+
+        var expect: BinarySearchResult = .{ .index = 0, .exact = false };
+        for (keys) |key, i| {
+            switch (compare_keys(key, target_key)) {
+                .lt => expect.index = @intCast(u32, i) + 1,
+                .eq => {
+                    expect.exact = true;
+                    break;
+                },
+                .gt => break,
+            }
+        }
+
+        const actual = binary_search_keys(
+            u32,
+            compare_keys,
+            keys,
+            target_key,
+        );
+
+        if (log) std.debug.print("expected: {}, actual: {}\n", .{ expect, actual });
+        try std.testing.expectEqual(expect.index, actual.index);
+        try std.testing.expectEqual(expect.exact, actual.exact);
+    }
 };
 
 // TODO test search on empty slice
@@ -211,4 +249,12 @@ test "binary search: duplicates" {
             .{ .index = 9, .exact = false },
         },
     );
+}
+
+test "binary search: random" {
+    var rng = std.rand.DefaultPrng.init(42);
+    var i: usize = 0;
+    while (i < 2048) : (i += 1) {
+        try test_binary_search.random_search(rng.random(), i);
+    }
 }
