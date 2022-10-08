@@ -138,17 +138,34 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
-        const lsm_forest_fuzz = b.addExecutable("lsm_forest_fuzz", "src/lsm/forest_fuzz.zig");
-        lsm_forest_fuzz.setMainPkgPath("src");
-        lsm_forest_fuzz.setTarget(target);
-        lsm_forest_fuzz.setBuildMode(mode);
+        const fuzz_lsm_forest = b.addExecutable("fuzz_lsm_forest", "src/lsm/forest_fuzz.zig");
+        fuzz_lsm_forest.setMainPkgPath("src");
+        fuzz_lsm_forest.setTarget(target);
+        fuzz_lsm_forest.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
-        lsm_forest_fuzz.omit_frame_pointer = false;
+        fuzz_lsm_forest.omit_frame_pointer = false;
 
-        const run_cmd = lsm_forest_fuzz.run();
+        const run_cmd = fuzz_lsm_forest.run();
         if (b.args) |args| run_cmd.addArgs(args);
 
-        const run_step = b.step("lsm_forest_fuzz", "Fuzz the LSM forest. Args: [--seed <seed>]");
+        const run_step = b.step("fuzz_lsm_forest", "Fuzz the LSM forest. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const fuzz_vsr_superblock = b.addExecutable(
+            "fuzz_vsr_superblock",
+            "src/vsr/superblock_fuzz.zig",
+        );
+        fuzz_vsr_superblock.setMainPkgPath("src");
+        fuzz_vsr_superblock.setTarget(target);
+        fuzz_vsr_superblock.setBuildMode(mode);
+
+        const run_cmd = fuzz_vsr_superblock.run();
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("fuzz_vsr_superblock", "Fuzz the SuperBlock. Args: [seed]");
         run_step.dependOn(&run_cmd.step);
     }
 
@@ -168,7 +185,10 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
-        const lsm_segmented_array_fuzz = b.addExecutable("lsm_segmented_array_fuzz", "src/lsm/segmented_array_fuzz.zig");
+        const lsm_segmented_array_fuzz = b.addExecutable(
+            "lsm_segmented_array_fuzz",
+            "src/lsm/segmented_array_fuzz.zig",
+        );
         lsm_segmented_array_fuzz.setMainPkgPath("src");
         lsm_segmented_array_fuzz.setTarget(target);
         lsm_segmented_array_fuzz.setBuildMode(mode);
