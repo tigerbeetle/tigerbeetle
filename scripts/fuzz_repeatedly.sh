@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -eEuo pipefail
+
+# Repeatedly runs some zig build command with different seeds and stores the output in the current directory.
+# Eg `fuzz_repeatedly.sh lsm_forest_fuzz` will run `zig build lsm_forest_fuzz -- seed $SEED > fuzz_lsm_forest_fuzz_${SEED}`
+# Use ./fuzz_unique_errors.sh to analyze the results.
+
+FUZZ_COMMAND=$1
+
+while true; do
+  SEED=$(od -A n -t u8 -N 8 /dev/urandom | xargs)
+  (zig build "$FUZZ_COMMAND" -- --seed "$SEED" 2>&1 || true) | tee "fuzz_${FUZZ_COMMAND}_${SEED}"
+done
