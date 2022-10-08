@@ -132,4 +132,18 @@ pub fn build(b: *std.build.Builder) void {
         const step = b.step("vopr", "Run the VOPR");
         step.dependOn(&run_cmd.step);
     }
+
+    {
+        const lsm_forest_fuzz = b.addExecutable("lsm_forest_fuzz", "src/lsm/forest_fuzz.zig");
+        lsm_forest_fuzz.setMainPkgPath("src");
+        lsm_forest_fuzz.setTarget(target);
+        lsm_forest_fuzz.setBuildMode(mode);
+
+        const run_cmd = lsm_forest_fuzz.run();
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("lsm_forest_fuzz", "Fuzz the LSM forest. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
 }
