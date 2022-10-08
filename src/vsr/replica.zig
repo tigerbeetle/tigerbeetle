@@ -144,8 +144,12 @@ pub fn ReplicaType(
         /// Invariants (not applicable during status=recovering):
         /// * `replica.op` exists in the Journal.
         /// * `replica.op ≥ replica.commit_min`.
-        /// * `replica.op ≤ replica.op_checkpoint_trigger`: don't wrap the WAL until we are sure
-        ///   that the overwritten entry will not be required for recovery.
+        /// * `replica.op - replica.commit_min    ≤ journal_slot_count`
+        /// * `replica.op - replica.op_checkpoint ≤ journal_slot_count`
+        ///   It is safe to overwrite `op_checkpoint` itself.
+        /// * `replica.op ≤ replica.op_checkpoint_trigger`:
+        ///   Don't wrap the WAL until we are sure that the overwritten entry will not be required
+        ///   for recovery.
         // TODO: When recovery protocol is removed, load the `op` from the WAL, and verify that it is ≥op_checkpoint.
         // Also verify that a corresponding header exists in the WAL.
         op: u64,
@@ -2591,8 +2595,10 @@ pub fn ReplicaType(
             // They will only be compacted to disk in the next measure.
             // Therefore, only ops "A..D" are committed to disk.
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
+            const vsr_state_commit_min = self.op_checkpoint_next();
             const vsr_state_new = .{
-                .commit_min = self.op_checkpoint_next(),
+                .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
+                .commit_min = vsr_state_commit_min,
                 .commit_max = self.commit_max,
                 .view_normal = self.view_normal,
                 .view = self.view,
@@ -5050,6 +5056,7 @@ pub fn ReplicaType(
             // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:
             assert(op >= self.commit_max);
             assert(op >= commit_max);
+            // TODO: This assertion may fail until recovery protocol is removed.
             assert(op <= self.op_checkpoint_trigger());
 
             // We expect that our commit numbers may also be greater even than `commit_max` because

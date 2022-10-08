@@ -98,9 +98,12 @@ pub const SuperBlockSector = extern struct {
     /// The size of the client table entries stored in the superblock trailer.
     client_table_size: u32,
 
-    reserved: [3160]u8 = [_]u8{0} ** 3160,
+    reserved: [3136]u8 = [_]u8{0} ** 3136,
 
     pub const VSRState = extern struct {
+        /// The vsr.Header.checksum of commit_min's message.
+        commit_min_checksum: u128,
+
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
 
@@ -113,8 +116,10 @@ pub const SuperBlockSector = extern struct {
         /// The view number of the replica.
         view: u32,
 
+        reserved: [8]u8 = [_]u8{0} ** 8,
+
         comptime {
-            assert(@sizeOf(VSRState) == 24);
+            assert(@sizeOf(VSRState) == 48);
             // Assert that there is no implicit padding in the struct.
             assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
         }
@@ -126,6 +131,8 @@ pub const SuperBlockSector = extern struct {
         pub fn monotonic(old: VSRState, new: VSRState) bool {
             assert(old.internally_consistent());
             assert(new.internally_consistent());
+            assert(old.commit_min_checksum == new.commit_min_checksum or
+                old.commit_min != new.commit_min);
 
             if (old.view > new.view) return false;
             if (old.view_normal > new.view_normal) return false;
@@ -214,6 +221,7 @@ pub const SuperBlockSector = extern struct {
         assert(superblock.flags == 0);
 
         for (mem.bytesAsSlice(u64, &superblock.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &superblock.vsr_state.reserved)) |word| assert(word == 0);
 
         superblock.checksum = superblock.calculate_checksum();
     }
@@ -245,6 +253,9 @@ pub const SuperBlockSector = extern struct {
 
         for (mem.bytesAsSlice(u64, &a.reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &b.reserved)) |word| assert(word == 0);
+
+        for (mem.bytesAsSlice(u64, &a.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &b.vsr_state.reserved)) |word| assert(word == 0);
 
         return true;
     }
@@ -542,6 +553,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .free_set_checksum = 0,
                 .client_table_checksum = 0,
                 .vsr_state = .{
+                    .commit_min_checksum = 0,
                     .commit_min = 0,
                     .commit_max = 0,
                     .view_normal = 0,
@@ -624,10 +636,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
         ) void {
             assert(superblock.opened);
             assert(vsr_state.commit_min == superblock.staging.vsr_state.commit_min);
+            assert(vsr_state.commit_min_checksum ==
+                superblock.staging.vsr_state.commit_min_checksum);
 
             log.debug(
-                "view_change: commit_min={}..{} commit_max={}..{} view_normal={}..{} view={}..{}",
+                "view_change: commit_min_checksum={}..{} commit_min={}..{} commit_max={}..{} " ++
+                "view_normal={}..{} view={}..{}",
                 .{
+                    superblock.staging.vsr_state.commit_min_checksum,
+                    vsr_state.commit_min_checksum,
+
                     superblock.staging.vsr_state.commit_min,
                     vsr_state.commit_min,
 
@@ -1079,6 +1097,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         // TODO Assert working.size.
                         assert(working.manifest_size == 0);
                         assert(working.free_set_size == 8);
+                        assert(working.vsr_state.commit_min_checksum == 0);
                         assert(working.vsr_state.commit_min == 0);
                         assert(working.vsr_state.commit_max == 0);
                         assert(working.vsr_state.view_normal == 0);
@@ -1090,7 +1109,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     superblock.working.* = working.*;
                     log.debug(
                         "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
-                            "replica={} size={} commit_min={} commit_max={} view_normal={} view={}",
+                            "replica={} size={} " ++
+                            "commit_min_checksum={} commit_min={} commit_max={} " ++
+                            "view_normal={} view={}",
                         .{
                             @tagName(context.caller),
                             superblock.working.checksum,
@@ -1098,6 +1119,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                             superblock.working.cluster,
                             superblock.working.replica,
                             superblock.working.size,
+                            superblock.working.vsr_state.commit_min_checksum,
                             superblock.working.vsr_state.commit_min,
                             superblock.working.vsr_state.commit_max,
                             superblock.working.vsr_state.view_normal,
