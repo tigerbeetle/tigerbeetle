@@ -582,6 +582,7 @@ pub fn GrooveType(
                         id_tree_value.timestamp,
                     )) |object| {
                         assert(!ObjectTreeHelpers(Object).tombstone(object));
+                        assert(object.id == id);
                         groove.prefetch_objects.putAssumeCapacity(object.*, {});
                     } else {
                         // The id was in the IdTree's value cache, but not in the ObjectTree's

@@ -78,15 +78,13 @@ pub const StateChecker = struct {
 
     pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
         const replica = state_checker.replicas[replica_index];
-
-        // TODO Verify that `replica.commit_min` always exists after recovering via state transfer.
-        // Until the journal has recovered, `commit_min` may not be in the headers.
-        // Skip commit_min=0 because op=0 may not be in the headers even after recovery.
         const commit_header = header: {
-            if (replica.journal.recovered and replica.commit_min > 0) {
-                break :header replica.journal.header_with_op(replica.commit_min).?;
+            if (replica.journal.recovered) {
+                const commit_header = replica.journal.header_with_op(replica.commit_min);
+                assert(commit_header != null or replica.commit_min == replica.op_checkpoint);
+                break :header replica.journal.header_with_op(replica.commit_min);
             } else {
-                // Still recovering or waiting for the first commit.
+                // Still recovering.
                 break :header null;
             }
         };

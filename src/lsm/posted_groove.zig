@@ -188,6 +188,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         /// For example, if all unique operations require the same two dependencies.
         pub fn prefetch_enqueue(groove: *PostedGroove, id: u128) void {
             if (groove.tree.lookup_from_memory(groove.prefetch_snapshot.?, id)) |value| {
+                assert(value.id == id);
                 switch (value.data) {
                     .posted => groove.prefetch_objects.putAssumeCapacity(value.id, true),
                     .voided => groove.prefetch_objects.putAssumeCapacity(value.id, false),

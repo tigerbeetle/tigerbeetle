@@ -138,7 +138,7 @@ transfer in the batch, to create a chain of transfers, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first transfer without this flag. The last
 transfer in a batch may therefore never have `flags.linked` set as
-this would leave a chain open-ended.
+this would leave a chain open-ended (see `linked_event_chain_open`).
 
 Multiple chains of individual transfers may coexist within a batch to
 succeed or fail independently. Transfers within a chain are executed

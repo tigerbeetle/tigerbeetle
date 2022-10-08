@@ -358,6 +358,10 @@ comptime {
     assert(message_size_max % sector_size == 0);
     assert(message_size_max >= sector_size);
 
+    assert(superblock_copies % 2 == 0);
+    assert(superblock_copies >= 4);
+    assert(superblock_copies <= 8);
+
     // ManifestLog serializes the level as a u7.
     assert(lsm_levels > 0);
     assert(lsm_levels <= std.math.maxInt(u7));
