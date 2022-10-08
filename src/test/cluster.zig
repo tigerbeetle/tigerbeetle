@@ -120,21 +120,22 @@ pub const Cluster = struct {
         };
 
         var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
-        const faulty_areas = Storage.generate_faulty_areas(
+        const faulty_wal_areas = Storage.generate_faulty_wal_areas(
             prng,
             config.journal_size_max,
             options.replica_count,
             &buffer,
         );
-        assert(faulty_areas.len == options.replica_count);
+        assert(faulty_wal_areas.len == options.replica_count);
 
         for (cluster.storages) |*storage, replica_index| {
+            var storage_options = options.storage_options;
+            storage_options.replica_index = @intCast(u8, replica_index);
+            storage_options.faulty_wal_areas = faulty_wal_areas[replica_index];
             storage.* = try Storage.init(
                 allocator,
                 superblock_zone_size + config.journal_size_max + options.grid_size_max,
-                options.storage_options,
-                @intCast(u8, replica_index),
-                faulty_areas[replica_index],
+                storage_options,
             );
         }
         errdefer for (cluster.storages) |*storage| storage.deinit(allocator);

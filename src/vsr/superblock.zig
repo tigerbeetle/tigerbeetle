@@ -800,7 +800,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = offset_manifest(context.copy, superblock.writing.sequence);
+            const offset = Format.offset_manifest(context.copy, superblock.writing.sequence);
 
             mem.set(u8, buffer[superblock.writing.manifest_size..], 0); // Zero sector padding.
 
@@ -843,7 +843,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = offset_free_set(context.copy, superblock.writing.sequence);
+            const offset = Format.offset_free_set(context.copy, superblock.writing.sequence);
 
             mem.set(u8, buffer[superblock.writing.free_set_size..], 0); // Zero sector padding.
 
@@ -886,7 +886,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = offset_client_table(context.copy, superblock.writing.sequence);
+            const offset = Format.offset_client_table(context.copy, superblock.writing.sequence);
 
             mem.set(u8, buffer[superblock.writing.client_table_size..], 0); // Zero sector padding.
 
@@ -962,7 +962,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.writing.valid_checksum());
 
             const buffer = mem.asBytes(superblock.writing);
-            const offset = superblock_size * context.copy;
+            const offset = Format.offset_sector(context.copy);
 
             log.debug("{}: {s}: write_sector: checksum={x} sequence={} copy={} size={} offset={}", .{
                 superblock.writing.replica,
@@ -1041,7 +1041,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.copy < superblock_copies_max);
 
             const buffer = mem.asBytes(&superblock.reading[context.copy]);
-            const offset = superblock_size * context.copy;
+            const offset = Format.offset_sector(context.copy);
 
             log.debug("{s}: read_sector: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1160,7 +1160,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = offset_manifest(context.copy, superblock.working.sequence);
+            const offset = Format.offset_manifest(context.copy, superblock.working.sequence);
 
             log.debug("{s}: read_manifest: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1226,7 +1226,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = offset_free_set(context.copy, superblock.working.sequence);
+            const offset = Format.offset_free_set(context.copy, superblock.working.sequence);
 
             log.debug("{s}: read_free_set: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1298,7 +1298,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = offset_client_table(context.copy, superblock.working.sequence);
+            const offset = Format.offset_client_table(context.copy, superblock.working.sequence);
 
             log.debug("{s}: read_client_table: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1436,30 +1436,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(offset + size <= superblock.storage_offset + superblock.storage_size);
         }
 
-        fn offset_manifest(copy: u8, sequence: u64) u64 {
-            assert(copy >= starting_copy_for_sequence(sequence));
-            assert(copy <= stopping_copy_for_sequence(sequence));
-
-            return superblock_size * copy + @sizeOf(SuperBlockSector);
-        }
-
-        fn offset_free_set(copy: u8, sequence: u64) u64 {
-            assert(copy >= starting_copy_for_sequence(sequence));
-            assert(copy <= stopping_copy_for_sequence(sequence));
-
-            return superblock_size * copy + @sizeOf(SuperBlockSector) +
-                superblock_trailer_manifest_size_max;
-        }
-
-        fn offset_client_table(copy: u8, sequence: u64) u64 {
-            assert(copy >= starting_copy_for_sequence(sequence));
-            assert(copy <= stopping_copy_for_sequence(sequence));
-
-            return superblock_size * copy + @sizeOf(SuperBlockSector) +
-                superblock_trailer_manifest_size_max +
-                superblock_trailer_free_set_size_max;
-        }
-
         /// We use flexible quorums for even quorums with write quorum > read quorum, for example:
         /// * When writing, we must verify that at least 3/4 copies were written.
         /// * At startup, we must verify that at least 2/4 copies were read.
@@ -1498,6 +1474,52 @@ fn starting_copy_for_sequence(sequence: u64) u8 {
 /// Returns the last copy index (inclusive) to be written for a sequence number.
 fn stopping_copy_for_sequence(sequence: u64) u8 {
     return starting_copy_for_sequence(sequence) + config.superblock_copies - 1;
+}
+
+pub const Format = struct {
+    pub fn offset_sector(copy: u8) u64 {
+        return superblock_size * copy;
+    }
+
+    pub fn offset_manifest(copy: u8, sequence: u64) u64 {
+        assert(copy >= starting_copy_for_sequence(sequence));
+        assert(copy <= stopping_copy_for_sequence(sequence));
+
+        return superblock_size * copy + @sizeOf(SuperBlockSector);
+    }
+
+    pub fn offset_free_set(copy: u8, sequence: u64) u64 {
+        assert(copy >= starting_copy_for_sequence(sequence));
+        assert(copy <= stopping_copy_for_sequence(sequence));
+
+        return superblock_size * copy + @sizeOf(SuperBlockSector) +
+            superblock_trailer_manifest_size_max;
+    }
+
+    pub fn offset_client_table(copy: u8, sequence: u64) u64 {
+        assert(copy >= starting_copy_for_sequence(sequence));
+        assert(copy <= stopping_copy_for_sequence(sequence));
+
+        return superblock_size * copy + @sizeOf(SuperBlockSector) +
+            superblock_trailer_manifest_size_max +
+            superblock_trailer_free_set_size_max;
+    }
+};
+
+test "SuperBlockSector" {
+    const expect = std.testing.expect;
+
+    var a = std.mem.zeroInit(SuperBlockSector, .{});
+    a.set_checksum();
+
+    assert(a.copy == 0);
+    try expect(a.valid_checksum());
+
+    a.copy += 1;
+    try expect(a.valid_checksum());
+
+    a.replica += 1;
+    try expect(!a.valid_checksum());
 }
 
 const Quorums = struct {
