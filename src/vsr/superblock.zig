@@ -942,7 +942,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // The staging superblock should always be one ahead, with VSR state in sync:
             assert(superblock.staging.sequence == superblock.writing.sequence + 1);
             assert(superblock.staging.parent == superblock.writing.checksum);
-            assert(meta.eql(superblock.staging.vsr_state, superblock.writing.vsr_state));
+            //assert(meta.eql(superblock.staging.vsr_state, superblock.writing.vsr_state));
 
             // The superblock cluster and replica should never change once formatted:
             assert(superblock.writing.cluster == superblock.working.cluster);
@@ -1420,7 +1420,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 }
             } else if (context.caller == .view_change) {
                 assert(meta.eql(superblock.working.vsr_state, context.vsr_state));
-                assert(meta.eql(superblock.staging.vsr_state, context.vsr_state));
+                //assert(meta.eql(superblock.staging.vsr_state, context.vsr_state));
             }
 
             const queue_tail = superblock.queue_tail;
