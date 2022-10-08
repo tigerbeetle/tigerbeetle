@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -eEuo pipefail
+#!/usr/bin/env sh
+set -eu
 
 # After running ./fuzz_repeatedly.sh use this script to produce a list of unique crashes.
 # As a heuristic, we look for the first line of the stacktrace that occurs inside tigerbeetle code.
