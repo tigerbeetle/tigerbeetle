@@ -82,8 +82,15 @@ public class BatchTest {
         assertFalse(batch.next());
         assertFalse(batch.isValidPosition());
 
-        // Calling multiple times must return false
-        assertFalse(batch.next());
+        // Calling next multiple times must throw an exception, preventing the user to assume that
+        // an iterated batch is an empty one.
+        try {
+            batch.next();
+            assert false;
+        } catch (IndexOutOfBoundsException exception) {
+            assert true;
+        }
+
         assertFalse(batch.isValidPosition());
 
         // Adding 2 elements
@@ -119,8 +126,14 @@ public class BatchTest {
         assertFalse(batch.next());
         assertFalse(batch.isValidPosition());
 
-        // Calling multiple times must return false
-        assertFalse(batch.next());
+        // Calling next multiple times must throw an exception, preventing the user to assume that
+        // an iterated batch is an empty one.
+        try {
+            batch.next();
+            assert false;
+        } catch (IndexOutOfBoundsException exception) {
+            assert true;
+        }
         assertFalse(batch.isValidPosition());
     }
 
@@ -149,8 +162,14 @@ public class BatchTest {
         assertFalse(batch.next());
         assertFalse(batch.isValidPosition());
 
-        // Calling multiple times must return false
-        assertFalse(batch.next());
+        // Calling next multiple times must throw an exception, preventing the user to assume that
+        // an iterated batch is an empty one.
+        try {
+            batch.next();
+            assert false;
+        } catch (IndexOutOfBoundsException exception) {
+            assert true;
+        }
         assertFalse(batch.isValidPosition());
     }
 
@@ -177,8 +196,14 @@ public class BatchTest {
         assertFalse(batch.next());
         assertFalse(batch.isValidPosition());
 
-        // Calling multiple times must return false
-        assertFalse(batch.next());
+        // Calling next multiple times must throw an exception, preventing the user to assume that
+        // an iterated batch is an empty one.
+        try {
+            batch.next();
+            assert false;
+        } catch (IndexOutOfBoundsException exception) {
+            assert true;
+        }
         assertFalse(batch.isValidPosition());
 
     }
