@@ -80,3 +80,40 @@ inline fn block_index(hash: u32, size: usize) u32 {
 test {
     _ = std.testing.refAllDecls(@This());
 }
+
+const test_bloom_filter = struct {
+    const block_size = @import("../config.zig").block_size;
+
+    fn random_keys(random: std.rand.Random, iter: usize) !void {
+        const keys_count = @floatToInt(usize, @trunc(random.floatExp(f64) * @intToFloat(f64, iter)));
+
+        const keys = try std.testing.allocator.alloc(u32, keys_count);
+        defer std.testing.allocator.free(keys);
+
+        for (keys) |*key| key.* = @floatToInt(u32, @trunc(random.floatExp(f64) * 100));
+
+        // `block_size` is currently the only size bloom_filter that we use.
+        const filter = try std.testing.allocator.alloc(u8, block_size);
+        defer std.testing.allocator.free(filter);
+
+        for (keys) |key| {
+            add(Fingerprint.create(std.mem.asBytes(&key)), filter);
+        }
+        for (keys) |key| {
+            try std.testing.expect(may_contain(Fingerprint.create(std.mem.asBytes(&key)), filter));
+        }
+
+        // TODO Test the false positive rate:
+        // * Calculate the expected false positive rate
+        // * Test with a large number of random keys.
+        // * Use Chernoff bound or similar to determine a reasonable test cutoff.
+    }
+};
+
+test "bloom filter: random" {
+    var rng = std.rand.DefaultPrng.init(42);
+    var i: usize = 0;
+    while (i < (1 << 12)) : (i += 1) {
+        try test_bloom_filter.random_keys(rng.random(), i);
+    }
+}
