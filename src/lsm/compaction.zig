@@ -48,7 +48,7 @@
 //!
 //!   table IO       snapshot interval      group
 //!            ┅┅┅┅
-//!      T₁ I  ?───·························· ⎤  The first measure of compaction is just for
+//!      T₁ I  ?───·························· ⎤  The first full measure of compaction is just for
 //!      T₂  O $   ·························· ⎦  demonstration; there are no tables to compact yet.
 //!      T₁ I  $───                           ⎤
 //!      T₂  O $   ?───────────────────────── ⎦
