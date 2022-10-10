@@ -52,6 +52,10 @@ export enum CreateAccountError {
   id_must_not_be_int_max,
   ledger_must_not_be_zero,
   code_must_not_be_zero,
+  debits_pending_must_be_zero,
+  debits_posted_must_be_zero,
+  credits_pending_must_be_zero,
+  credits_posted_must_be_zero,
 
   mutually_exclusive_flags,
 
@@ -65,10 +69,6 @@ export enum CreateAccountError {
   exists_with_different_user_data,
   exists_with_different_ledger,
   exists_with_different_code,
-  exists_with_different_debits_pending,
-  exists_with_different_debits_posted,
-  exists_with_different_credits_pending,
-  exists_with_different_credits_posted,
   exists,
 }
 
