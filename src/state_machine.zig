@@ -1637,10 +1637,6 @@ test "create/lookup/rollback transfers" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    //const size = state_machine.commit(0, 0, .create_accounts, input, output);
-
-    //const errors = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
-    //try expect(errors.len == 0);
 
     for (accounts) |account| {
         state_machine.forest.grooves.accounts.put(&account);
