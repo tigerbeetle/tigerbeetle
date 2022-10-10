@@ -17,7 +17,7 @@ const log = std.log.scoped(.storage_checker);
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
-const SuperBlockFormat = @import("../vsr/superblock.zig").Format;
+const SuperBlockLayout = @import("../vsr/superblock.zig").Layout;
 const FreeSet = @import("../vsr/superblock.zig").SuperBlockFreeSet;
 const Replica = @import("cluster.zig").Replica;
 const Storage = @import("storage.zig").Storage;
@@ -75,9 +75,9 @@ pub const StorageChecker = struct {
             offset: fn (copy: u8, sequence: u64) u64,
             size: u64,
         }{
-            .{ .offset = SuperBlockFormat.offset_manifest, .size = working.manifest_size },
-            .{ .offset = SuperBlockFormat.offset_free_set, .size = working.free_set_size },
-            .{ .offset = SuperBlockFormat.offset_client_table, .size = working.client_table_size },
+            .{ .offset = SuperBlockLayout.offset_manifest, .size = working.manifest_size },
+            .{ .offset = SuperBlockLayout.offset_free_set, .size = working.free_set_size },
+            .{ .offset = SuperBlockLayout.offset_client_table, .size = working.client_table_size },
         }) |trailer| {
             var copy: u8 = 0;
             while (copy < config.superblock_copies * 2) : (copy += 1) {
@@ -101,7 +101,7 @@ pub const StorageChecker = struct {
         var free_set = try FreeSet.init(storage.allocator, config.block_count_max);
         defer free_set.deinit(storage.allocator);
 
-        const free_set_offset = SuperBlockFormat.offset_free_set(working.copy, working.sequence);
+        const free_set_offset = SuperBlockLayout.offset_free_set(working.copy, working.sequence);
         free_set.decode(storage.memory[free_set_offset..][0..working.free_set_size]);
 
         var acquired = free_set.blocks.iterator(.{ .kind = .unset });
