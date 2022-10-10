@@ -929,17 +929,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tree.manifest.compact(compact_manifest_callback);
         }
 
-        /// Called after the fourth/last beat.
+        /// Called after the last beat of a full compaction measure.
         fn compact_mutable_table_into_immutable(tree: *Tree) void {
-            if (tree.table_mutable.count() == 0) return;
             assert(tree.table_immutable.free);
             assert((tree.compaction_op + 1) % config.lsm_batch_multiple == 0);
+
+            if (tree.table_mutable.count() == 0) return;
 
             // Sort the mutable table values directly into the immutable table's array.
             const values_max = tree.table_immutable.values_max();
             const values = tree.table_mutable.sort_into_values_and_clear(values_max);
             assert(values.ptr == values_max.ptr);
 
+            // The immutable table should be visible to the next measure.
             const snapshot_min = compaction_snapshot_for_op(tree.compaction_op) + 1;
             assert(snapshot_min <= tree.prefetch_snapshot_max);
             tree.table_immutable.reset_with_sorted_values(snapshot_min, values);
