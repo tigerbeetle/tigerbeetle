@@ -8,6 +8,7 @@
 //! - Calling checkpoint() and view_change() concurrently is safe.
 //!   - VSRState will not leak before the corresponding checkpoint()/view_change().
 //!   - Trailers will not leak before the corresponding checkpoint().
+//! - view_change_in_progress() reports the correct state.
 //!
 const std = @import("std");
 const assert = std.debug.assert;
@@ -136,6 +137,12 @@ fn fuzz(allocator: std.mem.Allocator, seed: u64) !void {
         assert(env.pending.count() > 0);
         assert(env.pending.count() <= 2);
         try env.tick();
+
+        // Trailers are only updated on-disk by checkpoint(), never view_change().
+        // Trailers must not be mutated while a checkpoint() is in progress.
+        if (!env.pending.contains(.checkpoint) and random.boolean()) {
+            _ = env.superblock.free_set.acquire().?;
+        }
     }
 }
 
@@ -174,6 +181,7 @@ const Environment = struct {
         assert(!env.pending.contains(.format));
         assert(!env.pending.contains(.open));
         assert(!env.pending_verify);
+        assert(env.pending.contains(.view_change) == env.superblock.view_change_in_progress());
 
         // TODO(Zig): Change this to const once std.PriorityQueue's type signature is fixed.
         const write = env.superblock.storage.writes.peek();
@@ -181,12 +189,6 @@ const Environment = struct {
 
         if (write) |w| {
             if (w.done_at_tick <= env.superblock.storage.ticks) try env.verify();
-        }
-
-        // Trailers are only updated on-disk by checkpoint(), never view_change().
-        // Trailers must not be mutated while a checkpoint() is in progress.
-        if (!env.pending.contains(.checkpoint)) {
-            _ = env.superblock.free_set.acquire().?;
         }
     }
 
