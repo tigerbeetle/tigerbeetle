@@ -12,6 +12,10 @@ public enum CreateAccountResult {
     IdMustNotBeIntMax,
     LedgerMustNotBeZero,
     CodeMustNotBeZero,
+    DebitsPendingMustBeZero,
+    DebitsPostedMustBeZero,
+    CreditsPendingMustBeZero,
+    CreditsPostedMustBeZero,
 
     MutuallyExclusiveFlags,
 
@@ -22,13 +26,9 @@ public enum CreateAccountResult {
     ExceedsDebits,
 
     ExistsWithDifferentFlags,
-    ExistsWithDifferentUser_data,
+    ExistsWithDifferentUserData,
     ExistsWithDifferentLedger,
     ExistsWithDifferentCode,
-    ExistsWithDifferentDebitsPending,
-    ExistsWithDifferentDebitsPosted,
-    ExistsWithDifferentCreditsPending,
-    ExistsWithDifferentCreditsPosted,
     Exists;
 
     public static CreateAccountResult fromValue(int value) {

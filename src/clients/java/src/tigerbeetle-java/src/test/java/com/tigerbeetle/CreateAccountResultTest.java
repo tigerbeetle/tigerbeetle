@@ -7,14 +7,14 @@ public class CreateAccountResultTest {
 
     @Test
     public void testFromValue() {
-        var value = 11;
+        var value = 15;
         Assert.assertEquals(CreateAccountResult.OverflowsCredits,
                 CreateAccountResult.fromValue(value));
     }
 
     @Test
     public void testOrdinal() {
-        var value = 16;
+        var value = 20;
         Assert.assertEquals(CreateAccountResult.ExistsWithDifferentLedger.ordinal(), value);
     }
 
