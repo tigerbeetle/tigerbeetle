@@ -694,19 +694,19 @@ pub const Storage = struct {
         assert(sector.valid_checksum());
         assert(sector.vsr_state.internally_consistent());
 
-        const Format = superblock.Format;
+        const Layout = superblock.Layout;
         const manifest_offset = vsr.Zone.superblock.offset(
-            Format.offset_manifest(sector.copy, sector.sequence));
+            Layout.offset_manifest(sector.copy, sector.sequence));
         const manifest_buffer = storage.memory[manifest_offset..][0..sector.manifest_size];
         assert(vsr.checksum(manifest_buffer) == sector.manifest_checksum);
 
         const free_set_offset = vsr.Zone.superblock.offset(
-            Format.offset_free_set(sector.copy, sector.sequence));
+            Layout.offset_free_set(sector.copy, sector.sequence));
         const free_set_buffer = storage.memory[free_set_offset..][0..sector.free_set_size];
         assert(vsr.checksum(free_set_buffer) == sector.free_set_checksum);
 
         const client_table_offset = vsr.Zone.superblock.offset(
-            Format.offset_client_table(sector.copy, sector.sequence));
+            Layout.offset_client_table(sector.copy, sector.sequence));
         const client_table_buffer =
             storage.memory[client_table_offset..][0..sector.client_table_size];
         assert(vsr.checksum(client_table_buffer) == sector.client_table_checksum);
@@ -747,10 +747,10 @@ const SuperBlockArea = struct {
         // Invent a sequence to pass the assertions; we don't have access to the real one.
         const sequence = 1 + @as(u64, @boolToInt(self.copy < config.superblock_copies));
         return switch (self.group) {
-            .sector => superblock.Format.offset_sector(self.copy),
-            .manifest => superblock.Format.offset_manifest(self.copy, sequence),
-            .free_set => superblock.Format.offset_free_set(self.copy, sequence),
-            .client_table => superblock.Format.offset_client_table(self.copy, sequence),
+            .sector => superblock.Layout.offset_sector(self.copy),
+            .manifest => superblock.Layout.offset_manifest(self.copy, sequence),
+            .free_set => superblock.Layout.offset_free_set(self.copy, sequence),
+            .client_table => superblock.Layout.offset_client_table(self.copy, sequence),
         };
     }
 
