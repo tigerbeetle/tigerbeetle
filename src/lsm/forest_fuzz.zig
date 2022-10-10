@@ -32,7 +32,10 @@ const Environment = struct {
     const cluster = 32;
     const replica = 4;
     // TODO Is this appropriate for the number of fuzz_ops we want to run?
-    const size_max = vsr.Zone.superblock.size().? + vsr.Zone.wal.size().? + 1024 * 1024 * 1024;
+    const size_max = vsr.Zone.superblock.size().? +
+        vsr.Zone.wal_headers.size().? +
+        vsr.Zone.wal_prepares.size().? +
+        1024 * 1024 * 1024;
 
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
@@ -238,27 +241,9 @@ const Environment = struct {
     }
 };
 
-pub fn run_fuzz_ops(fuzz_ops: []const FuzzOp) !void {
+pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) !void {
     // Init mocked storage.
-    var storage = try Storage.init(
-        allocator,
-        Environment.size_max,
-        Storage.Options{
-            // We don't apply storage faults yet, so this seed doesn't matter.
-            .seed = 0xdeadbeef,
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
-            .read_fault_probability = 0,
-            .write_fault_probability = 0,
-        },
-        0,
-        .{
-            .first_offset = 0,
-            .period = 0,
-        },
-    );
+    var storage = try Storage.init(allocator, Environment.size_max, storage_options);
     defer storage.deinit(allocator);
 
     try Environment.format(&storage);
@@ -381,9 +366,21 @@ pub fn main() !void {
     log.info("Fuzz seed = {}", .{seed.?});
 
     var rng = std.rand.DefaultPrng.init(seed.?);
+    const random = rng.random();
 
-    const fuzz_ops = try generate_fuzz_ops(rng.random());
+    const fuzz_ops = try generate_fuzz_ops(random);
     defer allocator.free(fuzz_ops);
 
-    try run_fuzz_ops(fuzz_ops);
+    const read_latency_min = fuzz.random_int_exponential(random, u64, 5);
+    const write_latency_min = fuzz.random_int_exponential(random, u64, 5);
+
+    try run_fuzz_ops(
+        Storage.Options{
+            .read_latency_min = read_latency_min,
+            .read_latency_mean = read_latency_min + fuzz.random_int_exponential(random, u64, 20),
+            .write_latency_min = write_latency_min,
+            .write_latency_mean = write_latency_min + fuzz.random_int_exponential(random, u64, 20),
+        },
+        fuzz_ops
+    );
 }
