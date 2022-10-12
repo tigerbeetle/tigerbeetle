@@ -141,8 +141,8 @@ pub const SuperBlockSector = extern struct {
             state.* = new;
         }
 
-        /// Compaction is one measure ahead of superblock's commit_min.
-        /// The commits from the measure following commit_min were in the mutable table, and
+        /// Compaction is one bar ahead of superblock's commit_min.
+        /// The commits from the bar following commit_min were in the mutable table, and
         /// thus not preserved in the checkpoint.
         /// But the corresponding `compact()` updates were preserved, and must not be repeated
         /// to ensure determinstic storage.

@@ -66,7 +66,7 @@ pub fn TableInfoType(comptime Table: type) type {
         /// disk.
         ///
         /// Instead, prefetch will continue to query the compaction's input tables until the
-        /// half-measure of compaction completes. At that point `tree.prefetch_snapshot_max` is
+        /// half-bar of compaction completes. At that point `tree.prefetch_snapshot_max` is
         /// updated (to the compaction's `compaction_op`), simultaneously rendering the old (input)
         /// tables invisible, and the new (output) tables visible.
         pub fn visible(table: *const TableInfo, snapshot: u64) bool {
