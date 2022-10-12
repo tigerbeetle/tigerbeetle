@@ -4,8 +4,9 @@
     {
         Ok = 0,
         LinkedEventFailed,
+		LinkedEventChainOpen,
 
-        ReservedFlag,
+		ReservedFlag,
         ReservedField,
 
         IdMustNotBeZero,

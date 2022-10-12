@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace TigerBeetle
 {
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-    public struct Account : IEquatable<Account>
+    public struct Account
     {
         #region InnerTypes
 
@@ -67,84 +67,30 @@ namespace TigerBeetle
 
         public UInt128 Id { get => id; set => id = value; }
 
-        #region Documentation
-
-        /// <summary>
-        /// Opaque third-party identifier to link this account (many-to-one) to an external entity.
-        /// </summary>
-
-        #endregion Documentation
-
         public UInt128 UserData { get => userData; set => userData = value; }
-
-        #region Documentation
-
-        /// <summary>
-        /// Reserved for accounting policy primitives.
-        /// </summary>
-
-        #endregion Documentation
 
         public ReadOnlySpan<byte> Reserved
         {
             get => reserved.AsReadOnlySpan<byte>();
-            set => value.CopyTo(reserved.AsSpan<byte>());
+			internal set => value.CopyTo(reserved.AsSpan<byte>());
         }
 
         public uint Ledger { get => ledger; set => ledger = value; }
-
-        #region Documentation
-
-        /// <summary>
-        /// A chart of accounts code describing the type of account (e.g. clearing, settlement).
-        /// </summary>
-
-        #endregion Documentation
 
         public ushort Code { get => code; set => code = value; }
 
         public AccountFlags Flags { get => flags; set => flags = value; }
 
-        public ulong DebitsPending { get => debitsPending; set => debitsPending = value; }
+        public ulong DebitsPending { get => debitsPending; internal set => debitsPending = value; }
 
-        public ulong DebitsPosted { get => debitsPosted; set => debitsPosted = value; }
+        public ulong DebitsPosted { get => debitsPosted; internal set => debitsPosted = value; }
 
-        public ulong CreditsPending { get => creditsPending; set => creditsPending = value; }
+        public ulong CreditsPending { get => creditsPending; internal set => creditsPending = value; }
 
-        public ulong CreditsPosted { get => creditsPosted; set => creditsPosted = value; }
+        public ulong CreditsPosted { get => creditsPosted; internal set => creditsPosted = value; }
 
-        public ulong Timestamp { get => timestamp; set => timestamp = value; }
+        public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
 
         #endregion Properties
-
-        #region Methods
-
-        public bool Equals(Account other)
-        {
-            return AsReadOnlySpan().SequenceEqual(other.AsReadOnlySpan());
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return obj is Account account && Equals(account);
-        }
-
-        public override int GetHashCode()
-        {
-            return id.GetHashCode();
-        }
-
-        public ReadOnlySpan<byte> AsReadOnlySpan()
-        {
-            unsafe
-            {
-                fixed (void* ptr = &this)
-                {
-                    return new ReadOnlySpan<byte>(ptr, Account.SIZE);
-                }
-            }
-        }
-
-        #endregion Methods
     }
 }

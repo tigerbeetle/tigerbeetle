@@ -15,7 +15,7 @@ namespace TigerBeetle
 
         #region Constructor
 
-        internal CreateAccountsResult(int index, CreateAccountResult result = CreateAccountResult.Ok)
+        internal CreateAccountsResult(int index, CreateAccountResult result)
         {
             this.index = index;
             this.result = result;

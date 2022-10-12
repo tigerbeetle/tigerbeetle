@@ -14,7 +14,7 @@ namespace TigerBeetle.Tests
 	{
 		#region Fields
 
-		private static Client GetClient(int maxConcurrency = 32) => new Client(0, new IPEndPoint[] { IPEndPoint.Parse($"127.0.0.1:{TBServer.TB_PORT}") }, maxConcurrency);
+		private static Client GetClient(int maxConcurrency = 32) => new(0, new IPEndPoint[] { IPEndPoint.Parse($"127.0.0.1:{TBServer.TB_PORT}") }, maxConcurrency);
 
 		private static readonly Account[] accounts = new[]
 		{
@@ -38,35 +38,31 @@ namespace TigerBeetle.Tests
 		[DoNotParallelize]
 		public void CreateAccounts()
 		{
-			using (var server = new TBServer())
-			{
-				using var client = GetClient();
+			using var server = new TBServer();
+			using var client = GetClient();
 
-				var results = client.CreateAccounts(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var results = client.CreateAccounts(accounts);
+			Assert.IsTrue(results.Length == 0);
 
-				var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-			}
+			var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 		}
 
 		[TestMethod]
 		[DoNotParallelize]
 		public async Task CreateAccountsAsync()
 		{
-			using (var server = new TBServer())
-			{
-				using var client = GetClient();
+			using var server = new TBServer();
+			using var client = GetClient();
 
-				var results = await client.CreateAccountsAsync(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var results = await client.CreateAccountsAsync(accounts);
+			Assert.IsTrue(results.Length == 0);
 
-				var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-			}
+			var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 		}
 
-		private void AssertAccounts(Account[] lookupAccounts)
+		private static void AssertAccounts(Account[] lookupAccounts)
 		{
 			Assert.IsTrue(lookupAccounts.Length == 2);
 			Assert.AreEqual(lookupAccounts[0].Id, accounts[0].Id);
@@ -82,448 +78,432 @@ namespace TigerBeetle.Tests
 		[DoNotParallelize]
 		public void CreateTransfers()
 		{
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient();
+
+			var results = client.CreateAccounts(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var transfer = new Transfer
 			{
-				using var client = GetClient();
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+			};
 
-				var results = client.CreateAccounts(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var result = client.CreateTransfer(transfer);
+			Assert.IsTrue(result == CreateTransferResult.Ok);
 
-				var transfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-				};
+			var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var result = client.CreateTransfer(transfer);
-				Assert.IsTrue(result == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
 
-				var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
-			}
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
 		}
 
 		[TestMethod]
 		[DoNotParallelize]
 		public async Task CreateTransfersAsync()
 		{
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient();
+
+			var results = await client.CreateAccountsAsync(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var transfer = new Transfer
 			{
-				using var client = GetClient();
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+			};
 
-				var results = await client.CreateAccountsAsync(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var result = await client.CreateTransferAsync(transfer);
+			Assert.IsTrue(result == CreateTransferResult.Ok);
 
-				var transfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-				};
+			var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var result = await client.CreateTransferAsync(transfer);
-				Assert.IsTrue(result == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
 
-				var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
-			}
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
 		}
 
 		[TestMethod]
 		[DoNotParallelize]
 		public void CreatePendingTransfers()
 		{
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient();
+
+			var results = client.CreateAccounts(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var transfer = new Transfer
 			{
-				using var client = GetClient();
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.Pending,
+				Timeout = int.MaxValue,
+			};
 
-				var results = client.CreateAccounts(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var result = client.CreateTransfer(transfer);
+			Assert.IsTrue(result == CreateTransferResult.Ok);
 
-				var transfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.Pending,
-					Timeout = int.MaxValue,
-				};
+			var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var result = client.CreateTransfer(transfer);
-				Assert.IsTrue(result == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
 
-				var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
 
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+			var postTransfer = new Transfer
+			{
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.PostPendingTransfer,
+				PendingId = transfer.Id,
+			};
 
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+			var postResult = client.CreateTransfer(postTransfer);
+			Assert.IsTrue(postResult == CreateTransferResult.Ok);
 
-				var postTransfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.PostPendingTransfer,
-					PendingId = transfer.Id,
-				};
+			lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var postResult = client.CreateTransfer(postTransfer);
-				Assert.IsTrue(postResult == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
 
-				lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
-			}
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
 		}
 
 		[TestMethod]
 		[DoNotParallelize]
 		public async Task CreatePendingTransfersAsync()
 		{
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient();
+
+			var results = await client.CreateAccountsAsync(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var transfer = new Transfer
 			{
-				using var client = GetClient();
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.Pending,
+				Timeout = int.MaxValue,
+			};
 
-				var results = await client.CreateAccountsAsync(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var result = await client.CreateTransferAsync(transfer);
+			Assert.IsTrue(result == CreateTransferResult.Ok);
 
-				var transfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.Pending,
-					Timeout = int.MaxValue,
-				};
+			var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var result = await client.CreateTransferAsync(transfer);
-				Assert.IsTrue(result == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
 
-				var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
 
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+			var postTransfer = new Transfer
+			{
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.PostPendingTransfer,
+				PendingId = transfer.Id,
+			};
 
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+			var postResult = await client.CreateTransferAsync(postTransfer);
+			Assert.IsTrue(postResult == CreateTransferResult.Ok);
 
-				var postTransfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.PostPendingTransfer,
-					PendingId = transfer.Id,
-				};
+			lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var postResult = await client.CreateTransferAsync(postTransfer);
-				Assert.IsTrue(postResult == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
 
-				lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
-			}
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
 		}
 
 		[TestMethod]
 		[DoNotParallelize]
 		public void CreatePendingTransfersAndVoid()
 		{
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient();
+
+			var results = client.CreateAccounts(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var transfer = new Transfer
 			{
-				using var client = GetClient();
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.Pending,
+				Timeout = int.MaxValue,
+			};
 
-				var results = client.CreateAccounts(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var result = client.CreateTransfer(transfer);
+			Assert.IsTrue(result == CreateTransferResult.Ok);
 
-				var transfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.Pending,
-					Timeout = int.MaxValue,
-				};
+			var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var result = client.CreateTransfer(transfer);
-				Assert.IsTrue(result == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
 
-				var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
 
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+			var postTransfer = new Transfer
+			{
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.VoidPendingTransfer,
+				PendingId = transfer.Id,
+			};
 
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+			var postResult = client.CreateTransfer(postTransfer);
+			Assert.IsTrue(postResult == CreateTransferResult.Ok);
 
-				var postTransfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.VoidPendingTransfer,
-					PendingId = transfer.Id,
-				};
+			lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var postResult = client.CreateTransfer(postTransfer);
-				Assert.IsTrue(postResult == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
 
-				lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
-			}
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
 		}
 
 		[TestMethod]
 		[DoNotParallelize]
 		public async Task CreatePendingTransfersAndVoidAsync()
 		{
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient();
+
+			var results = await client.CreateAccountsAsync(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var transfer = new Transfer
 			{
-				using var client = GetClient();
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.Pending,
+				Timeout = int.MaxValue,
+			};
 
-				var results = await client.CreateAccountsAsync(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var result = await client.CreateTransferAsync(transfer);
+			Assert.IsTrue(result == CreateTransferResult.Ok);
 
-				var transfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.Pending,
-					Timeout = int.MaxValue,
-				};
+			var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var result = await client.CreateTransferAsync(transfer);
-				Assert.IsTrue(result == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
 
-				var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
 
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+			var postTransfer = new Transfer
+			{
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.VoidPendingTransfer,
+				PendingId = transfer.Id,
+			};
 
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+			var postResult = await client.CreateTransferAsync(postTransfer);
+			Assert.IsTrue(postResult == CreateTransferResult.Ok);
 
-				var postTransfer = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.VoidPendingTransfer,
-					PendingId = transfer.Id,
-				};
+			lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var postResult = await client.CreateTransferAsync(postTransfer);
-				Assert.IsTrue(postResult == CreateTransferResult.Ok);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
 
-				lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
-			}
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
 		}
 
 		[TestMethod]
 		[DoNotParallelize]
 		public void CreateLikedTransfers()
 		{
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient();
+
+			var results = client.CreateAccounts(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var transfer1 = new Transfer
 			{
-				using var client = GetClient();
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.Linked,
+			};
 
-				var results = client.CreateAccounts(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var transfer2 = new Transfer
+			{
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[1].Id,
+				DebitAccountId = accounts[0].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 49,
+				Flags = TransferFlags.None,
+			};
 
-				var transfer1 = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.Linked,
-				};
+			var transferResults = client.CreateTransfers(new[] { transfer1, transfer2 });
+			Assert.IsTrue(transferResults.All(x => x.Result == CreateTransferResult.Ok));
 
-				var transfer2 = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[1].Id,
-					DebitAccountId = accounts[0].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 49,
-					Flags = TransferFlags.None,
-				};
+			var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var transferResults = client.CreateTransfers(new[] { transfer1, transfer2 });
-				Assert.IsTrue(transferResults.All(x => x.Result == CreateTransferResult.Ok));
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer1.Amount);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, transfer2.Amount);
 
-				var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer1.Amount);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, transfer2.Amount);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfer2.Amount);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
-			}
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfer2.Amount);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
 		}
 
 		[TestMethod]
 		[DoNotParallelize]
 		public async Task CreateLikedTransfersAsync()
 		{
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient();
+
+			var results = await client.CreateAccountsAsync(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var transfer1 = new Transfer
 			{
-				using var client = GetClient();
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[0].Id,
+				DebitAccountId = accounts[1].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 100,
+				Flags = TransferFlags.Linked,
+			};
 
-				var results = await client.CreateAccountsAsync(accounts);
-				Assert.IsTrue(results.Length == 0);
+			var transfer2 = new Transfer
+			{
+				Id = Guid.NewGuid(),
+				CreditAccountId = accounts[1].Id,
+				DebitAccountId = accounts[0].Id,
+				Ledger = 1,
+				Code = 1,
+				Amount = 49,
+				Flags = TransferFlags.None,
+			};
 
-				var transfer1 = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[0].Id,
-					DebitAccountId = accounts[1].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 100,
-					Flags = TransferFlags.Linked,
-				};
+			var transferResults = await client.CreateTransfersAsync(new[] { transfer1, transfer2 });
+			Assert.IsTrue(transferResults.All(x => x.Result == CreateTransferResult.Ok));
 
-				var transfer2 = new Transfer
-				{
-					Id = Guid.NewGuid(),
-					CreditAccountId = accounts[1].Id,
-					DebitAccountId = accounts[0].Id,
-					Ledger = 1,
-					Code = 1,
-					Amount = 49,
-					Flags = TransferFlags.None,
-				};
+			var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
 
-				var transferResults = await client.CreateTransfersAsync(new[] { transfer1, transfer2 });
-				Assert.IsTrue(transferResults.All(x => x.Result == CreateTransferResult.Ok));
+			Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer1.Amount);
+			Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, transfer2.Amount);
 
-				var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer1.Amount);
-				Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, transfer2.Amount);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfer2.Amount);
-				Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
-			}
+			Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfer2.Amount);
+			Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
 		}
 
 		/// <summary>
@@ -538,46 +518,44 @@ namespace TigerBeetle.Tests
 			const int TASKS_QTY = 12;
 			int MAX_CONCURRENCY = new Random().Next(1, TASKS_QTY / 2);
 
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient(MAX_CONCURRENCY);
+
+			var results = client.CreateAccounts(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var list = new List<Task<CreateTransferResult>>();
+
+			for (int i = 0; i < TASKS_QTY; i++)
 			{
-				using var client = GetClient(MAX_CONCURRENCY);
-
-				var results = client.CreateAccounts(accounts);
-				Assert.IsTrue(results.Length == 0);
-
-				var list = new List<Task<CreateTransferResult>>();
-
-				for (int i = 0; i < TASKS_QTY; i++)
+				var transfer = new Transfer
 				{
-					var transfer = new Transfer
-					{
-						Id = Guid.NewGuid(),
-						CreditAccountId = accounts[0].Id,
-						DebitAccountId = accounts[1].Id,
-						Ledger = 1,
-						Code = 1,
-						Amount = 100,
-					};
+					Id = Guid.NewGuid(),
+					CreditAccountId = accounts[0].Id,
+					DebitAccountId = accounts[1].Id,
+					Ledger = 1,
+					Code = 1,
+					Amount = 100,
+				};
 
-					/// Starts multiple tasks using a client with a limited maxConcurrency
-					var task = Task.Run(() => client.CreateTransfer(transfer));
-					list.Add(task);
-				}
-
-				Task.WaitAll(list.ToArray());
-				Assert.IsTrue(list.All(x => x.Result == CreateTransferResult.Ok));
-
-				var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-				AssertAccounts(lookupAccounts);
-
-				// Assert that all tasks ran to the conclusion
-
-				Assert.AreEqual(lookupAccounts[0].CreditsPosted, (ulong)(100 * TASKS_QTY));
-				Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0LU);
-
-				Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0LU);
-				Assert.AreEqual(lookupAccounts[1].DebitsPosted, (ulong)(100 * TASKS_QTY));
+				/// Starts multiple tasks using a client with a limited maxConcurrency
+				var task = Task.Run(() => client.CreateTransfer(transfer));
+				list.Add(task);
 			}
+
+			Task.WaitAll(list.ToArray());
+			Assert.IsTrue(list.All(x => x.Result == CreateTransferResult.Ok));
+
+			var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+			AssertAccounts(lookupAccounts);
+
+			// Assert that all tasks ran to the conclusion
+
+			Assert.AreEqual(lookupAccounts[0].CreditsPosted, (ulong)(100 * TASKS_QTY));
+			Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0LU);
+
+			Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0LU);
+			Assert.AreEqual(lookupAccounts[1].DebitsPosted, (ulong)(100 * TASKS_QTY));
 		}
 
 		/// <summary>
@@ -592,48 +570,46 @@ namespace TigerBeetle.Tests
 			const int TASKS_QTY = 12;
 			int MAX_CONCURRENCY = new Random().Next(1, TASKS_QTY / 4);
 
-			using (var server = new TBServer())
+			using var server = new TBServer();
+			using var client = GetClient(MAX_CONCURRENCY);
+
+			var results = client.CreateAccounts(accounts);
+			Assert.IsTrue(results.Length == 0);
+
+			var list = new List<Task<CreateTransferResult>>();
+
+			for (int i = 0; i < TASKS_QTY; i++)
 			{
-				var client = GetClient(MAX_CONCURRENCY);
-
-				var results = client.CreateAccounts(accounts);
-				Assert.IsTrue(results.Length == 0);
-
-				var list = new List<Task<CreateTransferResult>>();
-
-				for (int i = 0; i < TASKS_QTY; i++)
+				var transfer = new Transfer
 				{
-					var transfer = new Transfer
-					{
-						Id = Guid.NewGuid(),
-						CreditAccountId = accounts[0].Id,
-						DebitAccountId = accounts[1].Id,
-						Ledger = 1,
-						Code = 1,
-						Amount = 100,
-					};
+					Id = Guid.NewGuid(),
+					CreditAccountId = accounts[0].Id,
+					DebitAccountId = accounts[1].Id,
+					Ledger = 1,
+					Code = 1,
+					Amount = 100,
+				};
 
-					/// Starts multiple tasks using a client with a limited maxConcurrency
-					var task = Task.Run(() => client.CreateTransfer(transfer));
-					list.Add(task);
-				}
-
-				// Waiting for just one task
-				list.First().Wait();
-
-				// Disposes the client, forcing all tasks to finish if already submited a message, or fail
-				client.Dispose();
-
-				try
-				{
-					// Ignoring exceptions from the tasks
-					Task.WhenAll(list).Wait();
-				}
-				catch { }
-
-				// Asserting that either the task failed or succeeded
-				Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
+				/// Starts multiple tasks using a client with a limited maxConcurrency
+				var task = Task.Run(() => client.CreateTransfer(transfer));
+				list.Add(task);
 			}
+
+			// Waiting for just one task
+			list.First().Wait();
+
+			// Disposes the client, forcing all tasks to finish if already submited a message, or fail
+			client.Dispose();
+
+			try
+			{
+				// Ignoring exceptions from the tasks
+				Task.WhenAll(list).Wait();
+			}
+			catch { }
+
+			// Asserting that either the task failed or succeeded
+			Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
 		}
 	}
 
@@ -649,7 +625,7 @@ namespace TigerBeetle.Tests
 		public static readonly string FORMAT = $"format --cluster=0 --replica=0 ./{TB_FILE}";
 		public static readonly string START = $"start --addresses={TB_PORT} ./{TB_FILE}";
 
-		private Process process;
+		private readonly Process process;
 
 		#endregion Fields
 

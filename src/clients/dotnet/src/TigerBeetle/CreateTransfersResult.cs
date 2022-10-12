@@ -17,7 +17,7 @@ namespace TigerBeetle
 
         #region Constructor
 
-        internal CreateTransfersResult(int index, CreateTransferResult result = CreateTransferResult.Ok)
+        internal CreateTransfersResult(int index, CreateTransferResult result)
         {
             this.index = index;
             this.result = result;

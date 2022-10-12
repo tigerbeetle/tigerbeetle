@@ -4,16 +4,21 @@
     {
         Ok = 0,
         LinkedEventFailed,
+		LinkedEventChainOpen,
 
-        ReservedFlag,
+		ReservedFlag,
         ReservedField,
 
         IdMustNotBeZero,
         IdMustNotBeIntMax,
         LedgerMustNotBeZero,
         CodeMustNotBeZero,
+		DebitsPendingMustBeZero,
+		DebitsPostedMustBeZero,
+		CreditsPendingMustBeZero,
+		CreditsPostedMustBeZero,
 
-        MutuallyExclusiveFlags,
+		MutuallyExclusiveFlags,
 
         OverflowsDebits,
         OverflowsCredits,
@@ -22,13 +27,9 @@
         ExceedsDebits,
 
         ExistsWithDifferentFlags,
-        ExistsWithDifferentUser_data,
+        ExistsWithDifferentUserData,
         ExistsWithDifferentLedger,
         ExistsWithDifferentCode,
-        ExistsWithDifferentDebitsPending,
-        ExistsWithDifferentDebitsPosted,
-        ExistsWithDifferentCreditsPending,
-        ExistsWithDifferentCreditsPosted,
         Exists,
     }
 }

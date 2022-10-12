@@ -19,7 +19,7 @@ namespace TigerBeetle.Tests
         [TestMethod]
         public void I64Constructor()
         {
-            UInt128 value = new UInt128(-1L, -2L);
+            var value = new UInt128(-1L, -2L);
             var (i64a, i64b) = value.ToInt64();
 
             Assert.AreEqual(i64a, -1L);
@@ -29,7 +29,7 @@ namespace TigerBeetle.Tests
         [TestMethod]
         public void U64Constructors()
         {
-            UInt128 value = new UInt128(1LU, 2LU);
+            var value = new UInt128(1LU, 2LU);
             var (u64a, u64b) = value.ToUInt64();
 
             Assert.AreEqual(u64a, 1LU);
