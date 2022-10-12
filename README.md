@@ -39,6 +39,9 @@ info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 0.0.0.0:3000
 ```
 
+Note: if you are on macOS, you will need to call the Docker run
+command with `--cap-add IPC_LOCK` or `--ulimit memlock=-1:-1`.
+
 ### From Source
 
 To build from source, clone the repo and run the install script.
