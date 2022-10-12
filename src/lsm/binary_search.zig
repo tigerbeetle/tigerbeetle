@@ -246,6 +246,33 @@ test "binary search: exhaustive" {
 test "binary search: explicit" {
     if (test_binary_search.log) std.debug.print("\n", .{});
     try test_binary_search.explicit_search(
+        &[_]u32{},
+        &[_]u32{0},
+        &[_]BinarySearchResult{
+            .{ .index = 0, .exact = false },
+        },
+    );
+    try test_binary_search.explicit_search(
+        &[_]u32{1},
+        &[_]u32{ 0, 1, 2 },
+        &[_]BinarySearchResult{
+            .{ .index = 0, .exact = false },
+            .{ .index = 0, .exact = true },
+            .{ .index = 1, .exact = false },
+        },
+    );
+    try test_binary_search.explicit_search(
+        &[_]u32{ 1, 3 },
+        &[_]u32{ 0, 1, 2, 3, 4 },
+        &[_]BinarySearchResult{
+            .{ .index = 0, .exact = false },
+            .{ .index = 0, .exact = true },
+            .{ .index = 1, .exact = false },
+            .{ .index = 1, .exact = true },
+            .{ .index = 2, .exact = false },
+        },
+    );
+    try test_binary_search.explicit_search(
         &[_]u32{ 1, 3, 5, 8, 9, 11 },
         &[_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 },
         &[_]BinarySearchResult{
