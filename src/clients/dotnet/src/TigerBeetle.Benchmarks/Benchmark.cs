@@ -13,7 +13,7 @@ namespace TigerBeetle.Benchmarks
 		#region Fields
 
 		private const bool IS_ASYNC = true;
-		private const int BATCHES_COUNT = 3;
+		private const int BATCHES_COUNT = 5;
 		private const int MAX_MESSAGE_SIZE = (1024 * 1024) - 128; // config.message_size_max - @sizeOf(vsr.Header)
 		private const int TRANSFERS_PER_BATCH = (MAX_MESSAGE_SIZE / Transfer.SIZE);
 		private const int MAX_TRANSFERS = BATCHES_COUNT * TRANSFERS_PER_BATCH;
@@ -27,20 +27,20 @@ namespace TigerBeetle.Benchmarks
 			Console.WriteLine($"Benchmarking dotnet");
 
 			var queue = new TimedQueue();
-			using var client = new Client(0, new IPEndPoint[] { IPEndPoint.Parse("127.0.0.1:3001") }, maxConcurrency: 45);
+			using var client = new Client(0, new IPEndPoint[] { IPEndPoint.Parse("127.0.0.1:3001") });
 
 			var accounts = new[] {
 				new Account
 				{
 					Id = 1,
 					Code = 2,
-					Ledger = ISO4217.ZAR.Code,
+					Ledger = 777,
 				},
 				new Account
 				{
 					Id = 2,
 					Code = 2,
-					Ledger = ISO4217.ZAR.Code,
+					Ledger = 777,
 				}
 			};
 
@@ -54,8 +54,8 @@ namespace TigerBeetle.Benchmarks
 					DebitAccountId = accounts[0].Id,
 					CreditAccountId = accounts[1].Id,
 					Code = 1,
-					Ledger = ISO4217.ZAR.Code,
-					Amount = ISO4217.ZAR.ToUInt64(0.01M),
+					Ledger = 777,
+					Amount = 1,
 				};
 			}
 

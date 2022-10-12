@@ -1,14 +1,58 @@
-# TigerBeetle dotnet client
+# tigerBeetle-dotnet
 
-A C# client for [TigerBeetle](https://github.com/coilhq/tigerbeetle)
+[TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) client for C# and .Net
 
-****
+## Usage
 
-*TigerBeetle is a financial accounting database designed for mission-critical safety and performance to power the future of financial services.*
+A client needs to be configured with a `clusterID` and `replicaAddresses`.
+The `Client` class is thread-safe and for better performance, a single instance should be shared between multiple concurrent tasks.
+Multiple clients can be instantiated in case of connecting to more than one TigerBeetle cluster.
 
-## Development Setup
+```C#
+var client = new Client(clusterID: 0, replicaAddresses: new[] { "3001", "3002", "3003" });
+```
 
-[![asciicast](https://asciinema.org/a/518513.svg)](https://asciinema.org/a/518513)
+### Account Creation
+
+All TigerBeetle's IDs are 128-bit integers, and `tigerbeetle-dotnet` client accepts a wide range of dotnet values: `int`, `uint`, `long`, `ulong`, `Guid`, `byte[]` and the custom type `UInt128`.
+
+```C#
+var accounts = new[] {
+    new Account
+    {
+        Id = 1,
+        UserData = Guid.NewGuid(),
+        Code = 2,
+        Ledger = 720,
+    },     
+};
+
+var errors = await client.CreateAccounts(accounts);
+```
+
+Successfully executed events return an empty array whilst unsuccessful ones return an array with errors for only the ones that failed. An error will point to the index in the submitted array of the failed event.
+
+### Creating a Transfer
+
+Amounts are 64-bit unsigned integers values.
+
+```C#
+transfers = new[] {
+    new Transfer
+    {
+        Id = 100,
+        DebitAccountId = accountA.Id,
+        CreditAccountId = accountB.Id,
+        Code = 1,
+        Ledger = 720,
+        Amount = 100,
+    },
+}
+
+var errors = await client.CreateTransfers(accounts);
+```
+
+## Build from source
 
 ### 1. Install [dotnet 6](https://dotnet.microsoft.com/en-us/download)
 
@@ -71,61 +115,11 @@ scripts/benchmark.sh
 ```bash
 scripts\benchmark.bat
 ```
-
-## Usage
-
-A client needs to be configured with a `clusterID` and `replicaAddresses`.
-The `Client` class is thread-safe and for better performance, a single instance should be shared between multiple concurrent tasks.
-Multiple clients can be instantiated in case of connecting to more than one TigerBeetle cluster.
-
-```C#
-var client = new Client(clusterID: 0, replicaAddresses: new[] { "3001", "3002", "3003" });
-```
-
-### Account Creation
-
-All TigerBeetle's ID are 128-bit integer, and `tigerbeetle-dotnet` client accepts a wide range of dotnet values: `int`, `uint`, `long`, `ulong`, `Guid` and the custom type `UInt128`.
-
-```C#
-var accounts = new[] {
-    new Account
-    {
-        Id = 1,
-        UserData = Guid.NewGuid(),
-        Code = 2,
-        Ledger = ISO4217.USD.Code,
-    },  
-};
-
-var errors = await client.CreateAccounts(accounts);
-```
-
-Successfully executed events return an empty array whilst unsuccessful ones return an array with errors for only the ones that failed. An error will point to the index in the submitted array of the failed event.
-
-### Creating a Transfer
-
-Amounts are 64-bit unsigned integers and can be easily converted to/from `decimal` values.
-
-```C#
-transfers = new[] {
-    new Transfer
-    {
-        Id = Guid.NewGuid(),
-        DebitAccountId = accountA.Id,
-        CreditAccountId = accountB.Id,
-        Code = 1,
-        Ledger = ISO4217.USD.Code,
-        Amount = ISO4217.USD.ToUInt64(0.99M),
-    },
-}
-
-var errors = await client.CreateTransfers(accounts);
-```
-
 ## Other clients and documentation
 
-- [Tigerbeetle Node](https://github.com/coilhq/tigerbeetle-node)
-- [Tigerbeetle Go](https://github.com/coilhq/tigerbeetle-go)
+- [Tigerbeetle Node](https://github.com/tigerbeetledb/tigerbeetle-node)
+- [Tigerbeetle Go](https://github.com/tigerbeetledb/tigerbeetle-go)
+- [Tigerbeetle Java](https://github.com/tigerbeetledb/tigerbeetle-java)
 
 ## License
 

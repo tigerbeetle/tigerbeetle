@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace TigerBeetle
 {
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-    public struct Transfer : IEquatable<Transfer>
+    public struct Transfer
     {
         #region InnerTypes
 
@@ -73,49 +73,17 @@ namespace TigerBeetle
 
         public UInt128 CreditAccountId { get => creditAccountId; set => creditAccountId = value; }
 
-        #region Documentation
-
-        /// <summary>
-        /// Opaque third-party identifier to link this transfer (many-to-one) to an external entity.
-        /// </summary>
-
-        #endregion Documentation
-
         public UInt128 UserData { get => userData; set => userData = value; }
-
-        #region Documentation
-
-        /// <summary>
-        /// Reserved for accounting policy primitives.
-        /// </summary>
-
-        #endregion Documentation
 
         public ReadOnlySpan<byte> Reserved
         {
             get => reserved.AsReadOnlySpan<byte>();
-            set => value.CopyTo(reserved.AsSpan<byte>());
+            internal set => value.CopyTo(reserved.AsSpan<byte>());
         }
-
-        #region Documentation
-
-        /// <summary>
-        /// If this transfer will post or void a pending transfer, the id of that pending transfer.
-        /// </summary>
-
-        #endregion Documentation
 
         public UInt128 PendingId { get => pendingId; set => pendingId = value; }
 
         public ulong Timeout { get => timeout; set => timeout = value; }
-
-        #region Documentation
-
-        /// <summary>
-        /// A chart of accounts code describing the reason for the transfer (e.g. deposit, settlement).
-        /// </summary>
-
-        #endregion Documentation
 
         public uint Ledger { get => ledger; set => ledger = value; }
 
@@ -125,38 +93,8 @@ namespace TigerBeetle
 
         public ulong Amount { get => amount; set => amount = value; }
 
-        public ulong Timestamp { get => timestamp; set => timestamp = value; }
+        public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
 
         #endregion Properties
-
-        #region Methods
-
-        public bool Equals(Transfer other)
-        {
-            return AsReadOnlySpan().SequenceEqual(other.AsReadOnlySpan());
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return obj is Transfer transfer && Equals(transfer);
-        }
-
-        public override int GetHashCode()
-        {
-            return id.GetHashCode();
-        }
-
-        public ReadOnlySpan<byte> AsReadOnlySpan()
-        {
-            unsafe
-            {
-                fixed (void* ptr = &this)
-                {
-                    return new ReadOnlySpan<byte>(ptr, Transfer.SIZE);
-                }
-            }
-        }
-
-        #endregion Methods
     }
 }
