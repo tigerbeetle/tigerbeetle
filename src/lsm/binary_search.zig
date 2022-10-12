@@ -1,14 +1,19 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
+const config = @import("../config.zig");
 
 // TODO Add prefeching when @prefetch is available: https://github.com/ziglang/zig/issues/3600.
 //
 // TODO The Zig self hosted compiler will implement inlining itself before passing the IR to llvm,
 // which should eliminate the current poor codegen of key_from_value/compare_keys.
 
-/// Returns the index of the key either exactly equal to the target key or, if there is no exact
-/// match, the next greatest key.
+/// Returns either the index of the first value equal to key,
+/// or if there is no such value then the index where the key would be inserted
+/// ie returns `i` such that both:
+/// * i == values.len or key_from_value(values[i]) >= key
+/// * i == 0 or key_value_from(values[i-1]) < key
+///
 /// Doesn't perform the extra key comparison to determine if the match is exact.
 pub fn binary_search_values_raw(
     comptime Key: type,
@@ -20,9 +25,21 @@ pub fn binary_search_values_raw(
 ) u32 {
     if (values.len == 0) return 0;
 
+    if (config.verify) {
+        // Input must be sorted by key.
+        for (values) |_, i| {
+            assert(i == 0 or compare_keys(key_from_value(&values[i - 1]), key_from_value(&values[i])) != .gt);
+        }
+    }
+
     var offset: usize = 0;
     var length: usize = values.len;
     while (length > 1) {
+        if (config.verify) {
+            assert(offset == 0 or compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
+            assert(offset + length == values.len or compare_keys(key_from_value(&values[offset + length]), key) != .lt);
+        }
+
         const half = length / 2;
         const mid = offset + half;
 
@@ -34,7 +51,20 @@ pub fn binary_search_values_raw(
         length -= half;
     }
 
-    return @intCast(u32, offset + @boolToInt(compare_keys(key_from_value(&values[offset]), key) == .lt));
+    if (config.verify) {
+        assert(length == 1);
+        assert(offset == 0 or compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
+        assert(offset + length == values.len or compare_keys(key_from_value(&values[offset + length]), key) != .lt);
+    }
+
+    offset += @boolToInt(compare_keys(key_from_value(&values[offset]), key) == .lt);
+
+    if (config.verify) {
+        assert(offset == 0 or compare_keys(key_from_value(&values[offset - 1]), key) == .lt);
+        assert(offset == values.len or compare_keys(key_from_value(&values[offset]), key) != .lt);
+    }
+
+    return @intCast(u32, offset);
 }
 
 pub inline fn binary_search_keys_raw(
