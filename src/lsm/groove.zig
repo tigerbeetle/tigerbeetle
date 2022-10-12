@@ -138,6 +138,9 @@ fn IndexTreeType(
 
 /// A Groove is a collection of LSM trees auto generated for fields on a struct type
 /// as well as custom derived fields from said struct type.
+///
+/// Invariants:
+/// - Between beats, all of a groove's trees share the same lookup_snapshot_max.
 pub fn GrooveType(
     comptime Storage: type,
     comptime Object: type,
@@ -553,7 +556,9 @@ pub fn GrooveType(
             // We may query the input tables of an ongoing compaction, but must not query the
             // output tables until the compaction is complete. (Until then, the output tables may
             // be in the manifest but not yet on disk).
-            const snapshot_max = groove.ids.lookup_snapshot_max;
+            const snapshot_max = groove.objects.lookup_snapshot_max;
+            assert(snapshot_max == groove.ids.lookup_snapshot_max);
+
             const snapshot_target = snapshot orelse snapshot_max;
             assert(snapshot_target <= snapshot_max);
 

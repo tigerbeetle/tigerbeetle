@@ -2542,7 +2542,7 @@ pub fn ReplicaType(
             //
             // The checkpoint is triggered at "E".
             // At this point, ops 6 and 7 are in the in-memory immutable table.
-            // They will only be compacted to disk in the next measure.
+            // They will only be compacted to disk in the next bar.
             // Therefore, only ops "A..D" are committed to disk.
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_new = .{
@@ -2671,7 +2671,7 @@ pub fn ReplicaType(
 
             if (self.superblock.working.vsr_state.op_compacted(prepare.header.op)) {
                 // We are recovering from a checkpoint. Prior to the crash, the client table was
-                // updated with entries for one measure beyond the op_checkpoint.
+                // updated with entries for one bar beyond the op_checkpoint.
                 assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
                 if (self.client_table().get(prepare.header.client)) |entry| {
                     assert(entry.reply.header.command == .reply);

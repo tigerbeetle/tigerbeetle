@@ -1,5 +1,7 @@
 //! Compaction moves or merges a table's values into the next level.
 //!
+//! Each Compaction is paced to run in one half-bar.
+//!
 //!
 //! Compaction overview:
 //!
@@ -121,12 +123,14 @@ pub fn CompactionType(
         grid: *Grid,
         range: Manifest.CompactionRange,
 
-        /// `snapshot` is equal to the first op/beat of this compaction's half-bar.
-        /// - This compaction's input tables must be visible to `snapshot`.
-        /// - After this compaction finishes:
-        ///   - `snapshot + half_bar_beat_count - 1` will be the input tables' snapshot_max.
-        ///   - `snapshot + half_bar_beat_count` will be the output tables' snapshot_min.
-        snapshot: u64,
+        /// `op_min` is the first op/beat of this compaction's half-bar.
+        /// `op_min` is used as a snapshot — the compaction's input tables must be visible
+        /// to `op_min`.
+        ///
+        /// After this compaction finishes:
+        /// - `op_min + half_bar_beat_count - 1` will be the input tables' snapshot_max.
+        /// - `op_min + half_bar_beat_count` will be the output tables' snapshot_min.
+        op_min: u64,
         drop_tombstones: bool,
 
         status: Status,
@@ -162,7 +166,7 @@ pub fn CompactionType(
                 // Assigned by start()
                 .grid = undefined,
                 .range = undefined,
-                .snapshot = undefined,
+                .op_min = undefined,
                 .drop_tombstones = undefined,
 
                 .status = .idle,
@@ -193,12 +197,12 @@ pub fn CompactionType(
 
         /// The compaction's input tables are:
         /// * table_a (which is null when level B is 0), and
-        /// * any level-B tables visible to `snapshot` within `range`.
+        /// * any level-B tables visible to `op_min` within `range`.
         pub fn start(
             compaction: *Compaction,
             grid: *Grid,
             manifest: *Manifest,
-            snapshot: u64,
+            op_min: u64,
             range: Manifest.CompactionRange,
             table_a: ?*const TableInfo,
             level_b: u8,
@@ -209,12 +213,12 @@ pub fn CompactionType(
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done and compaction.merge_iterator == null);
 
-            assert(snapshot % @divExact(config.lsm_batch_multiple, 2) == 0);
+            assert(op_min % @divExact(config.lsm_batch_multiple, 2) == 0);
             assert(range.table_count > 0);
-            if (table_a) |t| assert(t.visible(snapshot));
+            if (table_a) |t| assert(t.visible(op_min));
 
             assert(level_b < config.lsm_levels);
-            assert((table_a == null) == (level_b == 0));
+            assert((level_b == 0) == (table_a == null));
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.
             // This invariant is always true for the last level as it doesn't have any lower ones.
@@ -224,7 +228,7 @@ pub fn CompactionType(
             compaction.* = .{
                 .grid = grid,
                 .range = range,
-                .snapshot = snapshot,
+                .op_min = op_min,
                 .drop_tombstones = drop_tombstones,
 
                 .status = .processing,
@@ -255,7 +259,7 @@ pub fn CompactionType(
                 .grid = grid,
                 .manifest = manifest,
                 .level = level_b,
-                .snapshot = snapshot,
+                .snapshot = op_min,
                 .key_min = range.key_min,
                 .key_max = range.key_max,
                 .direction = .ascending,
@@ -285,13 +289,13 @@ pub fn CompactionType(
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
             assert(!compaction.merge_done);
-            assert(table.visible(compaction.snapshot));
+            assert(table.visible(compaction.op_min));
 
             // Tables discovered by iterator_b that are visible at the start of compaction.
             var table_copy = table.*;
             compaction.manifest.update_table(
                 compaction.level_b,
-                snapshot_max_for_input_table(compaction.snapshot),
+                snapshot_max_for_table_input(compaction.op_min),
                 &table_copy,
             );
 
@@ -470,7 +474,7 @@ pub fn CompactionType(
                 const table = compaction.table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .address = compaction.grid.acquire(),
-                    .snapshot_min = snapshot_min_for_output_table(compaction.snapshot),
+                    .snapshot_min = snapshot_min_for_table_output(compaction.op_min),
                     // TODO(Persistent Snapshots) set snapshot_max to the minimum snapshot_max of
                     // all the (original) input tables.
                 });
@@ -507,7 +511,7 @@ pub fn CompactionType(
             // TODO: Release the grid blocks associated with level_a as well
             if (compaction.level_a_input) |*level_a_table| {
                 const level_a = compaction.level_b - 1;
-                const snapshot_max = snapshot_max_for_input_table(compaction.snapshot);
+                const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
                 compaction.manifest.update_table(level_a, snapshot_max, level_a_table);
                 assert(level_a_table.snapshot_max == snapshot_max);
             } else {
@@ -532,12 +536,12 @@ pub fn CompactionType(
     };
 }
 
-fn snapshot_max_for_input_table(compaction_snapshot: u64) u64 {
-    assert(compaction_snapshot % @divExact(config.lsm_batch_multiple, 2) == 0);
-    return compaction_snapshot + @divExact(config.lsm_batch_multiple, 2) - 1;
+fn snapshot_max_for_table_input(op_min: u64) u64 {
+    assert(op_min % @divExact(config.lsm_batch_multiple, 2) == 0);
+    return op_min + @divExact(config.lsm_batch_multiple, 2) - 1;
 }
 
-fn snapshot_min_for_output_table(compaction_snapshot: u64) u64 {
-    assert(compaction_snapshot % @divExact(config.lsm_batch_multiple, 2) == 0);
-    return compaction_snapshot + @divExact(config.lsm_batch_multiple, 2);
+fn snapshot_min_for_table_output(op_min: u64) u64 {
+    assert(op_min % @divExact(config.lsm_batch_multiple, 2) == 0);
+    return op_min + @divExact(config.lsm_batch_multiple, 2);
 }
