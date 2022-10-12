@@ -1,6 +1,9 @@
 demos/bitcast/bench-decode
 demos/bitcast/decode
 demos/bitcast/transfers
+demos/bitcast/bin
+demos/bitcast/obj
+demos/bitcast/*.o
 dist/
 journal
 main

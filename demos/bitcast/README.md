@@ -73,15 +73,58 @@ Coming from JavaScript, this is less code.
 
 ## What's the performance impact?
 
-Roughly, deserializing 16,384 transfers takes 5ms to 20ms in JavaScript and 0.21ms in
+Deserializing **16,384 transfers** on each language:
+
+Roughly, deserializing 16,384 transfers takes 5ms to 20ms in JavaScript and 0.03ms in
 Zig:
 
-```shell
-node bench-encode.js && zig build-exe bench-decode.zig -O ReleaseSafe && node bench-decode.js && ./bench-decode
- js: sum of transfer amounts=16384 ms=5
-zig: sum of transfer amounts=16384 ns=36000
-```
+|Language| Avg time(ms) |
+|--------|--------------|
+|Zig     |          0.03|
+|Go      |          0.03|
+|C#      |          0.05|
+|Java    |          0.85|
+|JS      |          5.00|
 
 To put this in perspective, the cost of deserializing a batch of transfers in
 JavaScript can be more than the fsync latency for writing the same data to an
 HDD, let alone an SSD or NVMe SSD.
+
+### Running
+
+Before running, create a mass of data used by all benchmarks:
+
+```shell
+node bench-encode.js
+```
+
+**Zig:**
+
+```shell
+zig build-exe bench-decode.zig -O ReleaseSafe && ./bench-decode
+```
+
+**Go:**
+
+```shell
+go run bench-decode.go
+```
+
+**C#**
+
+```shell
+dotnet run --project bench-decode.csproj -c Release
+```
+
+**Java:**
+
+```shell
+java BenchDecode.java
+```
+
+**JavaScript:**
+
+```shell
+node bench-decode.js
+```
+

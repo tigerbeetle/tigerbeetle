@@ -5,24 +5,28 @@ const TRANSFER                  = 128;
 const TRANSFER_ID               = 16;
 const TRANSFER_DEBIT_ID         = 16;
 const TRANSFER_CREDIT_ID        = 16;
-const TRANSFER_CUSTOM_1         = 16;
-const TRANSFER_CUSTOM_2         = 16;
-const TRANSFER_CUSTOM_3         = 16;
-const TRANSFER_FLAGS            = 8;
-const TRANSFER_AMOUNT           = 8;
+const TRANSFER_USER_DATA        = 16;
+const TRANSFER_RESERVED         = 16;
+const TRANSFER_PENDING_ID       = 16;
 const TRANSFER_TIMEOUT          = 8;
+const TRANSFER_LEDGER           = 4;
+const TRANSFER_CODE             = 2;
+const TRANSFER_FLAGS            = 2;
+const TRANSFER_AMOUNT           = 8;
 const TRANSFER_TIMESTAMP        = 8;
 
-const TRANSFER_ID_OFFSET        = 0;
-const TRANSFER_DEBIT_ID_OFFSET  = 0 + 16;
-const TRANSFER_CREDIT_ID_OFFSET = 0 + 16 + 16;
-const TRANSFER_CUSTOM_1_OFFSET  = 0 + 16 + 16 + 16;
-const TRANSFER_CUSTOM_2_OFFSET  = 0 + 16 + 16 + 16 + 16;
-const TRANSFER_CUSTOM_3_OFFSET  = 0 + 16 + 16 + 16 + 16 + 16;
-const TRANSFER_FLAGS_OFFSET     = 0 + 16 + 16 + 16 + 16 + 16 + 16;
-const TRANSFER_AMOUNT_OFFSET    = 0 + 16 + 16 + 16 + 16 + 16 + 16 + 8;
-const TRANSFER_TIMEOUT_OFFSET   = 0 + 16 + 16 + 16 + 16 + 16 + 16 + 8 + 8;
-const TRANSFER_TIMESTAMP_OFFSET = 0 + 16 + 16 + 16 + 16 + 16 + 16 + 8 + 8 + 8;
+const TRANSFER_ID_OFFSET         = 0;
+const TRANSFER_DEBIT_ID_OFFSET   = 0 + 16;
+const TRANSFER_CREDIT_ID_OFFSET  = 0 + 16 + 16;
+const TRANSFER_USER_DATA_OFFSET  = 0 + 16 + 16 + 16;
+const TRANSFER_RESERVED_OFFSET   = 0 + 16 + 16 + 16 + 16;
+const TRANSFER_PENDING_ID_OFFSET = 0 + 16 + 16 + 16 + 16 + 16;
+const TRANSFER_TIMEOUT_OFFSET    = 0 + 16 + 16 + 16 + 16 + 16 + 16;
+const TRANSFER_LEDGER_OFFSET     = 0 + 16 + 16 + 16 + 16 + 16 + 16 + 8;
+const TRANSFER_CODE_OFFSET       = 0 + 16 + 16 + 16 + 16 + 16 + 16 + 8 + 4;
+const TRANSFER_FLAGS_OFFSET      = 0 + 16 + 16 + 16 + 16 + 16 + 16 + 8 + 4 + 2;
+const TRANSFER_AMOUNT_OFFSET     = 0 + 16 + 16 + 16 + 16 + 16 + 16 + 8 + 4 + 2 + 2;
+const TRANSFER_TIMESTAMP_OFFSET  = 0 + 16 + 16 + 16 + 16 + 16 + 16 + 8 + 4 + 2 + 2 + 8;
 
 assert(TRANSFER_TIMESTAMP_OFFSET + TRANSFER_TIMESTAMP === TRANSFER);
 
@@ -45,16 +49,18 @@ while (loops--) {
       id: id(slice, TRANSFER_ID_OFFSET, TRANSFER_ID),
       debit_id: id(slice, TRANSFER_DEBIT_ID_OFFSET, TRANSFER_DEBIT_ID),
       credit_id: id(slice, TRANSFER_CREDIT_ID_OFFSET, TRANSFER_CREDIT_ID),
-      custom_1: id(slice, TRANSFER_CUSTOM_1_OFFSET, TRANSFER_CUSTOM_1),
-      custom_2: id(slice, TRANSFER_CUSTOM_2_OFFSET, TRANSFER_CUSTOM_2),
-      custom_3: id(slice, TRANSFER_CUSTOM_3_OFFSET, TRANSFER_CUSTOM_3),
-      flags: slice.readUInt32LE(TRANSFER_FLAGS_OFFSET),
+      user_data: id(slice, TRANSFER_USER_DATA_OFFSET, TRANSFER_USER_DATA),
+      reserved: id(slice, TRANSFER_RESERVED_OFFSET, TRANSFER_RESERVED),
+      pending_id: id(slice, TRANSFER_PENDING_ID_OFFSET, TRANSFER_PENDING_ID),
+      timeout: slice.readUint32LE(TRANSFER_TIMEOUT_OFFSET),
+      ledger: slice.readUInt32LE(TRANSFER_LEDGER_OFFSET),
+      code: slice.readUInt16LE(TRANSFER_CODE_OFFSET),
+      flags: slice.readUInt16LE(TRANSFER_FLAGS_OFFSET),
       amount: slice.readUInt32LE(TRANSFER_AMOUNT_OFFSET),
-      timeout: slice.readUInt32LE(TRANSFER_TIMEOUT_OFFSET),
       timestamp: slice.readUInt32LE(TRANSFER_TIMESTAMP_OFFSET)
     };
     sum += transfer.amount;
     offset += 128;
   }
-  console.log(` js: sum of transfer amounts=${sum} ms=${Date.now() - ms}`);
+  console.log(`  js: sum of transfer amounts=${sum} ms=${Date.now() - ms}`);
 }

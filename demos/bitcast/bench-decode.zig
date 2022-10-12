@@ -5,12 +5,14 @@ const Transfer = packed struct {
     id: u128,
     debit_id: u128,
     credit_id: u128,
-    custom_1: u128,
-    custom_2: u128,
-    custom_3: u128,
-    flags: u64,
-    amount: u64,
+    user_data: u128,
+    reserved: u128,
+    pending_id: u128,
     timeout: u64,
+    ledger: u32,
+    code: u16,
+    flags: u16,
+    amount: u64,
     timestamp: u64,
 };
 
@@ -38,5 +40,5 @@ pub fn main() !void {
         offset += 128;
     }
     var ns = std.time.nanoTimestamp() - start;
-    std.debug.print("zig: sum of transfer amounts={} ns={}\n", .{ sum, ns });
+    std.debug.print(" zig: sum of transfer amounts={} ns={}\n", .{ sum, ns });
 }
