@@ -49,6 +49,8 @@ on macOS, you will need to do one of the following:
 }
 ```
 
+See https://github.com/tigerbeetledb/tigerbeetle/issues/92 for discussion.
+
 ## Debugging panics
 
 If TigerBeetle panics and you can reproduce the panic, you can get a
