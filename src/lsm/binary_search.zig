@@ -9,10 +9,11 @@ const config = @import("../config.zig");
 // which should eliminate the current poor codegen of key_from_value/compare_keys.
 
 /// Returns either the index of the first value equal to `key`,
-/// or if there is no such value then the index where `key` would be inserted
-/// ie returns `i` such that both:
-/// * i == values.len or key_from_value(values[i]) >= key
-/// * i == 0 or key_value_from(values[i-1]) < key
+/// or if there is no such value then the index where `key` would be inserted.
+///
+/// In other words, return `i` such that both:
+/// * key_from_value(values[i])  >= key or i == values.len
+/// * key_value_from(values[i-1]) < key or i == 0
 ///
 /// Doesn't perform the extra key comparison to determine if the match is exact.
 pub fn binary_search_values_raw(
