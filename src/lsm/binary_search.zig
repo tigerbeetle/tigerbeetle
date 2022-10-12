@@ -29,7 +29,8 @@ pub fn binary_search_values_raw(
     if (config.verify) {
         // Input must be sorted by key.
         for (values) |_, i| {
-            assert(i == 0 or compare_keys(key_from_value(&values[i - 1]), key_from_value(&values[i])) != .gt);
+            assert(i == 0 or
+                compare_keys(key_from_value(&values[i - 1]), key_from_value(&values[i])) != .gt);
         }
     }
 
@@ -37,8 +38,10 @@ pub fn binary_search_values_raw(
     var length: usize = values.len;
     while (length > 1) {
         if (config.verify) {
-            assert(offset == 0 or compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
-            assert(offset + length == values.len or compare_keys(key_from_value(&values[offset + length]), key) != .lt);
+            assert(offset == 0 or
+                compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
+            assert(offset + length == values.len or
+                compare_keys(key_from_value(&values[offset + length]), key) != .lt);
         }
 
         const half = length / 2;
@@ -54,15 +57,19 @@ pub fn binary_search_values_raw(
 
     if (config.verify) {
         assert(length == 1);
-        assert(offset == 0 or compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
-        assert(offset + length == values.len or compare_keys(key_from_value(&values[offset + length]), key) != .lt);
+        assert(offset == 0 or
+            compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
+        assert(offset + length == values.len or
+            compare_keys(key_from_value(&values[offset + length]), key) != .lt);
     }
 
     offset += @boolToInt(compare_keys(key_from_value(&values[offset]), key) == .lt);
 
     if (config.verify) {
-        assert(offset == 0 or compare_keys(key_from_value(&values[offset - 1]), key) == .lt);
-        assert(offset == values.len or compare_keys(key_from_value(&values[offset]), key) != .lt);
+        assert(offset == 0 or
+            compare_keys(key_from_value(&values[offset - 1]), key) == .lt);
+        assert(offset == values.len or
+            compare_keys(key_from_value(&values[offset]), key) != .lt);
     }
 
     return @intCast(u32, offset);
@@ -201,7 +208,10 @@ const test_binary_search = struct {
     }
 
     fn random_search(random: std.rand.Random, iter: usize) !void {
-        const keys_count = @floatToInt(usize, @trunc(random.floatExp(f64) * @intToFloat(f64, iter)));
+        const keys_count = @floatToInt(
+            usize,
+            @trunc(random.floatExp(f64) * @intToFloat(f64, iter)),
+        );
 
         const keys = try std.testing.allocator.alloc(u32, keys_count);
         defer std.testing.allocator.free(keys);
