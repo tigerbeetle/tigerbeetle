@@ -124,6 +124,7 @@ pub fn TableImmutableType(comptime Table: type) type {
                 compare_keys,
                 table.values,
                 key,
+                .{},
             );
             if (result.exact) {
                 const value = &table.values[result.index];

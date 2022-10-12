@@ -94,6 +94,7 @@ pub fn main() !void {
                     return std.math.order(a, b);
                 }
             }.compare_keys,
+            .{ .verify = false },
         );
 
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
