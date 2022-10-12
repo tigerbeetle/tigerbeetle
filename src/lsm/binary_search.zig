@@ -8,8 +8,8 @@ const config = @import("../config.zig");
 // TODO The Zig self hosted compiler will implement inlining itself before passing the IR to llvm,
 // which should eliminate the current poor codegen of key_from_value/compare_keys.
 
-/// Returns either the index of the first value equal to key,
-/// or if there is no such value then the index where the key would be inserted
+/// Returns either the index of the first value equal to `key`,
+/// or if there is no such value then the index where `key` would be inserted
 /// ie returns `i` such that both:
 /// * i == values.len or key_from_value(values[i]) >= key
 /// * i == 0 or key_value_from(values[i-1]) < key
