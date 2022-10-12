@@ -1,7 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
-const config = @import("../config.zig");
+
+pub const Config = struct {
+    verify: bool = false,
+};
 
 // TODO Add prefeching when @prefetch is available: https://github.com/ziglang/zig/issues/3600.
 //
@@ -23,6 +26,7 @@ pub fn binary_search_values_raw(
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
+    comptime config: Config,
 ) u32 {
     if (values.len == 0) return 0;
 
@@ -80,6 +84,7 @@ pub inline fn binary_search_keys_raw(
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     keys: []const Key,
     key: Key,
+    comptime config: Config,
 ) u32 {
     return binary_search_values_raw(
         Key,
@@ -92,6 +97,7 @@ pub inline fn binary_search_keys_raw(
         compare_keys,
         keys,
         key,
+        config,
     );
 }
 
@@ -107,8 +113,9 @@ pub inline fn binary_search_values(
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
+    comptime config: Config,
 ) BinarySearchResult {
-    const index = binary_search_values_raw(Key, Value, key_from_value, compare_keys, values, key);
+    const index = binary_search_values_raw(Key, Value, key_from_value, compare_keys, values, key, config);
     return .{
         .index = index,
         .exact = index < values.len and compare_keys(key_from_value(&values[index]), key) == .eq,
@@ -120,8 +127,9 @@ pub inline fn binary_search_keys(
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     keys: []const Key,
     key: Key,
+    comptime config: Config,
 ) BinarySearchResult {
-    const index = binary_search_keys_raw(Key, compare_keys, keys, key);
+    const index = binary_search_keys_raw(Key, compare_keys, keys, key, config);
     return .{
         .index = index,
         .exact = index < keys.len and compare_keys(keys[index], key) == .eq,
@@ -175,6 +183,7 @@ const test_binary_search = struct {
                 compare_keys,
                 keys,
                 target_key,
+                .{ .verify = true },
             );
 
             if (log) std.debug.print("expected: {}, actual: {}\n", .{ expect, actual });
@@ -203,6 +212,7 @@ const test_binary_search = struct {
                 compare_keys,
                 keys,
                 target_key,
+                .{ .verify = true },
             );
             try std.testing.expectEqual(expect.index, actual.index);
             try std.testing.expectEqual(expect.exact, actual.exact);
@@ -239,6 +249,7 @@ const test_binary_search = struct {
             compare_keys,
             keys,
             target_key,
+            .{ .verify = true },
         );
 
         if (log) std.debug.print("expected: {}, actual: {}\n", .{ expect, actual });

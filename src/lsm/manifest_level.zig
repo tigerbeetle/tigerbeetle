@@ -82,9 +82,10 @@ pub fn ManifestLevelType(
                 }
             }.key_from_value,
             compare_keys,
+            .{},
         );
 
-        pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max);
+        pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max, .{});
 
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
@@ -582,6 +583,7 @@ pub fn TestContext(
                     compare_keys,
                     context.reference.items,
                     table.key_max,
+                    .{},
                 );
                 // Can't be equal as the tables may not overlap
                 if (index < context.reference.items.len) {
@@ -607,6 +609,7 @@ pub fn TestContext(
                 compare_keys,
                 context.reference.items,
                 new_key_min,
+                .{},
             );
 
             if (i > 0) {
