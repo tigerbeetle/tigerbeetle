@@ -906,8 +906,6 @@ fn TestContext(
                     for (buffer[0..count]) |value| {
                         const index_actual = context.array.insert_element(&context.pool, value);
                         const index_expect = context.reference_index(key_from_value(&value));
-                        // const index_expect = if (context.reference.items.len == 0) 0
-                        //     else binary_search_values_raw(Key, T, key_from_value, compare_keys, context.reference.items, key_from_value(&value));
                         context.reference.insert(index_expect, value) catch unreachable;
                         try std.testing.expectEqual(index_expect, index_actual);
                     }
@@ -1050,18 +1048,14 @@ fn TestContext(
         }
 
         fn reference_index(context: *const Self, key: Key) u32 {
-            if (context.reference.items.len == 0) {
-                return 0;
-            } else {
-                return binary_search_values_raw(
-                    Key,
-                    T,
-                    key_from_value,
-                    compare_keys,
-                    context.reference.items,
-                    key,
-                );
-            }
+            return binary_search_values_raw(
+                Key,
+                T,
+                key_from_value,
+                compare_keys,
+                context.reference.items,
+                key,
+            );
         }
     };
 }

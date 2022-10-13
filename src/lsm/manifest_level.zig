@@ -56,7 +56,6 @@ const meta = std.meta;
 const config = @import("../config.zig");
 const lsm = @import("tree.zig");
 const binary_search = @import("binary_search.zig");
-const binary_search_keys_raw = binary_search.binary_search_keys_raw;
 
 const Direction = @import("direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
@@ -576,20 +575,14 @@ pub fn TestContext(
             }
 
             for (buffer[0..count]) |table| {
-                const index = blk: {
-                    if (context.reference.items.len == 0) {
-                        break :blk 0;
-                    } else {
-                        break :blk binary_search.binary_search_values_raw(
-                            Key,
-                            TableInfo,
-                            key_min_from_table,
-                            compare_keys,
-                            context.reference.items,
-                            table.key_max,
-                        );
-                    }
-                };
+                const index = binary_search.binary_search_values_raw(
+                    Key,
+                    TableInfo,
+                    key_min_from_table,
+                    compare_keys,
+                    context.reference.items,
+                    table.key_max,
+                );
                 // Can't be equal as the tables may not overlap
                 if (index < context.reference.items.len) {
                     assert(context.reference.items[index].key_min > table.key_max);
@@ -607,20 +600,14 @@ pub fn TestContext(
 
             assert(compare_keys(new_key_min, key) == .gt);
 
-            var i = blk: {
-                if (context.reference.items.len == 0) {
-                    break :blk 0;
-                } else {
-                    break :blk binary_search.binary_search_values_raw(
-                        Key,
-                        TableInfo,
-                        key_min_from_table,
-                        compare_keys,
-                        context.reference.items,
-                        new_key_min,
-                    );
-                }
-            };
+            var i = binary_search.binary_search_values_raw(
+                Key,
+                TableInfo,
+                key_min_from_table,
+                compare_keys,
+                context.reference.items,
+                new_key_min,
+            );
 
             if (i > 0) {
                 if (compare_keys(new_key_min, context.reference.items[i - 1].key_max) != .gt) {
