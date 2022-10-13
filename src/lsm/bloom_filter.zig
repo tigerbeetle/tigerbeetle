@@ -82,15 +82,19 @@ test {
 }
 
 const test_bloom_filter = struct {
+    const fuzz = @import("../test/fuzz.zig");
     const block_size = @import("../config.zig").block_size;
 
     fn random_keys(random: std.rand.Random, iter: usize) !void {
-        const keys_count = @floatToInt(usize, @trunc(random.floatExp(f64) * @intToFloat(f64, iter)));
+        const keys_count = @minimum(
+            @as(usize, 1E6),
+            fuzz.random_int_exp(random, usize, iter),
+        );
 
         const keys = try std.testing.allocator.alloc(u32, keys_count);
         defer std.testing.allocator.free(keys);
 
-        for (keys) |*key| key.* = @floatToInt(u32, @trunc(random.floatExp(f64) * 100));
+        for (keys) |*key| key.* = fuzz.random_int_exp(random, u32, 100);
 
         // `block_size` is currently the only size bloom_filter that we use.
         const filter = try std.testing.allocator.alloc(u8, block_size);
