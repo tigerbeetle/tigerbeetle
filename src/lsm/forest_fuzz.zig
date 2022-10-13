@@ -284,8 +284,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    const biases = fuzz.random_biases(random, std.meta.Tag(FuzzOp));
-    log.info("biases = {d:.2}", .{biases});
+    const fuzz_op_distribution = fuzz.random_enum_distribution(random, std.meta.Tag(FuzzOp));
+    log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
     // We're not allowed to go more than Environment.cache_entries_max puts without compacting.
     var puts_since_compact: usize = 0;
@@ -299,7 +299,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
             FuzzOp{ .compact = {} }
         else
         // Otherwise pick a random FuzzOp.
-        switch (fuzz.random_enum_biased(random, std.meta.Tag(FuzzOp), biases)) {
+        switch (fuzz.random_enum(random, std.meta.Tag(FuzzOp), fuzz_op_distribution)) {
             .compact => FuzzOp{
                 .compact = {},
             },
