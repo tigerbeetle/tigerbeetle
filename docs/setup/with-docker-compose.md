@@ -83,6 +83,29 @@ Now you can connect to the running server with any client. For a quick
 start, try [creating accounts and transfers in the Node
 CLI](../usage/node-cli).
 
+## `error: SystemResources` on macOS
+
+If you get `error: SystemResources` when running TigerBeetle in Docker
+on macOS, you will need to add the `IPC_LOCK` capability.
+
+```yaml
+... rest of docker-compose.yml ...
+
+services:
+  tigerbeetle_0:
+    image: ghcr.io/tigerbeetledb/tigerbeetle
+    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
+    network_mode: host
+    cap_add:       # HERE
+      - IPC_LOCK   # HERE
+    volumes:
+      - ./data:/data
+
+... rest of docker-compose.yml ...
+```
+
+See https://github.com/tigerbeetledb/tigerbeetle/issues/92 for discussion.
+
 ## Debugging panics
 
 If TigerBeetle panics and you can reproduce the panic, you can get a
