@@ -74,7 +74,6 @@ const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
-const binary_search = @import("binary_search.zig");
 const bloom_filter = @import("bloom_filter.zig");
 
 const CompositeKey = @import("composite_key.zig").CompositeKey;
