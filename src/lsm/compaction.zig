@@ -334,27 +334,13 @@ pub fn CompactionType(
             defer compaction.io_finish();
 
             // Start reading blocks from the iterators to merge them.
-            compaction.io_read_start(&compaction.iterator_a);
-            compaction.io_read_start(&compaction.iterator_b);
+            if (compaction.iterator_a.tick()) compaction.io_start();
+            if (compaction.iterator_b.tick()) compaction.io_start();
 
             // Start writing blocks prepared by the merge iterator from a previous compact_tick().
             compaction.io_write_start(.data);
             compaction.io_write_start(.filter);
             compaction.io_write_start(.index);
-        }
-
-        fn io_read_start(compaction: *Compaction, iterator: anytype) void {
-            switch (@TypeOf(iterator.*)) {
-                IteratorA => assert(iterator == &compaction.iterator_a),
-                IteratorB => assert(iterator == &compaction.iterator_b),
-                else => unreachable,
-            }
-            
-            // Generate the IO for the iterator before-hand as tick() could complete inline before 
-            // returning true/false causing io_finish() to be called prematurely by the callbacks
-            // setup in start(). If tick() does no I/O, we cancel this premature io_start()
-            compaction.io_start();
-            if (!iterator.tick()) compaction.io_finish();
         }
 
         const BlockWriteField = enum { data, filter, index };
