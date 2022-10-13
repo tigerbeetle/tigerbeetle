@@ -212,15 +212,15 @@ const test_binary_search = struct {
     fn random_search(random: std.rand.Random, iter: usize) !void {
         const keys_count = @minimum(
             @as(usize, 1E6),
-            fuzz.random_int_exp(random, usize, iter),
+            fuzz.random_int_exponential(random, usize, iter),
         );
 
         const keys = try std.testing.allocator.alloc(u32, keys_count);
         defer std.testing.allocator.free(keys);
 
-        for (keys) |*key| key.* = fuzz.random_int_exp(random, u32, 100);
+        for (keys) |*key| key.* = fuzz.random_int_exponential(random, u32, 100);
         std.sort.sort(u32, keys, {}, less_than_key);
-        const target_key = fuzz.random_int_exp(random, u32, 100);
+        const target_key = fuzz.random_int_exponential(random, u32, 100);
 
         var expect: BinarySearchResult = .{ .index = 0, .exact = false };
         for (keys) |key, i| {

@@ -273,13 +273,13 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
         Environment.cache_entries_max;
-    return fuzz.random_int_exp(random, Int, avg_int);
+    return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
 pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
     const fuzz_op_count = @minimum(
         @as(usize, 1E7),
-        fuzz.random_int_exp(random, usize, 1E6),
+        fuzz.random_int_exponential(random, usize, 1E6),
     );
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);

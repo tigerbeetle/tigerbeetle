@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
-pub fn random_int_exp(random: std.rand.Random, comptime T: type, avg: T) T {
+pub fn random_int_exponential(random: std.rand.Random, comptime T: type, avg: T) T {
     comptime {
         const info = @typeInfo(T);
         assert(info == .Int);
