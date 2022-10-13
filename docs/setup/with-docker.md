@@ -32,8 +32,8 @@ If you get `error: SystemResources` when running TigerBeetle in Docker
 on macOS, you will need to do one of the following:
 
 1. Run `docker run` with `--cap-add IPC_LOCK`
-1. Run `docker run` with `--ulimit memlock=-1:-1`
-1. Or modify the defaults in `$HOME/.docker/daemon.json` and restart the Docker for Mac application:
+2. Run `docker run` with `--ulimit memlock=-1:-1`
+3. Or modify the defaults in `$HOME/.docker/daemon.json` and restart the Docker for Mac application:
 
 ```json
 {
