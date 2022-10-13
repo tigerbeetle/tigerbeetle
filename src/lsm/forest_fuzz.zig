@@ -4,6 +4,7 @@ const allocator = testing.allocator;
 const assert = std.debug.assert;
 
 const config = @import("../config.zig");
+const fuzz = @import("../test/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.lsm_forest_fuzz);
 
@@ -237,7 +238,7 @@ const Environment = struct {
     }
 };
 
-pub fn fuzz(fuzz_ops: []const FuzzOp) !void {
+pub fn run_fuzz_ops(fuzz_ops: []const FuzzOp) !void {
     // Init mocked storage.
     var storage = try Storage.init(
         allocator,
@@ -264,11 +265,7 @@ pub fn fuzz(fuzz_ops: []const FuzzOp) !void {
     try Environment.run(&storage, fuzz_ops);
 }
 
-fn random_int_exp(comptime Int: type, random: std.rand.Random, avg_int: Int) Int {
-    return @floatToInt(Int, @trunc(random.floatExp(f64) * @intToFloat(f64, avg_int)));
-}
-
-fn random_id(comptime Int: type, random: std.rand.Random) Int {
+fn random_id(random: std.rand.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
@@ -276,42 +273,19 @@ fn random_id(comptime Int: type, random: std.rand.Random) Int {
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
         Environment.cache_entries_max;
-    return random_int_exp(Int, random, avg_int);
-}
-
-fn random_biases(comptime Enum: type, random: std.rand.Random) [@typeInfo(Enum).Enum.fields.len]f64 {
-    var biases: [@typeInfo(Enum).Enum.fields.len]f64 = undefined;
-    var total: f64 = 0;
-    while (true) {
-        for (biases) |*bias| bias.* = @intToFloat(f64, random.uintLessThan(u8, 10));
-        total = 0;
-        for (biases) |bias| total += bias;
-        if (total != 0) break;
-    }
-    for (biases) |*bias| bias.* = bias.* / total;
-    return biases;
-}
-
-fn random_enum_biased(
-    comptime Enum: type,
-    random: std.rand.Random,
-    biases: [@typeInfo(Enum).Enum.fields.len]f64,
-) Enum {
-    var choice = random.float(f64);
-    inline for (@typeInfo(Enum).Enum.fields) |enum_field, i| {
-        choice -= biases[i];
-        if (choice < 0) return @intToEnum(Enum, enum_field.value);
-    }
-    unreachable;
+    return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
 pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
-    const fuzz_op_count = random_int_exp(usize, random, 1E6);
+    const fuzz_op_count = @minimum(
+        @as(usize, 1E7),
+        fuzz.random_int_exponential(random, usize, 1E6),
+    );
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    const biases = random_biases(std.meta.Tag(FuzzOp), random);
-    log.info("biases = {d:.2}", .{biases});
+    const fuzz_op_distribution = fuzz.random_enum_distribution(random, std.meta.Tag(FuzzOp));
+    log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
     // We're not allowed to go more than Environment.cache_entries_max puts without compacting.
     var puts_since_compact: usize = 0;
@@ -325,22 +299,22 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
             FuzzOp{ .compact = {} }
         else
         // Otherwise pick a random FuzzOp.
-        switch (random_enum_biased(std.meta.Tag(FuzzOp), random, biases)) {
+        switch (fuzz.random_enum(random, std.meta.Tag(FuzzOp), fuzz_op_distribution)) {
             .compact => FuzzOp{
                 .compact = {},
             },
             .put => put: {
-                const id = random_id(u128, random);
+                const id = random_id(random, u128);
                 // `timestamp` just needs to be unique, but we're not allowed to change the timestamp of an existing account.
                 const timestamp = id_to_timestamp.get(id) orelse fuzz_op_index;
                 try id_to_timestamp.put(id, timestamp);
                 break :put FuzzOp{ .put = Account{
                     .id = id,
                     .timestamp = timestamp,
-                    .user_data = random_id(u128, random),
+                    .user_data = random_id(random, u128),
                     .reserved = [_]u8{0} ** 48,
-                    .ledger = random_id(u32, random),
-                    .code = random_id(u16, random),
+                    .ledger = random_id(random, u32),
+                    .code = random_id(random, u16),
                     .flags = .{
                         .debits_must_not_exceed_credits = random.boolean(),
                         .credits_must_not_exceed_debits = random.boolean(),
@@ -352,7 +326,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
                 } };
             },
             .get_account => FuzzOp{
-                .get_account = random_int_exp(u128, random, 10),
+                .get_account = random_id(random, u128),
             },
         };
         switch (fuzz_op.*) {
@@ -411,5 +385,5 @@ pub fn main() !void {
     const fuzz_ops = try generate_fuzz_ops(rng.random());
     defer allocator.free(fuzz_ops);
 
-    try fuzz(fuzz_ops);
+    try run_fuzz_ops(fuzz_ops);
 }

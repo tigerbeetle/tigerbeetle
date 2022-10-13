@@ -1,14 +1,20 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
+const config = @import("../config.zig");
 
 // TODO Add prefeching when @prefetch is available: https://github.com/ziglang/zig/issues/3600.
 //
 // TODO The Zig self hosted compiler will implement inlining itself before passing the IR to llvm,
 // which should eliminate the current poor codegen of key_from_value/compare_keys.
 
-/// Returns the index of the key either exactly equal to the target key or, if there is no exact
-/// match, the next greatest key.
+/// Returns either the index of the first value equal to `key`,
+/// or if there is no such value then the index where `key` would be inserted.
+///
+/// In other words, return `i` such that both:
+/// * key_from_value(values[i])  >= key or i == values.len
+/// * key_value_from(values[i-1]) < key or i == 0
+///
 /// Doesn't perform the extra key comparison to determine if the match is exact.
 pub fn binary_search_values_raw(
     comptime Key: type,
@@ -18,11 +24,26 @@ pub fn binary_search_values_raw(
     values: []const Value,
     key: Key,
 ) u32 {
-    assert(values.len > 0);
+    if (values.len == 0) return 0;
+
+    if (config.verify) {
+        // Input must be sorted by key.
+        for (values) |_, i| {
+            assert(i == 0 or
+                compare_keys(key_from_value(&values[i - 1]), key_from_value(&values[i])) != .gt);
+        }
+    }
 
     var offset: usize = 0;
     var length: usize = values.len;
     while (length > 1) {
+        if (config.verify) {
+            assert(offset == 0 or
+                compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
+            assert(offset + length == values.len or
+                compare_keys(key_from_value(&values[offset + length]), key) != .lt);
+        }
+
         const half = length / 2;
         const mid = offset + half;
 
@@ -34,7 +55,24 @@ pub fn binary_search_values_raw(
         length -= half;
     }
 
-    return @intCast(u32, offset + @boolToInt(compare_keys(key_from_value(&values[offset]), key) == .lt));
+    if (config.verify) {
+        assert(length == 1);
+        assert(offset == 0 or
+            compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
+        assert(offset + length == values.len or
+            compare_keys(key_from_value(&values[offset + length]), key) != .lt);
+    }
+
+    offset += @boolToInt(compare_keys(key_from_value(&values[offset]), key) == .lt);
+
+    if (config.verify) {
+        assert(offset == 0 or
+            compare_keys(key_from_value(&values[offset - 1]), key) == .lt);
+        assert(offset == values.len or
+            compare_keys(key_from_value(&values[offset]), key) != .lt);
+    }
+
+    return @intCast(u32, offset);
 }
 
 pub inline fn binary_search_keys_raw(
@@ -91,12 +129,18 @@ pub inline fn binary_search_keys(
 }
 
 const test_binary_search = struct {
+    const fuzz = @import("../test/fuzz.zig");
+
     const log = false;
 
     const gpa = std.testing.allocator;
 
     inline fn compare_keys(a: u32, b: u32) math.Order {
         return math.order(a, b);
+    }
+
+    fn less_than_key(_: void, a: u32, b: u32) bool {
+        return a < b;
     }
 
     fn exhaustive_search(keys_count: u32) !void {
@@ -164,6 +208,43 @@ const test_binary_search = struct {
             try std.testing.expectEqual(expect.exact, actual.exact);
         }
     }
+
+    fn random_search(random: std.rand.Random, iter: usize) !void {
+        const keys_count = @minimum(
+            @as(usize, 1E6),
+            fuzz.random_int_exponential(random, usize, iter),
+        );
+
+        const keys = try std.testing.allocator.alloc(u32, keys_count);
+        defer std.testing.allocator.free(keys);
+
+        for (keys) |*key| key.* = fuzz.random_int_exponential(random, u32, 100);
+        std.sort.sort(u32, keys, {}, less_than_key);
+        const target_key = fuzz.random_int_exponential(random, u32, 100);
+
+        var expect: BinarySearchResult = .{ .index = 0, .exact = false };
+        for (keys) |key, i| {
+            switch (compare_keys(key, target_key)) {
+                .lt => expect.index = @intCast(u32, i) + 1,
+                .eq => {
+                    expect.exact = true;
+                    break;
+                },
+                .gt => break,
+            }
+        }
+
+        const actual = binary_search_keys(
+            u32,
+            compare_keys,
+            keys,
+            target_key,
+        );
+
+        if (log) std.debug.print("expected: {}, actual: {}\n", .{ expect, actual });
+        try std.testing.expectEqual(expect.index, actual.index);
+        try std.testing.expectEqual(expect.exact, actual.exact);
+    }
 };
 
 // TODO test search on empty slice
@@ -178,11 +259,38 @@ test "binary search: exhaustive" {
 test "binary search: explicit" {
     if (test_binary_search.log) std.debug.print("\n", .{});
     try test_binary_search.explicit_search(
-        &[_]u32{ 0, 3, 5, 8, 9, 11 },
-        &[_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 },
+        &[_]u32{},
+        &[_]u32{0},
         &[_]BinarySearchResult{
+            .{ .index = 0, .exact = false },
+        },
+    );
+    try test_binary_search.explicit_search(
+        &[_]u32{1},
+        &[_]u32{ 0, 1, 2 },
+        &[_]BinarySearchResult{
+            .{ .index = 0, .exact = false },
             .{ .index = 0, .exact = true },
             .{ .index = 1, .exact = false },
+        },
+    );
+    try test_binary_search.explicit_search(
+        &[_]u32{ 1, 3 },
+        &[_]u32{ 0, 1, 2, 3, 4 },
+        &[_]BinarySearchResult{
+            .{ .index = 0, .exact = false },
+            .{ .index = 0, .exact = true },
+            .{ .index = 1, .exact = false },
+            .{ .index = 1, .exact = true },
+            .{ .index = 2, .exact = false },
+        },
+    );
+    try test_binary_search.explicit_search(
+        &[_]u32{ 1, 3, 5, 8, 9, 11 },
+        &[_]u32{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 },
+        &[_]BinarySearchResult{
+            .{ .index = 0, .exact = false },
+            .{ .index = 0, .exact = true },
             .{ .index = 1, .exact = false },
             .{ .index = 1, .exact = true },
             .{ .index = 2, .exact = false },
@@ -211,4 +319,12 @@ test "binary search: duplicates" {
             .{ .index = 9, .exact = false },
         },
     );
+}
+
+test "binary search: random" {
+    var rng = std.rand.DefaultPrng.init(42);
+    var i: usize = 0;
+    while (i < 2048) : (i += 1) {
+        try test_binary_search.random_search(rng.random(), i);
+    }
 }

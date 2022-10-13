@@ -117,20 +117,18 @@ pub fn TableImmutableType(comptime Table: type) type {
         pub fn get(table: *const TableImmutable, key: Key) ?*const Value {
             assert(!table.free);
 
-            if (table.values.len > 0) {
-                const result = binary_search.binary_search_values(
-                    Key,
-                    Value,
-                    key_from_value,
-                    compare_keys,
-                    table.values,
-                    key,
-                );
-                if (result.exact) {
-                    const value = &table.values[result.index];
-                    if (config.verify) assert(compare_keys(key, key_from_value(value)) == .eq);
-                    return value;
-                }
+            const result = binary_search.binary_search_values(
+                Key,
+                Value,
+                key_from_value,
+                compare_keys,
+                table.values,
+                key,
+            );
+            if (result.exact) {
+                const value = &table.values[result.index];
+                if (config.verify) assert(compare_keys(key, key_from_value(value)) == .eq);
+                return value;
             }
 
             return null;
