@@ -133,14 +133,8 @@ pub fn GridType(comptime Storage: type) type {
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
         read_queue: FIFO(Read) = .{},
 
-        /// If false, this flag is set to true before running user provided read callbacks.
-        /// If true, Grid.read_block() will add the read to read_recursion_queue instead of
-        /// starting it directly. This prevents unbounded recursion if user provided callbacks
-        /// submit new reads.
-        /// The read_recursion_queue will be emptied once every call to Grid.tick().
-        read_recursion_guard: bool = false,
-        read_recursion_queue: FIFO(Read) = .{},
-
+        // Reads that were found to be in the cache on start_read().
+        read_cached_queue: FIFO(Read) = .{},
         // TODO interrogate this list and do recovery in Replica.tick().
         read_recovery_queue: FIFO(Read) = .{},
 
@@ -165,15 +159,21 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn tick(grid: *Grid) void {
-            assert(!grid.read_recursion_guard);
-
+            
+            // Resolve reads that were seen in the cache during start_read()
+            // but deferred to be asynchronously resolved on the next tick.
+            //
             // Make a copy to avoid a potential infinite loop here.
-            // If any new reads are added to the read_recursion_queue they will be started on
+            // If any new reads are added to the read_cached_queue they will be started on
             // the next tick.
-            var copy = grid.read_recursion_queue;
-            grid.read_recursion_queue = .{};
+            var copy = grid.read_cached_queue;
+            grid.read_cached_queue = .{};
             while (copy.pop()) |read| {
-                grid.start_read(read);
+                if (grid.cache.get(read.address)) |block| {
+                    read.callback(read, block);   
+                } else {
+                    grid.start_read(read);
+                }
             }
         }
 
@@ -226,7 +226,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
             for ([_]FIFO(Read){
                 grid.read_queue,
-                grid.read_recursion_queue,
+                grid.read_cached_queue,
                 grid.read_recovery_queue,
             }) |queue| {
                 var it = queue.peek();
@@ -348,8 +348,9 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(address > 0);
             assert(block_type != .reserved);
-            assert(!grid.superblock.free_set.is_free(address));
+
             grid.assert_not_writing(address, null);
+            assert(!grid.superblock.free_set.is_free(address));
 
             read.* = .{
                 .callback = callback,
@@ -358,16 +359,10 @@ pub fn GridType(comptime Storage: type) type {
                 .block_type = block_type,
             };
 
-            if (grid.read_recursion_guard) {
-                grid.read_recursion_queue.push(read);
-                return;
-            }
-
             grid.start_read(read);
         }
 
         fn start_read(grid: *Grid, read: *Grid.Read) void {
-            assert(!grid.read_recursion_guard);
             grid.assert_not_writing(read.address, null);
 
             if (grid.superblock.free_set.is_free(read.address)) {
@@ -404,14 +399,12 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            // If the block is already in the cache, there's no work to do.
+            // If the block is already in the cache, queue up the read to be resolved
+            // from the cache on the next tick. This keeps start_read() asynchronous.
             // Note that this must be called after we have checked for an in
             // progress read targeting the same address.
-            if (grid.cache.get(read.address)) |block| {
-                assert(!grid.read_recursion_guard);
-                grid.read_recursion_guard = true;
-                defer grid.read_recursion_guard = false;
-                read.callback(read, block);
+            if (grid.cache.get(read.address) != null) {
+                grid.read_cached_queue.push(read);
                 return;
             }
 
@@ -432,7 +425,27 @@ pub fn GridType(comptime Storage: type) type {
                 .completion = undefined,
                 .block = block,
             };
+
+            // Collect the current Read and any other matching/pending Reads to this IOP.
+            // There could be reads in the read_queue for the same address that our read
+            // finally got an IOP for. If we don't gather them here, they will eventually be 
+            // processed at the end of read_block_callback() but that will issue a new call to
+            // read_sectors().
             iop.reads.push(read);
+            {
+                // Make a copy here to avoid an infinite loop from pending_reads being 
+                // re-added to read_queue after not matching the current read. 
+                var copy = grid.read_queue;
+                grid.read_queue = .{};
+                while (copy.pop()) |pending_read| {
+                    if (pending_read.address == read.address) {
+                        assert(pending_read.checksum == read.checksum);
+                        iop.reads.push(pending_read);
+                    } else {
+                        grid.read_queue.push(pending_read);
+                    }
+                } 
+            }
 
             grid.superblock.storage.read_sectors(
                 read_block_callback,
@@ -468,12 +481,12 @@ pub fn GridType(comptime Storage: type) type {
             const checksum_match = header.checksum == checksum;
 
             if (checksum_valid and checksum_body_valid and checksum_match) {
-                assert(!grid.read_recursion_guard);
                 assert(header.op == address);
                 assert(header.operation == block_type.operation());
 
-                grid.read_recursion_guard = true;
-                defer grid.read_recursion_guard = false;
+                // NOTE: read callbacks resolved here could queue up reads into this very iop.
+                // This extends this while loop, but that's fine as it keeps the callbacks 
+                // asynchronous to themselves (preventing something like a stack-overflow).
                 while (iop.reads.pop()) |read| {
                     assert(read.address == address);
                     assert(read.checksum == checksum);
@@ -501,6 +514,9 @@ pub fn GridType(comptime Storage: type) type {
                 } else {
                     unreachable;
                 }
+
+                // IOP reads that fail checksum validation get punted to a recovery queue.
+                // TODO: Have the replica do something with the pending reads here.
                 while (iop.reads.pop()) |read| {
                     iop.grid.read_recovery_queue.push(read);
                 }
@@ -508,12 +524,17 @@ pub fn GridType(comptime Storage: type) type {
 
             grid.read_iops.release(iop);
 
-            // Always iterate through the full list of pending reads here to ensure that all
-            // possible reads in the list are started, even in the presence of concurrent reads
-            // targeting the same block address.
+            // Always iterate through the full list of pending reads instead of just one to ensure
+            // that those which could be serviced from the cache don't prevent those waiting for 
+            // an IOP from seeing the released one above.
+            //
+            // NOTE: There shouldn't be any pending reads with the same address as the IOP that
+            // was just released as the read that started the IOP collected matching ones already
+            // and subsequent matching reads joined the IOP when it was still acquired.
             var copy = grid.read_queue;
             grid.read_queue = .{};
             while (copy.pop()) |read| {
+                assert(read.address != address);
                 grid.start_read(read);
             }
         }
