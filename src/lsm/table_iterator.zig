@@ -257,7 +257,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
                 it.buffered_value_count() >= Table.data.value_count_max;
         }
 
-        pub fn peek(it: TableIterator) ?Table.Key {
+        pub fn peek(it: TableIterator) error{Empty, Buffering}!Table.Key {
             assert(!it.read_pending);
             assert(!it.read_table_index);
 
@@ -265,11 +265,10 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             const block = it.data_blocks.head() orelse {
                 // NOTE No values to peek may still mean some are unbuffered.
-                // The caller should use buffered_all_values() to distinguish between 
+                // We use buffered_all_values() to distinguish between 
                 // the iterator being empty and having to tick() to refill values.
-                // 
-                // assert(it.buffered_all_values());
-                return null;
+                if (!it.buffered_all_values()) return error.Buffering;
+                return error.Empty;
             };
 
             const values = Table.data_block_values_used(block);
