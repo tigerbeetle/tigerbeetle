@@ -70,7 +70,6 @@ Invariants:
 
 3. Second half-bar, first beat ("middle beat"):
     * Assert no compactions are currently running.
-    * Start odd level compactions if there are any tables to compact.
     * Start compactions from odd levels that have reached their table limit.
     * Compact the immutable table if it contains any sorted values (it might be empty).
 
@@ -103,15 +102,17 @@ Links:
 
 Each table has a minimum and maximum integer snapshot (`snapshot_min` and `snapshot_max`).
 
-Each query targets a particular snapshot. A table `T` is "visible" to a snapshot `S` when
+Each query targets a particular snapshot. A table `T` is _visible_ to a snapshot `S` when
 
 ```
 T.snapshot_min ≤ S ≤ T.snapshot_max
 ```
 
-and is "invisible" to the snapshot otherwise.
+and is _invisible_ to the snapshot otherwise.
 
-Compaction does not modify tables in place — it copies data. Snapshots control and distinguish which copies are useful, and which can be deleted. Snapshots can also be persisted, enabling queries against past states of the tree (unimplemented; future work).
+Compaction does not modify tables in place — it copies data. Snapshots control and distinguish
+which copies are useful, and which can be deleted. Snapshots can also be persisted, enabling
+queries against past states of the tree (unimplemented; future work).
 
 ### Snapshots and Compaction
 
@@ -119,7 +120,7 @@ Consider the half-bar compaction beginning at op=`X` (`12`), with `lsm_batch_mul
 Each half-bar contains `N=M/2` (`4`) beats. The next half-bar begins at `Y=X+N` (`16`).
 
 During the half-bar compaction `X` (op=`X…Y-1`; `12…15`), each commit prefetches from the snapshot
-equal to the first op of the compaction. As shown, they continue to query the old (input) tables.
+[equal to its own op](#current-snapshot). As shown, they continue to query the old (input) tables.
 
 During the half-bar compaction `X`:
 - `snapshot_max` of each input table is truncated to `Y-1` (`15`).
@@ -145,17 +146,48 @@ At this point the input tables can be removed if they are invisible to all persi
 
 ### Snapshot Queries
 
+Each query targets a particular snapshot, either:
+- the [current snapshot](#current-snapshot), or
+- a [persisted snapshot](#persistent-snapshots).
+
+#### Current Snapshot
+
 Each tree tracks the highest snapshot safe to query from (`tree.lookup_snapshot_max`), to ensure that
 an ongoing compaction's incomplete output tables are not visible. Queries targeting
 `tree.lookup_snapshot_max` always read from the mutable and immutable tables — so each commit can
 see all previous commits' updates.)
 
+During typical operation, the `lookup_snapshot_max` when prefetching op `S` is snapshot `S`.
+The following chart depicts:
+- `lookup_snapshot_max` (`$`)
+- for each commit op (the left column)
+- and a compaction that began at op `12` and completed at the end of op `15`.
+
+```
+op  0   4   8  12  16  20  24  (op, snapshot)
+    ┼───┬───┼───┬───┼───┬───┼
+12  ····────────$───
+13  ····─────────$──
+14  ····──────────$─
+15  ····───────────$
+16                  $────····
+17                  ─$───····
+18                  ──$──····
+19                  ───$─····
+```
+
+However, commits in the first measure following recovery from a checkpoint prefetch from a higher
+snapshot to avoid querying tables that were deleted at the checkpoint.
+See [`lookup_snapshot_max_for_checkpoint()`](#tree.zig) for more detail.
+
+#### Persistent Snapshots
+
 TODO(Persistent Snapshots): Expand this section.
 
 ### Snapshot Values
 
-The on-disk tables visible to a snapshot `B` do not contain the updates from the commit with op `B`.
-Rather, the snapshot `B` corresponds to the TODO
+- The on-disk tables visible to a snapshot `B` do not contain the updates from the commit with op `B`.
+- Rather, snapshot `B` is first visible to a prefetch from the commit with op `B`.
 
 Consider the following diagram (`lsm_batch_multiple=8`):
 
@@ -166,16 +198,17 @@ Consider the following diagram (`lsm_batch_multiple=8`):
         ↑A      ↑B      ↑C
 ```
 
-Compaction is driven by the commits of ops `B→C` (`16…23`):
+Compaction is driven by the commits of ops `B→C` (`16…23`). While these ops are being committed:
 - Updates from ops `0→A` (`0…7`) are on-disk.
 - Updates from ops `A→B` (`8…15`) are in the immutable table.
   - These updates were moved to the immutable table from the immutable table at the end of op `B-1`
     (`15`).
   - These updates will exist in the immutable table until it is reset at the end of op `C-1` (`23`).
 - Updates from ops `B→C` (`16…23`) are added to the mutable table (by the respective commit).
-- `tree.lookup_snapshot_max` is `B` (`16`).
+- `tree.lookup_snapshot_max` is `B` when committing op `B`.
+- `tree.lookup_snapshot_max` is `x` when committing op `x` (for `x ∈ {16,17,…,23}`).
 
 At the end of the last beat of the compaction bar (`23`):
 - Updates from ops `0→B` (`0…15`) are on disk.
 - Updates from ops `B→C` (`16…23`) are moved from the mutable table to the immutable table.
-- `tree.lookup_snapshot_max` is `C` (`24`).
+- `tree.lookup_snapshot_max` is `x` when committing op `x` (for `x ∈ {24,25,…}`).
