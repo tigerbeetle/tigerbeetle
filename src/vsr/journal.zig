@@ -1146,7 +1146,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ///   match op                 _   _   _   _   _   _   _   _   _  !1   <   >   1  !1
         ///   match view               _   _   _   _   _   _   _   _   _  !1   _   _  !0  !1
         ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix vsr fix vsr nil fix vsr vsr eql
-        ///   decision (replicas=1)                  fix     fix
+        ///   decision (replicas=1)              fix fix     fix
         ///
         /// Legend:
         ///
@@ -1349,20 +1349,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     self.faulty.clear(slot);
                 },
                 .fix => {
-                    // TODO Perhaps we should have 3 separate branches here for the different cases.
-                    // The header may be valid or invalid.
-                    // The header may be reserved or a prepare.
-                    assert(prepare.?.command == .prepare);
-                    assert(self.prepare_inhabited[slot.index]);
-                    assert(self.prepare_checksums[slot.index] == prepare.?.checksum);
-
                     self.headers[slot.index] = prepare.?.*;
                     self.faulty.clear(slot);
                     if (replica.replica_count == 1) {
-                        // @E, @F, @G, @H, @K:
+                        // @D, @E, @F, @G, @H, @K:
                         self.dirty.clear(slot);
                         // TODO Repair header on disk to restore durability.
                     } else {
+                        assert(prepare.?.command == .prepare);
+                        assert(self.prepare_inhabited[slot.index]);
+                        assert(self.prepare_checksums[slot.index] == prepare.?.checksum);
                         // @F, @H, @K:
                         // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty).
                         assert(self.dirty.bit(slot));
@@ -1911,6 +1907,14 @@ pub const BitSet = struct {
 ///
 /// Case @B may be caused by crashing while writing the prepare (torn write).
 ///
+/// @D:
+/// This is possibly a torn prepare to the redundant headers, so when replica_count=1 we must
+/// repair this locally. The probability that this results in an incorrect recovery is:
+///   P(crash during first WAL wrap)
+///     × P(redundant header is corrupt)
+///     × P(lost write to prepare covered by the corrupt redundant header)
+/// which is negligible, and does not impact replica_count>1.
+///
 /// @E:
 /// Valid prepare, corrupt header. One of:
 ///
@@ -1998,7 +2002,7 @@ const recovery_cases = table: {
         Case.init("@A", .vsr, .vsr, .{ _0, __, _0, __, __, __, __, __, __ }),
         Case.init("@B", .vsr, .vsr, .{ _1, _1, _0, __, __, __, __, __, __ }),
         Case.init("@C", .vsr, .vsr, .{ _1, _0, _0, __, __, __, __, __, __ }),
-        Case.init("@D", .vsr, .vsr, .{ _0, __, _1, _1, __, __, __, __, __ }),
+        Case.init("@D", .vsr, .fix, .{ _0, __, _1, _1, __, __, __, __, __ }),
         Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, _0, __, __, __, __ }),
         Case.init("@F", .fix, .fix, .{ _0, __, _1, _0, _1, __, __, __, __ }),
         Case.init("@G", .vsr, .fix, .{ _1, _1, _1, _0, _0, __, __, __, __ }),
