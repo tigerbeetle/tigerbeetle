@@ -85,19 +85,12 @@ pub fn CompactionType(
         );
 
         const MergeStreamSelector = struct {
-            fn peek(compaction: *const Compaction, stream_id: u32) error{Empty, Pending}!Key {
-                switch (stream_id) {
-                    0 => {
-                        if (compaction.iterator_a.peek()) |key| return key;
-                        if (!compaction.iterator_a.buffered_all_values()) return error.Pending;
-                    },
-                    1 => {
-                        if (compaction.iterator_b.peek()) |key| return key;
-                        if (!compaction.iterator_b.buffered_all_values()) return error.Pending;
-                    },
+            fn peek(compaction: *const Compaction, stream_id: u32) error{Empty, Buffering}!Key {
+                return switch (stream_id) {
+                    0 => compaction.iterator_a.peek(),
+                    1 => compaction.iterator_b.peek(),
                     else => unreachable,
-                }
-                return error.Empty;
+                };
             }
 
             fn pop(compaction: *Compaction, stream_id: u32) Value {
@@ -508,10 +501,20 @@ pub fn CompactionType(
             assert(!compaction.index.writable);
 
             // Double check the iterators are finished as well.
-            assert(compaction.iterator_a.buffered_all_values());
-            assert(compaction.iterator_a.peek() == null);
-            assert(compaction.iterator_b.buffered_all_values());
-            assert(compaction.iterator_b.peek() == null);
+            const stream_empty = struct {
+                fn empty(it: anytype) bool {
+                    _ = it.peek() catch |err| switch (err) {
+                        error.Buffering => {},
+                        error.Empty => {
+                            assert(it.buffered_all_values());
+                            return true;
+                        },
+                    };
+                    return false;
+                }
+            }.empty;
+            assert(stream_empty(&compaction.iterator_a));
+            assert(stream_empty(&compaction.iterator_b));
 
             // Mark the level_a table as invisible if it was provided;
             // it has been merged into level_b.

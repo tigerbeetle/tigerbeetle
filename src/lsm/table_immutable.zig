@@ -187,9 +187,9 @@ pub fn TableImmutableIteratorType(comptime Table: type, comptime Storage: type) 
             return true; // All values are "buffered" in memory.
         }
 
-        pub fn peek(it: *const TableImmutableIterator) ?Table.Key {
+        pub fn peek(it: *const TableImmutableIterator) error{Empty, Buffering}!Table.Key {
             assert(!it.table.free);
-            if (it.values_index == it.table.values.len) return null;
+            if (it.values_index == it.table.values.len) return error.Empty;
             return Table.key_from_value(&it.table.values[it.values_index]);
         }
 

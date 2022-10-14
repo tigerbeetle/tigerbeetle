@@ -212,7 +212,8 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         fn next_table_iterator(it: *LevelIterator) *TableIterator {
             if (it.tables.full()) {
                 const table = &it.tables.head_ptr().?.table_iterator;
-                while (table.peek() != null) {
+                while (true) {
+                    _ = table.peek() catch break;
                     it.values.push(table.pop()) catch unreachable;
                 }
                 it.tables.advance_head();
@@ -277,18 +278,18 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                 it.buffered_value_count() >= Table.data.value_count_max;
         }
 
-        pub fn peek(it: LevelIterator) ?Key {
+        pub fn peek(it: LevelIterator) error{Empty, Buffering}!Key {
             if (it.values.head_ptr_const()) |value| return key_from_value(value);
 
             const scope = it.tables.head_ptr_const() orelse {
                 // NOTE No values to peek may still mean some are unbuffered.
-                // The caller should use buffered_all_values() to distinguish between 
+                // We use buffered_all_values() to distinguish between 
                 // the iterator being empty and having to tick() to refill values.
-                //
-                // assert(it.buffered_all_values());
-                return null;
+                if (!it.buffered_all_values()) return error.Buffering;
+                return error.Empty;
             };
-            return scope.table_iterator.peek().?;
+
+            return scope.table_iterator.peek() catch unreachable;
         }
 
         /// This may only be called after peek() has returned non-null.
@@ -297,7 +298,12 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
             const table_iterator = &it.tables.head_ptr().?.table_iterator;
             const value = table_iterator.pop();
-            if (table_iterator.peek() == null) it.tables.advance_head();
+
+            _ = table_iterator.peek() catch |err| switch (err) {
+                error.Empty => it.tables.advance_head(),
+                error.Buffering => {},
+            };
+
             return value;
         }
     };
