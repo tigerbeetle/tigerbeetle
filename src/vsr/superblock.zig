@@ -6,7 +6,8 @@
 //!     - vsr_state.commit_min is initially 0 (for a newly-formatted replica).
 //!     - checkpoint() must advance the superblock's vsr_state.commit_min.
 //!     - view_change() must not advance the superblock's vsr_state.commit_min.
-//!     - All fields of vsr_state are monotonically increasing over view_change()/checkpoint().
+//!     - All fields of vsr_state except commit_min_checksum are monotonically increasing over
+//!       view_change()/checkpoint().
 //!
 const std = @import("std");
 const assert = std.debug.assert;
@@ -26,12 +27,7 @@ pub const SuperBlockManifest = @import("superblock_manifest.zig").Manifest;
 pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
 pub const SuperBlockClientTable = @import("superblock_client_table.zig").ClientTable;
 
-/// Identifies the type of a sector or block. Protects against misdirected I/O across valid types.
-pub const Magic = enum(u8) {
-    superblock,
-};
-
-pub const SuperBlockVersion: u8 = 0;
+pub const SuperBlockVersion: u16 = 0;
 
 // Fields are aligned to work as an extern or packed struct.
 pub const SuperBlockSector = extern struct {
@@ -43,14 +39,13 @@ pub const SuperBlockSector = extern struct {
     /// This simplifies writing and comparing multiple copies.
     copy: u8 = 0,
 
-    /// Protects against misdirected I/O for non-superblock sectors that have a valid checksum.
-    magic: Magic,
-
-    /// The version of the superblock format in use, reserved for major breaking changes.
-    version: u8,
-
     /// Protects against writing to or reading from the wrong data file.
     replica: u8,
+
+    /// The version of the superblock format in use, reserved for major breaking changes.
+    version: u16,
+
+    /// Protects against writing to or reading from the wrong data file.
     cluster: u32,
 
     /// The current size of the data file.
@@ -228,7 +223,6 @@ pub const SuperBlockSector = extern struct {
 
     pub fn set_checksum(superblock: *SuperBlockSector) void {
         assert(superblock.copy < superblock_copies_max);
-        assert(superblock.magic == .superblock);
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.flags == 0);
 
@@ -245,9 +239,6 @@ pub const SuperBlockSector = extern struct {
 
     /// Does not consider { checksum, copy } when comparing equality.
     pub fn equal(a: *const SuperBlockSector, b: *const SuperBlockSector) bool {
-        assert(a.magic == .superblock);
-        assert(b.magic == .superblock);
-
         if (a.version != b.version) return false;
         if (a.replica != b.replica) return false;
         if (a.cluster != b.cluster) return false;
@@ -587,7 +578,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // We therefore use zero values to make this parent checksum as stable as possible.
             superblock.working.* = .{
                 .copy = 0,
-                .magic = .superblock,
                 .version = SuperBlockVersion,
                 .sequence = 0,
                 .replica = options.replica,
@@ -1729,7 +1719,6 @@ const Quorums = struct {
         // Verify that the remaining quorums are correctly sorted:
         for (quorums.slice()[1..]) |a| {
             assert(sort_priority_descending({}, b, a));
-            assert(a.sector.magic == .superblock);
             assert(a.sector.valid_checksum());
         }
 
@@ -1769,7 +1758,6 @@ const Quorums = struct {
                 } else if (!a.sector.vsr_state.monotonic(b.sector.vsr_state)) {
                     return error.VSRStateNotMonotonic;
                 } else {
-                    assert(b.sector.magic == .superblock);
                     assert(b.sector.valid_checksum());
 
                     return b;
@@ -1791,11 +1779,6 @@ const Quorums = struct {
 
         if (!copy.valid_checksum()) {
             log.debug("copy: {}/{}: invalid checksum", .{ index, superblock_copies_max });
-            return;
-        }
-
-        if (copy.magic != .superblock) {
-            log.debug("copy: {}/{}: not a superblock", .{ index, superblock_copies_max });
             return;
         }
 
@@ -1838,7 +1821,6 @@ const Quorums = struct {
     }
 
     fn find_or_insert_quorum_for_copy(quorums: *Quorums, copy: *const SuperBlockSector) *Quorum {
-        assert(copy.magic == .superblock);
         assert(copy.valid_checksum());
 
         for (quorums.array[0..quorums.count]) |*quorum| {
@@ -1857,8 +1839,6 @@ const Quorums = struct {
 
     fn sort_priority_descending(_: void, a: Quorum, b: Quorum) bool {
         assert(a.sector.checksum != b.sector.checksum);
-        assert(a.sector.magic == .superblock);
-        assert(b.sector.magic == .superblock);
 
         if (a.valid and !b.valid) return true;
         if (b.valid and !a.valid) return false;
@@ -2024,7 +2004,6 @@ fn test_quorums_working(
 
         sector.* = mem.zeroInit(SuperBlockSector, .{
             .copy = @intCast(u8, i),
-            .magic = .superblock,
             .version = SuperBlockVersion,
             .replica = 1,
             .size_max = data_file_size_min,
