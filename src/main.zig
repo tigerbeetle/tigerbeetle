@@ -42,7 +42,7 @@ pub fn main() !void {
 
     switch (parse_args) {
         .format => |*args| try Command.format(allocator, args.cluster, args.replica, args.path),
-        .start => |*args| try Command.start(allocator, args.addresses, args.memory, args.path),
+        .start => |*args| try Command.start(&arena, args.addresses, args.memory, args.path),
     }
 }
 
@@ -107,12 +107,14 @@ const Command = struct {
     }
 
     pub fn start(
-        allocator: mem.Allocator,
+        arena: *std.heap.ArenaAllocator,
         addresses: []std.net.Address,
         memory: u64,
         path: [:0]const u8,
     ) !void {
         _ = memory; // TODO
+
+        const allocator = arena.allocator();
 
         var command: Command = undefined;
         try command.init(allocator, path, false);
@@ -140,6 +142,24 @@ const Command = struct {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => err,
         };
+
+        // Calculate how many bytes are allocated inside `arena`.
+        // TODO This does not account for the fact that any allocations will be rounded up to the nearest page by `std.heap.page_allocator`.
+        var allocation_count: usize = 0;
+        var allocation_size: usize = 0;
+        {
+            var node_maybe = arena.state.buffer_list.first;
+            while (node_maybe) |node| {
+                allocation_count += 1;
+                allocation_size += node.data.len;
+                node_maybe = node.next;
+            }
+        }
+        log.info("{}: Allocated {} bytes in {} regions during replica init", .{
+            replica.replica,
+            allocation_size,
+            allocation_count,
+        });
 
         log.info("{}: cluster={}: listening on {}", .{
             replica.replica,
