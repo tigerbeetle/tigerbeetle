@@ -1206,6 +1206,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (self.recover_torn_prepare(&cases)) |torn_slot| {
                 assert(cases[torn_slot.index].decision(replica.replica_count) == .vsr);
                 cases[torn_slot.index] = &case_cut;
+
+                log.warn("{}: recover_slots: torn prepare in slot={}", .{
+                    self.replica,
+                    torn_slot.index,
+                });
             }
 
             for (cases) |case, index| self.recover_slot(Slot{ .index = index }, case);
@@ -1278,32 +1283,30 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             }
 
             const checkpoint_index = self.slot_for_op(replica.op_checkpoint).index;
-            if (checkpoint_index == torn_slot.index) {
-                // The checkpoint and the torn op are in the same slot.
-                assert(cases[checkpoint_index].decision(replica.replica_count) == .vsr);
-                assert(slot_count > 1);
-                assert(op_max >= replica.op_checkpoint);
-                assert(torn_op == op_max + 1);
-                assert(torn_op > replica.op_checkpoint);
-                return null;
-            }
-
             const known_range = SlotRange{
                 .head = Slot{ .index = checkpoint_index },
                 .tail = torn_slot,
             };
 
             // We must be certain that the torn prepare really was being appended to the WAL.
-            // Return if any faults do not lie between the checkpoint and the torn prepare, such as:
+            // Return null if any faults do not lie between the checkpoint and the torn prepare,
+            // such as:
             //
             //   (fault  [checkpoint..........torn]        fault)
             //   (...torn]    fault     fault  [checkpoint......)
+            //
+            // When the checkpoint and torn op are in the same slot, then we can only be certain
+            // if there are no faults other than the torn op itself.
             for (cases) |case, index| {
                 // Do not use `faulty.bit()` because the decisions have not been processed yet.
-                if (case.decision(replica.replica_count) == .vsr and
-                    !known_range.contains(Slot{ .index = index }))
-                {
-                    return null;
+                if (case.decision(replica.replica_count) == .vsr) {
+                    if (checkpoint_index == torn_slot.index) {
+                        assert(op_max >= replica.op_checkpoint);
+                        assert(torn_op > replica.op_checkpoint);
+                        if (index != torn_slot.index) return null;
+                    } else {
+                        if (!known_range.contains(Slot{ .index = index })) return null;
+                    }
                 }
             }
 
@@ -1503,6 +1506,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         /// `write_prepare` uses `write_sectors` to prevent concurrent disk writes.
+        // TODO To guard against torn writes, don't write simultaneously to all redundant header
+        // sectors. (This is mostly a risk for single-replica clusters very small WALs).
         pub fn write_prepare(
             self: *Self,
             callback: fn (self: *Replica, wrote: ?*Message, trigger: Write.Trigger) void,
@@ -1516,6 +1521,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
             assert(self.has(message.header));
+            assert(replica.replica_count != 1 or self.writes.executing() == 0);
 
             // The underlying header memory must be owned by the buffer and not by self.headers:
             // Otherwise, concurrent writes may modify the memory of the pointer while we write.
@@ -1717,9 +1723,16 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn write_prepare_release(self: *Self, write: *Self.Write, wrote: ?*Message) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
-            write.callback(replica, wrote, write.trigger);
-            replica.message_bus.unref(write.message);
+            const write_callback = write.callback;
+            const write_trigger = write.trigger;
+            const write_message = write.message;
+
+            // Release the write prior to returning control to the caller.
+            // This allows us to enforce journal.writes.len≤1 when replica_count=1, because the
+            // callback may immediately start the next write.
             self.writes.release(write);
+            write_callback(replica, wrote, write_trigger);
+            replica.message_bus.unref(write_message);
         }
 
         fn write_prepare_debug(self: *const Self, header: *const Header, status: []const u8) void {
