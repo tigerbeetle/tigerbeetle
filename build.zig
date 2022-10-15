@@ -153,6 +153,55 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const fuzz_lsm_manifest_log = b.addExecutable(
+            "fuzz_lsm_manifest_log",
+            "src/lsm/manifest_log_fuzz.zig",
+        );
+        fuzz_lsm_manifest_log.setMainPkgPath("src");
+        fuzz_lsm_manifest_log.setTarget(target);
+        fuzz_lsm_manifest_log.setBuildMode(mode);
+
+        const run_cmd = fuzz_lsm_manifest_log.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("fuzz_lsm_manifest_log", "Fuzz the ManifestLog. Args: [seed]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const fuzz_lsm_tree = b.addExecutable("fuzz_lsm_tree", "src/lsm/tree_fuzz.zig");
+        fuzz_lsm_tree.setMainPkgPath("src");
+        fuzz_lsm_tree.setTarget(target);
+        fuzz_lsm_tree.setBuildMode(mode);
+        // Ensure that we get stack traces even in release builds.
+        lsm_tree_fuzz.omit_frame_pointer = false;
+
+        const run_cmd = fuzz_lsm_tree.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("fuzz_lsm_tree", "Fuzz the LSM tree. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const fuzz_lsm_segmented_array = b.addExecutable(
+            "fuzz_lsm_segmented_array",
+            "src/lsm/segmented_array_fuzz.zig",
+        );
+        fuzz_lsm_segmented_array.setMainPkgPath("src");
+        fuzz_lsm_segmented_array.setTarget(target);
+        fuzz_lsm_segmented_array.setBuildMode(mode);
+        // Ensure that we get stack traces even in release builds.
+        lsm_tree_fuzz.omit_frame_pointer = false;
+
+        const run_cmd = fuzz_lsm_segmented_array.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("fuzz_lsm_segmented_array", "Fuzz the LSM segmented array. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
         const fuzz_vsr_superblock = b.addExecutable(
             "fuzz_vsr_superblock",
             "src/vsr/superblock_fuzz.zig",
@@ -162,43 +211,9 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock.setBuildMode(mode);
 
         const run_cmd = fuzz_vsr_superblock.run();
-        run_cmd.step.dependOn(b.getInstallStep());
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("fuzz_vsr_superblock", "Fuzz the SuperBlock. Args: [seed]");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const lsm_tree_fuzz = b.addExecutable("lsm_tree_fuzz", "src/lsm/tree_fuzz.zig");
-        lsm_tree_fuzz.setMainPkgPath("src");
-        lsm_tree_fuzz.setTarget(target);
-        lsm_tree_fuzz.setBuildMode(mode);
-        // Ensure that we get stack traces even in release builds.
-        lsm_tree_fuzz.omit_frame_pointer = false;
-
-        const run_cmd = lsm_tree_fuzz.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step("lsm_tree_fuzz", "Fuzz the LSM tree. Args: [--seed <seed>]");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const lsm_segmented_array_fuzz = b.addExecutable(
-            "lsm_segmented_array_fuzz",
-            "src/lsm/segmented_array_fuzz.zig",
-        );
-        lsm_segmented_array_fuzz.setMainPkgPath("src");
-        lsm_segmented_array_fuzz.setTarget(target);
-        lsm_segmented_array_fuzz.setBuildMode(mode);
-        // Ensure that we get stack traces even in release builds.
-        lsm_segmented_array_fuzz.omit_frame_pointer = false;
-
-        const run_cmd = lsm_segmented_array_fuzz.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step("lsm_segmented_array_fuzz", "Fuzz the LSM segmented array. Args: [--seed <seed>]");
         run_step.dependOn(&run_cmd.step);
     }
 }
