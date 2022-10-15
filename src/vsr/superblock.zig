@@ -124,6 +124,16 @@ pub const SuperBlockSector = extern struct {
             assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
         }
 
+        pub fn root(cluster: u32) VSRState {
+            return .{
+                .commit_min_checksum = vsr.Header.root_prepare(cluster).checksum,
+                .commit_min = 0,
+                .commit_max = 0,
+                .view_normal = 0,
+                .view = 0,
+            };
+        }
+
         pub fn internally_consistent(state: VSRState) bool {
             return state.commit_max >= state.commit_min and state.view >= state.view_normal;
         }
@@ -131,8 +141,10 @@ pub const SuperBlockSector = extern struct {
         pub fn monotonic(old: VSRState, new: VSRState) bool {
             assert(old.internally_consistent());
             assert(new.internally_consistent());
-            assert(old.commit_min_checksum == new.commit_min_checksum or
-                old.commit_min != new.commit_min);
+            // The last case is for when checking monotonic() from the sequence=0 sector.
+            assert(old.commit_min != new.commit_min or
+                old.commit_min_checksum == new.commit_min_checksum or
+                (old.commit_min_checksum == 0 and old.commit_min == 0));
 
             if (old.view > new.view) return false;
             if (old.view_normal > new.view_normal) return false;
@@ -336,8 +348,8 @@ pub const data_file_size_min = blk: {
     break :blk superblock_zone_size + config.journal_size_max;
 };
 
-/// The following table shows the progression of the SuperBlock's 3 in-memory sectors' sequence
-/// number and parent sector ("seq" and "par", respectively).
+/// This table shows the sequence number progression of the SuperBlock's sectors for the current
+/// and parent quorums ("seq" and "par", respectively).
 ///
 /// action        working  staging  writing  disk
 /// format        seq par  seq par  seq par  seq par
@@ -389,7 +401,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             read: Storage.Read = undefined,
             read_threshold: ?Quorums.Threshold = null,
             copy: ?u8 = null,
-            vsr_state: ?SuperBlockSector.VSRState = null, // Used by view_change().
+            /// Used by checkpoint() and view_change().
+            vsr_state: ?SuperBlockSector.VSRState = null,
             repair: ?Quorums.QuorumCount = null, // Used by open().
         };
 
@@ -606,6 +619,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.staging.* = superblock.working.*;
             superblock.staging.sequence = superblock.working.sequence + 1;
             superblock.staging.parent = superblock.working.checksum;
+            superblock.staging.vsr_state = SuperBlockSector.VSRState.root(options.cluster);
 
             context.* = .{
                 .superblock = superblock,
@@ -640,16 +654,20 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
+            vsr_state: SuperBlockSector.VSRState,
         ) void {
             assert(superblock.opened);
-            // Checkpoint must advance commit_min.
-            assert(superblock.staging.vsr_state.commit_min >
-                superblock.working.vsr_state.commit_min);
+            // Checkpoint must advance commit_min, but never the view.
+            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
+            assert(superblock.staging.vsr_state.commit_min < vsr_state.commit_min);
+            assert(superblock.staging.vsr_state.commit_min_checksum !=
+                vsr_state.commit_min_checksum);
 
             context.* = .{
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .checkpoint,
+                .vsr_state = vsr_state,
             };
 
             superblock.acquire(context);
@@ -665,6 +683,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(vsr_state.commit_min == superblock.staging.vsr_state.commit_min);
             assert(vsr_state.commit_min_checksum ==
                 superblock.staging.vsr_state.commit_min_checksum);
+            assert(superblock.staging.vsr_state.monotonic(vsr_state));
 
             log.debug(
                 "view_change: commit_min_checksum={}..{} commit_min={}..{} commit_max={}..{} " ++
@@ -731,6 +750,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.write_staging_encode_manifest();
             superblock.write_staging_encode_free_set();
             superblock.write_staging_encode_client_table();
+
+            if (context.caller == .checkpoint) {
+                assert(meta.eql(superblock.working.vsr_state, superblock.staging.vsr_state));
+                assert(superblock.staging.vsr_state.would_be_updated_by(context.vsr_state.?));
+
+                superblock.staging.vsr_state.update(context.vsr_state.?);
+            }
 
             superblock.writing.* = superblock.staging.*;
             superblock.writing.set_checksum();
@@ -1145,7 +1171,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.manifest_size == 0);
                     assert(working.free_set_size == 8);
                     assert(working.client_table_size == 4);
-                    assert(working.vsr_state.commit_min_checksum == 0);
+                    assert(working.vsr_state.commit_min_checksum ==
+                        vsr.Header.root_prepare(working.cluster).checksum);
                     assert(working.vsr_state.commit_min == 0);
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.view_normal == 0);
@@ -1461,20 +1488,24 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             log.debug("{s}: complete", .{@tagName(context.caller)});
 
-            if (context.caller == .open) {
-                assert(!superblock.opened);
-                superblock.opened = true;
+            switch (context.caller) {
+                .format => {},
+                .open => {
+                    assert(!superblock.opened);
+                    superblock.opened = true;
 
-                if (superblock.working.manifest_size > 0) {
-                    assert(superblock.manifest.count > 0);
-                }
-                // TODO Make the FreeSet encoding format not dependant on the word size.
-                if (superblock.working.free_set_size > @sizeOf(usize)) {
-                    assert(superblock.free_set.count_acquired() > 0);
-                }
-            } else if (context.caller == .view_change) {
-                assert(meta.eql(superblock.working.vsr_state, context.vsr_state.?));
-                //assert(meta.eql(superblock.staging.vsr_state, context.vsr_state));
+                    if (superblock.working.manifest_size > 0) {
+                        assert(superblock.manifest.count > 0);
+                    }
+                    // TODO Make the FreeSet encoding format not dependant on the word size.
+                    if (superblock.working.free_set_size > @sizeOf(usize)) {
+                        assert(superblock.free_set.count_acquired() > 0);
+                    }
+                },
+                .checkpoint, .view_change => {
+                    assert(meta.eql(superblock.staging.vsr_state, context.vsr_state.?));
+                    assert(meta.eql(superblock.working.vsr_state, context.vsr_state.?));
+                },
             }
 
             const queue_tail = superblock.queue_tail;
