@@ -206,14 +206,14 @@ pub const Storage = struct {
             if (!storage.x_in_100(storage.options.crash_fault_probability)) continue;
 
             const sector_min = @divExact(write.zone.offset(write.offset), config.sector_size);
-            const sector_max = @divExact(
-                write.zone.offset(write.offset + write.buffer.len),
-                config.sector_size,
-            );
+            const sector_max = sector_min + @divExact(write.buffer.len, config.sector_size);
 
             // Randomly corrupt one of the faulty sectors the operation targeted.
             // TODO: inject more realistic and varied storage faults as described above.
-            storage.fault_sector(storage.random_uint_between(usize, sector_min, sector_max));
+            storage.fault_sector(
+                write.zone,
+                storage.random_uint_between(usize, sector_min, sector_max),
+            );
         }
         assert(storage.writes.len == 0);
 
@@ -327,7 +327,7 @@ pub const Storage = struct {
             const sector_max = @divExact(offset_in_storage + read.buffer.len, config.sector_size);
             var sector: usize = sector_min;
             while (sector < sector_max) : (sector += 1) {
-                if (storage.faults.isSet(sector_min)) {
+                if (storage.faults.isSet(sector)) {
                     const faulty_sector_offset = (sector - sector_min) * config.sector_size;
                     const faulty_sector_bytes = read.buffer[faulty_sector_offset..][0..config.sector_size];
                     storage.prng.random().bytes(faulty_sector_bytes);
@@ -542,8 +542,8 @@ pub const Storage = struct {
             // This is the maximum number of faults per-area per-copyset that can be safely
             // injected on a read/write.
             //
-            // For SuperBlockSector, checkpoint() and view_change() require 3/4 valid sectors.
-            // For trailers, consider (superblock_copies=4):
+            // For SuperBlockSector, checkpoint() and view_change() require 3/4 valid sectors (1 fault).
+            // Trailers are likewise 3/4 — consider (superblock_copies=4):
             // 1. `SuperBlock.checkpoint()` for sequence=6.
             //   - write copy 0, corrupt manifest (fault_count=1)
             //   - write copy 1, corrupt manifest (fault_count=2) !
@@ -588,18 +588,21 @@ pub const Storage = struct {
             const message_size_max = config.message_size_max;
             const period = faulty_wal_areas.period;
 
-            const faulty_offset =
+            const offset_faulty =
                 faulty_wal_areas.first_offset + (offset_in_storage / period) * period;
 
-            const start = std.math.max(offset_in_storage, faulty_offset);
-            const end = std.math.min(offset_in_storage + size, faulty_offset + message_size_max);
+            const offset_start = std.math.max(offset_in_storage, offset_faulty);
+            const offset_end = std.math.min(
+                offset_in_storage + size,
+                offset_faulty + message_size_max,
+            );
 
             // The read/write does not touch any faulty sectors.
-            if (start >= end) return null;
+            if (offset_start >= offset_end) return null;
 
             return SectorRange{
-                .min = @divExact(start, config.sector_size),
-                .max = @divExact(end, config.sector_size),
+                .min = @divExact(offset_start, config.sector_size),
+                .max = @divExact(offset_end, config.sector_size),
             };
         }
 
@@ -610,21 +613,24 @@ pub const Storage = struct {
 
     fn fault_faulty_sectors(storage: *Storage, zone: vsr.Zone, offset_in_zone: u64, size: u64) void {
         const faulty = storage.faulty_sectors(zone, offset_in_zone, size) orelse return;
+        const target_sector_min = @divExact(zone.offset(offset_in_zone), config.sector_size);
+        const target_sector_max = target_sector_min + @divExact(size, config.sector_size);
         assert(faulty.min < faulty.max);
-        assert(faulty.min >= @divExact(zone.offset(offset_in_zone), config.sector_size));
-        assert(faulty.max <= @divExact(zone.offset(offset_in_zone + size), config.sector_size));
+        assert(faulty.min >= target_sector_min);
+        assert(faulty.max <= target_sector_max);
 
         // Randomly corrupt one of the faulty sectors the operation targeted.
         // TODO: inject more realistic and varied storage faults as described above.
-        storage.fault_sector(storage.random_uint_between(usize, faulty.min, faulty.max));
+        storage.fault_sector(zone, storage.random_uint_between(usize, faulty.min, faulty.max));
     }
 
-    fn fault_sector(storage: *Storage, sector: usize) void {
+    fn fault_sector(storage: *Storage, zone: vsr.Zone, sector: usize) void {
         storage.faults.set(sector);
         if (storage.options.replica_index) |replica_index| {
-            log.info("corrupting sector {} by replica {}", .{
-                sector,
+            log.debug("{}: corrupting sector at zone={} offset={}", .{
                 replica_index,
+                zone,
+                sector * config.sector_size - zone.offset(0),
             });
         }
     }
@@ -652,18 +658,11 @@ pub const Storage = struct {
         if (header.checksum == 0) return;
 
         const header_slot = header.op % config.journal_slot_count;
-        const header_offset = vsr.Zone.wal_headers.offset(header_slot * @sizeOf(vsr.Header));
-        const header_old = mem.bytesAsValue(
-            vsr.Header,
-            storage.memory[header_offset..][0..@sizeOf(vsr.Header)],
-        );
+        const header_old = storage.wal_headers()[header_slot];
 
+        const prepare_header = storage.wal_prepares()[header_slot].header;
         const prepare_offset = vsr.Zone.wal_prepares.offset(header_slot * config.message_size_max);
         const prepare_sector = @divExact(prepare_offset, config.sector_size);
-        const prepare_header = mem.bytesAsValue(
-            vsr.Header,
-            storage.memory[prepare_offset..][0..@sizeOf(vsr.Header)],
-        );
 
         assert(storage.memory_occupied.isSet(prepare_sector));
         if (header.command == .prepare) {
@@ -734,6 +733,37 @@ pub const Storage = struct {
             assert(block_header.checksum == manifest.checksums[i]);
             assert(block_header.operation == BlockType.manifest.operation());
         }
+    }
+
+    pub fn wal_headers(storage: *const Storage) []const vsr.Header {
+        const offset = vsr.Zone.wal_headers.offset(0);
+        const size = vsr.Zone.wal_headers.size().?;
+        return mem.bytesAsSlice(vsr.Header, storage.memory[offset..][0..size]);
+    }
+
+    const MessageRaw = struct {
+        header: vsr.Header,
+        body: [config.message_size_max - @sizeOf(vsr.Header)]u8,
+    };
+
+    pub fn wal_prepares(storage: *const Storage) []const MessageRaw {
+        const offset = vsr.Zone.wal_prepares.offset(0);
+        const size = vsr.Zone.wal_prepares.size().?;
+        return mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]);
+    }
+
+    pub fn grid_block(storage: *const Storage, address: u64) []const u8 {
+        assert(address > 0);
+
+        const block_offset = vsr.Zone.grid.offset((address - 1) * config.block_size);
+        const block_header = mem.bytesAsSlice(
+            vsr.Header,
+            storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
+        )[0];
+        assert(block_header.valid_checksum());
+        assert(block_header.size <= config.block_size);
+
+        return storage.memory[block_offset..][0..block_header.size];
     }
 };
 
