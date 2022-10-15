@@ -565,7 +565,7 @@ fn ForestTestType(comptime StorageProvider: type) type {
                     }
                 }
 
-                // At the end of a compaction measure, record how many will be checkpointed next.
+                // At the end of a compaction bar, record how many will be checkpointed next.
                 if (self.op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1) {
                     self.accounts.next_checkpoint = @intCast(u32, self.accounts.inserted.items.len);
                     self.transfers.next_checkpoint = @intCast(u32, self.transfers.inserted.items.len);
