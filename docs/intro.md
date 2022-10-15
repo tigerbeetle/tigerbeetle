@@ -20,7 +20,7 @@ To get TigerBeetle up-and-running locally, check out:
 
 Once you've got a TigerBeetle server, check out:
 
-* [Creating accounts and transfers in the Node CLI](./usage/node-cli)
+* [Creating accounts and transfers in the Node CLI](./usage/node-cli.md)
 
 # Reference
 
