@@ -25,8 +25,9 @@ const VSRState = @import("superblock.zig").SuperBlockSector.VSRState;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlock = SuperBlockType(Storage);
 
-// Total calls to checkpoint() + view_change().
+/// Total calls to checkpoint() + view_change().
 const transitions_count_total = 10;
+const cluster = 0;
 
 pub fn main() !void {
     const allocator = std.testing.allocator;
@@ -220,7 +221,6 @@ const Environment = struct {
             env.superblock_verify.working.checksum == env.superblock.writing.checksum
         );
 
-        const expectEqual = std.testing.expectEqual;
         // Verify the sequence we read from disk is monotonically increasing.
         if (env.latest_sequence < env.superblock_verify.working.sequence) {
             assert(
@@ -231,25 +231,22 @@ const Environment = struct {
             if (env.latest_checksum != 0) {
                 if (env.latest_sequence + 1 == env.superblock_verify.working.sequence) {
                     // After a checkpoint(), the parent points to the previous working sector.
-                    try expectEqual(env.superblock_verify.working.parent, env.latest_checksum);
+                    assert(env.superblock_verify.working.parent == env.latest_checksum);
                 }
 
                 if (env.latest_sequence + 2 == env.superblock_verify.working.sequence) {
                     // After a view_change(), the parent is unchanged.
-                    try expectEqual(env.superblock_verify.working.parent, env.latest_parent);
+                    assert(env.superblock_verify.working.parent == env.latest_parent);
                 }
             }
 
-            try std.testing.expect(VSRState.monotonic(
-                env.latest_vsr_state,
-                env.superblock_verify.working.vsr_state,
-            ));
-            try expectEqual(
+            assert(env.latest_vsr_state.monotonic(env.superblock_verify.working.vsr_state));
+            assert(std.meta.eql(
                 env.sequence_vsr_states.get(env.superblock_verify.working.sequence).?,
                 env.superblock_verify.working.vsr_state,
-            );
-            try expectEqual(
-                env.sequence_free_sets.get(env.superblock_verify.working.sequence).?,
+            ));
+            assert(
+                env.sequence_free_sets.get(env.superblock_verify.working.sequence).? ==
                 checksum_free_set(env.superblock_verify),
             );
 
@@ -258,9 +255,9 @@ const Environment = struct {
             env.latest_parent = env.superblock_verify.working.parent;
             env.latest_vsr_state = env.superblock_verify.working.vsr_state;
         } else {
-            try expectEqual(env.latest_sequence, env.superblock_verify.working.sequence);
-            try expectEqual(env.latest_checksum, env.superblock_verify.working.checksum);
-            try expectEqual(env.latest_parent, env.superblock_verify.working.parent);
+            assert(env.latest_sequence == env.superblock_verify.working.sequence);
+            assert(env.latest_checksum == env.superblock_verify.working.checksum);
+            assert(env.latest_parent == env.superblock_verify.working.parent);
         }
     }
 
@@ -274,7 +271,7 @@ const Environment = struct {
         assert(env.pending.count() == 0);
         env.pending.insert(.format);
         env.superblock.format(format_callback, &env.context_format, .{
-            .cluster = 0,
+            .cluster = cluster,
             .replica = 0,
             // Include extra space (beyond what Storage actually needs) because SuperBlock will
             // update the sector's size according to the highest FreeSet block allocated.
@@ -282,8 +279,8 @@ const Environment = struct {
         });
 
         assert(env.sequence_vsr_states.count() == 0);
-        try env.sequence_vsr_states.putNoClobber(1, std.mem.zeroInit(VSRState, .{}));
-        try env.sequence_vsr_states.putNoClobber(2, std.mem.zeroInit(VSRState, .{}));
+        try env.sequence_vsr_states.putNoClobber(1, VSRState.root(cluster));
+        try env.sequence_vsr_states.putNoClobber(2, VSRState.root(cluster));
 
         assert(env.sequence_free_sets.count() == 0);
         try env.sequence_free_sets.putNoClobber(1, checksum_free_set(env.superblock));
@@ -309,7 +306,7 @@ const Environment = struct {
 
         assert(env.superblock.working.sequence == 2);
         assert(env.superblock.working.replica == 0);
-        assert(env.superblock.working.cluster == 0);
+        assert(env.superblock.working.cluster == cluster);
     }
 
     fn view_change(env: *Environment) !void {
@@ -349,8 +346,8 @@ const Environment = struct {
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
             .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
-            .view_normal = env.superblock.staging.vsr_state.view_normal,
-            .view = env.superblock.staging.vsr_state.view,
+            .view_normal = env.superblock.staging.vsr_state.view_normal + 1,
+            .view = env.superblock.staging.vsr_state.view + 1,
         };
 
         const sequence = env.superblock.writing.sequence + 1;
@@ -358,8 +355,7 @@ const Environment = struct {
         try env.sequence_free_sets.putNoClobber(sequence, checksum_free_set(env.superblock));
 
         env.pending.insert(.checkpoint);
-        env.superblock.staging.vsr_state = vsr_state;
-        env.superblock.checkpoint(checkpoint_callback, &env.context_checkpoint);
+        env.superblock.checkpoint(checkpoint_callback, &env.context_checkpoint, vsr_state);
     }
 
     fn checkpoint_callback(context: *SuperBlock.Context) void {
