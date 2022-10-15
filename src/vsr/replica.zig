@@ -167,10 +167,10 @@ pub fn ReplicaType(
         /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
         ///
         /// Invariants (not applicable during status=recovering):
-        /// * `replica.commit_min` exists in the Journal.
+        /// * `replica.commit_min` exists in the Journal OR `replica.commit_min == op_checkpoint`.
         /// * `replica.commit_min ≤ replica.op`
         /// * `replica.commit_min ≥ replica.op_checkpoint`.
-        /// * never decreases
+        /// * never decreases while the replica is alive
         commit_min: u64,
 
         /// The op number of the latest committed operation (according to the cluster):
@@ -996,11 +996,10 @@ pub fn ReplicaType(
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
             // const threshold = self.quorum_replication;
             // TODO: When Block recover & state transfer are implemented, this can be removed.
-            const threshold = if (prepare.message.header.op == self.op_checkpoint_trigger() or
-                prepare.message.header.op == self.op_checkpoint + config.lsm_batch_multiple + 1)
-                self.replica_count
-            else
-                self.quorum_replication;
+            const threshold =
+                if (prepare.message.header.op == self.op_checkpoint_trigger() or
+                    prepare.message.header.op == self.op_checkpoint + config.lsm_batch_multiple + 1)
+                    self.replica_count else self.quorum_replication;
 
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
@@ -2624,12 +2623,12 @@ pub fn ReplicaType(
                 .view_normal = self.view_normal,
                 .view = self.view,
             };
-            assert(VSRState.monotonic(self.superblock.working.vsr_state, vsr_state_new));
+            assert(self.superblock.working.vsr_state.monotonic(vsr_state_new));
 
-            self.superblock.staging.vsr_state = vsr_state_new;
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
+                vsr_state_new,
             );
         }
 
@@ -2685,8 +2684,15 @@ pub fn ReplicaType(
             // this commit.
 
             assert(self.journal.has(prepare.header));
-            assert(self.journal.header_with_op(self.commit_min).?.checksum ==
-                prepare.header.parent);
+            if (self.op_checkpoint == self.commit_min) {
+                // op_checkpoint's slot may have been overwritten in the WAL — but we can
+                // always use the VSRState to anchor the hash chain.
+                assert(prepare.header.parent ==
+                    self.superblock.working.vsr_state.commit_min_checksum);
+            } else {
+                assert(prepare.header.parent ==
+                    self.journal.header_with_op(self.commit_min).?.checksum);
+            }
 
             log.debug("{}: commit_op: executing view={} {} op={} checksum={} ({s})", .{
                 self.replica,
@@ -3875,8 +3881,6 @@ pub fn ReplicaType(
             assert(self.op_checkpoint <= self.commit_min);
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
-
-            assert(self.journal.header_with_op(self.commit_min) != null);
             assert(self.journal.header_with_op(self.op) != null);
 
             // The replica repairs backwards from `commit_max`. But if `commit_max` is too high
@@ -5724,8 +5728,10 @@ pub fn ReplicaType(
 
         /// Returns true if all operations are present, correctly ordered and connected by hash
         /// chain, between `op_min` and `op_max` (both inclusive).
-        fn valid_hash_chain_between(self: *Self, op_min: u64, op_max: u64) bool {
+        fn valid_hash_chain_between(self: *const Self, op_min: u64, op_max: u64) bool {
             assert(op_min <= op_max);
+            // Headers with ops preceding the checkpoint may be unavailable due to a WAL wrap.
+            assert(op_min >= self.op_checkpoint);
 
             // If we use anything less than self.op then we may commit ops for a forked hash chain
             // that have since been reordered by a new leader.
@@ -5735,6 +5741,24 @@ pub fn ReplicaType(
             var op = op_max;
             while (op > op_min) {
                 op -= 1;
+
+                if (self.op_checkpoint == op) {
+                    // op_checkpoint's slot may have been overwritten in the WAL — but we can
+                    // always use the VSRState to anchor the hash chain.
+                    assert(op == op_min);
+                    assert(op == self.superblock.working.vsr_state.commit_min);
+                    if (self.superblock.working.vsr_state.commit_min_checksum == b.parent) {
+                        return true;
+                    } else {
+                        log.debug("{}: valid_hash_chain_between: break A: {} (checkpoint={})", .{
+                            self.replica,
+                            self.superblock.working.vsr_state.commit_min_checksum,
+                            self.op_checkpoint,
+                        });
+                        log.debug("{}: valid_hash_chain_between: break B: {}", .{ self.replica, b, });
+                        return false;
+                    }
+                }
 
                 if (self.journal.header_with_op(op)) |a| {
                     assert(a.op + 1 == b.op);
