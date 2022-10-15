@@ -146,4 +146,21 @@ pub fn build(b: *std.build.Builder) void {
         const run_step = b.step("lsm_forest_fuzz", "Fuzz the LSM forest. Args: [--seed <seed>]");
         run_step.dependOn(&run_cmd.step);
     }
+
+    {
+        const fuzz_lsm_manifest_log = b.addExecutable(
+            "fuzz_lsm_manifest_log",
+            "src/lsm/manifest_log_fuzz.zig",
+        );
+        fuzz_lsm_manifest_log.setMainPkgPath("src");
+        fuzz_lsm_manifest_log.setTarget(target);
+        fuzz_lsm_manifest_log.setBuildMode(mode);
+
+        const run_cmd = fuzz_lsm_manifest_log.run();
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("fuzz_lsm_manifest_log", "Fuzz the ManifestLog. Args: [seed]");
+        run_step.dependOn(&run_cmd.step);
+    }
 }

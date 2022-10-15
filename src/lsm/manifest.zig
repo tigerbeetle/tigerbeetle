@@ -217,6 +217,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             table: *TableInfo,
         ) void {
             const manifest_level = &manifest.levels[level];
+
+            assert(table.snapshot_max >= snapshot);
             manifest_level.set_snapshot_max(snapshot, table);
             assert(table.snapshot_max == snapshot);
 

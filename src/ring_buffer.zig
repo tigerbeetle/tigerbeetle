@@ -6,11 +6,12 @@ const mem = std.mem;
 /// A First In, First Out ring buffer holding at most `count_max` elements.
 pub fn RingBuffer(
     comptime T: type,
-    comptime count_max: usize,
+    comptime count_max_: usize,
     comptime buffer_type: enum { array, pointer },
 ) type {
     return struct {
         const Self = @This();
+        pub const count_max = count_max_;
 
         buffer: switch (buffer_type) {
             .array => [count_max]T,

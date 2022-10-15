@@ -85,7 +85,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         const block_body_size = config.block_size - @sizeOf(vsr.Header);
         const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
         const entry_count_max_unaligned = @divFloor(block_body_size, entry_size);
-        const entry_count_max = @divFloor(entry_count_max_unaligned, alignment) * alignment;
+        pub const entry_count_max = @divFloor(entry_count_max_unaligned, alignment) * alignment;
 
         comptime {
             assert(entry_count_max > 0);
@@ -271,12 +271,14 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         /// A move is only recorded as an insert, there is no remove from the previous level, since
         /// this is safer (no potential to get the event order wrong) and reduces fragmentation.
         pub fn insert(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
+            assert(!manifest_log.writing);
             manifest_log.append(.{ .level = level, .event = .insert }, table);
         }
 
         /// Appends the removal of a table from a level.
         /// The table must have previously been inserted to the manifest log.
         pub fn remove(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
+            assert(!manifest_log.writing);
             manifest_log.append(.{ .level = level, .event = .remove }, table);
         }
 
@@ -543,6 +545,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
             assert(manifest_log.write_callback == null);
+            //assert(manifest_log.blocks_closed == 0); // TODO(DJ) try this
 
             manifest_log.writing = true;
             manifest_log.write_callback = callback;
@@ -708,246 +711,4 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             )[0..entry_count_max];
         }
     };
-}
-
-// TODO This is a manual runner to be replaced with a fuzz test.
-fn ManifestLogTestType(
-    comptime Storage: type,
-    comptime TableInfo: type,
-) type {
-    return struct {
-        const ManifestLogTest = @This();
-        const ManifestLog = ManifestLogType(Storage, TableInfo);
-
-        const SuperBlock = SuperBlockType(Storage);
-        const Grid = GridType(Storage);
-
-        superblock: *SuperBlock,
-        superblock_context: SuperBlock.Context = undefined,
-        manifest_log: ManifestLog,
-        pending: usize = 0,
-
-        fn init(allocator: mem.Allocator, grid: *Grid) !ManifestLogTest {
-            const tree_hash: u128 = std.math.maxInt(u128);
-
-            var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
-            errdefer manifest_log.deinit(allocator);
-
-            return ManifestLogTest{
-                .superblock = grid.superblock,
-                .manifest_log = manifest_log,
-            };
-        }
-
-        fn deinit(t: *ManifestLogTest, allocator: mem.Allocator) void {
-            t.manifest_log.deinit(allocator);
-        }
-
-        fn format_superblock(t: *ManifestLogTest) void {
-            t.pending += 1;
-            t.superblock.format(format_superblock_callback, &t.superblock_context, .{
-                .cluster = 10,
-                .replica = 0,
-                .size_max = 512 * 1024 * 1024,
-            });
-        }
-
-        fn format_superblock_callback(context: *SuperBlock.Context) void {
-            const t = @fieldParentPtr(ManifestLogTest, "superblock_context", context);
-            t.pending -= 1;
-            t.open_superblock();
-        }
-
-        fn open_superblock(t: *ManifestLogTest) void {
-            t.pending += 1;
-            t.superblock.open(open_superblock_callback, &t.superblock_context);
-        }
-
-        fn open_superblock_callback(context: *SuperBlock.Context) void {
-            const t = @fieldParentPtr(ManifestLogTest, "superblock_context", context);
-            t.pending -= 1;
-
-            t.open();
-        }
-
-        fn open(t: *ManifestLogTest) void {
-            t.pending += 1;
-            t.manifest_log.open(open_event, open_callback);
-        }
-
-        fn open_event(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
-            log.debug(
-                "{}: open_event: level={} checksum={} address={} flags={} snapshot={}..{}",
-                .{
-                    manifest_log.tree_hash,
-                    level,
-                    table.checksum,
-                    table.address,
-                    table.flags,
-                    table.snapshot_min,
-                    table.snapshot_max,
-                },
-            );
-        }
-
-        fn open_callback(manifest_log: *ManifestLog) void {
-            const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
-            t.pending -= 1;
-
-            t.manifest_log.insert(2, &TableInfo{
-                .checksum = 123,
-                .address = 7,
-                .flags = 0,
-                .snapshot_min = 42,
-                .key_min = 50,
-                .key_max = 100,
-            });
-
-            t.flush();
-        }
-
-        fn flush(t: *ManifestLogTest) void {
-            t.pending += 1;
-            t.manifest_log.flush(flush_callback);
-        }
-
-        fn flush_callback(manifest_log: *ManifestLog) void {
-            const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
-            t.pending -= 1;
-            t.checkpoint();
-        }
-
-        fn checkpoint(t: *ManifestLogTest) void {
-            t.pending += 1;
-            t.manifest_log.checkpoint(checkpoint_callback);
-        }
-
-        fn checkpoint_callback(manifest_log: *ManifestLog) void {
-            const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
-            t.pending -= 1;
-
-            t.manifest_log.insert(2, &TableInfo{
-                .checksum = 123,
-                .address = 7,
-                .flags = 0,
-                .snapshot_min = 42,
-                .snapshot_max = 50,
-                .key_min = 50,
-                .key_max = 100,
-            });
-
-            t.manifest_log.remove(2, &TableInfo{
-                .checksum = 123,
-                .address = 7,
-                .flags = 0,
-                .snapshot_min = 42,
-                .snapshot_max = 50,
-                .key_min = 50,
-                .key_max = 100,
-            });
-
-            t.checkpoint_again();
-        }
-
-        fn checkpoint_again(t: *ManifestLogTest) void {
-            t.pending += 1;
-            t.manifest_log.checkpoint(checkpoint_again_callback);
-        }
-
-        fn checkpoint_again_callback(manifest_log: *ManifestLog) void {
-            const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
-            t.pending -= 1;
-            t.compact();
-        }
-
-        fn compact(t: *ManifestLogTest) void {
-            t.pending += 1;
-            t.manifest_log.compact(compact_callback);
-        }
-
-        fn compact_callback(manifest_log: *ManifestLog) void {
-            const t = @fieldParentPtr(ManifestLogTest, "manifest_log", manifest_log);
-            t.pending -= 1;
-
-            const tree = t.manifest_log.tree_hash;
-            if (t.manifest_log.superblock.manifest.oldest_block_queued_for_compaction(tree)) |_| {
-                t.compact();
-            } else {
-                t.checkpoint_superblock();
-            }
-        }
-
-        fn checkpoint_superblock(t: *ManifestLogTest) void {
-            t.pending += 1;
-            t.superblock.checkpoint(checkpoint_superblock_callback, &t.superblock_context);
-        }
-
-        fn checkpoint_superblock_callback(context: *SuperBlock.Context) void {
-            const t = @fieldParentPtr(ManifestLogTest, "superblock_context", context);
-            t.pending -= 1;
-        }
-    };
-}
-
-pub fn main() !void {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    testing.log_level = .debug;
-
-    const os = std.os;
-    const IO = @import("../io.zig").IO;
-    const Storage = @import("../storage.zig").Storage;
-    const SuperBlock = SuperBlockType(Storage);
-    const Grid = @import("grid.zig").GridType(Storage);
-
-    const dir_path = ".";
-    const dir_fd = os.openZ(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0) catch |err| {
-        std.debug.print("failed to open directory '{s}': {}", .{ dir_path, err });
-        return;
-    };
-
-    const size_max = 2 * 1024 * 1024 * 1024;
-    const storage_fd = try IO.open_file(dir_fd, "test_manifest_log", size_max, true);
-    defer std.fs.cwd().deleteFile("test_manifest_log") catch {};
-
-    var io = try IO.init(128, 0);
-    defer io.deinit();
-
-    var storage = try Storage.init(&io, storage_fd);
-    defer storage.deinit();
-
-    var superblock = try SuperBlock.init(allocator, &storage);
-    defer superblock.deinit(allocator);
-
-    var grid = try Grid.init(allocator, &superblock);
-    defer grid.deinit(allocator);
-
-    const TableInfo = extern struct {
-        checksum: u128,
-        address: u64,
-        flags: u64 = 0,
-
-        /// The minimum snapshot that can see this table (with exclusive bounds).
-        /// This value is set to the current snapshot tick on table creation.
-        snapshot_min: u64,
-
-        /// The maximum snapshot that can see this table (with exclusive bounds).
-        /// This value is set to the current snapshot tick on table deletion.
-        snapshot_max: u64 = math.maxInt(u64),
-
-        key_min: u128,
-        key_max: u128,
-    };
-    assert(@sizeOf(TableInfo) == 48 + 16 * 2);
-    assert(@alignOf(TableInfo) == 16);
-    assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
-
-    const ManifestLogTest = ManifestLogTestType(Storage, TableInfo);
-
-    var t = try ManifestLogTest.init(allocator, &grid);
-    defer t.deinit(allocator);
-
-    t.format_superblock();
-    while (t.pending > 0) try io.run_for_ns(100);
 }
