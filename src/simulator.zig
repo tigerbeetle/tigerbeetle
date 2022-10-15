@@ -29,8 +29,7 @@ const output = std.log.scoped(.state_checker);
 /// This will run much slower but will trace all logic across the cluster.
 const log_state_transitions_only = builtin.mode != .Debug;
 
-const log_health = std.log.scoped(.health);
-const log_faults = std.log.scoped(.faults);
+const log_simulator = std.log.scoped(.simulator);
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
@@ -109,6 +108,7 @@ pub fn main() !void {
         .grid_size_max = 1024 * 1024 * 256,
         .seed = random.int(u64),
         .on_change_state = on_replica_change_state,
+        .on_compact = on_replica_compact,
         .on_checkpoint = on_replica_checkpoint,
         .network_options = .{
             .packet_simulator_options = .{
@@ -140,7 +140,12 @@ pub fn main() !void {
             .write_latency_mean = 3 + random.uintLessThan(u16, 100),
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
-            .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
+            // TODO Allow WAL faults on crash when replica_count=1 when redundant-header-repair
+            // is implemented after recovering with decision=fix. Otherwise we can end up with
+            // multiple crashes faulting first a redundant headers, then a prepare, upgrading
+            // a decision=fix to decision=vsr.
+            .crash_fault_probability =
+                if (replica_count == 1) 0 else 80 + random.uintLessThan(u8, 21),
             .faulty_superblock = true,
         },
         .health_options = .{
@@ -339,14 +344,14 @@ pub fn main() !void {
                 // complete the VSR recovery protocol either.
                 if (cluster.health[replica] == .up and crashes == 0) {
                     if (storage.faulty) {
-                        log_faults.debug("{}: disable storage faults", .{replica});
+                        log_simulator.debug("{}: disable storage faults", .{replica});
                         storage.faulty = false;
                     }
                 } else {
                     // When a journal recovers for the first time, enable its storage faults.
                     // Future crashes will recover in the presence of faults.
                     if (!storage.faulty) {
-                        log_faults.debug("{}: enable storage faults", .{replica});
+                        log_simulator.debug("{}: enable storage faults", .{replica});
                         storage.faulty = true;
                     }
                 }
@@ -373,7 +378,7 @@ pub fn main() !void {
                     }
 
                     if (!try cluster.crash_replica(replica.replica)) continue;
-                    log_health.debug("{}: crash replica", .{replica.replica});
+                    log_simulator.debug("{}: crash replica", .{replica.replica});
                     crashes -= 1;
                 },
                 .down => |*ticks| {
@@ -384,7 +389,7 @@ pub fn main() !void {
                     assert(replica.status == .recovering);
                     if (ticks.* == 0 and chance_f64(random, health_options.restart_probability)) {
                         cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
-                        log_health.debug("{}: restart replica", .{replica.replica});
+                        log_simulator.debug("{}: restart replica", .{replica.replica});
                     }
                 },
             }
@@ -447,8 +452,14 @@ fn on_replica_change_state(replica: *const Replica) void {
     };
 }
 
+fn on_replica_compact(replica: *const Replica) void {
+    storage_checker.replica_compact(replica) catch |err| {
+        fatal(.correctness, "storage checker error: {}", .{err});
+    };
+}
+
 fn on_replica_checkpoint(replica: *const Replica) void {
-    storage_checker.check_storage(replica) catch |err| {
+    storage_checker.replica_checkpoint(replica) catch |err| {
         fatal(.correctness, "storage checker error: {}", .{err});
     };
 }

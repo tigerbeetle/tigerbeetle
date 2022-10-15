@@ -356,6 +356,7 @@ comptime {
 
     // The WAL format requires messages to be a multiple of the sector size.
     assert(message_size_max % sector_size == 0);
+    assert(message_size_max >= @sizeOf(vsr.Header));
     assert(message_size_max >= sector_size);
 
     assert(superblock_copies % 2 == 0);

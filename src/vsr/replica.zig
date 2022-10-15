@@ -265,6 +265,8 @@ pub fn ReplicaType(
 
         /// Simulator hooks.
         on_change_state: ?fn (replica: *const Self) void = null,
+        /// Called immediately after a compaction.
+        on_compact: ?fn (replica: *const Self) void = null,
         /// Called immediately after a checkpoint.
         /// Note: The replica may checkpoint without calling this function:
         /// 1. Begin checkpoint.
@@ -2563,6 +2565,8 @@ pub fn ReplicaType(
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
             assert(op <= self.op_checkpoint_trigger());
+
+            if (self.on_compact) |on_compact| on_compact(self);
 
             // If op_checkpoint_next == vsr_state.commit_min, we checkpointed at op,
             // then crashed and have now recovered.
