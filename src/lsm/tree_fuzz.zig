@@ -15,17 +15,61 @@ const Storage = @import("../test/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 
 const GridType = @import("grid.zig").GridType;
-const GrooveType = @import("groove.zig").GrooveType;
-const Forest = StateMachine.Forest;
+const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
+const Table = @import("table.zig").TableType(
+    Key,
+    Key.Value,
+    Key.compare_keys,
+    Key.key_from_value,
+    Key.sentinel_key,
+    Key.tombstone,
+    Key.tombstone_from_key,
+);
+const Tree = @import("tree.zig").TreeType(Table, Storage, @typeName(Table) ++ "_test");
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
+const Key = packed struct {
+    id: u64 align(@alignOf(u64)),
+
+    const Value = packed struct {
+        id: u64,
+        value: u63,
+        tombstone: u1 = 0,
+    };
+
+    inline fn compare_keys(a: Key, b: Key) std.math.Order {
+        return std.math.order(a.id, b.id);
+    }
+
+    inline fn key_from_value(value: *const Key.Value) Key {
+        return Key{ .id = value.id };
+    }
+
+    const sentinel_key = Key{
+        .id = std.math.maxInt(u64),
+    };
+
+    inline fn tombstone(value: *const Key.Value) bool {
+        return value.tombstone != 0;
+    }
+
+    inline fn tombstone_from_key(key: Key) Key.Value {
+        return Key.Value{
+            .id = key.id,
+            .value = 0,
+            .tombstone = 1,
+        };
+    }
+};
+
 const FuzzOp = union(enum) {
-    // TODO Test checkpointing, secondary index lookups and range queries.
+    // TODO Test checkpointing, range queries.
     compact,
-    put: Account,
-    get_account: u128,
+    put: Key.Value,
+    remove: Key.Value,
+    get: Key,
 };
 
 const Environment = struct {
@@ -37,22 +81,20 @@ const Environment = struct {
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
     const cache_entries_max = 2048;
-    const forest_options = StateMachine.forest_options(.{
-        // Ignored by StateMachine.forest_options().
-        .lsm_forest_node_count = undefined,
-        .cache_entries_accounts = cache_entries_max,
-        .cache_entries_transfers = cache_entries_max,
-        .cache_entries_posted = cache_entries_max,
-        .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
-    });
+    const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
+    const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
+    const tree_options = Tree.Options{
+        .commit_entries_max = commit_entries_max,
+    };
 
     const State = enum {
         uninit,
         init,
         formatted,
         superblock_open,
-        forest_open,
-        forest_compacting,
+        tree_open,
+        tree_compacting,
+        tree_lookup,
     };
 
     state: State,
@@ -61,9 +103,13 @@ const Environment = struct {
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context,
     grid: Grid,
-    forest: Forest,
-    // We need @fieldParentPtr() of forest, so we can't use an optional Forest.
-    forest_exists: bool,
+    node_pool: NodePool,
+    cache: Tree.TableMutable.ValuesCache,
+    tree: Tree,
+    // We need @fieldParentPtr() of tree, so we can't use an optional Tree.
+    tree_exists: bool,
+    lookup_context: Tree.LookupContext = undefined,
+    lookup_value: ?*const Key.Value = null,
 
     fn init(env: *Environment, storage: *Storage) !void {
         env.state = .uninit;
@@ -81,9 +127,15 @@ const Environment = struct {
         env.grid = try Grid.init(allocator, &env.superblock);
         errdefer env.grid.deinit(allocator);
 
-        // Forest must be initialized with an open superblock.
-        env.forest = undefined;
-        env.forest_exists = false;
+        env.node_pool = try NodePool.init(allocator, node_count);
+        errdefer env.node_pool.deinit(allocator);
+
+        env.cache = try Tree.TableMutable.ValuesCache.init(allocator, cache_entries_max);
+        errdefer env.cache.deinit(allocator);
+
+        // Tree must be initialized with an open superblock.
+        env.tree = undefined;
+        env.tree_exists = false;
 
         env.state = .init;
     }
@@ -91,10 +143,12 @@ const Environment = struct {
     fn deinit(env: *Environment) void {
         assert(env.state != .uninit);
 
-        if (env.forest_exists) {
-            env.forest.deinit(allocator);
-            env.forest_exists = false;
+        if (env.tree_exists) {
+            env.tree.deinit(allocator);
+            env.tree_exists = false;
         }
+        env.cache.deinit(allocator);
+        env.node_pool.deinit(allocator);
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
         env.message_pool.deinit(allocator);
@@ -142,49 +196,51 @@ const Environment = struct {
     pub fn open(env: *Environment) void {
         assert(env.state == .init);
         env.superblock.open(superblock_open_callback, &env.superblock_context);
-        env.tick_until_state_change(.init, .forest_open);
+        env.tick_until_state_change(.init, .tree_open);
     }
 
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
         env.change_state(.init, .superblock_open);
-        env.forest = Forest.init(allocator, &env.grid, node_count, forest_options) catch unreachable;
-        env.forest_exists = true;
-        env.forest.open(forest_open_callback);
+        env.tree = Tree.init(allocator, &env.node_pool, &env.grid, &env.cache, tree_options) catch unreachable;
+        env.tree_exists = true;
+        env.tree.open(tree_open_callback);
     }
 
-    fn forest_open_callback(forest: *Forest) void {
-        const env = @fieldParentPtr(@This(), "forest", forest);
-        env.change_state(.superblock_open, .forest_open);
+    fn tree_open_callback(tree: *Tree) void {
+        const env = @fieldParentPtr(@This(), "tree", tree);
+        env.change_state(.superblock_open, .tree_open);
     }
 
     pub fn compact(env: *Environment, op: u64) void {
-        env.change_state(.forest_open, .forest_compacting);
-        env.forest.compact(forest_compact_callback, op);
-        env.tick_until_state_change(.forest_compacting, .forest_open);
+        env.change_state(.tree_open, .tree_compacting);
+        env.tree.compact(tree_compact_callback, op);
+        env.tick_until_state_change(.tree_compacting, .tree_open);
     }
 
-    fn forest_compact_callback(forest: *Forest) void {
-        const env = @fieldParentPtr(@This(), "forest", forest);
-        env.change_state(.forest_compacting, .forest_open);
+    fn tree_compact_callback(tree: *Tree) void {
+        const env = @fieldParentPtr(@This(), "tree", tree);
+        env.change_state(.tree_compacting, .tree_open);
     }
 
-    fn prefetch_account(env: *Environment, id: u128) void {
-        const groove = &env.forest.grooves.accounts;
-        const Groove = @TypeOf(groove.*);
-        const Getter = struct {
-            finished: bool = false,
-            prefetch_context: Groove.PrefetchContext = undefined,
-            fn prefetch_callback(prefetch_context: *Groove.PrefetchContext) void {
-                const getter = @fieldParentPtr(@This(), "prefetch_context", prefetch_context);
-                getter.finished = true;
-            }
-        };
-        var getter = Getter{};
-        groove.prefetch_setup(null);
-        groove.prefetch_enqueue(id);
-        groove.prefetch(Getter.prefetch_callback, &getter.prefetch_context);
-        while (!getter.finished) env.tick();
+    fn get(env: *Environment, key: Key) ?*const Key.Value {
+        if (env.tree.lookup_from_memory(env.tree.lookup_snapshot_max, key)) |value| {
+            return Tree.unwrap_tombstone(value);
+        } else {
+            env.change_state(.tree_open, .tree_lookup);
+            env.lookup_context = undefined;
+            env.lookup_value = null;
+            env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max, key);
+            env.tick_until_state_change(.tree_lookup, .tree_open);
+            return env.lookup_value;
+        }
+    }
+
+    fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Key.Value) void {
+        const env = @fieldParentPtr(Environment, "lookup_context", lookup_context);
+        assert(env.lookup_value == null);
+        env.lookup_value = value;
+        env.change_state(.tree_lookup, .tree_open);
     }
 
     fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
@@ -196,9 +252,9 @@ const Environment = struct {
         // Open the superblock then forest.
         env.open();
 
-        // The forest should behave like a simple key-value data-structure.
+        // The tree should behave like a simple key-value data-structure.
         // We'll compare it to a hash map.
-        var model = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+        var model = std.hash_map.AutoHashMap(Key, Key.Value).init(allocator);
         defer model.deinit();
 
         // We need an op number for compact.
@@ -212,24 +268,27 @@ const Environment = struct {
                     env.compact(op);
                     op += 1;
                 },
-                .put => |account| {
-                    env.forest.grooves.accounts.put(&account);
-                    try model.put(account.id, account);
+                .put => |value| {
+                    env.tree.put(&value);
+                    try model.put(Key.key_from_value(&value), value);
                 },
-                .get_account => |id| {
+                .remove => |value| {
+                    env.tree.remove(&value);
+                    _ = model.remove(Key.key_from_value(&value));
+                },
+                .get => |key| {
                     // Get account from lsm.
-                    env.prefetch_account(id);
-                    const lsm_account = env.forest.grooves.accounts.get(id);
+                    const tree_value = env.get(key);
 
                     // Compare result to model.
-                    const model_account = model.get(id);
-                    if (model_account == null) {
-                        assert(lsm_account == null);
+                    const model_value = model.get(key);
+                    if (model_value == null) {
+                        assert(tree_value == null);
                     } else {
                         assert(std.mem.eql(
                             u8,
-                            std.mem.asBytes(&model_account.?),
-                            std.mem.asBytes(lsm_account.?),
+                            std.mem.asBytes(&model_value.?),
+                            std.mem.asBytes(tree_value.?),
                         ));
                     }
                 },
@@ -290,10 +349,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
     // We're not allowed to go more than Environment.cache_entries_max puts without compacting.
     var puts_since_compact: usize = 0;
 
-    var id_to_timestamp = std.hash_map.AutoHashMap(u128, u64).init(allocator);
-    defer id_to_timestamp.deinit();
-
-    for (fuzz_ops) |*fuzz_op, fuzz_op_index| {
+    for (fuzz_ops) |*fuzz_op| {
         fuzz_op.* = if (puts_since_compact >= Environment.cache_entries_max)
             // We have to compact before doing any other operations.
             FuzzOp{ .compact = {} }
@@ -303,36 +359,23 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
             .compact => FuzzOp{
                 .compact = {},
             },
-            .put => put: {
-                const id = random_id(random, u128);
-                // `timestamp` just needs to be unique, but we're not allowed to change the timestamp of an existing account.
-                const timestamp = id_to_timestamp.get(id) orelse fuzz_op_index;
-                try id_to_timestamp.put(id, timestamp);
-                break :put FuzzOp{ .put = Account{
-                    .id = id,
-                    .timestamp = timestamp,
-                    .user_data = random_id(random, u128),
-                    .reserved = [_]u8{0} ** 48,
-                    .ledger = random_id(random, u32),
-                    .code = random_id(random, u16),
-                    .flags = .{
-                        .debits_must_not_exceed_credits = random.boolean(),
-                        .credits_must_not_exceed_debits = random.boolean(),
-                    },
-                    .debits_pending = random.int(u64),
-                    .debits_posted = random.int(u64),
-                    .credits_pending = random.int(u64),
-                    .credits_posted = random.int(u64),
-                } };
-            },
-            .get_account => FuzzOp{
-                .get_account = random_id(random, u128),
-            },
+            .put => FuzzOp{ .put = .{
+                .id = random_id(random, u64),
+                .value = random.int(u63),
+            } },
+            .remove => FuzzOp{ .remove = .{
+                .id = random_id(random, u64),
+                .value = random.int(u63),
+            } },
+            .get => FuzzOp{ .get = .{
+                .id = random_id(random, u64),
+            } },
         };
         switch (fuzz_op.*) {
             .compact => puts_since_compact = 0,
-            .put => puts_since_compact += 1,
-            .get_account => {},
+            // Tree.remove() works by inserting a tombstone, so it counts as a put.
+            .put, .remove => puts_since_compact += 1,
+            .get => {},
         }
     }
 
