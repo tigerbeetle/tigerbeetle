@@ -89,17 +89,13 @@ fn fuzz(allocator: std.mem.Allocator, seed: u64) !void {
     var superblock_verify = try SuperBlock.init(allocator, &storage_verify, &message_pool);
     defer superblock_verify.deinit(allocator);
 
-    var sequence_vsr_states = std.AutoHashMap(u64, VSRState).init(allocator);
-    defer sequence_vsr_states.deinit();
-
-    var sequence_free_sets = std.AutoHashMap(u64, u128).init(allocator);
-    defer sequence_free_sets.deinit();
+    var sequence_states = Environment.SequenceStates.init(allocator);
+    defer sequence_states.deinit();
 
     var env = Environment{
+        .sequence_states = sequence_states,
         .superblock = &superblock,
         .superblock_verify = &superblock_verify,
-        .sequence_vsr_states = sequence_vsr_states,
-        .sequence_free_sets = sequence_free_sets,
     };
 
     try env.format();
@@ -110,7 +106,7 @@ fn fuzz(allocator: std.mem.Allocator, seed: u64) !void {
 
     try env.verify();
     assert(env.pending.count() == 0);
-    assert(env.latest_sequence == 2);
+    assert(env.latest_sequence == 1);
 
     var transitions: usize = 0;
     while (transitions < transitions_count_total or env.pending.count() > 0) {
@@ -148,18 +144,23 @@ fn fuzz(allocator: std.mem.Allocator, seed: u64) !void {
 }
 
 const Environment = struct {
+    /// Track the expected value of parameters at a particular sequence.
+    /// Indexed by sequence.
+    const SequenceStates = std.ArrayList(struct {
+        vsr_state: VSRState,
+        /// Track the expected `checksum(free_set)`.
+        /// Note that this is a checksum of the decoded free set; it is not the same as
+        /// `SuperBlockSector.free_set_checksum`.
+        free_set: u128,
+    });
+
+    sequence_states: SequenceStates,
+
     superblock: *SuperBlock,
     superblock_verify: *SuperBlock,
 
-    /// Track the expected VSRState for each superblock sequence.
-    sequence_vsr_states: std.AutoHashMap(u64, VSRState),
-    /// Track the expected `checksum(free_set)` for each superblock sequence.
-    /// Note that this is a checksum of the decoded free set; it is not the same as
-    /// `SuperBlockSector.free_set_checksum`.
-    sequence_free_sets: std.AutoHashMap(u64, u128),
-
     /// Verify that the working superblock after open() never regresses.
-    latest_sequence: u64 = 1,
+    latest_sequence: u64 = 0,
     latest_checksum: u128 = 0,
     latest_parent: u128 = 0,
     latest_vsr_state: VSRState = std.mem.zeroInit(VSRState, .{}),
@@ -223,32 +224,21 @@ const Environment = struct {
 
         // Verify the sequence we read from disk is monotonically increasing.
         if (env.latest_sequence < env.superblock_verify.working.sequence) {
-            assert(
-                env.latest_sequence + 1 == env.superblock_verify.working.sequence or
-                env.latest_sequence + 2 == env.superblock_verify.working.sequence
-            );
+            assert(env.latest_sequence + 1 == env.superblock_verify.working.sequence);
 
             if (env.latest_checksum != 0) {
                 if (env.latest_sequence + 1 == env.superblock_verify.working.sequence) {
-                    // After a checkpoint(), the parent points to the previous working sector.
+                    // After a checkpoint() or view_change(), the parent points to the previous
+                    // working sector.
                     assert(env.superblock_verify.working.parent == env.latest_checksum);
-                }
-
-                if (env.latest_sequence + 2 == env.superblock_verify.working.sequence) {
-                    // After a view_change(), the parent is unchanged.
-                    assert(env.superblock_verify.working.parent == env.latest_parent);
                 }
             }
 
             assert(env.latest_vsr_state.monotonic(env.superblock_verify.working.vsr_state));
-            assert(std.meta.eql(
-                env.sequence_vsr_states.get(env.superblock_verify.working.sequence).?,
-                env.superblock_verify.working.vsr_state,
-            ));
-            assert(
-                env.sequence_free_sets.get(env.superblock_verify.working.sequence).? ==
-                checksum_free_set(env.superblock_verify),
-            );
+
+            const expect = env.sequence_states.items[env.superblock_verify.working.sequence];
+            assert(std.meta.eql(expect.vsr_state, env.superblock_verify.working.vsr_state));
+            assert(expect.free_set == checksum_free_set(env.superblock_verify));
 
             env.latest_sequence = env.superblock_verify.working.sequence;
             env.latest_checksum = env.superblock_verify.working.checksum;
@@ -278,13 +268,12 @@ const Environment = struct {
             .size_max = data_file_size_min + 1000 * config.block_size,
         });
 
-        assert(env.sequence_vsr_states.count() == 0);
-        try env.sequence_vsr_states.putNoClobber(1, VSRState.root(cluster));
-        try env.sequence_vsr_states.putNoClobber(2, VSRState.root(cluster));
-
-        assert(env.sequence_free_sets.count() == 0);
-        try env.sequence_free_sets.putNoClobber(1, checksum_free_set(env.superblock));
-        try env.sequence_free_sets.putNoClobber(2, checksum_free_set(env.superblock));
+        assert(env.sequence_states.items.len == 0);
+        try env.sequence_states.append(undefined); // skip sequence=0
+        try env.sequence_states.append(.{
+            .vsr_state = VSRState.root(cluster),
+            .free_set = checksum_free_set(env.superblock),
+        });
     }
 
     fn format_callback(context: *SuperBlock.Context) void {
@@ -304,7 +293,7 @@ const Environment = struct {
         assert(env.pending.contains(.open));
         env.pending.remove(.open);
 
-        assert(env.superblock.working.sequence == 2);
+        assert(env.superblock.working.sequence == 1);
         assert(env.superblock.working.replica == 0);
         assert(env.superblock.working.cluster == cluster);
     }
@@ -321,12 +310,11 @@ const Environment = struct {
             .view = env.superblock.staging.vsr_state.view + 5,
         };
 
-        const sequence = env.superblock.writing.sequence + 2;
-        try env.sequence_vsr_states.putNoClobber(sequence, vsr_state);
-        try env.sequence_free_sets.putNoClobber(
-            sequence,
-            env.sequence_free_sets.get(sequence - 2).?,
-        );
+        assert(env.sequence_states.items.len == env.superblock.writing.sequence + 1);
+        try env.sequence_states.append(.{
+            .vsr_state = vsr_state,
+            .free_set = env.sequence_states.items[env.sequence_states.items.len - 1].free_set,
+        });
 
         env.pending.insert(.view_change);
         env.superblock.view_change(view_change_callback, &env.context_view_change, vsr_state);
@@ -350,9 +338,11 @@ const Environment = struct {
             .view = env.superblock.staging.vsr_state.view + 1,
         };
 
-        const sequence = env.superblock.writing.sequence + 1;
-        try env.sequence_vsr_states.putNoClobber(sequence, vsr_state);
-        try env.sequence_free_sets.putNoClobber(sequence, checksum_free_set(env.superblock));
+        assert(env.sequence_states.items.len == env.superblock.writing.sequence + 1);
+        try env.sequence_states.append(.{
+            .vsr_state = vsr_state,
+            .free_set = checksum_free_set(env.superblock),
+        });
 
         env.pending.insert(.checkpoint);
         env.superblock.checkpoint(checkpoint_callback, &env.context_checkpoint, vsr_state);
