@@ -138,10 +138,8 @@ pub const StorageChecker = struct {
             const trailer_size = @field(working, @tagName(trailer.field) ++ "_size");
 
             var copy: u8 = 0;
-            while (copy < config.superblock_copies * 2) : (copy += 1) {
-                const copyset = @divFloor(copy, config.superblock_copies);
-                const offset_in_zone = trailer.offset(copy, copyset);
-                const offset_in_storage = vsr.Zone.superblock.offset(offset_in_zone);
+            while (copy < config.superblock_copies) : (copy += 1) {
+                const offset_in_storage = vsr.Zone.superblock.offset(trailer.offset(copy));
                 @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer.field)) |=
                     vsr.checksum(storage.memory[offset_in_storage..][0..trailer_size]);
             }

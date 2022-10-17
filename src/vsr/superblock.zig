@@ -222,7 +222,7 @@ pub const SuperBlockSector = extern struct {
     }
 
     pub fn set_checksum(superblock: *SuperBlockSector) void {
-        assert(superblock.copy < superblock_copies_max);
+        assert(superblock.copy < config.superblock_copies);
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.flags == 0);
 
@@ -275,20 +275,12 @@ comptime {
 }
 
 /// The size of the entire superblock storage zone.
-pub const superblock_zone_size = superblock_size * superblock_copies_max;
-
-/// A single set of copies (a copy set) consists of config.superblock_copies of a superblock.
-/// At least two copy sets are required for copy-on-write in order not to impair existing copies.
-///
-/// However, when writing only the superblock sector for a view change, we do update-in-place,
-/// which is necessary as we need to continue to reference the existing superblock trailer to
-/// decouple view changes from checkpoints, to not force an untimely checkpoint ahead of schedule.
-pub const superblock_copies_max = config.superblock_copies * 2;
+pub const superblock_zone_size = superblock_copy_size * config.superblock_copies;
 
 /// The size of an individual superblock including trailer.
-pub const superblock_size = @sizeOf(SuperBlockSector) + superblock_trailer_size_max;
+pub const superblock_copy_size = @sizeOf(SuperBlockSector) + superblock_trailer_size_max;
 comptime {
-    assert(superblock_size % config.sector_size == 0);
+    assert(superblock_copy_size % config.sector_size == 0);
 }
 
 /// The maximum possible size of the superblock trailer, following the superblock sector.
@@ -309,7 +301,9 @@ pub const superblock_trailer_size_max = blk: {
 
     // We order the smaller manifest section ahead of the block free set for better access locality.
     // For example, it's cheaper to skip over 1 MiB when reading from disk than to skip over 32 MiB.
-    break :blk superblock_trailer_manifest_size_max + superblock_trailer_free_set_size_max + superblock_trailer_client_table_size_max;
+    break :blk superblock_trailer_manifest_size_max +
+        superblock_trailer_free_set_size_max +
+        superblock_trailer_client_table_size_max;
 };
 
 // A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
@@ -348,10 +342,9 @@ pub const data_file_size_min = blk: {
 /// action        working  staging  writing  disk
 /// format        seq par  seq par  seq par  seq par
 ///                0   0    1   0             -   -    Initially the file has no sectors.
-///                         2   1    1   0    -   -
-///                         3   2    2   1    1   0    Write a copyset for the first sequence.
-///                         3   2    2   1    2   1    Write a copyset for the second sequence.
-///                2   1    3   2    2   1    2   1    Read quorum; verify 3/4 are valid.
+///                0   0    2   1    1   0    -   -
+///                0   0    2   1    1   0    1   0    Write a copyset for the first sequence.
+///                1   0    2   1    1   0    1   0    Read quorum; verify 3/4 are valid.
 ///
 /// open          seq par  seq par  seq par  seq par
 ///                                          a    b
@@ -477,7 +470,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             errdefer allocator.free(c);
 
             const reading = try allocator.allocAdvanced(
-                [config.superblock_copies * 2]SuperBlockSector,
+                [config.superblock_copies]SuperBlockSector,
                 config.sector_size,
                 1,
                 .exact,
@@ -768,7 +761,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.writing.free_set_size == superblock.staging.free_set_size);
             assert(superblock.writing.client_table_size == superblock.staging.client_table_size);
 
-            context.copy = starting_copy_for_sequence(superblock.writing.sequence);
+            context.copy = 0;
             superblock.write_manifest(context);
         }
 
@@ -822,11 +815,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.writing.* = superblock.working.*;
 
-            // We cannot increment the sequence number when writing only the superblock sector as
-            // this would write the sector to another copy set with different superblock trailers.
-            // Instead, we increment twice so that the sector remains in the same copy set.
-            superblock.writing.sequence += 2;
-            assert(superblock.writing.parent == superblock.working.parent);
+            superblock.writing.parent = superblock.working.checksum;
+            superblock.writing.sequence += 1;
 
             superblock.writing.vsr_state.update(context.vsr_state.?);
             superblock.staging.vsr_state.update(context.vsr_state.?);
@@ -836,7 +826,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.staging.sequence = superblock.writing.sequence + 1;
             superblock.staging.parent = superblock.writing.checksum;
 
-            context.copy = starting_copy_for_sequence(superblock.writing.sequence);
+            context.copy = 0;
             superblock.write_sector(context);
         }
 
@@ -847,7 +837,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = Layout.offset_manifest(context.copy.?, superblock.writing.sequence);
+            const offset = Layout.offset_manifest(context.copy.?);
 
             mem.set(u8, buffer[superblock.writing.manifest_size..], 0); // Zero sector padding.
 
@@ -890,7 +880,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = Layout.offset_free_set(context.copy.?, superblock.writing.sequence);
+            const offset = Layout.offset_free_set(context.copy.?);
 
             mem.set(u8, buffer[superblock.writing.free_set_size..], 0); // Zero sector padding.
 
@@ -933,7 +923,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = Layout.offset_client_table(context.copy.?, superblock.writing.sequence);
+            const offset = Layout.offset_client_table(context.copy.?);
 
             mem.set(u8, buffer[superblock.writing.client_table_size..], 0); // Zero sector padding.
 
@@ -972,19 +962,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn write_sector(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            // We update the working superblock for a checkpoint/format (+1) or a view change (+2):
+            // We update the working superblock for a checkpoint/format/view_change:
             // open() does not update the working superblock, since it only writes to repair.
-            switch (context.caller) {
-                .open => {
-                    assert(superblock.writing.sequence == superblock.working.sequence);
-                },
-                .format, .checkpoint => {
-                    assert(superblock.writing.sequence == superblock.working.sequence + 1);
-                },
-                .view_change => {
-                    assert(superblock.writing.sequence == superblock.working.sequence + 2);
-                },
-            }
+            assert(superblock.writing.sequence ==
+                superblock.working.sequence + @boolToInt(context.caller != .open));
 
             // The staging superblock should always be one ahead, with VSR state in sync:
             assert(superblock.staging.sequence == superblock.writing.sequence + 1);
@@ -1000,9 +981,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.writing.size >= data_file_size_min);
             assert(superblock.writing.size <= superblock.writing.size_max);
 
-            assert(context.copy.? < superblock_copies_max);
-            assert(context.copy.? >= starting_copy_for_sequence(superblock.writing.sequence));
-            assert(context.copy.? <= stopping_copy_for_sequence(superblock.writing.sequence));
+            assert(context.copy.? < config.superblock_copies);
             superblock.writing.copy = context.copy.?;
 
             // Updating the copy number should not affect the checksum, which was previously set:
@@ -1021,7 +1000,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 offset,
             });
 
-            superblock.assert_bounds(offset, buffer.len + superblock_trailer_size_max);
+            superblock.assert_bounds(offset, buffer.len);
 
             superblock.storage.write_sectors(
                 write_sector_callback,
@@ -1039,9 +1018,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             assert(superblock.queue_head == context);
 
-            assert(copy < superblock_copies_max);
-            assert(copy >= starting_copy_for_sequence(superblock.writing.sequence));
-            assert(copy <= stopping_copy_for_sequence(superblock.writing.sequence));
+            assert(copy < config.superblock_copies);
             assert(copy == superblock.writing.copy);
 
             if (context.caller == .open) {
@@ -1052,17 +1029,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 return;
             }
 
-            if (copy == stopping_copy_for_sequence(superblock.writing.sequence)) {
+            if (copy + 1 == config.superblock_copies) {
                 context.copy = null;
-
-                if (context.caller == .format and superblock.writing.sequence < 2) {
-                    assert(superblock.writing.sequence != 0);
-
-                    superblock.working.* = superblock.writing.*;
-                    superblock.write_staging(context);
-                } else {
-                    superblock.read_working(context, .verify);
-                }
+                superblock.read_working(context, .verify);
             } else {
                 context.copy = copy + 1;
 
@@ -1088,7 +1057,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // This would make verification reads more flaky when we do experience a read fault.
             // See "An Analysis of Data Corruption in the Storage Stack".
 
-            context.copy = 0; // Read all copies across all copy sets.
+            context.copy = 0;
             context.read_threshold = threshold;
             for (superblock.reading) |*copy| copy.* = undefined;
             superblock.read_sector(context);
@@ -1096,7 +1065,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn read_sector(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
-            assert(context.copy.? < superblock_copies_max);
+            assert(context.copy.? < config.superblock_copies);
             assert(context.read_threshold != null);
 
             const buffer = mem.asBytes(&superblock.reading[context.copy.?]);
@@ -1109,7 +1078,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 offset,
             });
 
-            superblock.assert_bounds(offset, buffer.len + superblock_trailer_size_max);
+            superblock.assert_bounds(offset, buffer.len);
 
             superblock.storage.read_sectors(
                 read_sector_callback,
@@ -1127,8 +1096,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             assert(superblock.queue_head == context);
 
-            assert(context.copy.? < superblock_copies_max);
-            if (context.copy.? != superblock_copies_max - 1) {
+            assert(context.copy.? < config.superblock_copies);
+            if (context.copy.? + 1 != config.superblock_copies) {
                 context.copy = context.copy.? + 1;
                 superblock.read_sector(context);
                 return;
@@ -1159,7 +1128,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 }
 
                 if (context.caller == .format) {
-                    assert(working.sequence == 2);
+                    assert(working.sequence == 1);
                     assert(working.size == data_file_size_min);
                     assert(working.manifest_size == 0);
                     assert(working.free_set_size == 8);
@@ -1202,7 +1171,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.release(context);
                     } else {
                         assert(threshold == .open);
-                        context.copy = starting_copy_for_sequence(superblock.working.sequence);
+                        context.copy = 0;
                         context.repair = quorum.repair();
                         superblock.read_manifest(context);
                     }
@@ -1213,23 +1182,21 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else |err| switch (err) {
                 error.NotFound => @panic("superblock not found"),
                 error.QuorumLost => @panic("superblock quorum lost"),
-                error.ParentNotFound => @panic("superblock parent not found"),
-                error.ParentQuorumLost => @panic("superblock parent quorum lost"),
+                error.ParentNotConnected => @panic("superblock parent not connected"),
                 error.VSRStateNotMonotonic => @panic("superblock vsr state not monotonic"),
-                error.SequenceNotMonotonic => @panic("superblock sequence not monotonic"),
             }
         }
 
         fn read_manifest(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy.? < superblock_copies_max);
+            assert(context.copy.? < config.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.manifest_size);
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = Layout.offset_manifest(context.copy.?, superblock.working.sequence);
+            const offset = Layout.offset_manifest(context.copy.?);
 
             log.debug("{s}: read_manifest: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1276,9 +1243,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 // TODO Repair any impaired copies before we continue.
                 // At present, we repair at the next checkpoint.
                 // We do not repair padding.
-                context.copy = starting_copy_for_sequence(superblock.working.sequence);
+                context.copy = 0;
                 superblock.read_free_set(context);
-            } else if (copy == stopping_copy_for_sequence(superblock.working.sequence)) {
+            } else if (copy + 1 == config.superblock_copies) {
                 @panic("superblock manifest lost");
             } else {
                 log.debug("open: read_manifest: corrupt copy={}", .{copy});
@@ -1290,13 +1257,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_free_set(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy.? < superblock_copies_max);
+            assert(context.copy.? < config.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.free_set_size);
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = Layout.offset_free_set(context.copy.?, superblock.working.sequence);
+            const offset = Layout.offset_free_set(context.copy.?);
 
             log.debug("{s}: read_free_set: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1344,7 +1311,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 // TODO Repair any impaired copies before we continue.
                 superblock.read_client_table(context);
-            } else if (copy == stopping_copy_for_sequence(superblock.working.sequence)) {
+            } else if (copy + 1 == config.superblock_copies) {
                 @panic("superblock free set lost");
             } else {
                 log.debug("open: read_free_set: corrupt copy={}", .{copy});
@@ -1363,13 +1330,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_client_table(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy.? < superblock_copies_max);
+            assert(context.copy.? < config.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.client_table_size);
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = Layout.offset_client_table(context.copy.?, superblock.working.sequence);
+            const offset = Layout.offset_client_table(context.copy.?);
 
             log.debug("{s}: read_client_table: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1415,7 +1382,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 context.copy = null;
                 superblock.repair(context);
-            } else if (copy == stopping_copy_for_sequence(superblock.working.sequence)) {
+            } else if (copy + 1 == config.superblock_copies) {
                 @panic("superblock client table lost");
             } else {
                 log.debug("open: read_client_table: corrupt copy={}", .{copy});
@@ -1430,8 +1397,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.queue_head == context);
 
             if (context.repair.?.findFirstSet()) |repair_copy| {
-                assert(repair_copy >= starting_copy_for_sequence(superblock.working.sequence));
-                assert(repair_copy <= stopping_copy_for_sequence(superblock.working.sequence));
                 assert(context.repair.?.count() <=
                     config.superblock_copies - threshold_for_caller(context.caller));
 
@@ -1544,43 +1509,25 @@ pub fn SuperBlockType(comptime Storage: type) type {
     };
 }
 
-/// Returns the first copy index (inclusive) to be written for a sequence number.
-fn starting_copy_for_sequence(sequence: u64) u8 {
-    return config.superblock_copies * @intCast(u8, sequence % 2);
-}
-
-/// Returns the last copy index (inclusive) to be written for a sequence number.
-fn stopping_copy_for_sequence(sequence: u64) u8 {
-    return starting_copy_for_sequence(sequence) + config.superblock_copies - 1;
-}
-
 pub const Layout = struct {
     pub fn offset_sector(copy: u8) u64 {
-        return superblock_size * copy;
+        assert(copy < config.superblock_copies);
+        return superblock_copy_size * @as(u64, copy);
     }
 
-    pub fn offset_manifest(copy: u8, sequence: u64) u64 {
-        assert(copy >= starting_copy_for_sequence(sequence));
-        assert(copy <= stopping_copy_for_sequence(sequence));
-
-        return superblock_size * copy + @sizeOf(SuperBlockSector);
+    pub fn offset_manifest(copy: u8) u64 {
+        assert(copy < config.superblock_copies);
+        return offset_sector(copy) + @sizeOf(SuperBlockSector);
     }
 
-    pub fn offset_free_set(copy: u8, sequence: u64) u64 {
-        assert(copy >= starting_copy_for_sequence(sequence));
-        assert(copy <= stopping_copy_for_sequence(sequence));
-
-        return superblock_size * copy + @sizeOf(SuperBlockSector) +
-            superblock_trailer_manifest_size_max;
+    pub fn offset_free_set(copy: u8) u64 {
+        assert(copy < config.superblock_copies);
+        return offset_manifest(copy) + superblock_trailer_manifest_size_max;
     }
 
-    pub fn offset_client_table(copy: u8, sequence: u64) u64 {
-        assert(copy >= starting_copy_for_sequence(sequence));
-        assert(copy <= stopping_copy_for_sequence(sequence));
-
-        return superblock_size * copy + @sizeOf(SuperBlockSector) +
-            superblock_trailer_manifest_size_max +
-            superblock_trailer_free_set_size_max;
+    pub fn offset_client_table(copy: u8) u64 {
+        assert(copy < config.superblock_copies);
+        return offset_free_set(copy) + superblock_trailer_free_set_size_max;
     }
 };
 
@@ -1611,12 +1558,10 @@ const Quorums = struct {
             assert(quorum.valid);
 
             var repairs = QuorumCount.initEmpty();
-            const copy_min = starting_copy_for_sequence(quorum.sector.sequence);
-            const copy_max = stopping_copy_for_sequence(quorum.sector.sequence);
-            var copy: u8 = copy_min;
-            while (copy <= copy_max) : (copy += 1) {
-                if (!quorum.count.isSet(copy)) {
-                    repairs.set(copy);
+            var slot: u8 = 0;
+            while (slot < config.superblock_copies) : (slot += 1) {
+                if (!quorum.count.isSet(slot)) {
+                    repairs.set(slot);
                 }
             }
             assert(repairs.count() == config.superblock_copies - quorum.count.count());
@@ -1625,17 +1570,15 @@ const Quorums = struct {
         }
     };
 
-    const QuorumCount = std.StaticBitSet(superblock_copies_max);
+    const QuorumCount = std.StaticBitSet(config.superblock_copies);
 
-    array: [superblock_copies_max]Quorum = undefined,
+    array: [config.superblock_copies]Quorum = undefined,
     count: u8 = 0,
 
     pub const Error = error{
         NotFound,
         QuorumLost,
-        ParentNotFound,
-        ParentQuorumLost,
-        SequenceNotMonotonic,
+        ParentNotConnected,
         VSRStateNotMonotonic,
     };
 
@@ -1672,15 +1615,14 @@ const Quorums = struct {
     };
 
     /// Returns the working superblock according to the quorum with the highest sequence number.
-    /// Verifies that the highest quorum is connected, that the previous quorum was not lost.
-    /// i.e. Both the working and previous quorum must be valid and intact and connected.
-    /// Otherwise, we might regress to a previous working superblock.
+    /// When a member of the parent quorum is still present, verify that the highest quorum is
+    /// connected.
     pub fn working(
         quorums: *Quorums,
         copies: []SuperBlockSector,
         threshold: Threshold,
     ) Error!Quorum {
-        assert(copies.len == superblock_copies_max);
+        assert(copies.len == config.superblock_copies);
         assert(threshold.count() >= 2 and threshold.count() <= 5);
 
         quorums.array = undefined;
@@ -1725,10 +1667,11 @@ const Quorums = struct {
         // Even the best copy with the most quorum still has inadequate quorum.
         if (!b.valid) return error.QuorumLost;
 
-        // The superblock is only partially formatted, not all copies were written.
-        if (b.sector.sequence < 2) return error.NotFound;
-
-        // Verify that the parent copy exists:
+        // If a parent quorum is present (either complete or incomplete) it must be connected to the
+        // new working quorum. The parent quorum can exist due to:
+        // - a crash during checkpoint()/view_change() before writing all copies
+        // - a lost or misdirected write
+        // - a latent sector error that prevented a write
         for (quorums.slice()[1..]) |a| {
             if (a.sector.cluster != b.sector.cluster) {
                 log.warn("superblock copy={} has cluster={} instead of {}", .{
@@ -1742,19 +1685,13 @@ const Quorums = struct {
                     a.sector.replica,
                     b.sector.replica,
                 });
-            } else if (a.sector.checksum == b.sector.parent) {
+            } else if (a.sector.sequence + 1 == b.sector.sequence) {
                 assert(a.sector.checksum != b.sector.checksum);
                 assert(a.sector.cluster == b.sector.cluster);
                 assert(a.sector.replica == b.sector.replica);
 
-                if (!a.valid) {
-                    return error.ParentQuorumLost;
-                } else if (a.sector.sequence >= b.sector.sequence) {
-                    return error.SequenceNotMonotonic;
-                } else if (a.sector.sequence % 2 == b.sector.sequence % 2) {
-                    // The parent must reside in the alternate copy to guarantee that we are able to
-                    // detect when the working quorum is lost.
-                    return error.SequenceNotMonotonic;
+                if (a.sector.checksum != b.sector.parent) {
+                    return error.ParentNotConnected;
                 } else if (!a.sector.vsr_state.monotonic(b.sector.vsr_state)) {
                     return error.VSRStateNotMonotonic;
                 } else {
@@ -1765,7 +1702,8 @@ const Quorums = struct {
             }
         }
 
-        return error.ParentNotFound;
+        assert(b.sector.valid_checksum());
+        return b;
     }
 
     fn count_copy(
@@ -1774,18 +1712,18 @@ const Quorums = struct {
         index: usize,
         threshold: Threshold,
     ) void {
-        assert(index < superblock_copies_max);
+        assert(index < config.superblock_copies);
         assert(threshold.count() >= 2 and threshold.count() <= 5);
 
         if (!copy.valid_checksum()) {
-            log.debug("copy: {}/{}: invalid checksum", .{ index, superblock_copies_max });
+            log.debug("copy: {}/{}: invalid checksum", .{ index, config.superblock_copies });
             return;
         }
 
         if (copy.copy == index) {
             log.debug("copy: {}/{}: checksum={x} parent={x} sequence={}", .{
                 index,
-                superblock_copies_max,
+                config.superblock_copies,
                 copy.checksum,
                 copy.parent,
                 copy.sequence,
@@ -1797,7 +1735,7 @@ const Quorums = struct {
                 "copy: {}/{}: checksum={x} parent={x} sequence={} misdirected from copy={}",
                 .{
                     index,
-                    superblock_copies_max,
+                    config.superblock_copies,
                     copy.checksum,
                     copy.parent,
                     copy.sequence,
@@ -1866,80 +1804,69 @@ test "Quorums.working" {
     const X = {}; // Ignored, just for alignment + contrast.
 
     // No faults:
-    try t(2, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
-    try t(3, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
+    try t(2, &.{ o(3), o(3), o(3), o(3) }, 3);
+    try t(3, &.{ o(3), o(3), o(3), o(3) }, 3);
 
     // Single fault:
-    try t(3, &.{ x(X), o(3), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
-    try t(3, &.{ o(3), o(3), o(3), o(3), x(X), o(4), o(4), o(4) }, 4);
+    try t(3, &.{ x(X), o(3), o(3), o(3) }, 3);
     // Double fault, same quorum:
-    try t(2, &.{ x(X), x(X), o(3), o(3), o(4), o(4), o(4), o(4) }, 4);
-    try t(3, &.{ x(X), x(X), o(3), o(3), o(4), o(4), o(4), o(4) }, error.ParentQuorumLost);
-    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), x(X), o(4), o(4) }, 4);
-    try t(3, &.{ o(3), o(3), o(3), o(3), x(X), x(X), o(4), o(4) }, error.ParentNotFound);
+    try t(2, &.{ x(X), x(X), o(4), o(4) }, 4);
+    try t(3, &.{ x(X), x(X), o(4), o(4) }, error.QuorumLost);
     // Double fault, different quorums:
-    try t(3, &.{ x(X), o(3), o(3), o(3), x(X), o(4), o(4), o(4) }, 4);
-    // Triple fault, different quorums:
-    try t(3, &.{ x(X), x(X), o(3), o(3), x(X), o(4), o(4), o(4) }, error.ParentQuorumLost);
-    try t(3, &.{ x(X), o(3), o(3), o(3), x(X), x(X), o(4), o(4) }, error.ParentNotFound);
+    try t(2, &.{ x(X), x(X), o(3), o(4) }, error.QuorumLost);
+    // Triple fault.
+    try t(2, &.{ x(X), x(X), x(X), o(4) }, error.QuorumLost);
 
     // Partial format (broken sequence=1):
-    try t(2, &.{ x(X), o(1), o(1), o(1), o(2), o(2), o(2), o(2) }, 2);
-    try t(3, &.{ x(X), o(1), o(1), o(1), o(2), o(2), o(2), o(2) }, 2);
-    try t(2, &.{ x(X), x(X), o(1), o(1), o(2), o(2), o(2), o(2) }, 2);
-    try t(3, &.{ x(X), x(X), o(1), o(1), o(2), o(2), o(2), o(2) }, error.ParentQuorumLost);
-    try t(2, &.{ x(X), x(X), x(X), o(1), o(2), o(2), o(2), o(2) }, error.ParentQuorumLost);
-    try t(2, &.{ x(X), x(X), x(X), x(X), o(2), o(2), o(2), o(2) }, error.ParentNotFound);
-    // Partial format (broken sequence=2):
-    try t(2, &.{ o(1), o(1), o(1), o(1), x(X), o(2), o(2), o(2) }, 2);
-    try t(2, &.{ o(1), o(1), o(1), o(1), x(X), x(X), o(2), o(2) }, 2);
-    try t(2, &.{ o(1), o(1), o(1), o(1), x(X), x(X), x(X), o(2) }, error.NotFound);
-    try t(2, &.{ o(1), o(1), o(1), o(1), x(X), x(X), x(X), x(X) }, error.NotFound);
-    try t(2, &.{ x(X), x(X), x(X), x(X), x(X), x(X), x(X), x(X) }, error.NotFound);
+    try t(2, &.{ x(X), o(1), o(1), o(1) }, 1);
+    try t(3, &.{ x(X), o(1), o(1), o(1) }, 1);
+    try t(2, &.{ x(X), x(X), o(1), o(1) }, 1);
+    try t(3, &.{ x(X), x(X), o(1), o(1) }, error.QuorumLost);
+    try t(2, &.{ x(X), x(X), x(X), o(1) }, error.QuorumLost);
+    try t(2, &.{ x(X), x(X), x(X), x(X) }, error.NotFound);
 
+    // Partial checkpoint() to sequence=4 (2 quorums):
+    try t(2, &.{ o(3), o(2), o(2), o(2) }, 2); // open after 1/4
+    try t(2, &.{ o(3), o(3), o(2), o(2) }, 3); // open after 2/4
+    try t(2, &.{ o(3), o(3), o(3), o(2) }, 3); // open after 3/4
     // Partial checkpoint() to sequence=4 (3 quorums):
-    try t(2, &.{ o(3), o(3), o(3), o(3), o(4), o(2), o(2), o(2) }, 3); // open after 1/4
-    try t(2, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(2), o(2) }, 4); // open after 2/4
-    try t(2, &.{ o(3), o(3), o(3), o(3), o(4), o(4), o(4), o(2) }, 4); // open after 3/4
-    // Partial checkpoint() to sequence=4 (4 quorums):
-    try t(2, &.{ o(1), o(1), o(3), o(3), o(2), o(2), o(4), o(4) }, 4);
-    try t(3, &.{ o(1), o(1), o(3), o(3), o(2), o(2), o(4), o(4) }, error.QuorumLost);
+    try t(2, &.{ o(1), o(2), o(3), o(3) }, 3);
+    try t(3, &.{ o(1), o(2), o(3), o(3) }, error.QuorumLost);
 
-    // Partial view_change() to sequence=6:
-    const s = CopyTemplate.make_valid_skip;
-    try t(2, &.{ o(3), o(3), o(3), o(3), s(6), o(4), o(4), o(4) }, 4); // open after 1/4
-    try t(2, &.{ o(3), o(3), o(3), o(3), s(6), s(6), o(4), o(4) }, 6); // open after 1/4
-    try t(2, &.{ o(3), o(3), o(3), o(3), s(6), s(6), s(6), o(4) }, 6); // open after 1/4
-    // Invalid view_change() to sequence=6:
-    const c = CopyTemplate.make_invalid_skip;
-    try t(2, &.{ o(3), o(3), o(3), o(3), c(6), c(6), o(4), o(4) }, error.SequenceNotMonotonic);
-
-    // Damaged checkpoint of sequence=4:
-    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), o(4), o(4), o(4) }, 4);
-    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), x(X), o(4), o(4) }, 4);
-    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), x(X), x(X), o(4) }, error.ParentNotFound);
-    try t(2, &.{ o(3), o(3), o(3), o(3), x(X), x(X), x(X), x(X) }, error.ParentNotFound);
+    // Skipped sequence.
+    try t(2, &.{ o(2), o(2), o(2), o(4) }, 2); // open after 1/4
+    try t(2, &.{ o(2), o(2), o(4), o(4) }, 4); // open after 2/4
+    try t(2, &.{ o(2), o(2), o(4), o(4) }, 4); // open after 3/4
 
     // Parent has wrong cluster|replica.
     const m = CopyTemplate.make_invalid_misdirect;
-    try t(2, &.{ o(3), o(3), o(3), o(3), m(2), m(2), m(2), m(2) }, error.ParentNotFound);
-    try t(2, &.{ o(3), o(3), o(3), o(3), o(2), o(2), m(2), m(2) }, 3);
+    try t(2, &.{ m(2), m(2), m(2), o(3) }, 2);
+    try t(2, &.{ m(2), m(2), o(3), o(3) }, 3);
+    try t(2, &.{ m(2), o(3), o(3), o(3) }, 3);
+    // Grandparent has wrong cluster|replica.
+    try t(2, &.{ m(2), m(2), m(2), o(4) }, 2);
+    try t(2, &.{ m(2), m(2), o(4), o(4) }, 4);
+    try t(2, &.{ m(2), o(4), o(4), o(4) }, 4);
+
+    // Parent/child hash chain is broken.
+    const p = CopyTemplate.make_invalid_parent;
+    try t(2, &.{ o(2), o(2), o(2), p(3) }, 2);
+    try t(2, &.{ o(2), o(2), p(3), p(3) }, error.ParentNotConnected);
+    try t(2, &.{ o(2), p(3), p(3), p(3) }, error.ParentNotConnected);
+    try t(2, &.{ p(3), p(3), p(3), p(3) }, 3);
+
     // Parent view is greater than child view.
     const v = CopyTemplate.make_invalid_vsr_state;
-    try t(2, &.{ o(3), o(3), o(3), o(3), v(2), v(2), v(2), v(2) }, error.VSRStateNotMonotonic);
-
-    // Missing parent for sequence=4:
-    try t(2, &.{ o(1), o(1), o(1), o(1), o(2), o(2), o(4), o(4) }, error.ParentNotFound);
+    try t(2, &.{ v(2), v(2), o(3), o(3) }, error.VSRStateNotMonotonic);
 }
 
 const CopyTemplate = struct {
     sequence: u64,
     variant: enum {
         valid,
-        valid_skip,
         invalid_broken,
-        invalid_skip,
         invalid_misdirect,
+        invalid_parent,
         invalid_vsr_state,
     },
 
@@ -1947,29 +1874,24 @@ const CopyTemplate = struct {
         return .{ .sequence = sequence, .variant = .valid };
     }
 
-    /// Constructs a valid copy, which skips a sequence number (view_change()).
-    fn make_valid_skip(sequence: u64) CopyTemplate {
-        return .{ .sequence = sequence, .variant = .valid_skip };
-    }
-
-    /// Constructs a copy that is corrupt (invalid checksum) or a duplicate.
+    /// Construct a corrupt (invalid checksum) or duplicate copy copy.
     fn make_invalid_broken(_: void) CopyTemplate {
         // Use a high sequence so that invalid copies are the last generated by
         // test_quorums_working(), so that they can become duplicates of (earlier) valid copies.
         return .{ .sequence = 6, .variant = .invalid_broken };
     }
 
-    /// Constructs a copy with a parent in the same copyset (sequence-2).
-    fn make_invalid_skip(sequence: u64) CopyTemplate {
-        return .{ .sequence = sequence, .variant = .invalid_skip };
-    }
-
-    /// Constructs a copy with either an incorrect "cluster" or "replica".
+    /// Construct a copy with either an incorrect "cluster" or "replica".
     fn make_invalid_misdirect(sequence: u64) CopyTemplate {
         return .{ .sequence = sequence, .variant = .invalid_misdirect };
     }
 
-    /// Constructs a copy with a newer `VSRState` than its parent.
+    /// Construct a copy with an invalid "parent" checksum.
+    fn make_invalid_parent(sequence: u64) CopyTemplate {
+        return .{ .sequence = sequence, .variant = .invalid_parent };
+    }
+
+    /// Construct a copy with a newer `VSRState` than its parent.
     fn make_invalid_vsr_state(sequence: u64) CopyTemplate {
         return .{ .sequence = sequence, .variant = .invalid_vsr_state };
     }
@@ -1981,38 +1903,35 @@ const CopyTemplate = struct {
 
 fn test_quorums_working(
     threshold_count: u8,
-    copies: *[8]CopyTemplate,
+    copies: *[4]CopyTemplate,
     result: Quorums.Error!u64,
 ) !void {
     var prng = std.rand.DefaultPrng.init(@intCast(u64, std.time.milliTimestamp()));
     const random = prng.random();
     const misdirect = random.boolean(); // true:cluster false:replica
     var quorums: Quorums = undefined;
-    var sectors: [8]SuperBlockSector = undefined;
+    var sectors: [4]SuperBlockSector = undefined;
+    // TODO(Zig): Ideally this would be a [6]?u128 and the access would be
+    // "checksums[i] orelse random.int(u128)", but that currently causes the compiler to segfault
+    // during code generation.
     var checksums: [6]u128 = undefined;
+    for (checksums) |*c| c.* = random.int(u128);
 
     // Create sectors in ascending-sequence order to build the checksum/parent hash chain.
     std.sort.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
 
     for (sectors) |*sector, i| {
-        const parent = blk: {
-            if (copies[i].sequence == 0) break :blk 0;
-            if (copies[i].variant == .invalid_skip) break :blk checksums[copies[i].sequence - 2];
-            if (copies[i].variant == .valid_skip) break :blk checksums[copies[i].sequence - 3];
-            break :blk checksums[copies[i].sequence - 1];
-        };
-
         sector.* = mem.zeroInit(SuperBlockSector, .{
             .copy = @intCast(u8, i),
             .version = SuperBlockVersion,
             .replica = 1,
             .size_max = data_file_size_min,
             .sequence = copies[i].sequence,
-            .parent = parent,
+            .parent = checksums[copies[i].sequence - 1],
         });
 
         switch (copies[i].variant) {
-            .valid, .valid_skip, .invalid_skip => sector.set_checksum(),
+            .valid => sector.set_checksum(),
             .invalid_broken => {
                 if (random.boolean() and i > 0) {
                     // Error: duplicate sector (if available).
@@ -2022,8 +1941,8 @@ fn test_quorums_working(
                     sector.checksum = random.int(u128);
                 }
             },
-            .invalid_vsr_state => {
-                sector.vsr_state.view += 1;
+            .invalid_parent => {
+                sector.parent += 1;
                 sector.set_checksum();
             },
             .invalid_misdirect => {
@@ -2032,6 +1951,10 @@ fn test_quorums_working(
                 } else {
                     sector.replica += 1;
                 }
+                sector.set_checksum();
+            },
+            .invalid_vsr_state => {
+                sector.vsr_state.view += 1;
                 sector.set_checksum();
             },
         }

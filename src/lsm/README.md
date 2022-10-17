@@ -25,7 +25,7 @@ A tree is a hierarchy of in-memory and on-disk tables. There are three categorie
   - The mutable table's contents are periodically moved to the immutable table,
     where they are stored while being flushed to level `0`.
 - Level `0` … level `config.lsm_levels - 1` each contain an exponentially increasing number of
-  on-disk tables.
+  immutable on-disk tables.
   - Each tree has as many as `config.lsm_growth_factor ^ (level + 1)` tables per level.
     (`config.lsm_growth_factor` is typically 8).
   - Within a given level and snapshot, the tables' key ranges are [disjoint](manifest_level.zig).
