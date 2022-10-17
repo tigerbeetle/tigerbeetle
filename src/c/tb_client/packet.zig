@@ -12,6 +12,7 @@ pub const Packet = extern struct {
 
     pub const Status = enum(u8) {
         ok,
+        timed_out,
         too_much_data,
         invalid_operation,
         invalid_data_size,

@@ -18,6 +18,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
 
         pub const Error = error{
             TooManyOutstandingRequests,
+            TimedOut,
         };
 
         const Request = struct {
@@ -382,6 +383,28 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             assert(message.header.request < self.request_number);
             assert(message.header.checksum == self.parent);
             assert(message.header.context == self.session);
+
+            // TODO: this condition is just a PoC, add the correct logic, config and tests
+            // We should timeout if we alread round-robin the entire cluster X times
+            // Probably all inflight messages are going to timeout together, lets think about that later
+            const timed_out = self.request_timeout.attempts > 3 and message.header.operation > .register;
+            if (timed_out) {
+                const inflight = self.request_queue.pop().?;
+                defer self.message_bus.unref(inflight.message);
+
+                log.debug("{}: on_request_timeout: dropping request={} checksum={}", .{
+                    self.id,
+                    inflight.message.header.request,
+                    inflight.message.header.checksum,
+                });
+
+                inflight.callback(
+                    inflight.user_data,
+                    inflight.message.header.operation.cast(StateMachine),
+                    error.TimedOut,
+                );
+                return;
+            }
 
             log.debug("{}: on_request_timeout: resending request={} checksum={}", .{
                 self.id,

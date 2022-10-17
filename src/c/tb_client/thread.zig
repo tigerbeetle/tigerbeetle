@@ -313,6 +313,7 @@ pub fn ThreadType(
                     error.TooManyOutstandingRequests => {
                         return self.retry.push(Packet.List.from(packet));
                     },
+                    error.TimedOut => .timed_out,
                     error.TooMuchData => .too_much_data,
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,
