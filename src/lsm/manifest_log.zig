@@ -106,6 +106,11 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         blocks_closed: u8 = 0,
 
         /// The number of entries in the open block.
+        ///
+        /// Invariants:
+        /// - When `entry_count = 0`, there is no open block.
+        /// - `entry_count < entry_count_max`. When `entry_count` reaches the maximum, the open
+        ///   block is closed, and `entry_count` resets to 0.
         entry_count: u32 = 0,
 
         opened: bool = false,
@@ -282,11 +287,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(table.snapshot_min > 0);
             assert(table.snapshot_max > table.snapshot_min);
 
-            if (manifest_log.blocks.empty()) {
-                manifest_log.acquire_block();
-            } else if (manifest_log.entry_count == entry_count_max) {
-                assert(manifest_log.blocks.count > 0);
-                manifest_log.close_block();
+            if (manifest_log.entry_count == 0) {
+                assert(manifest_log.blocks.count == manifest_log.blocks_closed);
                 manifest_log.acquire_block();
             } else if (manifest_log.entry_count > 0) {
                 assert(manifest_log.blocks.count > 0);
@@ -325,10 +327,14 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
 
             manifest_log.entry_count += 1;
+            if (manifest_log.entry_count == entry_count_max) {
+                manifest_log.close_block();
+                assert(manifest_log.entry_count == 0);
+            }
         }
 
         /// `flush` does not close a partial block; that is only necessary during `checkpoint`.
-        pub fn flush(manifest_log: *ManifestLog, callback: Callback) void {
+        fn flush(manifest_log: *ManifestLog, callback: Callback) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
@@ -375,6 +381,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const entry_count = block_entry_count(block);
 
             if (manifest_log.blocks_closed == 1 and manifest_log.blocks.count == 1) {
+                // This might be the last block of a checkpoint, which can be a partial block.
                 assert(entry_count > 0);
             } else {
                 assert(entry_count == entry_count_max);
@@ -554,6 +561,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         fn acquire_block(manifest_log: *ManifestLog) void {
             assert(manifest_log.opened);
             assert(manifest_log.entry_count == 0);
+            assert(manifest_log.blocks.count == manifest_log.blocks_closed);
             assert(!manifest_log.blocks.full());
 
             manifest_log.blocks.advance_tail();
@@ -570,8 +578,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         fn close_block(manifest_log: *ManifestLog) void {
-            const block: BlockPtr = manifest_log.blocks.tail().?;
+            assert(manifest_log.blocks.count == manifest_log.blocks_closed + 1);
 
+            const block: BlockPtr = manifest_log.blocks.tail().?;
             const entry_count = manifest_log.entry_count;
             assert(entry_count > 0);
             assert(entry_count <= entry_count_max);
@@ -604,6 +613,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             manifest_log.blocks_closed += 1;
             manifest_log.entry_count = 0;
+            assert(manifest_log.blocks.count == manifest_log.blocks_closed);
         }
 
         fn verify_block(block: BlockPtrConst, checksum: ?u128, address: ?u64) void {

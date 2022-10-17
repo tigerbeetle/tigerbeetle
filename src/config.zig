@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const tigerbeetle = @import("tigerbeetle.zig");
+const vsr = @import("vsr.zig");
 
 const Environment = enum {
     development,
@@ -80,7 +81,7 @@ pub const journal_slot_count = switch (deployment_environment) {
 /// This enables static allocation of disk space so that appends cannot fail with ENOSPC.
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
 // TODO remove this; just allocate a part of the total storage for the journal
-pub const journal_size_max = journal_slot_count * (128 + message_size_max);
+pub const journal_size_max = journal_slot_count * (@sizeOf(vsr.Header) + message_size_max);
 
 /// The maximum number of connections that can be held open by the server at any time:
 pub const connections_max = replicas_max + clients_max;
@@ -94,10 +95,19 @@ pub const connections_max = replicas_max + clients_max;
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 2 MiB / 125 * 1000ms = 16ms for the next request.
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const message_size_max = switch (deployment_environment) {
-    // Use a small message size during the simulator for improved performance.
-    .simulation => sector_size,
+    .simulation => message_size_max_min,
     else => 1 * 1024 * 1024,
 };
+
+/// The smallest possible message_size_max (for use in the simulator to improve performance).
+/// The message body must have room for pipeline_max headers in the DVC.
+const message_size_max_min = std.math.max(
+    sector_size,
+    std.mem.alignForward(
+        @sizeOf(vsr.Header) + pipeline_max * @sizeOf(vsr.Header),
+        sector_size,
+    ),
+);
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
@@ -312,7 +322,7 @@ pub const clock_synchronization_window_max_ms = 20000;
 pub const verify = true;
 
 // TODO Move these to a separate "internal computed constants" file.
-pub const journal_size_headers = journal_slot_count * 128; // 128 == @sizeOf(Header)
+pub const journal_size_headers = journal_slot_count * @sizeOf(vsr.Header);
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
 // TODO Move these into a separate `config_valid.zig` which we import here:

@@ -920,22 +920,20 @@ pub fn TableType(
                 key,
             );
 
-            if (values.len > 0) {
-                const result = binary_search.binary_search_values(
-                    Key,
-                    Value,
-                    key_from_value,
-                    compare_keys,
-                    values,
-                    key,
-                );
-                if (result.exact) {
-                    const value = &values[result.index];
-                    if (config.verify) {
-                        assert(compare_keys(key, key_from_value(value)) == .eq);
-                    }
-                    return value;
+            const result = binary_search.binary_search_values(
+                Key,
+                Value,
+                key_from_value,
+                compare_keys,
+                values,
+                key,
+            );
+            if (result.exact) {
+                const value = &values[result.index];
+                if (config.verify) {
+                    assert(compare_keys(key, key_from_value(value)) == .eq);
                 }
+                return value;
             }
 
             if (config.verify) {

@@ -66,7 +66,7 @@ pub fn TableInfoType(comptime Table: type) type {
         /// disk.
         ///
         /// Instead, prefetch will continue to query the compaction's input tables until the
-        /// half-measure of compaction completes. At that point `tree.prefetch_snapshot_max` is
+        /// half-bar of compaction completes. At that point `tree.prefetch_snapshot_max` is
         /// updated (to the compaction's `compaction_op`), simultaneously rendering the old (input)
         /// tables invisible, and the new (output) tables visible.
         pub fn visible(table: *const TableInfo, snapshot: u64) bool {
@@ -258,6 +258,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 manifest.manifest_log.remove(log_level, table);
                 manifest_level.remove_table(manifest.node_pool, &snapshots, table);
             }
+
+            if (config.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
         }
 
         /// Returns an iterator over tables that might contain `key` (but are not guaranteed to).
@@ -317,15 +319,23 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshot: u64) void {
-            for (manifest.levels) |*manifest_level| {
-                var it = manifest_level.iterator(
-                    .invisible,
-                    @as(*const [1]u64, &snapshot),
-                    .ascending,
-                    null,
-                );
-                assert(it.next() == null);
+            for (manifest.levels) |_, level| {
+                manifest.assert_no_invisible_tables_at_level(@intCast(u8, level), snapshot);
             }
+        }
+
+        fn assert_no_invisible_tables_at_level(
+            manifest: *const Manifest,
+            level: u8,
+            snapshot: u64,
+        ) void {
+            var it = manifest.levels[level].iterator(
+                .invisible,
+                @as(*const [1]u64, &snapshot),
+                .ascending,
+                null,
+            );
+            assert(it.next() == null);
         }
 
         /// Returns the next table in the range, after `key_exclusive` if provided.

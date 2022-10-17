@@ -405,14 +405,21 @@ pub fn StateMachineType(comptime Storage: type) type {
             var chain_broken = false;
 
             for (events) |*event, index| {
-                if (event.flags.linked and chain == null) {
-                    chain = index;
-                    assert(chain_broken == false);
-                }
-                const result = if (chain_broken) .linked_event_failed else switch (operation) {
-                    .create_accounts => self.create_account(event),
-                    .create_transfers => self.create_transfer(event),
-                    else => unreachable,
+                const result = blk: {
+                    if (event.flags.linked) {
+                        if (chain == null) {
+                            chain = index;
+                            assert(chain_broken == false);
+                        }
+
+                        if (index == events.len - 1) break :blk .linked_event_chain_open;
+                    }
+
+                    break :blk if (chain_broken) .linked_event_failed else switch (operation) {
+                        .create_accounts => self.create_account(event),
+                        .create_transfers => self.create_transfer(event),
+                        else => unreachable,
+                    };
                 };
                 log.debug("{s} {}/{}: {}: {}", .{
                     @tagName(operation),
@@ -437,19 +444,17 @@ pub fn StateMachineType(comptime Storage: type) type {
                                 count += 1;
                             }
                         } else {
-                            assert(result == .linked_event_failed);
+                            assert(result == .linked_event_failed or result == .linked_event_chain_open);
                         }
                     }
                     results[count] = .{ .index = @intCast(u32, index), .result = result };
                     count += 1;
                 }
-                if (!event.flags.linked and chain != null) {
+                if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
                     chain = null;
                     chain_broken = false;
                 }
             }
-            // TODO client.zig: Validate that batch chains are always well-formed and closed.
-            // This is programming error and we should raise an exception for this in the client ASAP.
             assert(chain == null);
             assert(chain_broken == false);
 
@@ -536,12 +541,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 return .mutually_exclusive_flags;
             }
 
-            if (sum_overflows(a.debits_pending, a.debits_posted)) return .overflows_debits;
-            if (sum_overflows(a.credits_pending, a.credits_posted)) return .overflows_credits;
-
-            // Opening balances may never exceed limits:
-            if (a.debits_exceed_credits(0)) return .exceeds_credits;
-            if (a.credits_exceed_debits(0)) return .exceeds_debits;
+            if (a.debits_pending != 0) return .debits_pending_must_be_zero;
+            if (a.debits_posted != 0) return .debits_posted_must_be_zero;
+            if (a.credits_pending != 0) return .credits_pending_must_be_zero;
+            if (a.credits_posted != 0) return .credits_posted_must_be_zero;
 
             if (self.get_account(a.id)) |e| return create_account_exists(a, e);
 
@@ -562,10 +565,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(zeroed_48_bytes(a.reserved) and zeroed_48_bytes(e.reserved));
             if (a.ledger != e.ledger) return .exists_with_different_ledger;
             if (a.code != e.code) return .exists_with_different_code;
-            if (a.debits_pending != e.debits_pending) return .exists_with_different_debits_pending;
-            if (a.debits_posted != e.debits_posted) return .exists_with_different_debits_posted;
-            if (a.credits_pending != e.credits_pending) return .exists_with_different_credits_pending;
-            if (a.credits_posted != e.credits_posted) return .exists_with_different_credits_posted;
             return .exists;
         }
 
@@ -1115,10 +1114,6 @@ test "create/lookup/rollback accounts" {
                 .user_data = 2,
                 .ledger = 3,
                 .code = 4,
-                .debits_pending = 5,
-                .debits_posted = 6,
-                .credits_pending = 7,
-                .credits_posted = 8,
                 .timestamp = 1,
             }),
         },
@@ -1135,10 +1130,10 @@ test "create/lookup/rollback accounts" {
                     .debits_must_not_exceed_credits = true,
                     .credits_must_not_exceed_debits = true,
                 },
-                .debits_pending = math.maxInt(u64),
-                .debits_posted = math.maxInt(u64),
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = math.maxInt(u64),
+                .debits_pending = 1,
+                .debits_posted = 1,
+                .credits_pending = 1,
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
@@ -1155,10 +1150,10 @@ test "create/lookup/rollback accounts" {
                     .debits_must_not_exceed_credits = true,
                     .credits_must_not_exceed_debits = true,
                 },
-                .debits_pending = math.maxInt(u64),
-                .debits_posted = math.maxInt(u64),
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = math.maxInt(u64),
+                .debits_pending = 1,
+                .debits_posted = 1,
+                .credits_pending = 1,
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
@@ -1174,10 +1169,10 @@ test "create/lookup/rollback accounts" {
                     .debits_must_not_exceed_credits = true,
                     .credits_must_not_exceed_debits = true,
                 },
-                .debits_pending = math.maxInt(u64),
-                .debits_posted = math.maxInt(u64),
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = math.maxInt(u64),
+                .debits_pending = 1,
+                .debits_posted = 1,
+                .credits_pending = 1,
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
@@ -1193,10 +1188,10 @@ test "create/lookup/rollback accounts" {
                     .debits_must_not_exceed_credits = true,
                     .credits_must_not_exceed_debits = true,
                 },
-                .debits_pending = math.maxInt(u64),
-                .debits_posted = math.maxInt(u64),
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = math.maxInt(u64),
+                .debits_pending = 1,
+                .debits_posted = 1,
+                .credits_pending = 1,
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
@@ -1212,10 +1207,10 @@ test "create/lookup/rollback accounts" {
                     .debits_must_not_exceed_credits = true,
                     .credits_must_not_exceed_debits = true,
                 },
-                .debits_pending = math.maxInt(u64),
-                .debits_posted = math.maxInt(u64),
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = math.maxInt(u64),
+                .debits_pending = 1,
+                .debits_posted = 1,
+                .credits_pending = 1,
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
@@ -1230,10 +1225,10 @@ test "create/lookup/rollback accounts" {
                     .debits_must_not_exceed_credits = true,
                     .credits_must_not_exceed_debits = true,
                 },
-                .debits_pending = math.maxInt(u64),
-                .debits_posted = math.maxInt(u64),
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = math.maxInt(u64),
+                .debits_pending = 1,
+                .debits_posted = 1,
+                .credits_pending = 1,
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
@@ -1256,7 +1251,7 @@ test "create/lookup/rollback accounts" {
             }),
         },
         .{
-            .result = .overflows_debits,
+            .result = .debits_pending_must_be_zero,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
                 .user_data = 20,
@@ -1265,32 +1260,15 @@ test "create/lookup/rollback accounts" {
                 .flags = .{
                     .debits_must_not_exceed_credits = true,
                 },
-                .debits_pending = math.maxInt(u64),
-                .debits_posted = 60,
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = 80,
+                .debits_pending = 1,
+                .debits_posted = 1,
+                .credits_pending = 1,
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
         .{
-            .result = .overflows_credits,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 40,
-                .flags = .{
-                    .credits_must_not_exceed_debits = true,
-                },
-                .debits_pending = 50,
-                .debits_posted = 60,
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = 80,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exceeds_credits,
+            .result = .debits_posted_must_be_zero,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
                 .user_data = 20,
@@ -1299,27 +1277,38 @@ test "create/lookup/rollback accounts" {
                 .flags = .{
                     .debits_must_not_exceed_credits = true,
                 },
-                .debits_pending = 50,
-                .debits_posted = 60,
+                .debits_posted = 1,
                 .credits_pending = 1,
-                .credits_posted = 109,
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
         .{
-            .result = .exceeds_debits,
+            .result = .credits_pending_must_be_zero,
             .object = mem.zeroInit(Account, .{
                 .id = 1,
                 .user_data = 20,
                 .ledger = 30,
                 .code = 40,
                 .flags = .{
-                    .credits_must_not_exceed_debits = true,
+                    .debits_must_not_exceed_credits = true,
                 },
-                .debits_pending = 50,
-                .debits_posted = 60,
                 .credits_pending = 1,
-                .credits_posted = 109,
+                .credits_posted = 1,
+                .timestamp = 2,
+            }),
+        },
+        .{
+            .result = .credits_posted_must_be_zero,
+            .object = mem.zeroInit(Account, .{
+                .id = 1,
+                .user_data = 20,
+                .ledger = 30,
+                .code = 40,
+                .flags = .{
+                    .debits_must_not_exceed_credits = true,
+                },
+                .credits_posted = 1,
                 .timestamp = 2,
             }),
         },
@@ -1333,10 +1322,6 @@ test "create/lookup/rollback accounts" {
                 .flags = .{
                     .credits_must_not_exceed_debits = true,
                 },
-                .debits_pending = 50,
-                .debits_posted = 60,
-                .credits_pending = 0,
-                .credits_posted = 0,
                 .timestamp = 2,
             }),
         },
@@ -1347,10 +1332,6 @@ test "create/lookup/rollback accounts" {
                 .user_data = 20,
                 .ledger = 30,
                 .code = 40,
-                .debits_pending = 50,
-                .debits_posted = 60,
-                .credits_pending = 70,
-                .credits_posted = 80,
                 .timestamp = 2,
             }),
         },
@@ -1361,10 +1342,6 @@ test "create/lookup/rollback accounts" {
                 .user_data = 2,
                 .ledger = 30,
                 .code = 40,
-                .debits_pending = 50,
-                .debits_posted = 60,
-                .credits_pending = 70,
-                .credits_posted = 80,
                 .timestamp = 2,
             }),
         },
@@ -1375,66 +1352,6 @@ test "create/lookup/rollback accounts" {
                 .user_data = 2,
                 .ledger = 3,
                 .code = 40,
-                .debits_pending = 50,
-                .debits_posted = 60,
-                .credits_pending = 70,
-                .credits_posted = 80,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_debits_pending,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 2,
-                .ledger = 3,
-                .code = 4,
-                .debits_pending = 50,
-                .debits_posted = 60,
-                .credits_pending = 70,
-                .credits_posted = 80,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_debits_posted,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 2,
-                .ledger = 3,
-                .code = 4,
-                .debits_pending = 5,
-                .debits_posted = 60,
-                .credits_pending = 70,
-                .credits_posted = 80,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_credits_pending,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 2,
-                .ledger = 3,
-                .code = 4,
-                .debits_pending = 5,
-                .debits_posted = 6,
-                .credits_pending = 70,
-                .credits_posted = 80,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_credits_posted,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 2,
-                .ledger = 3,
-                .code = 4,
-                .debits_pending = 5,
-                .debits_posted = 6,
-                .credits_pending = 7,
-                .credits_posted = 80,
                 .timestamp = 2,
             }),
         },
@@ -1445,10 +1362,6 @@ test "create/lookup/rollback accounts" {
                 .user_data = 2,
                 .ledger = 3,
                 .code = 4,
-                .debits_pending = 5,
-                .debits_posted = 6,
-                .credits_pending = 7,
-                .credits_posted = 8,
                 .timestamp = 2,
             }),
         },
@@ -1551,6 +1464,124 @@ test "linked accounts" {
     // All our rollback handlers appear to be commutative.
 }
 
+test "linked_event_chain_open" {
+    var accounts = [_]Account{
+        // A chain of 3 events (the last event in the chain closes the chain with linked=false):
+        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+        mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+        mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1 }),
+
+        // An open chain of 2 events:
+        mem.zeroInit(Account, .{ .id = 4, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+        mem.zeroInit(Account, .{ .id = 5, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+    };
+
+    var context: TestContext = undefined;
+    try context.init(testing.allocator);
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
+
+    const input = mem.asBytes(&accounts);
+
+    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
+    defer testing.allocator.free(output);
+
+    _ = state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+
+    try expectEqualSlices(
+        CreateAccountsResult,
+        &[_]CreateAccountsResult{
+            .{ .index = 3, .result = .linked_event_failed },
+            .{ .index = 4, .result = .linked_event_chain_open },
+        },
+        results,
+    );
+
+    try expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
+    try expectEqual(accounts[1], state_machine.get_account(accounts[1].id).?.*);
+    try expectEqual(accounts[2], state_machine.get_account(accounts[2].id).?.*);
+
+    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[3].id));
+    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[4].id));
+}
+
+test "linked_event_chain_open for an already failed batch" {
+    var accounts = [_]Account{
+        // An individual event (successful):
+        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1 }),
+
+        // An open chain of 3 events (the second one fails):
+        mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+        mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+    };
+
+    var context: TestContext = undefined;
+    try context.init(testing.allocator);
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
+
+    const input = mem.asBytes(&accounts);
+
+    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
+    defer testing.allocator.free(output);
+
+    _ = state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+
+    try expectEqualSlices(
+        CreateAccountsResult,
+        &[_]CreateAccountsResult{
+            .{ .index = 1, .result = .linked_event_failed },
+            .{ .index = 2, .result = .exists_with_different_flags },
+            .{ .index = 3, .result = .linked_event_chain_open },
+        },
+        results,
+    );
+
+    try expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
+
+    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[1].id));
+    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[3].id));
+}
+
+test "linked_event_chain_open for a batch of 1" {
+    var accounts = [_]Account{
+        // Just one event with linked = true
+        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
+    };
+
+    var context: TestContext = undefined;
+    try context.init(testing.allocator);
+    defer context.deinit(testing.allocator);
+
+    const state_machine = &context.state_machine;
+
+    const input = mem.asBytes(&accounts);
+
+    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
+    defer testing.allocator.free(output);
+
+    _ = state_machine.prepare(.create_accounts, input);
+    const size = state_machine.commit(0, 0, .create_accounts, input, output);
+    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+
+    try expectEqualSlices(
+        CreateAccountsResult,
+        &[_]CreateAccountsResult{
+            .{ .index = 0, .result = .linked_event_chain_open },
+        },
+        results,
+    );
+
+    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[0].id));
+}
+
 // The goal is to ensure that:
 // 1. all CreateTransferResult enums are covered, with
 // 2. enums tested in the order that they are defined, for easier auditing of coverage, and that
@@ -1606,18 +1637,15 @@ test "create/lookup/rollback transfers" {
     defer testing.allocator.free(output);
 
     _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 0, .create_accounts, input, output);
-
-    const errors = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
-    try expect(errors.len == 0);
 
     for (accounts) |account| {
+        state_machine.forest.grooves.accounts.put(&account);
         try expectEqual(account, state_machine.get_account(account.id).?.*);
     }
 
     const Vector = struct { result: CreateTransferResult, object: Transfer };
 
-    const timestamp: u64 = (state_machine.commit_timestamp + 1);
+    const timestamp: u64 = state_machine.prepare_timestamp + 1;
     const vectors = [_]Vector{
         .{
             .result = .reserved_flag,
@@ -2204,11 +2232,6 @@ test "create/lookup/rollback transfers" {
     try test_account_balances(state_machine, 1, 100, 200, 0, 0);
     try test_account_balances(state_machine, 3, 0, 0, 110, 210);
     try expect(state_machine.get_transfer(1) == null);
-
-    for (accounts) |account| {
-        state_machine.create_account_rollback(&account);
-        try expect(state_machine.get_account(account.id) == null);
-    }
 }
 
 test "create/lookup/rollback 2-phase transfers" {

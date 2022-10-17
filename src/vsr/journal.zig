@@ -380,14 +380,15 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self.slot_with_op(header.op);
         }
 
-        /// Returns any existing entry at the location indicated by header.op.
-        /// This existing entry may have an older or newer op number.
-        pub fn header_for_entry(self: *const Self, header: *const Header) ?*const Header {
+        /// Returns any existing header at the location indicated by header.op.
+        /// The existing header may have an older or newer op number.
+        pub fn header_for_prepare(self: *const Self, header: *const Header) ?*const Header {
             assert(header.command == .prepare);
             return self.header_for_op(header.op);
         }
 
         /// We use `op` directly to index into the headers array and locate ops without a scan.
+        /// The existing header may have an older or newer op number.
         pub fn header_for_op(self: *const Self, op: u64) ?*const Header {
             // TODO Snapshots
             const slot = self.slot_for_op(op);
@@ -510,7 +511,8 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         /// Copies latest headers between `op_min` and `op_max` (both inclusive) as fit in `dest`.
         /// Reverses the order when copying so that latest headers are copied first, which protects
-        /// against the callsite slicing the buffer the wrong way and incorrectly.
+        /// against the callsite slicing the buffer the wrong way and incorrectly, and which is
+        /// required by message handlers that use the hash chain for repairs.
         /// Skips .reserved headers (gaps between headers).
         /// Zeroes the `dest` buffer in case the copy would underflow and leave a buffer bleed.
         /// Returns the number of headers actually copied.
@@ -725,6 +727,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             if (self.header_with_op_and_checksum(op, checksum)) |exact| {
                 if (exact.size == @sizeOf(Header)) {
                     message.header.* = exact.*;
+                    // Normally the message's padding would have been zeroed by the MessageBus,
+                    // but we are copying (only) a message header into a new buffer.
+                    std.mem.set(u8, message.buffer[@sizeOf(Header)..config.sector_size], 0);
                     callback(replica, message, destination_replica);
                     return;
                 }
@@ -1441,6 +1446,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 header.op,
                 header.checksum,
             });
+
             const slot = self.slot_for_header(header);
 
             if (self.has(header)) {

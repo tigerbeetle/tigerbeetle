@@ -8,7 +8,7 @@ This raises the question of whether or not these benefits are realised in a clou
 
 Direct I/O eliminates memory copies between user space and the kernel within the OS, so whether the OS is virtualized or not beyond that, Direct I/O would still be of benefit, and perhaps even more so in a cloud environment by virtue of reducing memory pressure and freeing up the more limited per-core memory bandwidth, especially with noisy neighbors. 
 
-A quick example, tested withUbuntu in a VM on a Mac, we still see a 7% relative throughput improvement for Direct I/O, regardless of whether Parallels is propagating O_DIRECT to the physical disk, it’s still saving the cost of the memcpy to Ubuntu’s page cache (and beyond that appears to also avoid polluting the CPU’s L1-3 cache by memcpy’ing through it - hard to be certain given all the various memcpy() implementations). 
+A quick example, tested with Ubuntu in a VM on a Mac, we still see a 7% relative throughput improvement for Direct I/O, regardless of whether Parallels is propagating O_DIRECT to the physical disk, it’s still saving the cost of the memcpy to Ubuntu’s page cache (and beyond that appears to also avoid polluting the CPU’s L1-3 cache by memcpy’ing through it - hard to be certain given all the various memcpy() implementations). 
 
 At the same time, where cloud environments support locally attached high-performance block devices (NVMe SSD), running local storage (as opposed to something like EBS) would definitely be preferable if only from a performance point of view.
 
