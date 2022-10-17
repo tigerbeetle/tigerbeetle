@@ -7,7 +7,7 @@
 //! Each zone can tolerate a different pattern of faults.
 //!
 //! - superblock:
-//!   - One read/write fault is permitted per copyset per area (section, manifest, …).
+//!   - One read/write fault is permitted per area (section, manifest, …).
 //!   - An additional fault is permitted at the target of a pending write during a crash.
 //!
 //! - wal_headers, wal_prepares:
@@ -350,14 +350,13 @@ pub const Storage = struct {
             assert(offset_in_zone + buffer.len <= zone_size);
         }
 
-        const offset_in_storage = zone.offset(offset_in_zone);
-        storage.verify_bounds_and_alignment(buffer, offset_in_storage);
+        storage.verify_bounds_and_alignment(buffer, zone.offset(offset_in_zone));
 
         // Verify that there are no concurrent overlapping writes.
         var iterator = storage.writes.iterator();
         while (iterator.next()) |other| {
-            assert(offset_in_storage + buffer.len <= other.offset or
-                other.offset + other.buffer.len <= offset_in_storage);
+            assert(offset_in_zone + buffer.len <= other.offset or
+                other.offset + other.buffer.len <= offset_in_zone);
         }
 
         switch (zone) {
@@ -539,11 +538,11 @@ pub const Storage = struct {
             if (!storage.options.faulty_superblock) return null;
 
             const target_area = SuperBlockArea.from_offset(offset_in_zone);
-            // This is the maximum number of faults per-area per-copyset that can be safely
-            // injected on a read/write.
+            // This is the maximum number of faults per-area that can be safely injected on a read
+            // or write to the superblock zone.
             //
-            // For SuperBlockSector, checkpoint() and view_change() require 3/4 valid sectors (1 fault).
-            // Trailers are likewise 3/4 — consider (superblock_copies=4):
+            // For SuperBlockSector, checkpoint() and view_change() require 3/4 valid sectors (1
+            // fault). Trailers are likewise 3/4 + 1 fault — consider if two faults were injected:
             // 1. `SuperBlock.checkpoint()` for sequence=6.
             //   - write copy 0, corrupt manifest (fault_count=1)
             //   - write copy 1, corrupt manifest (fault_count=2) !
@@ -554,12 +553,9 @@ pub const Storage = struct {
             assert(fault_count_max >= 1);
 
             const fault_count = blk: {
-                const copy_starting = target_area.starting_copy();
-                const copy_stopping = target_area.stopping_copy();
-
                 var fault_count: usize = 0;
-                var copy_ = copy_starting;
-                while (copy_ <= copy_stopping) : (copy_ += 1) {
+                var copy_: u8 = 0;
+                while (copy_ < config.superblock_copies) : (copy_ += 1) {
                     const copy_area = SuperBlockArea{ .group = target_area.group, .copy = copy_ };
                     const copy_area_offset_zone = copy_area.to_offset();
                     const copy_area_offset_storage = zone.offset(copy_area_offset_zone);
@@ -681,10 +677,15 @@ pub const Storage = struct {
     /// - All blocks referenced by the Manifest trailer exist.
     ///
     fn verify_write_superblock(storage: *const Storage, buffer: []const u8, offset_in_zone: u64) void {
+        const Layout = superblock.Layout;
         assert(offset_in_zone < vsr.Zone.superblock.size().?);
 
         // Ignore trailer writes; only check the superblock sector writes.
-        if (offset_in_zone % superblock.superblock_size != 0) return;
+        if (buffer.len != @sizeOf(superblock.SuperBlockSector)) return;
+        var copy_: u8 = 0;
+        while (copy_ < config.superblock_copies) : (copy_ += 1) {
+            if (Layout.offset_sector(copy_) == offset_in_zone) break;
+        } else return;
 
         for (storage.reads.items[0..storage.reads.len]) |read| assert(read.zone != .superblock);
         for (storage.writes.items[0..storage.writes.len]) |write| assert(write.zone != .superblock);
@@ -692,20 +693,17 @@ pub const Storage = struct {
         const sector = mem.bytesAsSlice(superblock.SuperBlockSector, buffer)[0];
         assert(sector.valid_checksum());
         assert(sector.vsr_state.internally_consistent());
+        assert(sector.copy == copy_);
 
-        const Layout = superblock.Layout;
-        const manifest_offset = vsr.Zone.superblock.offset(
-            Layout.offset_manifest(sector.copy, sector.sequence));
+        const manifest_offset = vsr.Zone.superblock.offset(Layout.offset_manifest(copy_));
         const manifest_buffer = storage.memory[manifest_offset..][0..sector.manifest_size];
         assert(vsr.checksum(manifest_buffer) == sector.manifest_checksum);
 
-        const free_set_offset = vsr.Zone.superblock.offset(
-            Layout.offset_free_set(sector.copy, sector.sequence));
+        const free_set_offset = vsr.Zone.superblock.offset(Layout.offset_free_set(copy_));
         const free_set_buffer = storage.memory[free_set_offset..][0..sector.free_set_size];
         assert(vsr.checksum(free_set_buffer) == sector.free_set_checksum);
 
-        const client_table_offset = vsr.Zone.superblock.offset(
-            Layout.offset_client_table(sector.copy, sector.sequence));
+        const client_table_offset = vsr.Zone.superblock.offset(Layout.offset_client_table(copy_));
         const client_table_buffer =
             storage.memory[client_table_offset..][0..sector.client_table_size];
         assert(vsr.checksum(client_table_buffer) == sector.client_table_checksum);
@@ -774,42 +772,34 @@ const SuperBlockArea = struct {
     copy: u8,
 
     fn to_offset(self: SuperBlockArea) u64 {
-        // Invent a sequence to pass the assertions; we don't have access to the real one.
-        const sequence = 1 + @as(u64, @boolToInt(self.copy < config.superblock_copies));
         return switch (self.group) {
             .sector => superblock.Layout.offset_sector(self.copy),
-            .manifest => superblock.Layout.offset_manifest(self.copy, sequence),
-            .free_set => superblock.Layout.offset_free_set(self.copy, sequence),
-            .client_table => superblock.Layout.offset_client_table(self.copy, sequence),
+            .manifest => superblock.Layout.offset_manifest(self.copy),
+            .free_set => superblock.Layout.offset_free_set(self.copy),
+            .client_table => superblock.Layout.offset_client_table(self.copy),
         };
     }
 
     fn from_offset(offset: u64) SuperBlockArea {
         var copy: u8 = 0;
-        while (copy <= 2 * config.superblock_copies) : (copy += 1) {
+        while (copy < config.superblock_copies) : (copy += 1) {
             for (std.enums.values(Group)) |group| {
                 const area = SuperBlockArea{ .group = group, .copy = copy };
                 if (area.to_offset() == offset) return area;
             }
         } else unreachable;
     }
-
-    fn starting_copy(self: SuperBlockArea) u8 {
-        return self.copy - self.copy % config.superblock_copies;
-    }
-
-    fn stopping_copy(self: SuperBlockArea) u8 {
-        return self.starting_copy() + config.superblock_copies - 1; // Inclusive.
-    }
 };
 
 test "SuperBlockArea" {
     var prng = std.rand.DefaultPrng.init(@intCast(u64, std.time.timestamp()));
     for (std.enums.values(SuperBlockArea.Group)) |group| {
-        const area = SuperBlockArea{
+        const area_expect = SuperBlockArea{
             .group = group,
-            .copy = prng.random().uintLessThan(u8, config.superblock_copies * 2),
+            .copy = prng.random().uintLessThan(u8, config.superblock_copies),
         };
-        try std.testing.expectEqual(area, SuperBlockArea.from_offset(area.to_offset()));
+        const area_actual = SuperBlockArea.from_offset(area_expect.to_offset());
+
+        try std.testing.expectEqual(area_expect, area_actual);
     }
 }
