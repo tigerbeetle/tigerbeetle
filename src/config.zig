@@ -213,7 +213,6 @@ pub const io_depth_write = 8;
 
 /// The number of redundant copies of the superblock in the superblock storage zone.
 /// This must be either { 4, 6, 8 }, i.e. an even number, for more efficient flexible quorums.
-/// This is further multiplied by two to support copy-on-write across copy sets.
 ///
 /// The superblock contains local state for the replica and therefore cannot be replicated remotely.
 /// Loss of the superblock would represent loss of the replica and so it must be protected.
