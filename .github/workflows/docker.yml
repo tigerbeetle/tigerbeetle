@@ -85,9 +85,9 @@ jobs:
 
       # Validate the image
       - if: github.event_name != 'pull_request'
-      - uses: actions/checkout@v2
+        uses: actions/checkout@v2
       - if: github.event_name != 'pull_request'
-      - run: ./scripts/confirm_image.sh ghcr.io/${{ env.IMAGE_NAME }}@${{ steps.docker_build_release.outputs.imageid }} --want-production
+        run: ./scripts/confirm_image.sh ghcr.io/${{ env.IMAGE_NAME }}@${{ steps.docker_build_release.outputs.imageid }} --want-production
 
   build-and-push-debug:
     runs-on: ubuntu-latest
@@ -122,9 +122,9 @@ jobs:
 
       # Validate the image
       - if: github.event_name != 'pull_request'
-      - uses: actions/checkout@v2
-        if: github.event_name != 'pull_request'
-      - run: ./scripts/confirm_image.sh ghcr.io/${{ env.IMAGE_NAME }}@${{ steps.docker_build_debug.outputs.imageid }} --want-debug
+        uses: actions/checkout@v2
+      - if: github.event_name != 'pull_request'
+        run: ./scripts/confirm_image.sh ghcr.io/${{ env.IMAGE_NAME }}@${{ steps.docker_build_debug.outputs.imageid }} --want-debug
 
   # Keep this around because Github CI looks for this job of this name.
   test:
@@ -132,3 +132,4 @@ jobs:
     needs: [test_on_linux]
     steps:
       - run: echo "done"
+<
