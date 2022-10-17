@@ -2572,7 +2572,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
             assert(self.committing);
             assert(self.commit_callback != null);
-            assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
+            assert(self.op_checkpoint == self.superblock.writing.vsr_state.commit_min);
             assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
 
             const op = self.commit_prepare.?.header.op;
@@ -2584,7 +2584,7 @@ pub fn ReplicaType(
             // If op_checkpoint_next == vsr_state.commit_min, we checkpointed at op,
             // then crashed and have now recovered.
             if (op == self.op_checkpoint_trigger() and
-                self.op_checkpoint_next() != self.superblock.staging.vsr_state.commit_min)
+                self.op_checkpoint_next() != self.superblock.working.vsr_state.commit_min)
             {
                 assert(op == self.op);
                 assert((op + 1) % config.lsm_batch_multiple == 0);
@@ -2645,7 +2645,7 @@ pub fn ReplicaType(
 
             self.op_checkpoint = self.op_checkpoint_next();
             assert(self.op_checkpoint == self.commit_min - config.lsm_batch_multiple);
-            assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
+            assert(self.op_checkpoint == self.superblock.writing.vsr_state.commit_min);
             assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
 
             log.debug("{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})", .{

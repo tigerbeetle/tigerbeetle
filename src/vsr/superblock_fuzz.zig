@@ -303,11 +303,11 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = .{
-            .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum,
-            .commit_min = env.superblock.staging.vsr_state.commit_min,
-            .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
-            .view_normal = env.superblock.staging.vsr_state.view_normal + 4,
-            .view = env.superblock.staging.vsr_state.view + 5,
+            .commit_min_checksum = env.superblock.writing.vsr_state.commit_min_checksum,
+            .commit_min = env.superblock.writing.vsr_state.commit_min,
+            .commit_max = env.superblock.writing.vsr_state.commit_max + 3,
+            .view_normal = env.superblock.writing.vsr_state.view_normal + 4,
+            .view = env.superblock.writing.vsr_state.view + 5,
         };
 
         assert(env.sequence_states.items.len == env.superblock.writing.sequence + 1);
@@ -331,11 +331,11 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = .{
-            .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
-            .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
-            .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
-            .view_normal = env.superblock.staging.vsr_state.view_normal + 1,
-            .view = env.superblock.staging.vsr_state.view + 1,
+            .commit_min_checksum = env.superblock.writing.vsr_state.commit_min_checksum + 1,
+            .commit_min = env.superblock.writing.vsr_state.commit_min + 1,
+            .commit_max = env.superblock.writing.vsr_state.commit_max + 1,
+            .view_normal = env.superblock.writing.vsr_state.view_normal + 1,
+            .view = env.superblock.writing.vsr_state.view + 1,
         };
 
         assert(env.sequence_states.items.len == env.superblock.writing.sequence + 1);
