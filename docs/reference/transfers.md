@@ -263,6 +263,8 @@ Constraints:
 * Type is 64-bit unsigned integer (8 bytes)
 * Must be zero if `flags.pending` is *not* set
 * Must be non-zero if `flags.pending` *is* set
+* Must not overflow a 64-bit unsigned integer when summed with the transfer's timestamp
+  (`error.overflows_timeout`)
 
 ### `ledger`
 
