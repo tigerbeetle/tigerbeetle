@@ -66,7 +66,12 @@ pub fn KWayMergeIterator(
             // TODO Do we have test coverage for this edge case?
             var stream_index: u32 = 0;
             while (stream_index < stream_count_max) : (stream_index += 1) {
-                it.keys[it.k] = stream_peek(context, stream_index) catch continue;
+                it.keys[it.k] = stream_peek(context, stream_index) catch |err| switch (err) {
+                    // On initialization, the streams should either have data already 
+                    // buffered up to peek or be empty and have no more values to produce.
+                    error.Buffering => unreachable,
+                    error.Empty => continue,
+                };
                 it.streams[it.k] = stream_index;
                 it.up_heap(it.k);
                 it.k += 1;
@@ -98,26 +103,24 @@ pub fn KWayMergeIterator(
         }
 
         fn pop_internal(it: *Self) ?Value {
-            if (it.k == 0) return null;
+            while (true) {
+                if (it.k == 0) return null;
 
-            const root = it.streams[0];
-            // We know that each input iterator is sorted, so we don't need to compare the next
-            // key on that iterator with the current min/max.
-            const value = stream_pop(it.context, root);
+                const root = it.streams[0];
+                const key = stream_peek(it.context, root) catch |err| switch (err) {
+                    error.Buffering => return null,
+                    error.Empty => {
+                        it.swap(0, it.k - 1);
+                        it.k -= 1;
+                        it.down_heap();
+                        continue;
+                    },
+                };
 
-            if (stream_peek(it.context, root)) |key| {
                 it.keys[0] = key;
                 it.down_heap();
-            } else |err| switch (err) {
-                error.Buffering => return null,
-                error.Empty => {
-                    it.swap(0, it.k - 1);
-                    it.k -= 1;
-                    it.down_heap();
-                },
+                return stream_pop(it.context, root);
             }
-
-            return value;
         }
 
         fn up_heap(it: *Self, start: u32) void {
@@ -217,6 +220,7 @@ fn TestContext(comptime k_max: u32) type {
         }
 
         fn stream_peek(context: *const Self, stream_index: u32) error{Empty, Buffering}!u32 {
+            // TODO: test for Buffering somehow as well
             const stream = context.streams[stream_index];
             if (stream.len == 0) return error.Empty;
             return stream[0].key;
