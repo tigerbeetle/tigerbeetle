@@ -589,11 +589,15 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .single_phase => {},
                 .pending => {
                     transfer.flags = .{ .pending = true };
-                    transfer.timeout = std.math.max(1, fuzz.random_int_exponential(
-                        self.random,
-                        u64,
-                        self.options.pending_timeout_mean,
-                    ));
+                    // Bound the timeout to ensure we never hit `overflows_timeout`.
+                    transfer.timeout = 1 + std.math.min(
+                        std.math.maxInt(u64) / 2,
+                        fuzz.random_int_exponential(
+                            self.random,
+                            u64,
+                            self.options.pending_timeout_mean,
+                        ),
+                    );
                 },
                 .post_pending, .void_pending => {
                     // Don't depend on `HashMap.keyIterator()` being deterministic.

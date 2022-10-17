@@ -162,6 +162,7 @@ pub const CreateTransferResult = enum(u32) {
     overflows_credits_posted,
     overflows_debits,
     overflows_credits,
+    overflows_timeout,
 
     exceeds_credits,
     exceeds_debits,
