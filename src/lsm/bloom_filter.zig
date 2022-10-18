@@ -94,10 +94,11 @@ const test_bloom_filter = struct {
         const keys = try std.testing.allocator.alloc(u32, keys_count);
         defer std.testing.allocator.free(keys);
 
-        for (keys) |*key| key.* = fuzz.random_int_exponential(random, u32, 100);
+        for (keys) |*key| key.* = random.int(u32);
 
         // `block_size` is currently the only size bloom_filter that we use.
         const filter = try std.testing.allocator.alloc(u8, block_size);
+        std.mem.set(u8, filter, 0);
         defer std.testing.allocator.free(filter);
 
         for (keys) |key| {
@@ -116,8 +117,9 @@ const test_bloom_filter = struct {
 
 test "bloom filter: random" {
     var rng = std.rand.DefaultPrng.init(42);
-    var i: usize = 0;
-    while (i < (1 << 12)) : (i += 1) {
-        try test_bloom_filter.random_keys(rng.random(), i);
+    const iterations_max: usize = (1 << 12);
+    var iterations: usize = 0;
+    while (iterations < iterations_max) : (iterations += 1) {
+        try test_bloom_filter.random_keys(rng.random(), iterations);
     }
 }
