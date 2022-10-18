@@ -188,6 +188,12 @@ pub fn SetAssociativeCache(
             mem.set(u64, self.clocks.words, 0);
         }
 
+        /// Checks if a key exists without bumping up its counts value.
+        pub fn exists(self: *Self, key: Key) bool {
+            const set = self.associate(key);
+            return self.search(set, key) != null;
+        }
+
         pub fn get(self: *Self, key: Key) ?*align(value_alignment) Value {
             const set = self.associate(key);
             const way = self.search(set, key) orelse return null;
