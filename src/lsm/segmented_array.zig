@@ -879,6 +879,15 @@ fn TestContext(
             }
 
             try context.remove_all();
+
+            if (element_order == .unsorted) {
+                var i: usize = 0;
+                while (i < element_count_max) : (i += 1) {
+                    try context.insert_pessimal();
+                }
+            }
+
+            try context.remove_all();
         }
 
         fn insert(context: *Self) !void {
@@ -912,6 +921,38 @@ fn TestContext(
                 },
             }
             context.inserts += count;
+
+            try context.verify();
+        }
+
+        /// Insert an element, choosing the index that leads to the worst-possible layout.
+        fn insert_pessimal(context: *Self) !void {
+            assert(element_order == .unsorted);
+
+            var node_pessimal: u32 = 0;
+            var node_pessimal_count: usize = 0;
+            {
+                var node: u32 = 0;
+                while (node < context.array.node_count) : (node += 1) {
+                    const node_count = context.array.count(node);
+                    if (node_count > node_pessimal_count) {
+                        node_pessimal = node;
+                        node_pessimal_count = node_count;
+                    }
+                }
+            }
+            const index_pessimal = context.array.absolute_index_for_cursor(.{
+                .node = node_pessimal,
+                .relative_index = 0,
+            });
+
+            var element: T = undefined;
+            context.random.bytes(mem.asBytes(&element));
+
+            context.array.insert_elements(&context.pool, index_pessimal, &.{element});
+            context.reference.insert(index_pessimal, element) catch unreachable;
+
+            context.inserts += 1;
 
             try context.verify();
         }
