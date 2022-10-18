@@ -130,10 +130,15 @@ pub fn GridType(comptime Storage: type) type {
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_queue: FIFO(Write) = .{},
 
+        /// `read_iops` maintains a list of ReadIOPs currently performing 
+        /// storage.read_sector() on a unique address. Reads with the same address are coalesced
+        /// to be resolved by the same ReadIOP if they're submitted by `start_read()` or 
+        /// already queued in `read_queue`. 
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
         read_queue: FIFO(Read) = .{},
 
-        // Reads that were found to be in the cache on start_read().
+        /// Reads that were found to be in the cache on start_read() and queued to be resolved on
+        /// the next tick(). This keeps read_block() always asynchronous to the caller.
         read_cached_queue: FIFO(Read) = .{},
         // TODO interrogate this list and do recovery in Replica.tick().
         read_recovery_queue: FIFO(Read) = .{},
