@@ -376,47 +376,62 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         fn on_request_timeout(self: *Self) void {
+
+            // TODO: this condition is just a PoC, add the correct logic, config and tests
+            // We should timeout if we alread round-robin the entire cluster X times
+            // Probably all inflight messages are going to timeout together, lets think about that later
+            const max_round_robin = self.replica_count * 3;
+            const timed_out = self.request_timeout.attempts > max_round_robin;
+            if (timed_out) {  
+                
+                defer self.request_timeout.stop();
+
+                // Drop all messages
+                while (self.request_queue.pop()) |timed_out_request| {
+                        
+                    defer self.message_bus.unref(timed_out_request.message);
+                    
+                    log.debug("{}: on_request_timeout: dropping request user_data={} request={} checksum={} {s}", .{
+                        self.id,
+                        timed_out_request.user_data,
+                        timed_out_request.message.header.request,
+                        timed_out_request.message.header.checksum,
+                        @tagName(timed_out_request.message.header.operation.cast(StateMachine)),
+                    });   
+
+                    if (timed_out_request.message.header.operation != .register) {
+                        timed_out_request.callback(
+                            timed_out_request.user_data,
+                            timed_out_request.message.header.operation.cast(StateMachine),
+                            error.TimedOut,
+                        );  
+                    }
+                }      
+
+                assert(self.request_queue.count == 0);
+                return;
+            }           
+
             self.request_timeout.backoff(self.prng.random());
 
             const message = self.request_queue.head_ptr().?.message;
             assert(message.header.command == .request);
             assert(message.header.request < self.request_number);
             assert(message.header.checksum == self.parent);
-            assert(message.header.context == self.session);
-
-            // TODO: this condition is just a PoC, add the correct logic, config and tests
-            // We should timeout if we alread round-robin the entire cluster X times
-            // Probably all inflight messages are going to timeout together, lets think about that later
-            const timed_out = self.request_timeout.attempts > 3 and message.header.operation > .register;
-            if (timed_out) {
-                const inflight = self.request_queue.pop().?;
-                defer self.message_bus.unref(inflight.message);
-
-                log.debug("{}: on_request_timeout: dropping request={} checksum={}", .{
-                    self.id,
-                    inflight.message.header.request,
-                    inflight.message.header.checksum,
-                });
-
-                inflight.callback(
-                    inflight.user_data,
-                    inflight.message.header.operation.cast(StateMachine),
-                    error.TimedOut,
-                );
-                return;
-            }
+            assert(message.header.context == self.session);                           
 
             log.debug("{}: on_request_timeout: resending request={} checksum={}", .{
                 self.id,
                 message.header.request,
                 message.header.checksum,
             });
-
+                            
             // We assume the leader is down and round-robin through the cluster:
             self.send_message_to_replica(
                 @intCast(u8, (self.view + self.request_timeout.attempts) % self.replica_count),
                 message,
             );
+            
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
