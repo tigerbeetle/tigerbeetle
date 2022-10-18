@@ -403,7 +403,7 @@ pub fn GridType(comptime Storage: type) type {
             // from the cache on the next tick. This keeps start_read() asynchronous.
             // Note that this must be called after we have checked for an in
             // progress read targeting the same address.
-            if (grid.cache.get(read.address) != null) {
+            if (grid.cache.exists(read.address)) {
                 grid.read_cached_queue.push(read);
                 return;
             }
