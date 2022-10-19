@@ -103,26 +103,24 @@ pub fn KWayMergeIterator(
         }
 
         fn pop_internal(it: *Self) ?Value {
-            while (true) {
-                if (it.k == 0) return null;
+            if (it.k == 0) return null;
 
-                const root = it.streams[0];
-                const value = stream_pop(it.context, root);
+            const root = it.streams[0];
+            const value = stream_pop(it.context, root);
 
-                if (stream_peek(it.context, root)) |key| {
-                    it.keys[0] = key;
+            if (stream_peek(it.context, root)) |key| {
+                it.keys[0] = key;
+                it.down_heap();
+            } else |err| switch (err) {
+                error.Drained => {},
+                error.Empty => {
+                    it.swap(0, it.k - 1);
+                    it.k -= 1;
                     it.down_heap();
-                } else |err| switch (err) {
-                    error.Drained => {},
-                    error.Empty => {
-                        it.swap(0, it.k - 1);
-                        it.k -= 1;
-                        it.down_heap();
-                    },
-                }
-
-                return value;
+                },
             }
+
+            return value;
         }
 
         fn up_heap(it: *Self, start: u32) void {

@@ -188,7 +188,8 @@ pub fn SetAssociativeCache(
             mem.set(u64, self.clocks.words, 0);
         }
 
-        /// Checks if a key exists without bumping up its counts value.
+        /// Returns whether an entry with the given key is cached, 
+        /// without modifying the entry's counter.
         pub fn exists(self: *Self, key: Key) bool {
             const set = self.associate(key);
             return self.search(set, key) != null;
