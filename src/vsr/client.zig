@@ -378,18 +378,18 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         fn on_request_timeout(self: *Self) void {
             assert(self.request_queue.count > 0);
 
-            const max_round_robin_attempts = self.replica_count * config.client_timeout_rounds;
-            const timed_out = self.request_timeout.attempts > max_round_robin_attempts;
-            if (timed_out) {
+            // If we have already tried to re-send multiple times and it is still timing out,
+            // we drain all queued requests assuming this client is disconnected.
+            const max_attempts_before_timing_out = self.replica_count * config.client_timeout_round_robin_attempts;
+            if (self.request_timeout.attempts > max_attempts_before_timing_out) {
                 defer {
-                    // Reset the client and try to reconnect
+                    // Reset and try to reconnect:
                     self.request_timeout.stop();
                     self.view = 0;
                     self.parent = 0;
                     self.register();
                 }
 
-                // Drop all requests
                 while (self.request_queue.pop()) |timed_out_request| {
                     defer self.message_bus.unref(timed_out_request.message);
 
@@ -426,6 +426,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 message.header.request,
                 message.header.checksum,
             });
+
             // We assume the leader is down and round-robin through the cluster:
             self.send_message_to_replica(
                 @intCast(u8, (self.view + self.request_timeout.attempts) % self.replica_count),

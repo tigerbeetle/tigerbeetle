@@ -130,7 +130,7 @@ pub const connection_send_queue_max_client = 2;
 pub const client_request_queue_max = 32;
 
 /// The number of times a client should round-robin through the cluster before timing out.
-pub const client_timeout_rounds = 3;
+pub const client_timeout_round_robin_attempts = 3;
 
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 /// If the backlog argument is greater than the value in `/proc/sys/net/core/somaxconn`, then it is
