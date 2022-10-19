@@ -12,7 +12,12 @@ Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the problem of 
 
 ## TigerBeetle (under active development)
 
-TigerBeetle is not yet production-ready. The production version of **TigerBeetle is now under active development**. Our [DESIGN doc](docs/DESIGN.md) provides an overview of TigerBeetle's data structures and our [project board](https://github.com/tigerbeetledb/tigerbeetle/projects?type=classic) provides a glimpse of where we want to go.
+TigerBeetle is not yet production-ready. The production version of
+**TigerBeetle is now under active development**. Our [DESIGN
+doc](docs/DESIGN.md) provides an overview of TigerBeetle's data
+structures.
+
+Check out short-term Roadmap below for where we're heading!
 
 ## QuickStart
 
@@ -232,6 +237,17 @@ You may be interested in:
 * [demos/bitcast](./demos/bitcast), how Zig makes zero-overhead network deserialization easy, fast and safe.
 * [demos/io_uring](./demos/io_uring), how ring buffers can eliminate kernel syscalls, reduce server hardware requirements by a factor of two, and change the way we think about event loops.
 * [demos/hash_table](./demos/hash_table), how linear probing compares with cuckoo probing, and what we look for in a hash table that needs to scale to millions (and billions) of account transfers.
+
+## Short-Term Roadmap
+
+Done:
+
+1. Harden the consensus layer
+
+In progress:
+
+2. Harden the storage layer (until this happens you'll occasionally see panics in the LSM code)
+3. Support querying an account for its transfers (until this happens you can only query account balances and list all transfers)
 
 ## License
 
