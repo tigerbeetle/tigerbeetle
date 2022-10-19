@@ -26,7 +26,7 @@ pub const IO = struct {
         const uts = std.os.uname();
         const release = std.mem.sliceTo(&uts.release, 0);
         const version = try std.builtin.Version.parse(release);
-        if (version.major < 5 or version.minor < 5) {
+        if (version.order(std.builtin.Version{ .major = 5, .minor = 5 }) == .lt) {
             @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
         }
 
