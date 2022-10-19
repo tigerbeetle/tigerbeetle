@@ -385,8 +385,10 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
                 defer {
                     // Reset and try to reconnect:
                     self.request_timeout.stop();
-                    self.view = 0;
                     self.parent = 0;
+                    self.session = 0;
+                    self.request_number = 0;
+                    self.view = 0;
                     self.register();
                 }
 
