@@ -130,10 +130,12 @@ pub fn GridType(comptime Storage: type) type {
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_queue: FIFO(Write) = .{},
 
-        /// `read_iops` maintains a list of ReadIOPs currently performing 
-        /// storage.read_sector() on a unique address. Reads with the same address are coalesced
-        /// to be resolved by the same ReadIOP if they're submitted by `start_read()` or 
-        /// already queued in `read_queue`. 
+        /// `read_iops` maintains a list of ReadIOPs currently performing storage.read_sector() on
+        /// a unique address.
+        ///
+        /// Invariants:
+        /// * An address is listed in `read_iops` at most once. Multiple reads of the same address
+        ///   (past or present) are coalesced.
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
         read_queue: FIFO(Read) = .{},
 
@@ -431,11 +433,9 @@ pub fn GridType(comptime Storage: type) type {
                 .block = block,
             };
 
-            // Collect the current Read and any other matching/pending Reads to this IOP.
-            // There could be reads in the read_queue for the same address that our read
-            // finally got an IOP for. If we don't gather them here, they will eventually be 
-            // processed at the end of read_block_callback() but that will issue a new call to
-            // read_sectors().
+            // Collect the current Read and any other pending Reads for the same address to this IOP.
+            // If we didn't gather them here, they would eventually be processed at the end of
+            // read_block_callback(), but that would issue a new call to read_sectors().
             iop.reads.push(read);
             {
                 // Make a copy here to avoid an infinite loop from pending_reads being 
@@ -530,12 +530,8 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_iops.release(iop);
 
             // Always iterate through the full list of pending reads instead of just one to ensure
-            // that those which could be serviced from the cache don't prevent those waiting for 
-            // an IOP from seeing the released one above.
-            //
-            // NOTE: There shouldn't be any pending reads with the same address as the IOP that
-            // was just released as the read that started the IOP collected matching ones already
-            // and subsequent matching reads joined the IOP when it was still acquired.
+            // that those serviced from the cache don't prevent others waiting for an IOP from 
+            // seeing the IOP that was just released.
             var copy = grid.read_queue;
             grid.read_queue = .{};
             while (copy.pop()) |read| {

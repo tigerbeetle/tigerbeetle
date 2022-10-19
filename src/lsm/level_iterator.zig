@@ -287,14 +287,14 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             if (it.values.head_ptr_const()) |value| return key_from_value(value);
 
             const scope = it.tables.head_ptr_const() orelse {
-                // NOTE: Even if there are no values to peek, some may be unbuffered.
+                // Even if there are no values available to peek, some may be unbuffered.
                 // We call buffered_all_values() to distinguish between the iterator
-                // being empty and needing to tic() to refill values.
+                // being empty and needing to tick() to refill values.
                 if (!it.buffered_all_values()) return error.Drained;
                 return error.Empty;
             };
 
-            return scope.table_iterator.peek() catch unreachable;
+            return scope.table_iterator.peek();
         }
 
         /// This may only be called after peek() has returned non-null.
