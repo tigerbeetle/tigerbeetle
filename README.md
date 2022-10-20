@@ -247,7 +247,9 @@ Done:
 In progress:
 
 2. Storage engine readiness.
-  * Until this happens you'll occasionally see panics in the LSM code.
+  * Until this happens you'll occasionally see assertion failures in
+    LSM code as we tune overtight or incorrect assertions, or as
+    assertions detect bugs and shut TigerBeetle down safely.
   * See [#189](https://github.com/tigerbeetledb/tigerbeetle/issues/189) for details.
 3. Recovery readiness
   * See [#212](https://github.com/tigerbeetledb/tigerbeetle/issues/212) for details
