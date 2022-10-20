@@ -30,7 +30,9 @@ pub fn KWayMergeIterator(
 
         /// Array of keys, with each key representing the next key in each stream.
         ///
-        /// Structured as a binary heap:
+        /// `keys` is *almost* structured as a binary heap — to become a heap, streams[0] must be
+        /// peeked and sifted (see pop_internal()).
+        ///
         /// * When `direction=ascending`, keys are ordered low-to-high.
         /// * When `direction=descending`, keys are ordered high-to-low.
         /// * Equivalent keys are ordered from high precedence to low.
@@ -105,20 +107,24 @@ pub fn KWayMergeIterator(
         fn pop_internal(it: *Self) ?Value {
             if (it.k == 0) return null;
 
-            const root = it.streams[0];
-            const value = stream_pop(it.context, root);
-
-            if (stream_peek(it.context, root)) |key| {
+            // We update the heap prior to removing the value from the stream. If we updated after
+            // stream_pop() instead, when stream_peek() returns Drained we would be unable to order
+            // the heap, and when the stream does buffer data it would be out of position.
+            if (stream_peek(it.context, it.streams[0])) |key| {
                 it.keys[0] = key;
                 it.down_heap();
             } else |err| switch (err) {
-                error.Drained => {},
+                error.Drained => return null,
                 error.Empty => {
                     it.swap(0, it.k - 1);
                     it.k -= 1;
                     it.down_heap();
                 },
             }
+            if (it.k == 0) return null;
+
+            const root = it.streams[0];
+            const value = stream_pop(it.context, root);
 
             return value;
         }
