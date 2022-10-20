@@ -242,7 +242,7 @@ You may be interested in:
 
 Done:
 
-1. Consensus layer readiness
+1. Consensus protocol readiness.
 
 In progress:
 
