@@ -146,4 +146,18 @@ pub fn build(b: *std.build.Builder) void {
         const run_step = b.step("lsm_forest_fuzz", "Fuzz the LSM forest. Args: [--seed <seed>]");
         run_step.dependOn(&run_cmd.step);
     }
+
+    {
+        const lsm_segmented_array_fuzz = b.addExecutable("lsm_segmented_array_fuzz", "src/lsm/segmented_array_fuzz.zig");
+        lsm_segmented_array_fuzz.setMainPkgPath("src");
+        lsm_segmented_array_fuzz.setTarget(target);
+        lsm_segmented_array_fuzz.setBuildMode(mode);
+
+        const run_cmd = lsm_segmented_array_fuzz.run();
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("lsm_segmented_array_fuzz", "Fuzz the LSM segmented array. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
 }

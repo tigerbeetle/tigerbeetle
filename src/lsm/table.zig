@@ -841,6 +841,7 @@ pub fn TableType(
                 compare_keys,
                 Table.index_data_keys_used(index_block),
                 key,
+                .{},
             );
             assert(data_block_index < index_data_blocks_used(index_block));
             return data_block_index;
@@ -927,6 +928,7 @@ pub fn TableType(
                 compare_keys,
                 values,
                 key,
+                .{},
             );
             if (result.exact) {
                 const value = &values[result.index];
