@@ -253,7 +253,7 @@ In progress:
   * See [#189](https://github.com/tigerbeetledb/tigerbeetle/issues/189) for details.
 3. Recovery readiness.
   * See [#212](https://github.com/tigerbeetledb/tigerbeetle/issues/212) for details.
-3. Support querying all transfers associated with an account id.
+4. Support querying all transfers associated with an account id.
   * Until this happens you can only query individual accounts and transfers by id.
 
 ## License
