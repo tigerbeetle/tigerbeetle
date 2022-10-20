@@ -22,8 +22,9 @@ pub fn SegmentedArray(
     comptime T: type,
     comptime NodePool: type,
     comptime element_count_max: u32,
+    comptime options: Options,
 ) type {
-    return SegmentedArrayType(T, NodePool, element_count_max, null, {}, {});
+    return SegmentedArrayType(T, NodePool, element_count_max, null, {}, {}, options);
 }
 
 pub fn SortedSegmentedArray(
@@ -33,9 +34,16 @@ pub fn SortedSegmentedArray(
     comptime Key: type,
     comptime key_from_value: fn (*const T) callconv(.Inline) Key,
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+    comptime options: Options,
 ) type {
-    return SegmentedArrayType(T, NodePool, element_count_max, Key, key_from_value, compare_keys);
+    return SegmentedArrayType(T, NodePool, element_count_max, Key, key_from_value, compare_keys, options);
 }
+
+pub const Options = struct {
+    /// Assert all invariants before/after every public function.
+    /// Very expensive - only enable for debugging/fuzzing.
+    verify: bool = false,
+};
 
 fn SegmentedArrayType(
     comptime T: type,
@@ -45,6 +53,7 @@ fn SegmentedArrayType(
     comptime Key: ?type,
     comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.Inline) K) else void,
     comptime compare_keys: if (Key) |K| (fn (K, K) callconv(.Inline) math.Order) else void,
+    comptime options: Options,
 ) type {
     return struct {
         const Self = @This();
@@ -59,7 +68,7 @@ fn SegmentedArrayType(
         pub const node_capacity = blk: {
             const max = @divFloor(NodePool.node_size, @sizeOf(T));
 
-            // We require that the node is evenly divisible by 2 to simplify our code
+            // We require that the node capacity is evenly divisible by 2 to simplify our code
             // that splits/joins nodes at the midpoint.
             const capacity = if (max % 2 == 0) max else max - 1;
 
@@ -71,15 +80,36 @@ fn SegmentedArrayType(
         comptime {
             // If this assert fails, we should be using a non-segmented array instead!
             assert(element_count_max > node_capacity);
+
+            // We use u32 for indexes and counts.
+            assert(element_count_max <= std.math.maxInt(u32));
+
+            // The buffers returned from the node_pool must be able to store T with correct alignment.
+            assert(NodePool.node_alignment >= @alignOf(T));
         }
 
-        pub const node_count_max = blk: {
+        pub const node_count_max_naive = blk: {
             // If a node fills up it is divided into two new nodes. Therefore,
             // the worst possible space overhead is when all nodes are half full.
             // This uses flooring division, we want to examine the worst case here.
             const elements_per_node_min = @divExact(node_capacity, 2);
             break :blk div_ceil(element_count_max, elements_per_node_min);
         };
+
+        // We can't always actually reach node_count_max_naive in all configurations.
+        // If we're at node_count_max_naive-1 nodes, in order to split one more node we need:
+        pub const node_count_max = if (element_count_max >=
+            // * The node that we split must be full.
+            node_capacity +
+            // * The last node must have at least one element.
+            1 +
+            // * All other nodes must be at least half-full.
+            ((node_count_max_naive -| 3) * @divExact(node_capacity, 2)) +
+            // * And then we insert one more element into the full node.
+            1)
+            node_count_max_naive
+        else
+            node_count_max_naive - 1;
 
         node_count: u32 = 0,
         /// This is the segmented array. The first node_count pointers are non-null.
@@ -104,13 +134,19 @@ fn SegmentedArrayType(
             mem.set(?*[node_capacity]T, nodes, null);
             indexes[0] = 0;
 
-            return Self{
+            const array = Self{
                 .nodes = nodes,
                 .indexes = indexes,
             };
+
+            if (options.verify) array.verify();
+
+            return array;
         }
 
         pub fn deinit(array: Self, allocator: mem.Allocator, node_pool: ?*NodePool) void {
+            if (options.verify) array.verify();
+
             for (array.nodes[0..array.node_count]) |node| {
                 node_pool.?.release(
                     @ptrCast(NodePool.Node, @alignCast(NodePool.node_alignment, node.?)),
@@ -120,6 +156,41 @@ fn SegmentedArrayType(
             allocator.free(array.indexes);
         }
 
+        pub fn verify(array: Self) void {
+            assert(array.node_count <= node_count_max);
+            for (array.nodes) |node, node_index| {
+                if (node_index < array.node_count) {
+                    // The first node_count pointers are non-null.
+                    assert(node != null);
+                } else {
+                    // The rest are non-null.
+                    assert(node == null);
+                }
+            }
+            for (array.nodes[0..array.node_count]) |_, node_index| {
+                const c = array.count(@intCast(u32, node_index));
+                // Every node is at most full.
+                assert(c <= node_capacity);
+                // Every node is at least half-full, except the last.
+                if (node_index < array.node_count - 1) {
+                    assert(c >= @divTrunc(node_capacity, 2));
+                }
+            }
+            if (Key) |K| {
+                // If Key is not null then the elements must be sorted by key_from_value (but not necessarily unique).
+                var key_prior_or_null: ?K = null;
+                for (array.nodes[0..array.node_count]) |_, node_index| {
+                    for (array.node_elements(@intCast(u32, node_index))) |*value| {
+                        const key = key_from_value(value);
+                        if (key_prior_or_null) |key_prior| {
+                            assert(compare_keys(key_prior, key) != .gt);
+                        }
+                        key_prior_or_null = key;
+                    }
+                }
+            }
+        }
+
         pub usingnamespace if (Key) |_| struct {
             /// Returns the absolute index of the element being inserted.
             pub fn insert_element(
@@ -127,9 +198,14 @@ fn SegmentedArrayType(
                 node_pool: *NodePool,
                 element: T,
             ) u32 {
+                if (options.verify) array.verify();
+
                 const cursor = array.search(key_from_value(&element));
                 const absolute_index = array.absolute_index_for_cursor(cursor);
                 array.insert_elements_at_absolute_index(node_pool, absolute_index, &[_]T{element});
+
+                if (options.verify) array.verify();
+
                 return absolute_index;
             }
         } else struct {
@@ -139,11 +215,15 @@ fn SegmentedArrayType(
                 absolute_index: u32,
                 elements: []const T,
             ) void {
-                return array.insert_elements_at_absolute_index(
+                if (options.verify) array.verify();
+
+                array.insert_elements_at_absolute_index(
                     node_pool,
                     absolute_index,
                     elements,
                 );
+
+                if (options.verify) array.verify();
             }
         };
 
@@ -195,6 +275,7 @@ fn SegmentedArrayType(
 
             const a = cursor.node;
             const a_pointer = array.nodes[a].?;
+            assert(cursor.relative_index <= array.count(a));
 
             const total = array.count(a) + @intCast(u32, elements.len);
             if (total <= node_capacity) {
@@ -223,86 +304,99 @@ fn SegmentedArrayType(
             // The 5th case can be seen as a special case of the 4th.
             //
             // elements: [yyyyyy], relative_index: 0
-            // [xxxxx_]
-            // [yyyyyy][xxxxx_]
+            // [xxxxx_][______]
+            // [______][xxxxx_] // after first copy_backwards
+            // [______][xxxxx_] // skip mem.copyBackwards (a_half >= relative_index)
+            // [yyyyyy][xxxxx_] // after second copy_backwards
             //
             // elements: [yy], relative_index: 1
-            // [xxxxx_]
-            // [xyyx__][xxx___]
+            // [xxxxx_][______]
+            // [x__x__][xxx___] // after first copy_backwards
+            // [x__x__][xxx___] // skip mem.copyBackwards (a_half >= relative_index)
+            // [xyyx__][xxx___] // after second copy_backwards
             //
             // elements: [yy], relative_index: 2
-            // [xxx_]
-            // [xxy_][yx__]
+            // [xxx_][____]
+            // [xx__][_x__] // after first copy_backwards
+            // [xx__][_x__] // skip mem.copyBackwards (a_half >= relative_index)
+            // [xxy_][yx__] // after second copy_backwards
             //
             // elements: [yy], relative_index: 5
-            // [xxxxxx]
-            // [xxxx__][xyyx__]
+            // [xxxxxx][______]
+            // [xxxxx_][___x__] // after first copy_backwards
+            // [xxxx__][x__x__] // after mem.copyBackwards (a_half < relative_index)
+            // [xxxx__][xyyx__] // after second copy_backwards
             //
             // elements: [yyyyy_], relative_index: 5
-            // [xxxxx_]
-            // [xxxxx_][yyyyy_]
+            // [xxxxx_][______]
+            // [xxxxx_][______] // after first copy_backwards
+            // [xxxxx_][______] // skip mem.copyBackwards (a_half >= relative_index)
+            // [xxxxx_][yyyyy_] // after second copy_backwards
 
-            assert(cursor.relative_index <= array.count(a));
+            const a_half_pointer = a_pointer[0..a_half];
+            const b_half_pointer = b_pointer[0..b_half];
 
-            const existing_a_head = a_pointer[0..@minimum(a_half, cursor.relative_index)];
-            const existing_b_head = a_pointer[existing_a_head.len..cursor.relative_index];
+            // Move part of `a` forwards to make space for elements.
+            copy_backwards(
+                a_half_pointer,
+                b_half_pointer,
+                cursor.relative_index + elements.len,
+                a_pointer[cursor.relative_index..array.count(a)],
+            );
 
-            const existing_a_tail = a_pointer[existing_a_head.len..][0..a_half -|
-                (cursor.relative_index + elements.len)];
-            const existing_b_tail = a_pointer[existing_a_head.len + existing_a_tail.len +
-                existing_b_head.len .. array.count(a)];
-
-            const elements_a = elements[0 .. a_half - existing_a_head.len - existing_a_tail.len];
-            const elements_b = elements[elements_a.len..];
-
-            assert(array.count(a) == existing_a_head.len + existing_b_head.len +
-                existing_a_tail.len + existing_b_tail.len);
-            assert(elements.len == elements_a.len + elements_b.len);
-            assert(a_half == existing_a_head.len + elements_a.len + existing_a_tail.len);
-            assert(b_half == existing_b_head.len + elements_b.len + existing_b_tail.len);
-            assert(total == a_half + b_half);
-
-            if (existing_a_tail.len > 0) assert(existing_b_head.len == 0 and elements_b.len == 0);
-            if (existing_b_head.len > 0) assert(elements_a.len == 0 and existing_a_tail.len == 0);
-            if (elements_a.len > 0) assert(existing_b_head.len == 0);
-            if (elements_b.len > 0) assert(existing_a_tail.len == 0);
-
-            assert(existing_a_head.ptr == a_pointer);
-            assert(existing_a_head.ptr + existing_a_head.len == existing_a_tail.ptr);
-            assert(existing_a_head.ptr + existing_a_head.len == existing_b_head.ptr);
-            if (existing_b_head.len > 0) {
-                assert(existing_b_head.ptr + existing_b_head.len == existing_b_tail.ptr);
-            } else {
-                assert(existing_a_tail.ptr + existing_a_tail.len == existing_b_tail.ptr);
+            if (a_half < cursor.relative_index) {
+                // Move the part of `a` that is past the half-way point into `b`.
+                mem.copyBackwards(
+                    T,
+                    b_half_pointer,
+                    a_pointer[a_half..cursor.relative_index],
+                );
             }
 
-            mem.copy(T, b_pointer[existing_b_head.len + elements_b.len ..], existing_b_tail);
-            mem.copy(T, b_pointer[existing_b_head.len..], elements_b);
-            mem.copy(T, b_pointer, existing_b_head);
-
-            mem.copyBackwards(
-                T,
-                a_pointer[existing_a_head.len + elements_a.len ..],
-                existing_a_tail,
+            // Move `elements` into `a` and/or `b`.
+            copy_backwards(
+                a_half_pointer,
+                b_half_pointer,
+                cursor.relative_index,
+                elements,
             );
-            mem.copy(T, a_pointer[existing_a_head.len..], elements_a);
 
             array.indexes[b] = array.indexes[a] + a_half;
             array.increment_indexes_after(b, @intCast(u32, elements.len));
         }
 
+        /// Behaves like mem.copyBackwards, but as if `a` and `b` were a single contiguous slice.
+        /// `target` is the destination index within the concatenation of `a` and `b`.
+        fn copy_backwards(
+            a: []T,
+            b: []T,
+            target: usize,
+            source: []const T,
+        ) void {
+            assert(target + source.len <= a.len + b.len);
+            const target_a = a[@minimum(target, a.len)..@minimum(target + source.len, a.len)];
+            const target_b = b[target -| a.len..(target + source.len) -| a.len];
+            assert(target_a.len + target_b.len == source.len);
+            const source_a = source[0..target_a.len];
+            const source_b = source[target_a.len..];
+            if (target_b.ptr != source_b.ptr) {
+                mem.copyBackwards(T, target_b, source_b);
+            }
+            if (target_a.ptr != source_a.ptr) {
+                mem.copyBackwards(T, target_a, source_a);
+            }
+        }
+
         /// Insert an empty node at index `node`.
         fn insert_empty_node_at(array: *Self, node_pool: *NodePool, node: u32) void {
-            assert(array.node_count + 1 < node_count_max);
-
             assert(node <= array.node_count);
-            if (node < array.node_count) {
-                mem.copyBackwards(
-                    ?*[node_capacity]T,
-                    array.nodes[node + 1 .. array.node_count + 1],
-                    array.nodes[node..array.node_count],
-                );
-            }
+            assert(array.node_count + 1 <= node_count_max);
+
+            mem.copyBackwards(
+                ?*[node_capacity]T,
+                array.nodes[node + 1 .. array.node_count + 1],
+                array.nodes[node..array.node_count],
+            );
             mem.copyBackwards(
                 u32,
                 array.indexes[node + 1 .. array.node_count + 2],
@@ -310,7 +404,13 @@ fn SegmentedArrayType(
             );
 
             array.node_count += 1;
-            array.nodes[node] = @ptrCast(*[node_capacity]T, node_pool.acquire());
+            const node_pointer = node_pool.acquire();
+            comptime {
+                // @ptrCast does not check that the size or alignment agree
+                assert(std.meta.alignment(@TypeOf(node_pointer)) >= @alignOf(T));
+                assert(@sizeOf(@TypeOf(node_pointer.*)) >= @sizeOf([node_capacity]T));
+            }
+            array.nodes[node] = @ptrCast(*[node_capacity]T, node_pointer);
             assert(array.indexes[node] == array.indexes[node + 1]);
         }
 
@@ -320,6 +420,8 @@ fn SegmentedArrayType(
             absolute_index: u32,
             remove_count: u32,
         ) void {
+            if (options.verify) array.verify();
+
             assert(array.node_count > 0);
             assert(remove_count > 0);
             assert(absolute_index + remove_count <= element_count_max);
@@ -333,6 +435,8 @@ fn SegmentedArrayType(
                 array.remove_elements_batch(node_pool, absolute_index, batch);
                 i -= batch;
             }
+
+            if (options.verify) array.verify();
         }
 
         fn remove_elements_batch(
@@ -410,7 +514,11 @@ fn SegmentedArrayType(
                 array.decrement_indexes_after(b, remove_count);
 
                 array.remove_empty_node_at(node_pool, b);
-                array.maybe_remove_or_merge_node_with_next(node_pool, a);
+
+                // Either:
+                // * `b` was the last node so now `a` is the last node
+                // * both `a` and `b` were at least half-full so now `a` is at least half-full
+                assert(b == array.node_count or array.count(a) >= half);
             }
         }
 
@@ -501,14 +609,11 @@ fn SegmentedArrayType(
                 @ptrCast(NodePool.Node, @alignCast(NodePool.node_alignment, array.nodes[node].?)),
             );
 
-            assert(node <= array.node_count - 1);
-            if (node < array.node_count - 1) {
-                mem.copy(
-                    ?*[node_capacity]T,
-                    array.nodes[node .. array.node_count - 1],
-                    array.nodes[node + 1 .. array.node_count],
-                );
-            }
+            mem.copy(
+                ?*[node_capacity]T,
+                array.nodes[node .. array.node_count - 1],
+                array.nodes[node + 1 .. array.node_count],
+            );
             mem.copy(
                 u32,
                 array.indexes[node..array.node_count],
@@ -598,7 +703,7 @@ fn SegmentedArrayType(
                 inline fn compare(a: u32, b: u32) math.Order {
                     return math.order(a, b);
                 }
-            }.compare, array.indexes[0..array.node_count], absolute_index);
+            }.compare, array.indexes[0..array.node_count], absolute_index, .{});
 
             if (result.exact) {
                 return .{
@@ -771,6 +876,7 @@ fn SegmentedArrayType(
                     compare_keys,
                     array.node_elements(node),
                     key,
+                    .{},
                 );
 
                 // Follow the same rule as absolute_index_for_cursor:
@@ -801,12 +907,12 @@ fn TestContext(
     comptime key_from_value: fn (*const T) callconv(.Inline) Key,
     comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     comptime element_order: enum { sorted, unsorted },
+    comptime options: Options,
 ) type {
     return struct {
         const Self = @This();
 
         const testing = std.testing;
-
         const log = false;
 
         const NodePool = @import("node_pool.zig").NodePool;
@@ -814,8 +920,8 @@ fn TestContext(
         // Test overaligned nodes to catch compile errors for missing @alignCast()
         const TestPool = NodePool(node_size, 2 * @alignOf(T));
         const TestArray = switch (element_order) {
-            .sorted => SortedSegmentedArray(T, TestPool, element_count_max, Key, key_from_value, compare_keys),
-            .unsorted => SegmentedArray(T, TestPool, element_count_max),
+            .sorted => SortedSegmentedArray(T, TestPool, element_count_max, Key, key_from_value, compare_keys, options),
+            .unsorted => SegmentedArray(T, TestPool, element_count_max, options),
         };
 
         random: std.rand.Random,
@@ -879,6 +985,27 @@ fn TestContext(
             }
 
             try context.remove_all();
+
+            if (element_order == .unsorted) {
+                // Insert at the beginning of the array until the array is full.
+                while (context.array.len() < element_count_max) {
+                    try context.insert_before_first();
+                }
+                assert(context.array.node_count >= TestArray.node_count_max - 1);
+
+                // Remove all-but-one elements from the last node and insert them into the first node.
+                const element_count_last = context.array.count(context.array.node_count - 1);
+                var element_index: usize = 0;
+                while (element_index < element_count_last - 1) : (element_index += 1) {
+                    try context.remove_last();
+                    try context.insert_before_first();
+                }
+
+                // We should now have maxed out our node count.
+                assert(context.array.node_count == TestArray.node_count_max);
+
+                try context.remove_all();
+            }
         }
 
         fn insert(context: *Self) !void {
@@ -931,6 +1058,35 @@ fn TestContext(
             context.reference.replaceRange(index, count, &[0]T{}) catch unreachable;
 
             context.removes += count;
+
+            try context.verify();
+        }
+
+        fn insert_before_first(context: *Self) !void {
+            assert(element_order == .unsorted);
+
+            const insert_index = context.array.absolute_index_for_cursor(context.array.first());
+
+            var element: T = undefined;
+            context.random.bytes(mem.asBytes(&element));
+
+            context.array.insert_elements(&context.pool, insert_index, &.{element});
+            context.reference.insert(insert_index, element) catch unreachable;
+
+            context.inserts += 1;
+
+            try context.verify();
+        }
+
+        fn remove_last(context: *Self) !void {
+            assert(element_order == .unsorted);
+
+            const remove_index = context.array.absolute_index_for_cursor(context.array.last());
+
+            context.array.remove_elements(&context.pool, remove_index, 1);
+            context.reference.replaceRange(remove_index, 1, &[0]T{}) catch unreachable;
+
+            context.removes += 1;
 
             try context.verify();
         }
@@ -1055,14 +1211,13 @@ fn TestContext(
                 compare_keys,
                 context.reference.items,
                 key,
+                .{},
             );
         }
     };
 }
 
-test "SegmentedArray" {
-    const seed = 42;
-
+pub fn run_tests(seed: u64, comptime options: Options) !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
@@ -1105,7 +1260,7 @@ test "SegmentedArray" {
         assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
     }
 
-    const Options = struct {
+    const TestOptions = struct {
         element_type: type,
         node_size: u32,
         element_count_max: u32,
@@ -1117,29 +1272,30 @@ test "SegmentedArray" {
     // We want to explore not just the bottom boundary but also the surrounding area
     // as it may also have interesting edge cases.
     inline for (.{
-        Options{ .element_type = u32, .node_size = 8, .element_count_max = 3 },
-        Options{ .element_type = u32, .node_size = 8, .element_count_max = 4 },
-        Options{ .element_type = u32, .node_size = 8, .element_count_max = 5 },
-        Options{ .element_type = u32, .node_size = 8, .element_count_max = 6 },
-        Options{ .element_type = u32, .node_size = 8, .element_count_max = 1024 },
-        Options{ .element_type = u32, .node_size = 16, .element_count_max = 1024 },
-        Options{ .element_type = u32, .node_size = 32, .element_count_max = 1024 },
-        Options{ .element_type = u32, .node_size = 64, .element_count_max = 1024 },
-        Options{ .element_type = TableInfo, .node_size = 256, .element_count_max = 3 },
-        Options{ .element_type = TableInfo, .node_size = 256, .element_count_max = 4 },
-        Options{ .element_type = TableInfo, .node_size = 256, .element_count_max = 1024 },
-        Options{ .element_type = TableInfo, .node_size = 512, .element_count_max = 1024 },
-        Options{ .element_type = TableInfo, .node_size = 1024, .element_count_max = 1024 },
-    }) |options| {
+        TestOptions{ .element_type = u32, .node_size = 8, .element_count_max = 3 },
+        TestOptions{ .element_type = u32, .node_size = 8, .element_count_max = 4 },
+        TestOptions{ .element_type = u32, .node_size = 8, .element_count_max = 5 },
+        TestOptions{ .element_type = u32, .node_size = 8, .element_count_max = 6 },
+        TestOptions{ .element_type = u32, .node_size = 8, .element_count_max = 1024 },
+        TestOptions{ .element_type = u32, .node_size = 16, .element_count_max = 1024 },
+        TestOptions{ .element_type = u32, .node_size = 32, .element_count_max = 1024 },
+        TestOptions{ .element_type = u32, .node_size = 64, .element_count_max = 1024 },
+        TestOptions{ .element_type = TableInfo, .node_size = 256, .element_count_max = 3 },
+        TestOptions{ .element_type = TableInfo, .node_size = 256, .element_count_max = 4 },
+        TestOptions{ .element_type = TableInfo, .node_size = 256, .element_count_max = 1024 },
+        TestOptions{ .element_type = TableInfo, .node_size = 512, .element_count_max = 1024 },
+        TestOptions{ .element_type = TableInfo, .node_size = 1024, .element_count_max = 1024 },
+    }) |test_options| {
         inline for (.{ .sorted, .unsorted }) |order| {
             const Context = TestContext(
-                options.element_type,
-                options.node_size,
-                options.element_count_max,
-                if (options.element_type == u32) u32 else u64,
-                if (options.element_type == u32) CompareInt.key_from_value else CompareTable.key_from_value,
-                if (options.element_type == u32) CompareInt.compare_keys else CompareTable.compare_keys,
+                test_options.element_type,
+                test_options.node_size,
+                test_options.element_count_max,
+                if (test_options.element_type == u32) u32 else u64,
+                if (test_options.element_type == u32) CompareInt.key_from_value else CompareTable.key_from_value,
+                if (test_options.element_type == u32) CompareInt.compare_keys else CompareTable.compare_keys,
                 order,
+                options,
             );
 
             var context = try Context.init(random);
@@ -1147,11 +1303,16 @@ test "SegmentedArray" {
 
             try context.run();
 
-            if (options.node_size % @sizeOf(options.element_type) != 0) tested_padding = true;
+            if (test_options.node_size % @sizeOf(test_options.element_type) != 0) tested_padding = true;
             if (Context.TestArray.node_capacity == 2) tested_node_capacity_min = true;
         }
     }
 
     assert(tested_padding);
     assert(tested_node_capacity_min);
+}
+
+test "SegmentedArray" {
+    const seed = 42;
+    try run_tests(seed, .{ .verify = true });
 }
