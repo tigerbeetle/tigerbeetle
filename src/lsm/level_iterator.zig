@@ -214,7 +214,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                 const table = &it.tables.head_ptr().?.table_iterator;
                 while (true) {
                     _ = table.peek() catch break;
-                    it.values.push(table.pop()) catch unreachable;
+                    it.values.push_assume_capacity(table.pop());
                 }
                 it.tables.advance_head();
             }
