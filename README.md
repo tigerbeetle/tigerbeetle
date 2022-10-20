@@ -17,7 +17,7 @@ TigerBeetle is not yet production-ready. The production version of
 doc](docs/DESIGN.md) provides an overview of TigerBeetle's data
 structures.
 
-Check out short-term Roadmap below for where we're heading!
+Check out our [short-term Roadmap](#short-term-roadmap) below for where we're heading!
 
 ## QuickStart
 
@@ -242,12 +242,17 @@ You may be interested in:
 
 Done:
 
-1. Harden the consensus layer
+1. Consensus layer readiness
 
 In progress:
 
-2. Harden the storage layer (until this happens you'll occasionally see panics in the LSM code)
-3. Support querying an account for its transfers (until this happens you can only query account balances and list all transfers)
+2. Storage layer readiness
+  * Until this happens you'll occasionally see panics in the LSM code.
+  * See [#189](https://github.com/tigerbeetledb/tigerbeetle/issues/189) for details
+3. Recovery readiness
+  * See [#212](https://github.com/tigerbeetledb/tigerbeetle/issues/212) for details
+3. Support querying all transfers associated with an account id
+  * Until this happens you can only query individual accounts and transfers by id
 
 ## License
 
