@@ -248,7 +248,7 @@ In progress:
 
 2. Storage layer readiness
   * Until this happens you'll occasionally see panics in the LSM code.
-  * See [#189](https://github.com/tigerbeetledb/tigerbeetle/issues/189) for details
+  * See [#189](https://github.com/tigerbeetledb/tigerbeetle/issues/189) for details.
 3. Recovery readiness
   * See [#212](https://github.com/tigerbeetledb/tigerbeetle/issues/212) for details
 3. Support querying all transfers associated with an account id
