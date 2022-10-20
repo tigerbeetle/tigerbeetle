@@ -282,7 +282,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
             return Table.key_from_value(&values[it.value]);
         }
 
-        /// This is only safe to call after peek() has returned non-null.
+        /// This may only be called after peek() returns a Key (and not Empty or Drained)
         pub fn pop(it: *TableIterator) Table.Value {
             assert(!it.read_pending);
             assert(!it.read_table_index);

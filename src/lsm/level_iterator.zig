@@ -297,7 +297,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             return scope.table_iterator.peek();
         }
 
-        /// This may only be called after peek() has returned non-null.
+        /// This may only be called after peek() returns a Key (and not Empty or Drained)
         pub fn pop(it: *LevelIterator) Value {
             if (it.values.pop()) |value| return value;
 
