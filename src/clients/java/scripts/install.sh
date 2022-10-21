@@ -11,4 +11,4 @@ echo "Building TigerBeetle..."
 (cd ./src/zig/lib/tigerbeetle && mv ./zig-out/bin/tigerbeetle .)
 
 echo "Building TigerBeetle Java Client..."
-(cd ./src/tigerbeetle-java && mvn -B clean package)
+(cd ./src/tigerbeetle-java && mvn -B package --quiet)
