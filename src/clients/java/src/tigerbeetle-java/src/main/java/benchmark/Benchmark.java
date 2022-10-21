@@ -75,7 +75,7 @@ public class Benchmark {
                 if (transfersErrors.getLength() > 0) {
 
                     while (accountErrors.next()) {
-                        System.err.printf("Error creating transfer #%d -> %s\n",
+                        System.err.printf("Error creating transfer #%d -> %s%n",
                                 transfersErrors.getIndex(), transfersErrors.getResult());
                     }
 
@@ -93,10 +93,10 @@ public class Benchmark {
 
             var result = (long) (MAX_TRANSFERS * 1000) / totalTime;
 
-            System.out.printf("%d transfers per second\n", result);
-            System.out.printf("create_transfers max p100 latency per %d transfers = %dms\n",
+            System.out.printf("%d transfers per second%n", result);
+            System.out.printf("create_transfers max p100 latency per %d transfers = %dms%n",
                     TRANSFERS_PER_BATCH, maxTransferLatency);
-            System.out.printf("total %d transfers in %dms\n", MAX_TRANSFERS, totalTime);
+            System.out.printf("total %d transfers in %dms%n", MAX_TRANSFERS, totalTime);
 
         } catch (Exception e) {
             System.out.println(e);

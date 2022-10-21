@@ -139,9 +139,7 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
             if (exception instanceof Error)
                 throw (Error) exception;
 
-            // If we can't determine the type of the exception,
-            // throw a generic RuntimeException pointing as a cause
-            throw new RuntimeException(exception);
+            throw new AssertionError(exception, "Unexpected exception");
 
         } else {
 

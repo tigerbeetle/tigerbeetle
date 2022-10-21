@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Objects;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 /**
@@ -35,9 +36,13 @@ public abstract class Batch {
         public static final int INVALID_POSITION = -1;
     }
 
-    // We require little-endian architectures everywhere for efficient network
-    // deserialization:
-    final static ByteOrder BYTE_ORDER = ByteOrder.LITTLE_ENDIAN;
+    final static ByteOrder BYTE_ORDER = ByteOrder.nativeOrder();
+
+    static {
+        // We require little-endian architectures everywhere for efficient network
+        // deserialization:
+        assertTrue(BYTE_ORDER == ByteOrder.LITTLE_ENDIAN, "Native byte order LITTLE ENDIAN expected");
+    }
 
     private int position;
     private CursorStatus cursorStatus;
@@ -60,7 +65,7 @@ public abstract class Batch {
         this.capacity = capacity;
 
         this.position = CursorStatus.INVALID_POSITION;
-        this.cursorStatus = CursorStatus.End;
+        this.cursorStatus = CursorStatus.Begin;
 
         final var bufferCapacity = capacity * ELEMENT_SIZE;
         this.buffer = ByteBuffer.allocateDirect(bufferCapacity).order(BYTE_ORDER);
@@ -69,9 +74,7 @@ public abstract class Batch {
     Batch(final ByteBuffer buffer, final int ELEMENT_SIZE) {
 
         assertTrue(ELEMENT_SIZE > 0, "Element size cannot be zero or negative");
-
-        if (buffer == null)
-            throw new NullPointerException("Buffer cannot be null");
+        Objects.requireNonNull(buffer, "Buffer cannot be null");
 
         this.ELEMENT_SIZE = ELEMENT_SIZE;
         final var bufferLen = buffer.capacity();
@@ -117,11 +120,13 @@ public abstract class Batch {
      * Tries to move the current {@link #setPosition position} to the next element in this batch.
      *
      * @return true if moved or false if the end of the batch was reached.
+     *
+     * @throws IndexOutOfBoundsException if the batch is already at the end.
      */
     public final boolean next() {
 
         if (cursorStatus == CursorStatus.End)
-            return false;
+            throw new IndexOutOfBoundsException("This batch reached the end");
 
         final var nextPosition = position + 1;
         if (nextPosition >= this.length) {
@@ -145,10 +150,12 @@ public abstract class Batch {
 
     /**
      * Moves the cursor to the front of this Batch, before the first element.
+     * <p>
+     * This causes the batch to be iterable again by calling {@link #next()}.
      */
     public final void beforeFirst() {
         position = CursorStatus.INVALID_POSITION;
-        cursorStatus = length > 0 ? CursorStatus.Begin : CursorStatus.End;
+        cursorStatus = CursorStatus.Begin;
     }
 
     /**
@@ -202,7 +209,8 @@ public abstract class Batch {
         if (this.cursorStatus != CursorStatus.Valid)
             throw new IllegalStateException();
 
-        return (this.position * ELEMENT_SIZE) + fieldOffSet;
+        final var elementPosition = this.position * ELEMENT_SIZE;
+        return elementPosition + fieldOffSet;
     }
 
     protected final byte[] getUInt128(final int index) {

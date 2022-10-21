@@ -1,6 +1,7 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
 /**
  * A {@link Batch batch} of transfers.
@@ -11,20 +12,20 @@ public final class TransferBatch extends Batch {
 
     interface Struct {
 
-        public static final int Id = 0;
-        public static final int DebitAccountId = 16;
-        public static final int CreditAccountId = 32;
-        public static final int UserData = 48;
-        public static final int Reserved = 64;
-        public static final int PendingId = 80;
-        public static final int Timeout = 96;
-        public static final int Ledger = 104;
-        public static final int Code = 108;
-        public static final int Flags = 110;
-        public static final int Amount = 112;
-        public static final int Timestamp = 120;
+        int Id = 0;
+        int DebitAccountId = 16;
+        int CreditAccountId = 32;
+        int UserData = 48;
+        int Reserved = 64;
+        int PendingId = 80;
+        int Timeout = 96;
+        int Ledger = 104;
+        int Code = 108;
+        int Flags = 110;
+        int Amount = 112;
+        int Timestamp = 120;
 
-        public static final int SIZE = 128;
+        int SIZE = 128;
     }
 
     static final TransferBatch EMPTY = new TransferBatch(0);
@@ -108,10 +109,7 @@ public final class TransferBatch extends Batch {
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setId(final byte[] id) {
-
-        if (id == null)
-            throw new NullPointerException("Id cannot be null");
-
+        Objects.requireNonNull(id, "Id cannot be null");
         putUInt128(at(Struct.Id), id);
     }
 
@@ -167,10 +165,7 @@ public final class TransferBatch extends Batch {
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setDebitAccountId(final byte[] debitAccountId) {
-
-        if (debitAccountId == null)
-            throw new NullPointerException("Debit account id cannot be null");
-
+        Objects.requireNonNull(debitAccountId, "Debit account id cannot be null");
         putUInt128(at(Struct.DebitAccountId), debitAccountId);
     }
 
@@ -225,10 +220,7 @@ public final class TransferBatch extends Batch {
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
     public void setCreditAccountId(final byte[] creditAccountId) {
-
-        if (creditAccountId == null)
-            throw new NullPointerException("Credit account id cannot be null");
-
+        Objects.requireNonNull(creditAccountId, "Credit account id cannot be null");
         putUInt128(at(Struct.CreditAccountId), creditAccountId);
     }
 

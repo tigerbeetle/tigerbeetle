@@ -5,7 +5,7 @@
     ],
     "java.configuration.updateBuildConfiguration": "automatic",
     "java.format.enabled": true,
-    "java.format.settings.url": "src/tigerbeetle-java/formatter.xml",
+    "java.format.settings.url": "eclipse-formatter.xml",
     "cSpell.words": [
         "tigerbeetle"
     ],

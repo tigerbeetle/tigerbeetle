@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import java.lang.annotation.Native;
 import java.nio.ByteBuffer;
+import java.util.Objects;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 abstract class Request<TResponse extends Batch> {
@@ -27,10 +28,10 @@ abstract class Request<TResponse extends Batch> {
     // @formatter:on
 
     interface Operations {
-        public final static byte CREATE_ACCOUNTS = 3;
-        public final static byte CREATE_TRANSFERS = 4;
-        public final static byte LOOKUP_ACCOUNTS = 5;
-        public final static byte LOOKUP_TRANSFERS = 6;
+        byte CREATE_ACCOUNTS = 3;
+        byte CREATE_TRANSFERS = 4;
+        byte LOOKUP_ACCOUNTS = 5;
+        byte LOOKUP_TRANSFERS = 6;
     }
 
     // Used ony by the JNI side
@@ -45,11 +46,8 @@ abstract class Request<TResponse extends Batch> {
     private final int requestLen;
 
     protected Request(final Client client, final byte operation, final Batch batch) {
-
-        if (client == null)
-            throw new NullPointerException("Client cannot be null");
-        if (batch == null)
-            throw new NullPointerException("Batch cannot be null");
+        Objects.requireNonNull(client, "Id cannot be null");
+        Objects.requireNonNull(batch, "Batch cannot be null");
 
         this.client = client;
         this.operation = operation;
