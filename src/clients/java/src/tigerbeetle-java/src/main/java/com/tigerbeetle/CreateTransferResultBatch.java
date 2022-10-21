@@ -9,14 +9,14 @@ import java.nio.ByteBuffer;
  * Successfully executed operations return an empty batch whilst unsuccessful ones return a batch
  * with errors for only the ones that failed. This instance is always ready-only.
  */
-public class CreateTransferResultBatch extends Batch {
+public final class CreateTransferResultBatch extends Batch {
 
     interface Struct {
 
-        public static final int Index = 0;
-        public static final int Result = 4;
+        int Index = 0;
+        int Result = 4;
 
-        public final static int SIZE = 8;
+        int SIZE = 8;
     }
 
     static final CreateTransferResultBatch EMPTY = new CreateTransferResultBatch(0);

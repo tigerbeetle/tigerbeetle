@@ -11,46 +11,37 @@ pub fn build(b: *std.build.Builder) void {
         .{ "x86_64-macos", "macos-x86_64" },
         .{ "aarch64-linux-gnu", "linux-aarch_64" },
         .{ "aarch64-macos", "macos-aarch64" },
-    } ++
-        // This is a workarround
-        // Cross compiling to windows is failing
-        // tb_client.obj: not an ELF file error: LLDReportedFailure
-        switch (builtin.target.os.tag) {
-        .windows => .{
-            .{ "x86_64-windows-gnu", "win-x86_64" },
-        },
-        else => .{},
+        .{ "x86_64-windows", "win-x86_64" },
     };
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
-        const tb_client = b.addStaticLibrary("tb_client", "lib/tigerbeetle/src/c/tb_client.zig");
-        tb_client.setMainPkgPath("lib/tigerbeetle/src");
-        tb_client.setTarget(cross_target);
-        tb_client.setBuildMode(mode);
-
         const lib = b.addSharedLibrary("tb_jniclient", "src/client.zig", .unversioned);
         lib.addPackagePath("jui", "lib/jui/src/jui.zig");
+        lib.addPackagePath("tigerbeetle", "tb_client.zig");
         lib.setOutputDir("../tigerbeetle-java/src/main/resources/lib/" ++ platform[1]);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
 
         if (cross_target.os_tag.? == .windows) {
 
-            // This is another workarround
-            // Compiling on Windows, the linker cannot resolve those dependencies from tb_client static library
+            // The linker cannot resolve these dependencies from tb_client
             // So we have to insert them manually here, or we are going to receive a "lld-link: error: undefined symbol"
-            if (builtin.target.os.tag == .windows) {
-                lib.linkSystemLibrary("ws2_32");
-                lib.linkSystemLibrary("advapi32");
-            }
+            lib.linkSystemLibrary("ws2_32");
+            lib.linkSystemLibrary("advapi32");
         } else {
-            tb_client.linkLibC();
             lib.linkLibC();
         }
 
-        lib.linkLibrary(tb_client);
+        // Hit some issue with the build cache between cross compilations:
+        // - From Linux, it runs fine
+        // - From Windows it fails on libc "invalid object"
+        // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
+        // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
+        b.cache_root = "zig-cache/" ++ platform[1];
+        b.global_cache_root = "zig-cache/global-" ++ platform[1];
+
         lib.install();
     }
 }

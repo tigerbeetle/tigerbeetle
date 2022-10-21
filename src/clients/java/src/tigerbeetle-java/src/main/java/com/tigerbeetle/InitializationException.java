@@ -3,12 +3,12 @@ package com.tigerbeetle;
 public final class InitializationException extends RuntimeException {
 
     public interface Status {
-        public static final int SUCCESS = 0;
-        public static final int UNEXPECTED = 1;
-        public static final int OUT_OF_MEMORY = 2;
-        public static final int INVALID_ADDRESS = 3;
-        public static final int SYSTEM_RESOURCES = 4;
-        public static final int NETWORK_SUBSYSTEM = 5;
+        int SUCCESS = 0;
+        int UNEXPECTED = 1;
+        int OUT_OF_MEMORY = 2;
+        int INVALID_ADDRESS = 3;
+        int SYSTEM_RESOURCES = 4;
+        int NETWORK_SUBSYSTEM = 5;
     }
 
     private final int status;

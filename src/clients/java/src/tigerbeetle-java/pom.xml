@@ -6,8 +6,7 @@
   <groupId>com.tigerbeetle</groupId>
   <artifactId>tigerbeetle-java</artifactId>
   <version>0.0.1-SNAPSHOT</version>
-
-  <name>tigerbeetle-java</name>
+  <name>TigerBeetle Java client</name>
   <url>https://www.tigerbeetle.com</url>
   <scm>
     <url>https://github.com/tigerbeetledb/tigerbeetle-java</url>
@@ -70,6 +69,7 @@
               <exclude>**/*.o</exclude>
               <exclude>**/*.obj</exclude>
               <exclude>**/*.pdb</exclude>
+              <exclude>**/win*/*.lib</exclude>
             </excludes>
           </configuration>
         </plugin>
@@ -120,7 +120,15 @@
           <version>2.19.0</version>
           <configuration>
             <lineEnding>LF</lineEnding>
-            <configFile>${project.basedir}/formatter.xml</configFile>
+            <configFile>${project.basedir}/../../eclipse-formatter.xml</configFile>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-pmd-plugin</artifactId>
+          <version>3.19.0</version>
+          <configuration>
+            <linkXRef>false</linkXRef>
           </configuration>
         </plugin>
       </plugins>
@@ -235,8 +243,28 @@
           </execution>
         </executions>
       </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-pmd-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>pdm-check</id>
+            <phase>test</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <verbose>true</verbose>
+              <excludeFromFailureFile>${project.basedir}/exclude-pmd.properties</excludeFromFailureFile>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
     </plugins>
   </build>
+
   <distributionManagement>
     <repository>
       <id>github</id>
