@@ -14,5 +14,5 @@ cd ..\..\..\..
 
 echo "Building TigerBeetle Java Client..."
 cd .\src\tigerbeetle-java
-mvn -B clean package --quiet
+mvn -B package --quiet
 cd ..\..

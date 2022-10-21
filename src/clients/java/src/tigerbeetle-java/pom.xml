@@ -127,6 +127,9 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-pmd-plugin</artifactId>
           <version>3.19.0</version>
+          <configuration>
+            <linkXRef>false</linkXRef>
+          </configuration>
         </plugin>
       </plugins>
     </pluginManagement>
