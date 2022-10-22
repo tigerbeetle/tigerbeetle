@@ -148,6 +148,20 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const lsm_tree_fuzz = b.addExecutable("lsm_tree_fuzz", "src/lsm/tree_fuzz.zig");
+        lsm_tree_fuzz.setMainPkgPath("src");
+        lsm_tree_fuzz.setTarget(target);
+        lsm_tree_fuzz.setBuildMode(mode);
+
+        const run_cmd = lsm_tree_fuzz.run();
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("lsm_tree_fuzz", "Fuzz the LSM tree. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
         const lsm_segmented_array_fuzz = b.addExecutable("lsm_segmented_array_fuzz", "src/lsm/segmented_array_fuzz.zig");
         lsm_segmented_array_fuzz.setMainPkgPath("src");
         lsm_segmented_array_fuzz.setTarget(target);

@@ -419,7 +419,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         /// Returns null if the value is null or a tombstone, otherwise returns the value.
         /// We use tombstone values internally, but expose them as null to the user.
         /// This distinction enables us to cache a null result as a tombstone in our hash maps.
-        inline fn unwrap_tombstone(value: ?*const Value) ?*const Value {
+        pub inline fn unwrap_tombstone(value: ?*const Value) ?*const Value {
             return if (value == null or tombstone(value.?)) null else value.?;
         }
 
@@ -1087,102 +1087,4 @@ test "table_count_max_for_level/tree" {
     try expectEqual(@as(u32, 4680 + 32768), table_count_max_for_tree(8, 5));
     try expectEqual(@as(u32, 37448 + 262144), table_count_max_for_tree(8, 6));
     try expectEqual(@as(u32, 299592 + 2097152), table_count_max_for_tree(8, 7));
-}
-
-pub fn main() !void {
-    const testing = std.testing;
-    const allocator = testing.allocator;
-
-    const IO = @import("../io.zig").IO;
-    const Storage = @import("../storage.zig").Storage;
-    const Grid = @import("grid.zig").GridType(Storage);
-
-    const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
-
-    const dir_fd = try IO.open_dir(".");
-    const storage_fd = try IO.open_file(dir_fd, "test_tree", data_file_size_min, true);
-    defer std.fs.cwd().deleteFile("test_tree") catch {};
-
-    var io = try IO.init(128, 0);
-    defer io.deinit();
-
-    var storage = try Storage.init(&io, storage_fd);
-    defer storage.deinit();
-
-    const Key = CompositeKey(u128);
-    const Table = @import("table.zig").TableType(
-        Key,
-        Key.Value,
-        Key.compare_keys,
-        Key.key_from_value,
-        Key.sentinel_key,
-        Key.tombstone,
-        Key.tombstone_from_key,
-    );
-
-    const Tree = TreeType(Table, Storage, @typeName(Table) ++ "_test");
-
-    // Check out our spreadsheet to see how we calculate node_count for a forest of trees.
-    const node_count = 1024;
-    var node_pool = try NodePool.init(allocator, node_count);
-    defer node_pool.deinit(allocator);
-
-    var value_cache = Tree.ValueCache{};
-    try value_cache.ensureTotalCapacity(allocator, 10000);
-    defer value_cache.deinit(allocator);
-
-    const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
-    const commit_entries_max = @divFloor(batch_size_max, 128);
-
-    var sort_buffer = try allocator.allocAdvanced(
-        u8,
-        16,
-        // This must be the greatest commit_entries_max and value_size across trees:
-        commit_entries_max * config.lsm_batch_multiple * 128,
-        .exact,
-    );
-    defer allocator.free(sort_buffer);
-
-    // TODO Initialize SuperBlock:
-    var superblock: vsr.SuperBlockType(Storage) = undefined;
-
-    var grid = try Grid.init(allocator, &superblock);
-    defer grid.deinit(allocator);
-
-    var tree = try Tree.init(
-        allocator,
-        &node_pool,
-        &grid,
-        &value_cache,
-        .{
-            .prefetch_entries_max = commit_entries_max * 2,
-            .commit_entries_max = commit_entries_max,
-        },
-    );
-    defer tree.deinit(allocator);
-
-    testing.refAllDecls(@This());
-
-    // TODO: more references
-    _ = Table;
-    _ = Table.Builder.data_block_finish;
-
-    // TODO: more references
-    _ = Tree.CompactionTable;
-
-    _ = tree.prefetch_enqueue;
-    _ = tree.prefetch;
-    _ = tree.prefetch_key;
-    _ = tree.get;
-    _ = tree.put;
-    _ = tree.remove;
-    _ = tree.lookup;
-    _ = tree.compact_tick;
-
-    _ = Tree.Manifest.LookupIterator.next;
-    _ = tree.manifest;
-    _ = tree.manifest.lookup;
-    _ = tree.manifest.insert_tables;
-
-    std.debug.print("table_count_max={}\n", .{table_count_max});
 }
