@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 
+const StaticAllocator = @import("../static_allocator.zig");
 const GridType = @import("../lsm/grid.zig").GridType;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -92,6 +93,10 @@ pub fn ReplicaType(
 
         const Journal = vsr.Journal(Self, Storage);
         const Clock = vsr.Clock(Time);
+
+        /// We use this allocator during open/init and then disable it.
+        /// An accidental dynamic allocation after open/init will cause an assertion failure.
+        static_allocator: StaticAllocator,
 
         /// The number of the cluster to which this replica belongs:
         cluster: u32,
@@ -255,7 +260,10 @@ pub fn ReplicaType(
         };
 
         /// Initializes and opens the provided replica using the options.
-        pub fn open(self: *Self, allocator: std.mem.Allocator, options: OpenOptions) !void {
+        pub fn open(self: *Self, parent_allocator: std.mem.Allocator, options: OpenOptions) !void {
+            self.static_allocator = StaticAllocator.init(parent_allocator);
+            const allocator = self.static_allocator.allocator();
+
             self.superblock = try SuperBlock.init(
                 allocator,
                 options.storage,
@@ -291,6 +299,9 @@ pub fn ReplicaType(
                 .state_machine_options = options.state_machine_options,
                 .message_bus_options = options.message_bus_options,
             });
+
+            // Disable all dynamic allocation from this point onwards.
+            self.static_allocator.transition_from_init_to_static();
 
             initialized = true;
             errdefer self.deinit(allocator);
@@ -410,6 +421,7 @@ pub fn ReplicaType(
             };
 
             self.* = Self{
+                .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
                 .replica_count = replica_count,
                 .replica = replica_index,
@@ -496,6 +508,8 @@ pub fn ReplicaType(
         /// Free all memory and unref all messages held by the replica
         /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time
         pub fn deinit(self: *Self, allocator: Allocator) void {
+            self.static_allocator.transition_from_static_to_deinit();
+
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
             self.state_machine.deinit(allocator);
