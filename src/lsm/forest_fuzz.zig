@@ -59,7 +59,7 @@ const Environment = struct {
     storage: *Storage,
     message_pool: MessagePool,
     superblock: SuperBlock,
-    superblock_context: SuperBlock.Context,
+    superblock_context: SuperBlock.Context = undefined,
     grid: Grid,
     forest: Forest,
     // We need @fieldParentPtr() of forest, so we can't use an optional Forest.
@@ -75,7 +75,6 @@ const Environment = struct {
         errdefer env.message_pool.deinit(allocator);
 
         env.superblock = try SuperBlock.init(allocator, env.storage, &env.message_pool);
-        env.superblock_context = undefined;
         errdefer env.superblock.deinit(allocator);
 
         env.grid = try Grid.init(allocator, &env.superblock);
