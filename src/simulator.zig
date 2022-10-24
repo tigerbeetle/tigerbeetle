@@ -141,8 +141,7 @@ pub fn main() !void {
             // is implemented after recovering with decision=fix. Otherwise we can end up with
             // multiple crashes faulting first a redundant headers, then a prepare, upgrading
             // a decision=fix to decision=vsr.
-            .crash_fault_probability =
-                if (replica_count == 1) 0 else 80 + random.uintLessThan(u8, 21),
+            .crash_fault_probability = if (replica_count == 1) 0 else 80 + random.uintLessThan(u8, 21),
             .faulty_superblock = true,
         },
         .health_options = .{

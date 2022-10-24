@@ -164,7 +164,7 @@ pub fn build(b: *std.build.Builder) void {
         const run_cmd = fuzz_lsm_manifest_log.run();
         if (b.args) |args| run_cmd.addArgs(args);
 
-        const run_step = b.step("fuzz_lsm_manifest_log", "Fuzz the ManifestLog. Args: [seed]");
+        const run_step = b.step("fuzz_lsm_manifest_log", "Fuzz the ManifestLog. Args: [--seed <seed>]");
         run_step.dependOn(&run_cmd.step);
     }
 
@@ -213,7 +213,7 @@ pub fn build(b: *std.build.Builder) void {
         const run_cmd = fuzz_vsr_superblock.run();
         if (b.args) |args| run_cmd.addArgs(args);
 
-        const run_step = b.step("fuzz_vsr_superblock", "Fuzz the SuperBlock. Args: [seed]");
+        const run_step = b.step("fuzz_vsr_superblock", "Fuzz the SuperBlock. Args: [--seed <seed>]");
         run_step.dependOn(&run_cmd.step);
     }
 }
