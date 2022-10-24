@@ -18,6 +18,9 @@ creation.
 
 This is a unique identifier for the transaction.
 
+Values for transfer IDs *may* be reused as values for account IDs. You
+can consider transfers and accounts as separate namespaces.
+
 As an example, you might generate a UUID to identify each transaction.
 
 Constraints:

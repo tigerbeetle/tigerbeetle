@@ -19,6 +19,9 @@ TigerBeetle as transfers move money to and from an account.
 
 This is a unique, client-defined identifier for the account.
 
+Values for account IDs *may* be reused as values for transfer IDs. You
+can consider transfers and accounts as separate namespaces.
+
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
