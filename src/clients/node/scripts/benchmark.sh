@@ -6,9 +6,11 @@ COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
 cd ./src/tigerbeetle
-$CWD/zig/zig build -Drelease-safe
-mv zig-out/bin/tigerbeetle $CWD
-cd $CWD
+"$CWD"/zig/zig build -Drelease-safe
+mv zig-out/bin/tigerbeetle "$CWD"
+cd "$CWD"
+
+REPLICAS="0"
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -20,7 +22,7 @@ function onerror {
         cat benchmark.log
     fi
 
-    for I in 0
+    for I in $REPLICAS
     do
         echo "Stopping replica $I..."
     done
@@ -41,7 +43,7 @@ if [ -f $FILE ]; then
 fi
 ./tigerbeetle format --cluster=$CLUSTER_ID --replica=0 $FILE
 
-for I in 0
+for I in $REPLICAS
 do
     echo "Starting replica $I..."
     ./tigerbeetle start $REPLICA_ADDRESSES $FILE > benchmark.log 2>&1 &

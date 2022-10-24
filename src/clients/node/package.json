@@ -6,7 +6,7 @@
   "typings": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/coilhq/tigerbeetle-node.git"
+    "url": "git+https://github.com/tigerbeetledb/tigerbeetle-node.git"
   },
   "preferUnplugged": true,
   "files": [
@@ -34,21 +34,21 @@
     "benchmark": "./scripts/benchmark.sh",
     "test": "node dist/test",
     "postinstall": "npm run install_zig && npm run download_node_headers && npm run build_lib",
-    "install_zig": "./src/tigerbeetle/scripts/install_zig.sh",
-    "download_node_headers": "./scripts/download_node_headers.sh",
+    "install_zig": "sh ./src/tigerbeetle/scripts/install_zig.sh",
+    "download_node_headers": "sh ./scripts/download_node_headers.sh",
     "build": "npm run build_tsc && npm run build_lib",
     "build_tsc": "./node_modules/typescript/bin/tsc",
     "build_lib": "mkdir -p dist && zig/zig build-lib -mcpu=baseline -OReleaseSafe -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -fallow-shlib-undefined -femit-bin=dist/client.node",
     "prepack": "git submodule deinit --all && git submodule update --init && npm run build_tsc",
     "clean": "rm -rf build dist node_modules src/zig-cache zig"
   },
-  "author": "Coil Technologies, Inc",
+  "author": "TigerBeetle, Inc",
   "license": "Apache-2.0",
   "contributors": [
     "Donovan Changfoot <don@coil.com>",
     "Isaac Freund <isaac.freund@coil.com>",
     "Jason Bruwer <jason.bruwer@coil.com>",
-    "Joran Dirk Greef <joran@coil.com>"
+    "Joran Dirk Greef <joran@tigerbeetle.com>"
   ],
   "devDependencies": {
     "@types/node": "^14.14.41",
