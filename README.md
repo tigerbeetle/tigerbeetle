@@ -23,6 +23,21 @@ structures.
 
 Check out our [short-term roadmap](#short-term-roadmap) below for where we're heading!
 
+## Documentation
+
+- Setup
+  - [Run a single-node cluster with Docker](./setup/with-docker)
+  - [Run a single-node cluster from source](./setup/from-source)
+  - [Run a three-node cluster with docker-compose](./setup/with-docker-compose)
+- Operation
+  - [Hardware](./docs/operation/hardware.md)
+- Usage
+  - [Integration](./docs/usage/integration.md)
+  - [Creating accounts and transfers in the Node CLI](./usage/node-cli.md)
+- Reference
+  - [Accounts](./docs/reference/accounts.md)
+  - [Transfers](./docs/reference/transfers.md)
+
 ## QuickStart
 
 TigerBeetle is easy to run with or without Docker, depending on your

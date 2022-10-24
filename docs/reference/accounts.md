@@ -100,6 +100,10 @@ chain. The account that was the first to break the chain will have a
 unique error result. Other accounts in the chain will have their error
 result set to `linked_event_failed`.
 
+After the link has executed, the association of each event is lost.
+To save the association, it must be
+[encoded into the data model](../usage/integration.md#data-modeling).
+
 #### `flags.debits_must_not_exceed_credits`
 
 When set, transfers will be rejected that would cause this account's
