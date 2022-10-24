@@ -815,18 +815,22 @@ test "exponential_backoff_with_jitter" {
 /// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
 pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8, address_limit: usize) ![]std.net.Address {
-    // TODO After parsing addresses resize the memory allocation.
-    var addresses = try allocator.alloc(std.net.Address, address_limit);
+    const address_count = std.mem.count(u8, raw, ",") + 1;
+    if (address_count > address_limit) return error.AddressLimitExceeded;
+
+    const addresses = try allocator.alloc(std.net.Address, address_count);
     errdefer allocator.free(addresses);
 
     var index: usize = 0;
     var comma_iterator = std.mem.split(u8, raw, ",");
     while (comma_iterator.next()) |raw_address| : (index += 1) {
+        assert(index < address_limit);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        if (index == address_limit) return error.AddressLimitExceeded;
         addresses[index] = try parse_address(raw_address);
     }
-    return addresses[0..index];
+    assert(index == address_count);
+
+    return addresses;
 }
 
 pub fn parse_address(raw: []const u8) !std.net.Address {
@@ -867,12 +871,12 @@ pub fn parse_address(raw: []const u8) !std.net.Address {
 test "parse_addresses" {
     const vectors_positive = &[_]struct {
         raw: []const u8,
-        addresses: [3]std.net.Address,
+        addresses: []const std.net.Address,
     }{
         .{
             // Test the minimum/maximum address/port.
             .raw = "1.2.3.4:567,0.0.0.0:0,255.255.255.255:65535",
-            .addresses = [3]std.net.Address{
+            .addresses = &[3]std.net.Address{
                 std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 567),
                 std.net.Address.initIp4([_]u8{ 0, 0, 0, 0 }, 0),
                 std.net.Address.initIp4([_]u8{ 255, 255, 255, 255 }, 65535),
@@ -881,7 +885,7 @@ test "parse_addresses" {
         .{
             // Addresses are not reordered.
             .raw = "3.4.5.6:7777,200.3.4.5:6666,1.2.3.4:5555",
-            .addresses = [3]std.net.Address{
+            .addresses = &[3]std.net.Address{
                 std.net.Address.initIp4([_]u8{ 3, 4, 5, 6 }, 7777),
                 std.net.Address.initIp4([_]u8{ 200, 3, 4, 5 }, 6666),
                 std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 5555),
@@ -890,10 +894,18 @@ test "parse_addresses" {
         .{
             // Test default address and port.
             .raw = "1.2.3.4:5,4321,2.3.4.5",
-            .addresses = [3]std.net.Address{
+            .addresses = &[3]std.net.Address{
                 std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 5),
                 try std.net.Address.parseIp4(config.address, 4321),
                 std.net.Address.initIp4([_]u8{ 2, 3, 4, 5 }, config.port),
+            },
+        },
+        .{
+            // Test addresses less than address_limit.
+            .raw = "1.2.3.4:5,4321",
+            .addresses = &[2]std.net.Address{
+                std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 5),
+                try std.net.Address.parseIp4(config.address, 4321),
             },
         },
     };
@@ -904,7 +916,7 @@ test "parse_addresses" {
     }{
         .{ .raw = "", .err = error.AddressHasTrailingComma },
         .{ .raw = "1.2.3.4:5,2.3.4.5:6,4.5.6.7:8", .err = error.AddressLimitExceeded },
-        .{ .raw = "1.2.3.4:7777,2.3.4.5:8888,", .err = error.AddressHasTrailingComma },
+        .{ .raw = "1.2.3.4:7777,", .err = error.AddressHasTrailingComma },
         .{ .raw = "1.2.3.4:7777,2.3.4.5::8888", .err = error.AddressHasMoreThanOneColon },
         .{ .raw = "1.2.3.4:5,A", .err = error.AddressInvalid }, // default port
         .{ .raw = "1.2.3.4:5,2.a.4.5", .err = error.AddressInvalid }, // default port
@@ -919,7 +931,7 @@ test "parse_addresses" {
         const addresses_actual = try parse_addresses(std.testing.allocator, vector.raw, 3);
         defer std.testing.allocator.free(addresses_actual);
 
-        try std.testing.expectEqual(addresses_actual.len, 3);
+        try std.testing.expectEqual(addresses_actual.len, vector.addresses.len);
         for (vector.addresses) |address_expect, i| {
             const address_actual = addresses_actual[i];
             try std.testing.expectEqual(address_expect.in.sa.family, address_actual.in.sa.family);
