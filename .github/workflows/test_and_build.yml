@@ -62,6 +62,30 @@ jobs:
       - run: zig/zig build test
       - run: ./scripts/install.sh
 
+  fuzz_lsm_manifest_log:
+    name: 'Fuzz LSM ManifestLog'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_lsm_manifest_log
+
+  fuzz_lsm_segmented_array:
+    name: 'Fuzz LSM SegmentedArray'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_lsm_segmented_array
+
+  fuzz_vsr_superblock:
+    name: 'Fuzz VSR SuperBlock'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_vsr_superblock
+
   # This is just a canary to make sure that the simulator compiles
   # (and passes for at least a single seed).
   simulator:
