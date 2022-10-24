@@ -1,5 +1,5 @@
 # tigerbeetle-node
-[TigerBeetle](https://github.com/coilhq/tigerbeetle) client for Node.js.
+[TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) client for Node.js.
 
 ## Installation
 
@@ -8,6 +8,16 @@ Install the `tigerbeetle-node` module to your current working directory:
 ```shell
 npm install tigerbeetle-node
 ```
+
+If you run into issues, check out the distribution-specific install
+steps that are run in CI to test support:
+
+* [Alpine](./scripts/test_install_on_alpine.sh)
+* [Amazon Linux](./scripts/test_install_on_amazonlinux.sh)
+* [Debian](./scripts/test_install_on_debian.sh)
+* [Fedora](./scripts/test_install_on_fedora.sh)
+* [Ubuntu](./scripts/test_install_on_ubuntu.sh)
+* [RHEL](./scripts/test_install_on_rhelubi.sh)
 
 ### Prerequisites
 
@@ -219,7 +229,7 @@ const errors = await client.createTransfers(batch)
 To get up and running when cloning the repo:
 
 ```shell
-git clone --recurse-submodules https://github.com/coilhq/tigerbeetle-node.git
+git clone --recurse-submodules https://github.com/tigerbeetledb/tigerbeetle-node.git
 cd tigerbeetle-node/
 npm install --include dev # This will automatically install and build everything you need.
 ```
