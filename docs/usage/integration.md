@@ -16,8 +16,8 @@ TigerBeetle provides strict serializability
 ([serializability + linearizability](http://www.bailis.org/blog/linearizability-versus-serializability/))
 to each [client session](#client-sessions).
 
-But consistency models are notoriously arcane — what specifically does this mean for applications
-in practice?
+But consistency models can seem arcane.
+What specific guarantees does TigerBeetle provide to applications?
 
 - [**Client sessions**](#client-sessions)
   - A client session may have at most one in-flight request.
