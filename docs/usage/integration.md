@@ -2,18 +2,19 @@
 
 TigerBeetle is designed to guard against bugs not only in its [own code](../TIGER_STYLE.md), but
 at the boundaries, in the application code which interfaces with TigerBeetle.
-This is exhibited by the client's API design, which may be [surprising](#retries) when contrasted
-with a more conventional database.
+This is exhibited by the client's API design, which may be surfacing (see [Retries](#retries)) when
+contrasted with a more conventional database.
 
-Strict consistency guarantees at the database level simplify application logic and error handling
+Strict consistency guarantees (at the database level) simplify application logic and error handling
 farther up the stack.
 
 
 
 ## Consistency
 
-TigerBeetle provides strict serializability (serializability + linearizability) to each
-[client session](#client-sessions).
+TigerBeetle provides strict serializability
+([serializability + linearizability](http://www.bailis.org/blog/linearizability-versus-serializability/))
+to each [client session](#client-sessions).
 
 But consistency models are notoriously arcane — what specifically does this mean for applications
 in practice?
@@ -24,10 +25,12 @@ in practice?
   - A client session observes writes in the order that they occur on the cluster.
   - A client session observes [`debits_posted`](../reference/accounts.md#debits_posted) and
     [`credits_posted`](../reference/accounts.md#credits_posted) as monotonically increasing.
+    That is, a client session will never see `credits_posted` or `debits_posted` decrease.
   - A client session never observes uncommitted updates.
   - A client session never observes a broken invariant (e.g.
     [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flags.credits_must_not_exceed_debits)).
   - Multiple client sessions may receive replies [out of order](#reply-order) relative to one another.
+  - A client session can consider a request executed when it receives a reply for the request.
 - [**Requests**](#requests)
   - A request executes within the cluster at most once.
   - Requests do not [time out](#retries) — a timeout typically implies failure, which cannot be
@@ -36,7 +39,7 @@ in practice?
   - Requests retried by a different client (same request body, different session) may receive
     [different replies](#consistency-with-foreign-databases).
   - Operations within a request are executed in sequential order.
-  - Operations within a request do not interleave with other requests.
+  - Operations within a request do not interleave with operations from other requests.
     (TODO: Can timeouts interleave batches, or should we shift the batch so that timeouts land
     entirely before/after?)
 - **Operations**
@@ -46,8 +49,8 @@ in practice?
   - [Transfers](../reference/transfers.md) are immutable — once created, they are never modified.
   - Transfer [timeouts](../reference/transfers.md#timeout) are deterministic, driven by the
     cluster's timestamp.
-  - Object timestamps are cluster-unique. For objects `A` and `B`, `A.timestamp ≠ B.timestamp`.
-  - Object timestamps are strictly increasing For objects `A` and `B`, if
+  - Object timestamps are cluster-unique. For all objects `A` and `B`, `A.timestamp ≠ B.timestamp`.
+  - Object timestamps are strictly increasing For all objects `A` and `B`, if
     `A.timestamp < B.timestamp`, then `A` was committed earlier than `B`.
 
 ### Reply Order
@@ -111,7 +114,7 @@ sequenceDiagram
 
 ### Retries
 
-A client will retry a request until either:
+A [client session](#client-sessions) will automatically retry a request until either:
 
 - the client receives a corresponding reply from the cluster, or
 - the client is terminated.
@@ -120,10 +123,10 @@ Unlike most database or RPC clients:
 
 - the TigerBeetle client will never time out
 - the TigerBeetle client has no retry limits
-- the TigerBeetle does not surface network errors
+- the TigerBeetle client does not surface network errors
 
 With TigerBeetle's strict consistency model, surfacing these errors at the client/application level
-would be misleading, because they would imply that a request did not execute, when that is not known:
+would be misleading. An error would imply that a request did not execute, when that is not known:
 
 - A request delayed by the network could execute after its timeout.
 - A reply delayed by the network could execute before its timeout.
@@ -309,105 +312,3 @@ flowchart LR
     API1 <--> Cluster
     API2 <--> Cluster
 ```
-
-
-
-## Data Modeling
-
-TigerBeetle is a domain-specific database — its schema of [`Account`s](../reference/accounts.md)
-and [`Transfer`s](../reference/transfers.md) is built-in and fixed. In return for this prescriptive
-design, it provides excellent performance, integrated business logic, and powerful invariants.
-This section is a sample of techniques for mapping an application's requirements onto TigerBeetle's
-data model. Which (if any) of these techniques are suitable is highly application-specific.
-
-When possible, encoding application invariants directly in TigerBeetle rather than implementing
-them in the application itself (or with a foreign database) minimizes round-trips and coordination.
-This is useful for both maintaining consistency and performance.
-
-### `user_data`
-
-`user_data` is the most flexible field in the schema (for both
-[accounts](../reference/accounts.md#user_data) and [transfers](../reference/transfers.md#user_data)).
-`user_data`'s contents are arbitrary, interpreted only by the application.
-
-`user_data` is indexed for efficient point and range queries.
-
-Example uses:
-
-- Set `user_data` to a "foreign key" — that is, an identifier of a corresponding object within
-  another database.
-- Set `user_data` to a group identifier for objects that will be queried together.
-- Set `user_data` to a transfer or account `id`.
-  (TODO: Can we use this for join queries via the query API, or must the application implement them?)
-
-### `id`
-
-[`Account`](../reference/accounts.md#id) and [`Transfer`](../reference/transfers.md#id) identifiers
-must be unique, so randomly-generated UUIDs are the natural choice — but not the only option.
-
-`id` is mostly accessed by point queries, but it is indexed for efficient range queries as well.
-
-When designing any id scheme:
-
-- `id`'s primary purpose is to ensure idempotence of object creation — this can be [difficult in the context of application crash recovery](#consistency-with-foreign-databases).
-- Be careful to [avoid `id` collisions](https://en.wikipedia.org/wiki/Birthday_problem).
-- An account and a transfer may share the same `id` — they belong to different "namespaces".
-- Avoid requiring a central oracle to generate each unique `id` (e.g. an auto-increment field in SQL). A central oracle may become a performance bottleneck when creating accounts/transfers.
-
-#### Examples
-##### Reuse Foreign Identifier
-
-Set `id` to a "foreign key" — that is, reuse an identifier of a corresponding object from
-[another database](#consistency-with-foreign-databases).
-
-For example, if every user (within the application's database) has a single account, then the
-identifier within the foreign database can be used as the `Account.id` within TigerBeetle.
-
-To reuse the foreign identifier, it must conform to TigerBeetle's `id`
-[constraints](../reference/accounts.md#id).
-
-This technique is most appropriate when integrating TigerBeetle with an existing application.
-It is not ideal because it
-[complicates consistency around application crash recover](#consistency-with-foreign-databases)
-and may have a bottleneck at the foreign database.
-
-##### Logically Grouped Objects
-
-Often accounts or transfers are logically grouped together from the application's perspective.
-For example, a simple currency exchange transaction is one logical transfer conducted between
-four accounts — two physical transfers.
-
-A non-random identifier scheme can:
-
-  - leave `user_data` free for a different purpose, and
-  - allow a group's members and roles to be derived by the application code,
-
-without relying on a [foreign database](#reuse-foreign-identifier) to store metadata for each
-member of the group.
-
-A group may (but does not necessarily) correspond to objects chained by
-[`flags.linked`](../reference/transfers.md#flags.linked).
-
-###### Identifier Offsets
-
-For each group, generate a single "root" `id`, and set group member's `id`s relative to that root.
-
-- From the root, use known offsets to derive member identifiers (e.g. `root + 1`).
-- From a group member, use `code`, `ledger`, or both to determine the object's role and derive the
-  root identifier.
-
-This technique enables a simple range query to iterate every member of a target group.
-
-If groups are large (or variable-sized), it may be be preferable to rely on
-[`user_data` for grouping](#user_data) to sidestep the risk of `id` collisions.
-
-###### Identifier Prefixes
-
-When a group consists of a fixed number of heterogeneous members (each with a distinct role),
-`id`s with the same role could be created with a common, application-known prefix.
-In this arrangement, the suffix could be randomized, but shared by a group's members.
-
-- A group's role is derived from its `id`'s prefix.
-- A group's members are derived by swapping the `id` prefix.
-
-This technique enables a simple range query to iterate every object with a target role.
