@@ -355,6 +355,7 @@ pub const Storage = struct {
         // Verify that there are no concurrent overlapping writes.
         var iterator = storage.writes.iterator();
         while (iterator.next()) |other| {
+            if (other.zone != zone) continue;
             assert(offset_in_zone + buffer.len <= other.offset or
                 other.offset + other.buffer.len <= offset_in_zone);
         }
