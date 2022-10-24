@@ -24,6 +24,7 @@ const data_file_size_min = @import("superblock.zig").data_file_size_min;
 const VSRState = @import("superblock.zig").SuperBlockSector.VSRState;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlock = SuperBlockType(Storage);
+const fuzz = @import("../test/fuzz.zig");
 
 /// Total calls to checkpoint() + view_change().
 const transitions_count_total = 10;
@@ -31,31 +32,13 @@ const cluster = 0;
 
 pub fn main() !void {
     const allocator = std.testing.allocator;
-    var args = std.process.args();
+    const args = try fuzz.parse_fuzz_args(allocator);
 
-    // Discard executable name.
-    allocator.free(try args.next(allocator).?);
-
-    var seed: u64 = undefined;
-    if (args.next(allocator)) |arg_or_error| {
-        const arg = try arg_or_error;
-        defer allocator.free(arg);
-
-        seed = std.fmt.parseInt(u64, arg, 10) catch |err| {
-            std.debug.panic("Invalid seed: '{}'; err: {}", .{
-                std.zig.fmtEscapes(arg),
-                err,
-            });
-        };
-    } else {
-        try std.os.getrandom(std.mem.asBytes(&seed));
-    }
-
-    log.info("seed={}", .{ seed });
-    try fuzz(allocator, seed);
+    log.info("seed={}", .{args.seed});
+    try run_fuzz(allocator, args.seed);
 }
 
-fn fuzz(allocator: std.mem.Allocator, seed: u64) !void {
+fn run_fuzz(allocator: std.mem.Allocator, seed: u64) !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
@@ -217,10 +200,8 @@ const Environment = struct {
         env.pending_verify = true;
         while (env.pending_verify) env.superblock_verify.storage.tick();
 
-        assert(
-            env.superblock_verify.working.checksum == env.superblock.working.checksum or
-            env.superblock_verify.working.checksum == env.superblock.writing.checksum
-        );
+        assert(env.superblock_verify.working.checksum == env.superblock.working.checksum or
+            env.superblock_verify.working.checksum == env.superblock.writing.checksum);
 
         // Verify the sequence we read from disk is monotonically increasing.
         if (env.latest_sequence < env.superblock_verify.working.sequence) {
