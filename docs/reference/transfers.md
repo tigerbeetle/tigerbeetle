@@ -7,6 +7,9 @@ TigerBeetle uses the same data structures internally and
 externally. This means that sometimes you need to set temporary values
 for fields that TigerBeetle, not you (the user), are responsible.
 
+In TigerBeetle, financial transactions are called "transfers" instead of "transactions" because
+the latter term is heavily overloaded in the context of databases.
+
 ### Updates
 
 Transfer fields *cannot be changed by the user* after
@@ -24,7 +27,7 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1`
-* Must be unique
+* Must not conflict with another transfer
 
 ### `debit_account_id`
 
@@ -150,7 +153,7 @@ unique error result. Other transfers in the chain will have their error
 result set to `linked_event_failed`.
 
 Consider this set of transfers as part of a batch:
-	
+
 | Transfer | Index within batch | flags.linked |
 |----------|--------------------|--------------|
 | `A`      | `0`                | `false`      |
@@ -165,6 +168,10 @@ are linked.
 
 Transfers `A` and `E` fail or succeed independently of `B`, `C`, and
 `D`.
+
+After the link has executed, the association of each event is lost.
+To save the association, it must be
+[encoded into the data model](../usage/integration.md#data-modeling).
 
 #### `flags.pending`
 
