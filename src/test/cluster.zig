@@ -283,41 +283,18 @@ pub const Cluster = struct {
         const replica_time = replica.time;
         replica.deinit(cluster.allocator);
 
-        // The message bus and network should be left alone, as messages
-        // may still be inflight to/from this replica. However, we should
-        // do a check to ensure that we aren't leaking any messages when
-        // deinitializing the replica above.
-        const packet_simulator = &cluster.network.packet_simulator;
-        // The same message may be used for multiple network packets, so simply counting how
-        // many packets are inflight from the replica is insufficient, we need to dedup them.
-        var messages_in_network_set = std.AutoHashMap(*Message, void).init(cluster.allocator);
-        defer messages_in_network_set.deinit();
-
-        var target: u8 = 0;
-        while (target < packet_simulator.options.node_count) : (target += 1) {
-            const path = .{ .source = replica_index, .target = target };
-            const queue = packet_simulator.path_queue(path);
-            var it = queue.iterator();
-            while (it.next()) |data| {
-                try messages_in_network_set.put(data.packet.message, {});
-            }
-        }
-
-        const messages_in_network = messages_in_network_set.count();
-
+        // Ensure that none of the replica's messages leaked when it was deinitialized.
         var messages_in_pool: usize = 0;
         const message_bus = cluster.network.get_message_bus(.{ .replica = replica_index });
         {
             var it = message_bus.pool.free_list;
             while (it) |message| : (it = message.next) messages_in_pool += 1;
         }
-
-        const total_messages = message_pool.messages_max_replica;
-        assert(messages_in_network + messages_in_pool == total_messages);
+        assert(messages_in_pool == message_pool.messages_max_replica);
 
         // Logically it would make more sense to run this during restart, not immediately following
-        // the crash. But having it here allows the replica's MessageBus to initialized and start
-        // queueing packets, or collecting packets that are dropped by the network.
+        // the crash. But having it here allows the replica's MessageBus to initialize and begin
+        // queueing packets.
         //
         // Pass the old replica's Time through to the new replica. It will continue to be tick
         // while the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
