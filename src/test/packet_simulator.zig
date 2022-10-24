@@ -89,8 +89,8 @@ pub fn PacketSimulator(comptime Packet: type) type {
             packet: Packet,
         };
 
-        /// A send and receive path between each node in the network. We use the `path` function to
-        /// index it.
+        /// A send and receive path between each node in the network. We use the `path_index`
+        /// function to index it.
         paths: []std.PriorityQueue(Data, void, Self.order_packets),
 
         /// We can arbitrary clog a path until a tick.
@@ -108,45 +108,55 @@ pub fn PacketSimulator(comptime Packet: type) type {
 
         pub fn init(allocator: std.mem.Allocator, options: PacketSimulatorOptions) !Self {
             assert(options.one_way_delay_mean >= options.one_way_delay_min);
+
+            const paths = try allocator.alloc(
+                std.PriorityQueue(Data, void, Self.order_packets),
+                @as(usize, options.node_count) * options.node_count,
+            );
+            errdefer allocator.free(paths);
+
+            const path_clogged_till = try allocator.alloc(
+                u64,
+                @as(usize, options.node_count) * options.node_count,
+            );
+            errdefer allocator.free(path_clogged_till);
+            std.mem.set(u64, path_clogged_till, 0);
+
+            const partition = try allocator.alloc(bool, @as(usize, options.replica_count));
+            errdefer allocator.free(partition);
+
+            const replicas = try allocator.alloc(u8, @as(usize, options.replica_count));
+            errdefer allocator.free(replicas);
+            for (replicas) |*replica, i| replica.* = @intCast(u8, i);
+
             var self = Self{
-                .paths = try allocator.alloc(
-                    std.PriorityQueue(Data, void, Self.order_packets),
-                    @as(usize, options.node_count) * options.node_count,
-                ),
-                .path_clogged_till = try allocator.alloc(
-                    u64,
-                    @as(usize, options.node_count) * options.node_count,
-                ),
+                .paths = paths,
+                .path_clogged_till = path_clogged_till,
                 .options = options,
                 .prng = std.rand.DefaultPrng.init(options.seed),
 
                 .is_partitioned = false,
                 .stability = options.unpartition_stability,
-                .partition = try allocator.alloc(bool, @as(usize, options.replica_count)),
-                .replicas = try allocator.alloc(u8, @as(usize, options.replica_count)),
+                .partition = partition,
+                .replicas = replicas,
             };
 
-            for (self.replicas) |_, i| {
-                self.replicas[i] = @intCast(u8, i);
-            }
+            for (self.paths) |*queue, i| {
+                errdefer for (self.paths[0..i]) |path| path.deinit();
 
-            for (self.paths) |*queue| {
                 queue.* = std.PriorityQueue(Data, void, Self.order_packets).init(allocator, {});
                 try queue.ensureTotalCapacity(options.path_maximum_capacity);
             }
-
-            for (self.path_clogged_till) |*clogged_till| {
-                clogged_till.* = 0;
-            }
+            errdefer for (self.paths) |path| path.deinit();
 
             return self;
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             for (self.paths) |*queue| {
-                while (queue.popOrNull()) |*data| data.packet.deinit();
-                queue.deinit();
+                while (queue.peek()) |_| queue.remove().packet.deinit();
             }
+
             allocator.free(self.paths);
             allocator.free(self.path_clogged_till);
             allocator.free(self.partition);
@@ -164,7 +174,8 @@ pub fn PacketSimulator(comptime Packet: type) type {
         }
 
         fn path_index(self: *Self, path: Path) usize {
-            assert(path.source < self.options.node_count and path.target < self.options.node_count);
+            assert(path.source < self.options.node_count);
+            assert(path.target < self.options.node_count);
 
             return @as(usize, path.source) * self.options.node_count + path.target;
         }
@@ -315,21 +326,21 @@ pub fn PacketSimulator(comptime Packet: type) type {
                         {
                             self.stats[@enumToInt(PacketStatistics.dropped_due_to_partition)] += 1;
                             log.err("dropped packet (different partitions): from={} to={}", .{ from, to });
-                            data.packet.deinit(path);
+                            data.packet.deinit();
                             continue;
                         }
 
                         if (self.should_drop()) {
                             self.stats[@enumToInt(PacketStatistics.dropped)] += 1;
                             log.err("dropped packet from={} to={}.", .{ from, to });
-                            data.packet.deinit(path);
+                            data.packet.deinit();
                             continue;
                         }
 
                         if (to < self.options.replica_count and cluster_health[to] == .down) {
                             self.stats[@enumToInt(PacketStatistics.dropped_due_to_crash)] += 1;
                             log.err("dropped packet (destination is crashed): from={} to={}", .{ from, to });
-                            data.packet.deinit(path);
+                            data.packet.deinit();
                             continue;
                         }
 
@@ -343,7 +354,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                         } else {
                             log.debug("delivering packet from={} to={}", .{ from, to });
                             data.callback(data.packet, path);
-                            data.packet.deinit(path);
+                            data.packet.deinit();
                         }
                     }
 
@@ -370,7 +381,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
             if (queue_length + 1 > queue.capacity()) {
                 const index = self.prng.random().uintLessThanBiased(u64, queue_length);
                 const data = queue.removeIndex(index);
-                data.packet.deinit(path);
+                data.packet.deinit();
                 log.err("submit_packet: {} reached capacity, dropped packet={}", .{
                     path,
                     index,
