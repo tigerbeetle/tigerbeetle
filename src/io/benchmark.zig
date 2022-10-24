@@ -11,7 +11,7 @@ const IO = @import("../io.zig").IO;
 const buffer_size = 1 * 1024 * 1024;
 
 // max time for the benchmark to run
-const run_duration = 1 * std.time.ns_per_s;
+const run_duration = 10 * std.time.ns_per_s;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -38,9 +38,10 @@ pub fn main() !void {
         const elapsed_ns = timer.monotonic() - started;
         const transferred_mb = @intToFloat(f64, self.transferred) / 1024 / 1024;
 
-        log.info("took {}ms @ {d:.2} MB/s\n", .{
+        log.info("took {}ms @ {d:.2} MB/s ({d} MB transferred) \n", .{
             elapsed_ns / std.time.ns_per_ms,
             transferred_mb / (@intToFloat(f64, elapsed_ns) / std.time.ns_per_s),
+            transferred_mb,
         });
     }
 
