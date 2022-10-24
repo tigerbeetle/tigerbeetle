@@ -102,7 +102,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         forest: Forest,
 
         prefetch_input: ?[]align(16) const u8 = null,
-        prefetch_callback: ?fn (*StateMachine) void = null,
+        prefetch_callback: ?*const fn (*StateMachine) void = null,
         // TODO(ifreund): use a union for these to save memory, likely an extern union
         // so that we can safetly @ptrCast() until @fieldParentPtr() is implemented
         // for unions. See: https://github.com/ziglang/zig/issues/6611
@@ -110,9 +110,9 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         prefetch_transfers_context: TransfersGroove.PrefetchContext = undefined,
         prefetch_posted_context: PostedGroove.PrefetchContext = undefined,
 
-        open_callback: ?fn (*StateMachine) void = null,
-        compact_callback: ?fn (*StateMachine) void = null,
-        checkpoint_callback: ?fn (*StateMachine) void = null,
+        open_callback: ?*const fn (*StateMachine) void = null,
+        compact_callback: ?*const fn (*StateMachine) void = null,
+        checkpoint_callback: ?*const fn (*StateMachine) void = null,
 
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
             var forest = try Forest.init(
@@ -154,7 +154,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             };
         }
 
-        pub fn open(self: *StateMachine, callback: fn (*StateMachine) void) void {
+        pub fn open(self: *StateMachine, callback: *const fn (*StateMachine) void) void {
             assert(self.open_callback == null);
             self.open_callback = callback;
 
@@ -204,7 +204,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
         pub fn prefetch(
             self: *StateMachine,
-            callback: fn (*StateMachine) void,
+            callback: *const fn (*StateMachine) void,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
@@ -380,7 +380,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             return result;
         }
 
-        pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
+        pub fn compact(self: *StateMachine, callback: *const fn (*StateMachine) void, op: u64) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 
@@ -395,7 +395,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             callback(self);
         }
 
-        pub fn checkpoint(self: *StateMachine, callback: fn (*StateMachine) void) void {
+        pub fn checkpoint(self: *StateMachine, callback: *const fn (*StateMachine) void) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 

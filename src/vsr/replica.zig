@@ -263,10 +263,10 @@ pub fn ReplicaType(
         /// Seeded with the replica's index number.
         prng: std.rand.DefaultPrng,
 
-        on_change_state: ?fn (replica: *Self) void = null,
+        on_change_state: ?*const fn (replica: *Self) void = null,
 
         /// Called when `commit_prepare` finishes committing.
-        commit_callback: ?fn (*Self) void = null,
+        commit_callback: ?*const fn (*Self) void = null,
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
@@ -2484,7 +2484,7 @@ pub fn ReplicaType(
         fn commit_op_prefetch(
             self: *Self,
             prepare: *Message,
-            callback: fn (*Self) void,
+            callback: *const fn (*Self) void,
         ) void {
             assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or

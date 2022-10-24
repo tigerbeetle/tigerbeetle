@@ -27,7 +27,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
 
         const TableInfo = Manifest.TableInfo;
-        const TableInfoCallback = fn (
+        const TableInfoCallback = *const fn (
             it: *LevelIterator,
             table: *const TableInfo,
             index_block: BlockPtrConst,
@@ -43,7 +43,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         grid: *Grid,
         manifest: *Manifest,
-        callback: fn (*LevelIterator) void,
+        callback: *const fn (*LevelIterator) void,
         table_info: ?*const TableInfo,
         table_info_callback: TableInfoCallback,
         level: u8,
@@ -119,7 +119,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         pub fn start(
             it: *LevelIterator,
             context: Context,
-            callback: fn (*LevelIterator) void,
+            callback: *const fn (*LevelIterator) void,
         ) void {
             if (context.direction == .descending) {
                 @panic("TODO Implement descending direction for LevelIterator.");
@@ -283,7 +283,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         /// - error.Empty when there are no values remaining to iterate.
         /// - error.Drained when the iterator isn't empty, but the values 
         ///   still need to be buffered into memory via tick().
-        pub fn peek(it: LevelIterator) error{Empty, Drained}!Key {
+        pub fn peek(it: LevelIterator) error{ Empty, Drained }!Key {
             if (it.values.head_ptr_const()) |value| return key_from_value(value);
 
             const scope = it.tables.head_ptr_const() orelse {

@@ -19,10 +19,10 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.value_count_max, .pointer);
 
         const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
-        const IndexBlockCallback = fn (it: *TableIterator, index_block: BlockPtrConst) void;
+        const IndexBlockCallback = *const fn (it: *TableIterator, index_block: BlockPtrConst) void;
 
         grid: *Grid,
-        read_done: fn (*TableIterator) void,
+        read_done: *const fn (*TableIterator) void,
         read_table_index: bool,
 
         /// We store only the address and checksum of the table's index block to save memory,
@@ -108,7 +108,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         pub fn start(
             it: *TableIterator,
             context: Context,
-            read_done: fn (*TableIterator) void,
+            read_done: *const fn (*TableIterator) void,
         ) void {
             assert(!it.read_pending);
             assert(it.index_block_callback == null);
@@ -264,7 +264,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         /// - error.Empty when there are no values remaining to iterate.
         /// - error.Drained when the iterator isn't empty, but some values 
         ///   still need to be buffered into memory via tick().
-        pub fn peek(it: TableIterator) error{Empty, Drained}!Table.Key {
+        pub fn peek(it: TableIterator) error{ Empty, Drained }!Table.Key {
             assert(!it.read_pending);
             assert(!it.read_table_index);
 

@@ -66,26 +66,21 @@ const usage = fmt.comptimePrint(
 
 pub const Command = union(enum) {
     format: struct {
-        args_allocated: std.ArrayList([:0]const u8),
         cluster: u32,
         replica: u8,
         path: [:0]const u8,
     },
     start: struct {
-        args_allocated: std.ArrayList([:0]const u8),
         addresses: []net.Address,
         memory: u64,
         path: [:0]const u8,
     },
 
     pub fn deinit(command: Command, allocator: std.mem.Allocator) void {
-        var args_allocated = switch (command) {
-            .format => |cmd| cmd.args_allocated,
-            .start => |cmd| cmd.args_allocated,
-        };
-
-        for (args_allocated.items) |arg| allocator.free(arg);
-        args_allocated.deinit();
+        switch (command) {
+            .format => |cmd| allocator.free(cmd.path),
+            .start => |cmd| allocator.free(cmd.path),
+        }
     }
 };
 
@@ -101,17 +96,12 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    // Keep track of the args from the ArgIterator above that were allocated
-    // then free them all at the end of the scope.
-    var args_allocated = std.ArrayList([:0]const u8).init(allocator);
-
     // Skip argv[0] which is the name of this executable
     const did_skip = args.skip();
     assert(did_skip);
 
-    const raw_command = try (args.next(allocator) orelse
-        fatal("no command provided, expected 'start' or 'format'", .{}));
-    defer allocator.free(raw_command);
+    const raw_command = args.next() orelse
+        fatal("no command provided, expected 'start' or 'format'", .{});
 
     if (mem.eql(u8, raw_command, "-h") or mem.eql(u8, raw_command, "--help")) {
         std.io.getStdOut().writeAll(usage) catch os.exit(1);
@@ -120,10 +110,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
         fatal("unknown command '{s}', expected 'start' or 'format'", .{raw_command});
 
-    while (args.next(allocator)) |parsed_arg| {
-        const arg = try parsed_arg;
-        try args_allocated.append(arg);
-
+    while (args.next()) |arg| {
         if (mem.startsWith(u8, arg, "--cluster")) {
             cluster = parse_flag("--cluster", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
@@ -151,10 +138,9 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
             return Command{
                 .format = .{
-                    .args_allocated = args_allocated,
                     .cluster = parse_cluster(cluster orelse fatal("required: --cluster", .{})),
                     .replica = parse_replica(replica orelse fatal("required: --replica", .{})),
-                    .path = path orelse fatal("required: <path>", .{}),
+                    .path = try allocator.dupeZ(u8, path orelse fatal("required: <path>", .{})),
                 },
             };
         },
@@ -164,13 +150,12 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
             return Command{
                 .start = .{
-                    .args_allocated = args_allocated,
                     .addresses = parse_addresses(
                         allocator,
                         addresses orelse fatal("required: --addresses", .{}),
                     ),
                     .memory = if (memory) |m| parse_size(m) else config.memory_size_max_default,
-                    .path = path orelse fatal("required: <path>", .{}),
+                    .path = try allocator.dupeZ(u8, path orelse fatal("required: <path>", .{})),
                 },
             };
         },

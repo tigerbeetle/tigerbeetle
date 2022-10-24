@@ -220,7 +220,7 @@ const test_binary_search = struct {
     }
 
     fn random_search(random: std.rand.Random, iter: usize) !void {
-        const keys_count = @minimum(
+        const keys_count = @min(
             @as(usize, 1E6),
             fuzz.random_int_exponential(random, usize, iter),
         );

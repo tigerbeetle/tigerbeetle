@@ -962,6 +962,5 @@ test "Table" {
         Key.tombstone_from_key,
     );
 
-    _ = Table;
     std.testing.refAllDecls(Table.Builder);
 }

@@ -50,9 +50,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
 
-        pub const Callback = fn (manifest_log: *ManifestLog) void;
+        pub const Callback = *const fn (manifest_log: *ManifestLog) void;
 
-        pub const OpenEvent = fn (
+        pub const OpenEvent = *const fn (
             manifest_log: *ManifestLog,
             level: u7,
             table: *const TableInfo,

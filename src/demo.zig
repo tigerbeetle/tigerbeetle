@@ -27,7 +27,7 @@ pub const log_level: std.log.Level = .alert;
 pub fn request(
     operation: StateMachine.Operation,
     batch: anytype,
-    on_reply: fn (
+    on_reply: *const fn (
         user_data: u128,
         operation: StateMachine.Operation,
         results: Client.Error![]const u8,

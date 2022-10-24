@@ -185,7 +185,7 @@ pub const IO = struct {
         next: ?*Completion = null,
         operation: Operation,
         context: ?*anyopaque,
-        callback: fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
+        callback: *const fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
@@ -241,7 +241,7 @@ pub const IO = struct {
         fn complete(completion: *Completion) void {
             switch (completion.operation) {
                 .accept => {
-                    const result = blk: {
+                    const result: AcceptError!os.socket_t = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -289,7 +289,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .connect => {
-                    const result = blk: {
+                    const result: ConnectError!void = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -318,12 +318,13 @@ pub const IO = struct {
                             break :blk err;
                         } else {
                             assert(completion.result == 0);
+                            break :blk {};
                         }
                     };
                     completion.callback(completion.context, completion, &result);
                 },
                 .read => {
-                    const result = blk: {
+                    const result: ReadError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -353,7 +354,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .recv => {
-                    const result = blk: {
+                    const result: RecvError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -381,7 +382,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .send => {
-                    const result = blk: {
+                    const result: SendError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -417,7 +418,7 @@ pub const IO = struct {
                 },
                 .timeout => {
                     assert(completion.result < 0);
-                    const result = switch (@intToEnum(os.E, -completion.result)) {
+                    const result: TimeoutError!void = switch (@intToEnum(os.E, -completion.result)) {
                         .INTR => {
                             completion.io.enqueue(completion);
                             return;
@@ -429,7 +430,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .write => {
-                    const result = blk: {
+                    const result: WriteError!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -596,6 +597,7 @@ pub const IO = struct {
         OpenAlreadyInProgress,
         FileDescriptorInvalid,
         ConnectionRefused,
+        ConnectionResetByPeer,
         AlreadyConnected,
         NetworkUnreachable,
         FileNotFound,
@@ -694,6 +696,7 @@ pub const IO = struct {
         WouldBlock,
         FileDescriptorInvalid,
         ConnectionRefused,
+        ConnectionResetByPeer,
         SystemResources,
         SocketNotConnected,
         FileDescriptorNotASocket,
@@ -850,8 +853,6 @@ pub const IO = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
-        _ = callback;
-
         completion.* = .{
             .io = self,
             .context = context,

@@ -160,7 +160,7 @@ pub const IO = struct {
     pub const Completion = struct {
         next: ?*Completion,
         context: ?*anyopaque,
-        callback: fn (Context) void,
+        callback: *const fn (Context) void,
         operation: Operation,
 
         const Context = struct {
@@ -453,7 +453,7 @@ pub const IO = struct {
                             else => |e| return e,
                         };
 
-                        const LPFN_CONNECTEX = fn (
+                        const LPFN_CONNECTEX = *const fn (
                             Socket: os.windows.ws2_32.SOCKET,
                             SockAddr: *const os.windows.ws2_32.sockaddr,
                             SockLen: os.socklen_t,
@@ -1049,7 +1049,7 @@ pub const IO = struct {
 
         const kernel32 = struct {
             const LOCKFILE_EXCLUSIVE_LOCK = 0x2;
-            const LOCKFILE_FAIL_IMMEDIATELY = 01;
+            const LOCKFILE_FAIL_IMMEDIATELY = 0x1;
 
             extern "kernel32" fn LockFileEx(
                 hFile: os.windows.HANDLE,

@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.state_machine);
 
 pub fn StateMachineType(comptime Storage: type) type {
-    _ = Storage;
     return struct {
         const StateMachine = @This();
         const Grid = @import("../lsm/grid.zig").GridType(Storage);

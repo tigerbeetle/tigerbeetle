@@ -11,12 +11,12 @@ const GridType = @import("grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
 pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type {
-    var groove_fields: []const std.builtin.TypeInfo.StructField = &.{};
-    var groove_options_fields: []const std.builtin.TypeInfo.StructField = &.{};
+    var groove_fields: []const std.builtin.Type.StructField = &.{};
+    var groove_options_fields: []const std.builtin.Type.StructField = &.{};
 
     for (std.meta.fields(@TypeOf(groove_config))) |field| {
         const Groove = @field(groove_config, field.name);
-        groove_fields = groove_fields ++ [_]std.builtin.TypeInfo.StructField{
+        groove_fields = groove_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
                 .field_type = Groove,
@@ -26,7 +26,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             },
         };
 
-        groove_options_fields = groove_options_fields ++ [_]std.builtin.TypeInfo.StructField{
+        groove_options_fields = groove_options_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
                 .field_type = Groove.Options,
@@ -60,7 +60,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
         const Grid = GridType(Storage);
 
-        const Callback = fn (*Forest) void;
+        const Callback = *const fn (*Forest) void;
         const JoinOp = enum {
             compacting,
             checkpoint,
@@ -150,7 +150,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
                 pub fn groove_callback(
                     comptime groove_field_name: []const u8,
-                ) fn (*GrooveFor(groove_field_name)) void {
+                ) *const fn (*GrooveFor(groove_field_name)) void {
                     return struct {
                         fn groove_cb(groove: *GrooveFor(groove_field_name)) void {
                             const grooves = @fieldParentPtr(Grooves, groove_field_name, groove);

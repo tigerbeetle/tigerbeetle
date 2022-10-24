@@ -9,8 +9,8 @@ const tb_packet_t = api.tb_packet_t;
 const tb_packet_list_t = api.tb_packet_list_t;
 
 pub const ContextImplementation = struct {
-    submit_fn: fn (*ContextImplementation, *tb_packet_list_t) void,
-    deinit_fn: fn (*ContextImplementation) void,
+    submit_fn: *const fn (*ContextImplementation, *tb_packet_list_t) void,
+    deinit_fn: *const fn (*ContextImplementation) void,
 };
 
 pub fn ContextType(

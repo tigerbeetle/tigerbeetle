@@ -111,7 +111,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const TableInfo = TableInfoType(Table);
 
         const Grid = GridType(Storage);
-        const Callback = fn (*Manifest) void;
+        const Callback = *const fn (*Manifest) void;
 
         /// Here, we use a structure with indexes over the segmented array for performance.
         const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);

@@ -15,7 +15,7 @@ pub const tb_status_t = enum(c_int) {
     network_subsystem,
 };
 
-pub const tb_completion_t = fn (
+pub const tb_completion_t = *const fn (
     context: usize,
     client: tb_client_t,
     packet: *tb_packet_t,

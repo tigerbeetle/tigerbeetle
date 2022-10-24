@@ -578,7 +578,6 @@ test "pipe data over socket" {
             completion: *IO.Completion,
             result: IO.ConnectError!void,
         ) void {
-            _ = completion;
             _ = result catch unreachable;
 
             assert(self.tx.socket.fd != IO.INVALID_SOCKET);
