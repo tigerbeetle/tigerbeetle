@@ -1000,8 +1000,10 @@ pub fn ReplicaType(
             // TODO: When Block recover & state transfer are implemented, this can be removed.
             const threshold =
                 if (prepare.message.header.op == self.op_checkpoint_trigger() or
-                    prepare.message.header.op == self.op_checkpoint + config.lsm_batch_multiple + 1)
-                    self.replica_count else self.quorum_replication;
+                prepare.message.header.op == self.op_checkpoint + config.lsm_batch_multiple + 1)
+                self.replica_count
+            else
+                self.quorum_replication;
 
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
@@ -5759,7 +5761,10 @@ pub fn ReplicaType(
                             self.superblock.working.vsr_state.commit_min_checksum,
                             self.op_checkpoint,
                         });
-                        log.debug("{}: valid_hash_chain_between: break B: {}", .{ self.replica, b, });
+                        log.debug("{}: valid_hash_chain_between: break B: {}", .{
+                            self.replica,
+                            b,
+                        });
                         return false;
                     }
                 }

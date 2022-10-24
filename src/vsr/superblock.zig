@@ -389,7 +389,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             copy: ?u8 = null,
             /// Used by format(), checkpoint(), and view_change().
             vsr_state: ?SuperBlockSector.VSRState = null,
-            repair: ?Quorums.QuorumCount = null, // Used by open().
+            repairs: ?Quorums.RepairIterator = null, // Used by open().
         };
 
         storage: *Storage,
@@ -661,7 +661,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             log.debug(
                 "view_change: commit_min_checksum={}..{} commit_min={}..{} commit_max={}..{} " ++
-                "view_normal={}..{} view={}..{}",
+                    "view_normal={}..{} view={}..{}",
                 .{
                     superblock.writing.vsr_state.commit_min_checksum,
                     vsr_state.commit_min_checksum,
@@ -970,8 +970,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(copy == superblock.writing.copy);
 
             if (context.caller == .open) {
-                assert(context.repair.?.isSet(copy));
-                context.repair.?.unset(copy);
                 context.copy = null;
                 superblock.repair(context);
                 return;
@@ -1056,7 +1054,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             if (superblock.quorums.working(superblock.reading, threshold)) |quorum| {
                 assert(quorum.valid);
-                assert(quorum.count.count() >= threshold.count());
+                assert(quorum.copies.count() >= threshold.count());
 
                 const working = quorum.sector;
                 if (threshold == .verify) {
@@ -1083,6 +1081,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 }
 
                 superblock.working.* = working.*;
+                superblock.writing.* = working.*;
                 log.debug(
                     "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
                         "replica={} size={} " ++
@@ -1104,14 +1103,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 );
 
                 if (context.caller == .open) {
-                    if (context.repair) |_| {
+                    if (context.repairs) |_| {
                         // We just verified that the repair completed.
                         assert(threshold == .verify);
                         superblock.release(context);
                     } else {
                         assert(threshold == .open);
                         context.copy = 0;
-                        context.repair = quorum.repair();
+                        context.repairs = quorum.repairs();
                         superblock.read_manifest(context);
                     }
                 } else {
@@ -1335,14 +1334,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.copy == null);
             assert(superblock.queue_head == context);
 
-            if (context.repair.?.findFirstSet()) |repair_copy| {
-                assert(context.repair.?.count() <=
-                    config.superblock_copies - threshold_for_caller(context.caller));
+            if (context.repairs.?.next()) |repair_copy| {
+                context.copy = repair_copy;
+                log.warn("repair: copy={}", .{repair_copy});
 
-                context.copy = @intCast(u8, repair_copy);
                 superblock.writing.* = superblock.working.*;
-                log.warn("repair: copy={}", .{ repair_copy });
-
                 superblock.write_manifest(context);
             } else {
                 superblock.release(context);
@@ -1488,23 +1484,18 @@ test "SuperBlockSector" {
 const Quorums = struct {
     const Quorum = struct {
         sector: *const SuperBlockSector,
-        count: QuorumCount = QuorumCount.initEmpty(),
         valid: bool = false,
+        /// Track which copies are a member of the quorum.
+        /// Used to ignore duplicate copies of a sector when determining a quorum.
+        copies: QuorumCount = QuorumCount.initEmpty(),
+        /// An integer value indicates the copy index found in the corresponding slot.
+        /// A `null` value indicates that the copy is invalid or not a member of the working quorum.
+        /// All copies belong to the same (valid, working) quorum.
+        slots: [config.superblock_copies]?u8 = [_]?u8{null} ** config.superblock_copies,
 
-        /// Returns a bitset of any missing/damaged copies.
-        pub fn repair(quorum: Quorum) QuorumCount {
+        pub fn repairs(quorum: Quorum) RepairIterator {
             assert(quorum.valid);
-
-            var repairs = QuorumCount.initEmpty();
-            var slot: u8 = 0;
-            while (slot < config.superblock_copies) : (slot += 1) {
-                if (!quorum.count.isSet(slot)) {
-                    repairs.set(slot);
-                }
-            }
-            assert(repairs.count() == config.superblock_copies - quorum.count.count());
-
-            return repairs;
+            return .{ .slots = quorum.slots };
         }
     };
 
@@ -1571,12 +1562,12 @@ const Quorums = struct {
         std.sort.sort(Quorum, quorums.slice(), {}, sort_priority_descending);
 
         for (quorums.slice()) |quorum| {
-            if (quorum.count.count() == config.superblock_copies) {
+            if (quorum.copies.count() == config.superblock_copies) {
                 log.debug("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
                     quorum.sector.checksum,
                     quorum.sector.parent,
                     quorum.sector.sequence,
-                    quorum.count.count(),
+                    quorum.copies.count(),
                     quorum.valid,
                 });
             } else {
@@ -1584,7 +1575,7 @@ const Quorums = struct {
                     quorum.sector.checksum,
                     quorum.sector.parent,
                     quorum.sector.sequence,
-                    quorum.count.count(),
+                    quorum.copies.count(),
                     quorum.valid,
                 });
             }
@@ -1647,24 +1638,33 @@ const Quorums = struct {
     fn count_copy(
         quorums: *Quorums,
         copy: *const SuperBlockSector,
-        index: usize,
+        slot: usize,
         threshold: Threshold,
     ) void {
-        assert(index < config.superblock_copies);
+        assert(slot < config.superblock_copies);
         assert(threshold.count() >= 2 and threshold.count() <= 5);
 
         if (!copy.valid_checksum()) {
-            log.debug("copy: {}/{}: invalid checksum", .{ index, config.superblock_copies });
+            log.debug("copy: {}/{}: invalid checksum", .{ slot, config.superblock_copies });
             return;
         }
 
-        if (copy.copy == index) {
+        if (copy.copy == slot) {
             log.debug("copy: {}/{}: checksum={x} parent={x} sequence={}", .{
-                index,
+                slot,
                 config.superblock_copies,
                 copy.checksum,
                 copy.parent,
                 copy.sequence,
+            });
+        } else if (copy.copy >= config.superblock_copies) {
+            log.warn("copy: {}/{}: checksum={x} parent={x} sequence={} corrupt copy={}", .{
+                slot,
+                config.superblock_copies,
+                copy.checksum,
+                copy.parent,
+                copy.sequence,
+                copy.copy,
             });
         } else {
             // If our read was misdirected, we definitely still want to count the copy.
@@ -1672,7 +1672,7 @@ const Quorums = struct {
             log.warn(
                 "copy: {}/{}: checksum={x} parent={x} sequence={} misdirected from copy={}",
                 .{
-                    index,
+                    slot,
                     config.superblock_copies,
                     copy.checksum,
                     copy.parent,
@@ -1686,14 +1686,23 @@ const Quorums = struct {
         assert(quorum.sector.checksum == copy.checksum);
         assert(quorum.sector.equal(copy));
 
-        quorum.count.set(copy.copy);
-        assert(quorum.count.isSet(copy.copy));
+        if (copy.copy >= config.superblock_copies) {
+            // This sector is a valid member of the quorum, but with an unexpected copy number.
+            // The "SuperBlockSector.copy" field is not protected by the checksum, so if that byte
+            // (and only that byte) is corrupted, the superblock is still valid — but we don't know
+            // for certain which copy this was supposed to be.
+            // We make the assumption that this was not a double-fault (corrupt + misdirect) —
+            // that is, the copy is in the correct slot, and its copy index is simply corrupt.
+            quorum.slots[slot] = @intCast(u8, slot);
+            quorum.copies.set(slot);
+        } else if (quorum.copies.isSet(copy.copy)) {
+            // Ignore the duplicate copy.
+        } else {
+            quorum.slots[slot] = copy.copy;
+            quorum.copies.set(copy.copy);
+        }
 
-        // In the worst case, all copies may contain divergent forks of the same sequence.
-        // However, this should not happen for the same checksum.
-        assert(quorum.count.count() <= config.superblock_copies);
-
-        quorum.valid = quorum.count.count() >= threshold.count();
+        quorum.valid = quorum.copies.count() >= threshold.count();
     }
 
     fn find_or_insert_quorum_for_copy(quorums: *Quorums, copy: *const SuperBlockSector) *Quorum {
@@ -1722,12 +1731,83 @@ const Quorums = struct {
         if (a.sector.sequence > b.sector.sequence) return true;
         if (b.sector.sequence > a.sector.sequence) return false;
 
-        if (a.count.count() > b.count.count()) return true;
-        if (b.count.count() > a.count.count()) return false;
+        if (a.copies.count() > b.copies.count()) return true;
+        if (b.copies.count() > a.copies.count()) return false;
 
         // The sort order must be stable and deterministic:
         return a.sector.checksum > b.sector.checksum;
     }
+
+    /// Repair a quorum's copies in the safest known order.
+    /// Repair is complete when every copy is on-disk (not necessarily in its home slot).
+    ///
+    /// We must be careful when repairing superblock sectors to avoid endangering our quorum if
+    /// an additional fault occurs. We primarily guard against torn writes — preventing a
+    /// misdirected write from derailing repair is far more expensive and complex — but they are
+    /// likewise far less likely to occur.
+    ///
+    /// For example, consider this case:
+    ///   0. Sequence is initially A.
+    ///   1. Checkpoint sequence B.
+    ///   2.   Write B₀ — ok.
+    ///   3.   Write B₁ — misdirected to B₂'s slot.
+    ///   4. Crash.
+    ///   5. Recover with quorum B[B₀,A₁,B₁,A₃].
+    /// If we repair the superblock quorum while only considering the valid copies (and not slots)
+    /// the following scenario could occur:
+    ///   6. We already have a valid B₀ and B₁, so begin writing B₂.
+    ///   7. Crash, tearing the B₂ write.
+    ///   8. Recover with quorum A[B₀,A₁,_,A₂].
+    /// The working quorum backtracked from B to A!
+    pub const RepairIterator = struct {
+        /// An integer value indicates the copy index found in the corresponding slot.
+        /// A `null` value indicates that the copy is invalid or not a member of the working quorum.
+        /// All copies belong to the same (valid, working) quorum.
+        slots: [config.superblock_copies]?u8,
+
+        /// Returns the slot/copy to repair next.
+        /// We never (deliberately) write a copy to a slot other than its own. This is simpler to
+        /// implement, and also reduces risk when one of open()'s reads was misdirected.
+        pub fn next(iterator: *RepairIterator) ?u8 {
+            // Corrupt copy indices have already been normalized.
+            for (iterator.slots) |slot| assert(slot == null or slot.? < config.superblock_copies);
+
+            // Set bits indicate that the corresponding copy was found at least once.
+            var copies_any = QuorumCount.initEmpty();
+            // Set bits indicate that the corresponding copy was found more than once.
+            var copies_duplicate = QuorumCount.initEmpty();
+
+            for (iterator.slots) |slot| {
+                if (slot) |copy| {
+                    if (copies_any.isSet(copy)) copies_duplicate.set(copy);
+                    copies_any.set(copy);
+                }
+            }
+
+            // In descending order, our priorities for repair are:
+            // 1. The slot holds no sector, and the copy was not found anywhere.
+            // 2. The slot holds no sector, but its copy was found elsewhere.
+            // 3. The slot holds a misdirected sector, but that copy is in another slot as well.
+            var a: ?u8 = null;
+            var b: ?u8 = null;
+            var c: ?u8 = null;
+            for (iterator.slots) |slot, i| {
+                if (slot == null and !copies_any.isSet(i)) a = @intCast(u8, i);
+                if (slot == null and copies_any.isSet(i)) b = @intCast(u8, i);
+                if (slot) |slot_copy| {
+                    if (slot_copy != i and copies_duplicate.isSet(slot_copy)) c = @intCast(u8, i);
+                }
+            }
+
+            const repair = a orelse b orelse c orelse {
+                for (iterator.slots) |slot| assert(slot != null);
+                return null;
+            };
+
+            iterator.slots[repair] = repair;
+            return repair;
+        }
+    };
 };
 
 test "Quorums.working" {
@@ -1739,7 +1819,7 @@ test "Quorums.working" {
     const t = test_quorums_working;
     const o = CopyTemplate.make_valid;
     const x = CopyTemplate.make_invalid_broken;
-    const X = {}; // Ignored, just for alignment + contrast.
+    const X = {}; // Ignored; just for text alignment + contrast.
 
     // No faults:
     try t(2, &.{ o(3), o(3), o(3), o(3) }, 3);
@@ -1796,12 +1876,17 @@ test "Quorums.working" {
     // Parent view is greater than child view.
     const v = CopyTemplate.make_invalid_vsr_state;
     try t(2, &.{ v(2), v(2), o(3), o(3) }, error.VSRStateNotMonotonic);
+
+    // A member of the quorum has an "invalid" copy, but an otherwise valid checksum.
+    const h = CopyTemplate.make_valid_high_copy;
+    try t(2, &.{ o(2), o(2), o(3), h(3) }, 3);
 }
 
 const CopyTemplate = struct {
     sequence: u64,
     variant: enum {
         valid,
+        valid_high_copy,
         invalid_broken,
         invalid_misdirect,
         invalid_parent,
@@ -1810,6 +1895,10 @@ const CopyTemplate = struct {
 
     fn make_valid(sequence: u64) CopyTemplate {
         return .{ .sequence = sequence, .variant = .valid };
+    }
+
+    fn make_valid_high_copy(sequence: u64) CopyTemplate {
+        return .{ .sequence = sequence, .variant = .valid_high_copy };
     }
 
     /// Construct a corrupt (invalid checksum) or duplicate copy copy.
@@ -1868,34 +1957,31 @@ fn test_quorums_working(
             .parent = checksums[copies[i].sequence - 1],
         });
 
+        var checksum: ?u128 = null;
         switch (copies[i].variant) {
-            .valid => sector.set_checksum(),
+            .valid => {},
+            .valid_high_copy => sector.copy = config.superblock_copies,
             .invalid_broken => {
                 if (random.boolean() and i > 0) {
                     // Error: duplicate sector (if available).
                     sector.* = sectors[random.uintLessThanBiased(usize, i)];
+                    checksum = random.int(u128);
                 } else {
                     // Error: invalid checksum.
-                    sector.checksum = random.int(u128);
+                    checksum = random.int(u128);
                 }
             },
-            .invalid_parent => {
-                sector.parent += 1;
-                sector.set_checksum();
-            },
+            .invalid_parent => sector.parent += 1,
             .invalid_misdirect => {
                 if (misdirect) {
                     sector.cluster += 1;
                 } else {
                     sector.replica += 1;
                 }
-                sector.set_checksum();
             },
-            .invalid_vsr_state => {
-                sector.vsr_state.view += 1;
-                sector.set_checksum();
-            },
+            .invalid_vsr_state => sector.vsr_state.view += 1,
         }
+        sector.checksum = checksum orelse sector.calculate_checksum();
 
         if (copies[i].variant == .valid or copies[i].variant == .invalid_vsr_state) {
             checksums[sector.sequence] = sector.checksum;
@@ -1916,4 +2002,82 @@ fn test_quorums_working(
         result,
         if (quorums.working(&sectors, threshold)) |working| working.sector.sequence else |err| err,
     );
+}
+
+// Verify that a torn write during repair never compromises the existing quorum.
+test "Quorum.repairs" {
+    // Don't print warnings from the Quorums.
+    var level = std.log.Level.err;
+    std.testing.log_level = std.log.Level.err;
+    defer std.testing.log_level = level;
+
+    var prng = std.rand.DefaultPrng.init(@intCast(u64, std.time.milliTimestamp()));
+    const random = prng.random();
+
+    var q1: Quorums = undefined;
+    var q2: Quorums = undefined;
+
+    const sectors_valid = blk: {
+        var sectors: [4]SuperBlockSector = undefined;
+        for (&sectors) |*sector, i| {
+            sector.* = mem.zeroInit(SuperBlockSector, .{
+                .copy = @intCast(u8, i),
+                .version = SuperBlockVersion,
+                .replica = 1,
+                .size_max = data_file_size_min,
+                .sequence = 123,
+            });
+            sector.set_checksum();
+        }
+        break :blk sectors;
+    };
+
+    const sector_invalid = blk: {
+        var sector = sectors_valid[0];
+        sector.checksum = 456;
+        break :blk sector;
+    };
+
+    var repetitions: usize = 0;
+    while (repetitions < 100) : (repetitions += 1) {
+        // Generate a random valid 2/4 quorum.
+        // 1 bits indicate valid sectors.
+        // 0 bits indicate invalid sectors.
+        var valid = std.bit_set.IntegerBitSet(4).initEmpty();
+        while (valid.count() < 2 or random.boolean()) valid.set(random.uintLessThan(usize, 4));
+
+        var working_sectors: [4]SuperBlockSector = undefined;
+        for (&working_sectors) |*sector, i| {
+            sector.* = if (valid.isSet(i)) sectors_valid[i] else sector_invalid;
+        }
+        random.shuffle(SuperBlockSector, &working_sectors);
+        var repair_sectors = working_sectors;
+
+        const working_quorum = q1.working(&working_sectors, .open) catch unreachable;
+        var quorum_repairs = working_quorum.repairs();
+        while (quorum_repairs.next()) |repair_copy| {
+            {
+                // Simulate a torn write, crash, recover sequence.
+                var damaged_sectors = repair_sectors;
+                damaged_sectors[repair_copy] = sector_invalid;
+                const damaged_quorum = q2.working(&damaged_sectors, .open) catch unreachable;
+                assert(damaged_quorum.sector.checksum == working_quorum.sector.checksum);
+            }
+
+            // "Finish" the write so that we can test the next repair.
+            repair_sectors[repair_copy] = sectors_valid[repair_copy];
+
+            const quorum_repaired = q2.working(&repair_sectors, .open) catch unreachable;
+            assert(quorum_repaired.sector.checksum == working_quorum.sector.checksum);
+        }
+
+        // At the end of all repairs, we expect to have every copy of the superblock.
+        // They do not need to be in their home slot.
+        var copies = Quorums.QuorumCount.initEmpty();
+        for (repair_sectors) |repair_sector| {
+            assert(repair_sector.checksum == working_quorum.sector.checksum);
+            copies.set(repair_sector.copy);
+        }
+        assert(repair_sectors.len == copies.count());
+    }
 }
