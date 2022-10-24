@@ -9,7 +9,7 @@ const config = @import("../config.zig");
 const TableType = @import("table.zig").TableType;
 const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("grid.zig").GridType;
-const CompositeKey = @import("composite_key.zig").CompositeKey;
+const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
@@ -122,7 +122,7 @@ fn IndexTreeType(
     comptime Field: type,
     comptime tree_name: []const u8,
 ) type {
-    const Key = CompositeKey(IndexCompositeKeyType(Field));
+    const Key = CompositeKeyType(IndexCompositeKeyType(Field));
     const Table = TableType(
         Key,
         Key.Value,
@@ -352,7 +352,7 @@ pub fn GrooveType(
                 pub fn derive_value(
                     object: *const Object,
                     index: Index,
-                ) CompositeKey(IndexCompositeKeyType(Index)).Value {
+                ) CompositeKeyType(IndexCompositeKeyType(Index)).Value {
                     return .{
                         .timestamp = object.timestamp,
                         .field = switch (@typeInfo(Index)) {

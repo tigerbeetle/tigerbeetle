@@ -2,47 +2,73 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
-pub fn CompositeKey(comptime Field: type) type {
+pub fn CompositeKeyType(comptime Field: type) type {
     assert(Field == u128 or Field == u64);
 
-    return packed struct {
-        const Self = @This();
+    // Because extern structs may not contain zero-sized fields, this is the cleanest way
+    // to conditionally include a padding field based on the Field type.
+    const CompositeKey = switch (Field) {
+        u64 => extern struct {
+            pub const Value = extern struct {
+                field: u64,
+                timestamp: u64,
+            };
 
-        pub const sentinel_key: Self = .{
-            .field = math.maxInt(Field),
+            field: u64,
+            timestamp: u64,
+
+            pub usingnamespace composite_key_decls(@This());
+        },
+        u128 => extern struct {
+            pub const Value = extern struct {
+                field: u128,
+                timestamp: u64,
+                padding: u64 = 0,
+            };
+
+            field: u128,
+            /// The most significant bit must be unset as it is used to indicate a tombstone.
+            timestamp: u64,
+            padding: u64 = 0,
+
+            pub usingnamespace composite_key_decls(@This());
+        },
+        else => unreachable,
+    };
+
+    assert(@sizeOf(CompositeKey) == @sizeOf(Field) * 2);
+    assert(@sizeOf(CompositeKey) * 8 == @bitSizeOf(CompositeKey));
+
+    assert(@sizeOf(CompositeKey.Value) == @sizeOf(Field) * 2);
+    assert(@sizeOf(CompositeKey.Value) * 8 == @bitSizeOf(CompositeKey.Value));
+
+    switch (Field) {
+        u128 => {
+            // The alignment of u128 struct fields is 16 as required by the C ABI
+            // but only 8 for u128 values.
+            assert(@alignOf(u128) == 8);
+            assert(@alignOf(CompositeKey) == 16);
+            assert(@alignOf(CompositeKey.Value) == 16);
+        },
+        else => {
+            assert(@alignOf(CompositeKey) == @alignOf(Field));
+            assert(@alignOf(CompositeKey.Value) == @alignOf(Field));
+        },
+    }
+
+    return CompositeKey;
+}
+
+fn composite_key_decls(comptime CompositeKey: type) type {
+    return struct {
+        pub const sentinel_key: CompositeKey = .{
+            .field = math.maxInt(std.meta.fieldInfo(CompositeKey, .field).field_type),
             .timestamp = math.maxInt(u64),
         };
 
         const tombstone_bit = 1 << 63;
 
-        // If zeroed padding is needed after the timestamp field.
-        const pad = Field == u128;
-
-        pub const Value = packed struct {
-            field: Field,
-            /// The most significant bit indicates if the value is a tombstone.
-            timestamp: u64,
-            padding: (if (pad) u64 else u0) = 0,
-
-            comptime {
-                assert(@sizeOf(Value) == @sizeOf(Field) * 2);
-                assert(@alignOf(Value) == @alignOf(Field));
-                assert(@sizeOf(Value) * 8 == @bitSizeOf(Value));
-            }
-        };
-
-        field: Field,
-        /// The most significant bit must be unset as it is used to indicate a tombstone.
-        timestamp: u64,
-        padding: (if (pad) u64 else u0) = 0,
-
-        comptime {
-            assert(@sizeOf(Self) == @sizeOf(Field) * 2);
-            assert(@alignOf(Self) == @alignOf(Field));
-            assert(@sizeOf(Self) * 8 == @bitSizeOf(Self));
-        }
-
-        pub inline fn compare_keys(a: Self, b: Self) math.Order {
+        pub inline fn compare_keys(a: CompositeKey, b: CompositeKey) math.Order {
             if (a.field < b.field) {
                 return .lt;
             } else if (a.field > b.field) {
@@ -56,18 +82,18 @@ pub fn CompositeKey(comptime Field: type) type {
             }
         }
 
-        pub inline fn key_from_value(value: *const Value) Self {
+        pub inline fn key_from_value(value: *const CompositeKey.Value) CompositeKey {
             return .{
                 .field = value.field,
                 .timestamp = @truncate(u63, value.timestamp),
             };
         }
 
-        pub inline fn tombstone(value: *const Value) bool {
+        pub inline fn tombstone(value: *const CompositeKey.Value) bool {
             return (value.timestamp & tombstone_bit) != 0;
         }
 
-        pub inline fn tombstone_from_key(key: Self) Value {
+        pub inline fn tombstone_from_key(key: CompositeKey) CompositeKey.Value {
             return .{
                 .field = key.field,
                 .timestamp = key.timestamp | tombstone_bit,

@@ -372,7 +372,7 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
 }
 
 pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
-    const fuzz_op_count = @min(
+    const fuzz_op_count = @minimum(
         @as(usize, 1E7),
         fuzz.random_int_exponential(random, usize, 1E6),
     );

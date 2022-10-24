@@ -89,7 +89,7 @@ pub fn TableType(
 
             pub fn hash(_: HashMapContextValue, value: Value) u64 {
                 // TODO(King): this erros out with "unable to hash type void" due to
-                // CompositeKey(T) struct containing .padding which may be void at comptime.
+                // CompositeKeyType(T) struct containing .padding which may be void at comptime.
                 const key = key_from_value(&value);
                 return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
             }
@@ -950,7 +950,7 @@ pub fn TableType(
 }
 
 test "Table" {
-    const Key = @import("composite_key.zig").CompositeKey(u128);
+    const Key = @import("composite_key.zig").CompositeKeyType(u128);
 
     const Table = TableType(
         Key,
