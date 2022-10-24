@@ -93,7 +93,7 @@ pub const SuperBlockSector = extern struct {
     /// The size of the client table entries stored in the superblock trailer.
     client_table_size: u32,
 
-    reserved: [3160]u8 = [_]u8{0} ** 3160,
+    reserved: [3172]u8 = [_]u8{0} ** 3172,
 
     pub const VSRState = extern struct {
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
@@ -207,7 +207,8 @@ pub const SuperBlockSector = extern struct {
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.flags == 0);
 
-        for (mem.bytesAsSlice(u64, &superblock.reserved)) |word| assert(word == 0);
+        assert(@bitCast(u32, superblock.reserved[0..4].*) == 0);
+        for (mem.bytesAsSlice(u64, superblock.reserved[4..])) |word| assert(word == 0);
 
         superblock.checksum = superblock.calculate_checksum();
     }
@@ -237,8 +238,10 @@ pub const SuperBlockSector = extern struct {
         if (a.manifest_size != b.manifest_size) return false;
         if (a.free_set_size != b.free_set_size) return false;
 
-        for (mem.bytesAsSlice(u64, &a.reserved)) |word| assert(word == 0);
-        for (mem.bytesAsSlice(u64, &b.reserved)) |word| assert(word == 0);
+        assert(@bitCast(u32, a.reserved[0..4].*) == 0);
+        assert(@bitCast(u32, b.reserved[0..4].*) == 0);
+        for (mem.bytesAsSlice(u64, a.reserved[4..])) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, b.reserved[4..])) |word| assert(word == 0);
 
         return true;
     }
