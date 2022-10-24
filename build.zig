@@ -12,7 +12,6 @@ pub fn build(b: *std.build.Builder) void {
         tigerbeetle.install();
 
         const run_cmd = tigerbeetle.run();
-        run_cmd.step.dependOn(b.getInstallStep());
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("run", "Run TigerBeetle");
@@ -25,7 +24,6 @@ pub fn build(b: *std.build.Builder) void {
         lint.setBuildMode(mode);
 
         const run_cmd = lint.run();
-        run_cmd.step.dependOn(&lint.step);
         if (b.args) |args| {
             run_cmd.addArgs(args);
         } else {
@@ -102,7 +100,6 @@ pub fn build(b: *std.build.Builder) void {
         simulator.setTarget(target);
 
         const run_cmd = simulator.run();
-        run_cmd.step.dependOn(&simulator.step);
 
         if (b.args) |args| {
             run_cmd.addArgs(args);
@@ -120,7 +117,6 @@ pub fn build(b: *std.build.Builder) void {
         vopr.setTarget(target);
 
         const run_cmd = vopr.run();
-        run_cmd.step.dependOn(&vopr.step);
 
         if (b.args) |args| {
             run_cmd.addArgs(args);
@@ -140,7 +136,6 @@ pub fn build(b: *std.build.Builder) void {
         lsm_forest_fuzz.setBuildMode(mode);
 
         const run_cmd = lsm_forest_fuzz.run();
-        run_cmd.step.dependOn(b.getInstallStep());
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("lsm_forest_fuzz", "Fuzz the LSM forest. Args: [--seed <seed>]");
@@ -154,7 +149,6 @@ pub fn build(b: *std.build.Builder) void {
         lsm_tree_fuzz.setBuildMode(mode);
 
         const run_cmd = lsm_tree_fuzz.run();
-        run_cmd.step.dependOn(b.getInstallStep());
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("lsm_tree_fuzz", "Fuzz the LSM tree. Args: [--seed <seed>]");
@@ -168,7 +162,6 @@ pub fn build(b: *std.build.Builder) void {
         lsm_segmented_array_fuzz.setBuildMode(mode);
 
         const run_cmd = lsm_segmented_array_fuzz.run();
-        run_cmd.step.dependOn(b.getInstallStep());
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("lsm_segmented_array_fuzz", "Fuzz the LSM segmented array. Args: [--seed <seed>]");
