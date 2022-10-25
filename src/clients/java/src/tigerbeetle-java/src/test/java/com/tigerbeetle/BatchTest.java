@@ -907,7 +907,7 @@ public class BatchTest {
         // Mimic the the binary response
         dummyCreateAccountResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyCreateAccountResultsStream.putInt(0).putInt(0); // Item 0 - OK
-        dummyCreateAccountResultsStream.putInt(1).putInt(22); // Item 1 - Exists
+        dummyCreateAccountResultsStream.putInt(1).putInt(18); // Item 1 - Exists
 
         createTransferResult1 = CreateTransferResult.Ok;
         createTransferResult2 = CreateTransferResult.ExceedsDebits;
