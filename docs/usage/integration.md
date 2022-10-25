@@ -49,9 +49,17 @@ What specific guarantees does TigerBeetle provide to applications?
   - [Transfers](../reference/transfers.md) are immutable — once created, they are never modified.
   - Transfer [timeouts](../reference/transfers.md#timeout) are deterministic, driven by the
     cluster's timestamp.
-  - Object timestamps are cluster-unique. For all objects `A` and `B`, `A.timestamp ≠ B.timestamp`.
-  - Object timestamps are strictly increasing For all objects `A` and `B`, if
-    `A.timestamp < B.timestamp`, then `A` was committed earlier than `B`.
+  - Within a cluster, object timestamps are unique.
+    For all objects `A` and `B` stored in the same cluster, `A.timestamp ≠ B.timestamp`.
+  - Within a cluster, object timestamps are strictly increasing.
+    For all objects `A` and `B` stored in the same cluster, if `A.timestamp < B.timestamp`,
+    then `A` was committed earlier than `B`.
+  - If a client session is terminated and restarts, it is guaranteed to see updates for which the
+    corresponding reply was received prior to termination.
+  - If a client session is terminated and restarts, it is _not_ guaranteed to see updates for
+    which the corresponding reply was _not_ received prior to the restart. Those updates may
+    occur at any point in the future, or never. Handling application crash recovery safely requires
+    [using `id`s to idempotently retry operations](#consistency-with-foreign-databases).
 
 ### Reply Order
 
@@ -241,8 +249,8 @@ the application is trying to run [too many](#batching-operations) concurrent cli
 
 ## Requests
 
-A _request_ is a [batch](#batching-operations) of one or more operations sent to the cluster in a
-single message.
+A _request_ is a [batch](#batching-operations) of one or more operation events sent to the cluster
+in a single message.
 
 - The cluster commits an entire batch at once, each operation in series.
 - Unless [linked](../reference/transfers.md#flags.linked), operations within
