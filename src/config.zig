@@ -72,7 +72,7 @@ pub const cache_transfers_pending_max = cache_transfers_max;
 /// These header copies enable us to disentangle corruption from crashes and recover accordingly.
 pub const journal_slot_count = switch (deployment_environment) {
     .production => 1024,
-    else => 128,
+    else => 1024,
 };
 
 /// The maximum size of the journal file:
@@ -98,6 +98,8 @@ pub const message_size_max = switch (deployment_environment) {
     .simulation => message_size_max_min,
     else => 1 * 1024 * 1024,
 };
+
+pub const message_body_size_max = message_size_max - @sizeOf(vsr.Header);
 
 /// The smallest possible message_size_max (for use in the simulator to improve performance).
 /// The message body must have room for pipeline_max headers in the DVC.
