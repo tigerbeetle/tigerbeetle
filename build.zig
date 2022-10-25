@@ -98,6 +98,8 @@ pub fn build(b: *std.build.Builder) void {
     {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
+        // Ensure that we get stack traces even in release builds.
+        simulator.omit_frame_pointer = false;
 
         const run_cmd = simulator.run();
 
@@ -115,6 +117,8 @@ pub fn build(b: *std.build.Builder) void {
     {
         const vopr = b.addExecutable("vopr", "src/vopr.zig");
         vopr.setTarget(target);
+        // Ensure that we get stack traces even in release builds.
+        vopr.omit_frame_pointer = false;
 
         const run_cmd = vopr.run();
 
@@ -134,6 +138,8 @@ pub fn build(b: *std.build.Builder) void {
         lsm_forest_fuzz.setMainPkgPath("src");
         lsm_forest_fuzz.setTarget(target);
         lsm_forest_fuzz.setBuildMode(mode);
+        // Ensure that we get stack traces even in release builds.
+        lsm_forest_fuzz.omit_frame_pointer = false;
 
         const run_cmd = lsm_forest_fuzz.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -147,6 +153,8 @@ pub fn build(b: *std.build.Builder) void {
         lsm_tree_fuzz.setMainPkgPath("src");
         lsm_tree_fuzz.setTarget(target);
         lsm_tree_fuzz.setBuildMode(mode);
+        // Ensure that we get stack traces even in release builds.
+        lsm_tree_fuzz.omit_frame_pointer = false;
 
         const run_cmd = lsm_tree_fuzz.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -160,6 +168,8 @@ pub fn build(b: *std.build.Builder) void {
         lsm_segmented_array_fuzz.setMainPkgPath("src");
         lsm_segmented_array_fuzz.setTarget(target);
         lsm_segmented_array_fuzz.setBuildMode(mode);
+        // Ensure that we get stack traces even in release builds.
+        lsm_segmented_array_fuzz.omit_frame_pointer = false;
 
         const run_cmd = lsm_segmented_array_fuzz.run();
         if (b.args) |args| run_cmd.addArgs(args);
