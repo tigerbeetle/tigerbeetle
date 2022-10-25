@@ -135,9 +135,9 @@ fn generate_events(
     errdefer allocator.free(events);
 
     var event_distribution = fuzz.random_enum_distribution(random, EventType);
-    event_distribution[@enumToInt(EventType.insert_new)] *= 10.0;
-    event_distribution[@enumToInt(EventType.insert_change_level)] *= 2.0;
-    event_distribution[@enumToInt(EventType.insert_change_snapshot)] *= 2.0;
+    event_distribution.insert_new *= 10.0;
+    event_distribution.insert_change_level *= 2.0;
+    event_distribution.insert_change_snapshot *= 2.0;
     log.info("event_distribution = {d:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
 
