@@ -110,9 +110,6 @@ pub const CreateAccountResult = enum(u32) {
 
     mutually_exclusive_flags,
 
-    exceeds_credits,
-    exceeds_debits,
-
     exists_with_different_flags,
     exists_with_different_user_data,
     exists_with_different_ledger,
