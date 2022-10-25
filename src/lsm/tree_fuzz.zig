@@ -12,7 +12,9 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../test/storage.zig").Storage;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
+    .message_body_size_max = config.message_body_size_max,
+});
 
 const GridType = @import("grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);

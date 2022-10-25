@@ -209,6 +209,8 @@ pub const Header = extern struct {
     ///
     /// * A `prepare` sets this to the leader's state machine `prepare_timestamp`.
     ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
+    /// * A `reply` sets this to the corresponding `prepare`'s timestamp.
+    ///   This allows the test workload to verify transfer timeouts.
     /// * A `do_view_change` sets this to the latest normal view number.
     /// * A `pong` sets this to the sender's wall clock value.
     /// * A `request_prepare` sets this to `1` when `context` is set to a checksum, and `0`
@@ -234,18 +236,18 @@ pub const Header = extern struct {
     pub fn calculate_checksum(self: *const Header) u128 {
         const checksum_size = @sizeOf(@TypeOf(self.checksum));
         assert(checksum_size == 16);
-        var target: [32]u8 = undefined;
-        std.crypto.hash.Blake3.hash(std.mem.asBytes(self)[checksum_size..], target[0..], .{});
-        return @bitCast(u128, target[0..checksum_size].*);
+        const checksum_value = checksum(std.mem.asBytes(self)[checksum_size..]);
+        assert(@TypeOf(checksum_value) == @TypeOf(self.checksum));
+        return checksum_value;
     }
 
     pub fn calculate_checksum_body(self: *const Header, body: []const u8) u128 {
         assert(self.size == @sizeOf(Header) + body.len);
         const checksum_size = @sizeOf(@TypeOf(self.checksum_body));
         assert(checksum_size == 16);
-        var target: [32]u8 = undefined;
-        std.crypto.hash.Blake3.hash(body[0..], target[0..], .{});
-        return @bitCast(u128, target[0..checksum_size].*);
+        const checksum_value = checksum(body);
+        assert(@TypeOf(checksum_value) == @TypeOf(self.checksum_body));
+        return checksum_value;
     }
 
     /// This must be called only after set_checksum_body() so that checksum_body is also covered:
@@ -429,7 +431,7 @@ pub const Header = extern struct {
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
         if (self.op != self.commit) return "op != commit";
-        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.timestamp == 0) return "timestamp == 0";
         if (self.operation == .register) {
             // In this context, the commit number is the newly registered session number.
             // The `0` commit number is reserved for cluster initialization.
