@@ -37,9 +37,9 @@ Future releases will allow multiple client instantiations.
 const {
   createClient,
   CreateAccountError,
-  CreateAccountFlags,
-  CreateTransferFlags,
   CreateTransferError,
+  AccountFlags,
+  TransferFlags,
 } = require('tigerbeetle-node');
 
 const client = createClient({
@@ -95,12 +95,12 @@ the [Accounts
 reference](https://docs.tigerbeetle.com/reference/accounts#flags).
 
 To toggle behavior for an account, combine enum values stored in the
-CreateAccountFlags object (in TypeScript it is an actual enum) with
+`AccountFlags` object (in TypeScript it is an actual enum) with
 bitwise-or:
 
-* `CreateAccountFlags.linked`
-* `CreateAccountFlags.debits_must_not_exceed_credits`
-* `CreateAccountFlags.credits_must_not_exceed_credits`
+* `AccountFlags.linked`
+* `AccountFlags.debits_must_not_exceed_credits`
+* `AccountFlags.credits_must_not_exceed_credits`
 
 For example, to link `account0` and `account1`, where `account0`
 additionally has the `debits_must_not_exceed_credits` constraint:
@@ -108,7 +108,7 @@ additionally has the `debits_must_not_exceed_credits` constraint:
 ```js
 const account0 = { ... account values ... };
 const account1 = { ... account values ... };
-account0.flags = CreateAccountFlags.linked | CreateAccountFlags.debits_must_not_exceed_credits;
+account0.flags = AccountFlags.linked | AccountFlags.debits_must_not_exceed_credits;
 // Create the account
 const errors = client.createAccounts([account0, account1]);
 ```
@@ -275,22 +275,21 @@ The transfer `flags` value is a bitfield. See details for these flags in
 the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfers#flags).
 
-To toggle behavior for an transfer, combine enum values stored in the
-`CreateTransferFlags` object (in TypeScript it is an actual enum) with
+To toggle behavior for a transfer, combine enum values stored in the
+`TransferFlags` object (in TypeScript it is an actual enum) with
 bitwise-or:
 
-* `CreateTransferFlags.linked`
-* `CreateTransferFlags.debits_must_not_exceed_credits`
-* `CreateTransferFlags.credits_must_not_exceed_credits`
+* `TransferFlags.linked`
+* `TransferFlags.pending`
+* `TransferFlags.post_pending_transfer`
+* `TransferFlags.void_pending_transfer`
 
-For example, to set the following `transfer0` as `linked` to
-`transfer1` and that `transfer0` has the setting
-`debits_must_not_exceed_credits`:
+For example, to link `transfer0` and `transfer1`:
 
 ```js
 const transfer0 = { ... transfer values ... };
 const transfer1 = { ... transfer values ... };
-transfer0.flags = CreateTransferFlags.linked | CreateTransferFlags.debits_must_not_exceed_credits;
+transfer0.flags = TransferFlags.linked;
 // Create the transfer
 const errors = client.createTransfers([transfer0, transfer1]);
 ```
@@ -305,10 +304,11 @@ transfer.
 
 ##### Post a Pending Transfer
 
-With `flags = post_pending_transfer`, TigerBeetle will post the
-transfer. TigerBeetle will atomically rollback the changes to
-`debits_pending` and `credits_pending` of the appropriate accounts and
-apply them to the `debits_posted` and `credits_posted` balances.
+With `transfer.flags == TransferFlags.post_pending_transfer`,
+TigerBeetle will post the transfer. TigerBeetle will atomically roll
+back the changes to `debits_pending` and `credits_pending` of the
+appropriate accounts and apply them to the `debits_posted` and
+`credits_posted` balances.
 
 ```js
 const post = {
