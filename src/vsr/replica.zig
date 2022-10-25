@@ -2583,11 +2583,7 @@ pub fn ReplicaType(
 
             if (self.on_compact) |on_compact| on_compact(self);
 
-            // If op_checkpoint_next == vsr_state.commit_min, we checkpointed at op,
-            // then crashed and have now recovered.
-            if (op == self.op_checkpoint_trigger() and
-                self.op_checkpoint_next() != self.superblock.working.vsr_state.commit_min)
-            {
+            if (op == self.op_checkpoint_trigger()) {
                 assert(op == self.op);
                 assert((op + 1) % config.lsm_batch_multiple == 0);
                 log.debug("{}: commit_op_compact_callback: checkpoint start " ++
