@@ -13,7 +13,9 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
 const Storage = @import("tigerbeetle/src/storage.zig").Storage;
-const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachineType(Storage);
+const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachineType(Storage, .{
+    .message_body_size_max = config.message_body_size_max,
+});
 const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
 const MessagePool = @import("tigerbeetle/src/message_pool.zig").MessagePool;
