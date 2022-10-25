@@ -19,7 +19,9 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
 
-pub fn StateMachineType(comptime Storage: type) type {
+pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
+    message_body_size_max: usize,
+}) type {
     return struct {
         const StateMachine = @This();
 
@@ -64,12 +66,35 @@ pub fn StateMachineType(comptime Storage: type) type {
             lookup_transfers,
         };
 
+        pub const constants = struct {
+            /// The maximum number of objects within a batch, by operation.
+            pub const batch_max = struct {
+                pub const create_accounts = operation_batch_max(.create_accounts);
+                pub const create_transfers = operation_batch_max(.create_transfers);
+                pub const lookup_accounts = operation_batch_max(.lookup_accounts);
+                pub const lookup_transfers = operation_batch_max(.lookup_transfers);
+
+                comptime {
+                    assert(create_accounts >= 0);
+                    assert(create_transfers >= 0);
+                    assert(lookup_accounts >= 0);
+                    assert(lookup_transfers >= 0);
+                }
+
+                fn operation_batch_max(comptime operation: Operation) usize {
+                    return @divFloor(constants_.message_body_size_max, std.math.max(
+                        @sizeOf(Event(operation)),
+                        @sizeOf(Result(operation)),
+                    ));
+                }
+            };
+        };
+
         pub const Options = struct {
             lsm_forest_node_count: u32,
             cache_entries_accounts: u32,
             cache_entries_transfers: u32,
             cache_entries_posted: u32,
-            message_body_size_max: usize,
         };
 
         prepare_timestamp: u64,
@@ -886,16 +911,10 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
-            const batch_accounts_max = @intCast(u32, @divFloor(
-                options.message_body_size_max,
-                @sizeOf(Account),
-            ));
-            const batch_transfers_max = @intCast(u32, @divFloor(
-                options.message_body_size_max,
-                @sizeOf(Transfer),
-            ));
-            assert(batch_accounts_max > 0);
-            assert(batch_transfers_max > 0);
+            const batch_accounts_max = @intCast(u32, constants.batch_max.create_accounts);
+            const batch_transfers_max = @intCast(u32, constants.batch_max.create_transfers);
+            assert(batch_accounts_max == constants.batch_max.lookup_accounts);
+            assert(batch_transfers_max == constants.batch_max.lookup_transfers);
 
             return .{
                 .accounts = .{
@@ -1038,7 +1057,11 @@ const TestContext = struct {
     const MessagePool = @import("message_pool.zig").MessagePool;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("lsm/grid.zig").GridType(Storage);
-    const StateMachine = StateMachineType(Storage);
+    const StateMachine = StateMachineType(Storage, .{
+        // Overestimate the batch size (in order to overprovision commit_entries_max)
+        // because the test never compacts.
+        .message_body_size_max = 1000 * @sizeOf(Account),
+    });
 
     storage: Storage,
     message_pool: MessagePool,
@@ -1084,9 +1107,6 @@ const TestContext = struct {
             .cache_entries_accounts = 2048,
             .cache_entries_transfers = 2048,
             .cache_entries_posted = 2048,
-            // Overestimate the batch size (in order to overprovision commit_entries_max)
-            // because the test never compacts.
-            .message_body_size_max = 1000 * @sizeOf(Account),
         });
         errdefer ctx.state_machine.deinit(allocator);
     }
@@ -2989,7 +3009,9 @@ fn test_equal_n_bytes(comptime n: usize) !void {
 
 test "StateMachine: ref all decls" {
     const Storage = @import("storage.zig").Storage;
-    const StateMachine = StateMachineType(Storage);
+    const StateMachine = StateMachineType(Storage, .{
+        .message_body_size_max = 1000 * @sizeOf(Account),
+    });
 
     std.testing.refAllDecls(StateMachine);
 }
