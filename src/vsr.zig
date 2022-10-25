@@ -959,7 +959,7 @@ pub fn sector_ceil(offset: u64) u64 {
 }
 
 pub fn checksum(source: []const u8) u128 {
-    var target: u128 = undefined;
-    std.crypto.hash.Blake3.hash(source, std.mem.asBytes(&target), .{});
-    return target;
+    var target: [32]u8 = undefined;
+    std.crypto.hash.Blake3.hash(source, target[0..], .{});
+    return @bitCast(u128, target[0..@sizeOf(u128)].*);
 }
