@@ -137,6 +137,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_manifest_log.setMainPkgPath("src");
         fuzz_lsm_manifest_log.setTarget(target);
         fuzz_lsm_manifest_log.setBuildMode(mode);
+        fuzz_lsm_manifest_log.omit_frame_pointer = false;
 
         const run_cmd = fuzz_lsm_manifest_log.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -151,7 +152,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_tree.setTarget(target);
         fuzz_lsm_tree.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
-        lsm_tree_fuzz.omit_frame_pointer = false;
+        fuzz_lsm_tree.omit_frame_pointer = false;
 
         const run_cmd = fuzz_lsm_tree.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -169,7 +170,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_segmented_array.setTarget(target);
         fuzz_lsm_segmented_array.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
-        lsm_tree_fuzz.omit_frame_pointer = false;
+        fuzz_lsm_segmented_array.omit_frame_pointer = false;
 
         const run_cmd = fuzz_lsm_segmented_array.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -186,6 +187,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock.setMainPkgPath("src");
         fuzz_vsr_superblock.setTarget(target);
         fuzz_vsr_superblock.setBuildMode(mode);
+        fuzz_vsr_superblock.omit_frame_pointer = false;
 
         const run_cmd = fuzz_vsr_superblock.run();
         if (b.args) |args| run_cmd.addArgs(args);

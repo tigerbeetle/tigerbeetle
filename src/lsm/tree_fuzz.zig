@@ -82,7 +82,10 @@ const Environment = struct {
     const cluster = 32;
     const replica = 4;
     // TODO Is this appropriate for the number of fuzz_ops we want to run?
-    const size_max = vsr.Zone.superblock.size().? + vsr.Zone.wal.size().? + 1024 * 1024 * 1024;
+    const size_max = vsr.Zone.superblock.size().? +
+        vsr.Zone.wal_headers.size().? +
+        vsr.Zone.wal_prepares.size().? +
+        1024 * 1024 * 1024;
 
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
@@ -248,7 +251,13 @@ const Environment = struct {
     fn tree_checkpoint_callback(tree: *Tree) void {
         const env = @fieldParentPtr(@This(), "tree", tree);
         env.change_state(.tree_checkpointing, .superblock_checkpointing);
-        env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context);
+        env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
+            .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
+            .commit_min = env.superblock.working.vsr_state.commit_min + 1,
+            .commit_max = env.superblock.working.vsr_state.commit_max + 1,
+            .view_normal = 0,
+            .view = 0,
+        });
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
@@ -292,11 +301,12 @@ const Environment = struct {
 
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
             log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
-            //TODO(@djg) Restore these when dj-vopr-workload merges.
-            //const storage_size_used = storage.size_used();
-            //log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
-            //const model_size = model.count() * @sizeOf(Key.Value);
-            //log.debug("space_amplification = {d:.2}", .{@intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size)});
+            const storage_size_used = storage.size_used();
+            log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
+            const model_size = model.count() * @sizeOf(Key.Value);
+            log.debug("space_amplification = {d:.2}", .{
+                @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
+            });
             // Apply fuzz_op to the tree and the model.
             switch (fuzz_op) {
                 .compact => |compact| {
@@ -339,19 +349,10 @@ pub fn run_fuzz_ops(fuzz_ops: []const FuzzOp) !void {
         allocator,
         Environment.size_max,
         Storage.Options{
-            // We don't apply storage faults yet, so this seed doesn't matter.
-            .seed = 0xdeadbeef,
             .read_latency_min = 0,
             .read_latency_mean = 0,
             .write_latency_min = 0,
             .write_latency_mean = 0,
-            .read_fault_probability = 0,
-            .write_fault_probability = 0,
-        },
-        0,
-        .{
-            .first_offset = 0,
-            .period = 0,
         },
     );
     defer storage.deinit(allocator);
