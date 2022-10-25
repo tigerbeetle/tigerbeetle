@@ -13,27 +13,28 @@ func _() {
 	_ = x[AccountReservedFlag-3]
 	_ = x[AccountReservedField-4]
 	_ = x[AccountIdMustNotBeZero-5]
-	_ = x[AccountLedgerMustNotBeZero-6]
-	_ = x[AccountCodeMustNotBeZero-7]
-	_ = x[AccountDebitsPendingMustBeZero-8]
-	_ = x[AccountDebitsPostedMustBeZero-9]
-	_ = x[AccountCreditsPendingMustBeZero-10]
-	_ = x[AccountCreditsPostedMustBeZero-11]
-	_ = x[AccountMutuallyExclusiveFlags-12]
-	_ = x[AccountOverflowsDebits-13]
-	_ = x[AccountOverflowsCredits-14]
-	_ = x[AccountExceedsCredits-15]
-	_ = x[AccountExceedsDebits-16]
-	_ = x[AccountExistsWithDifferentFlags-17]
-	_ = x[AccountExistsWithDifferentUserData-18]
-	_ = x[AccountExistsWithDifferentLedger-19]
-	_ = x[AccountExistsWithDifferentCode-20]
-	_ = x[AccountExist-21]
+	_ = x[AccountIdMustNotBeIntMax-6]
+	_ = x[AccountLedgerMustNotBeZero-7]
+	_ = x[AccountCodeMustNotBeZero-8]
+	_ = x[AccountDebitsPendingMustBeZero-9]
+	_ = x[AccountDebitsPostedMustBeZero-10]
+	_ = x[AccountCreditsPendingMustBeZero-11]
+	_ = x[AccountCreditsPostedMustBeZero-12]
+	_ = x[AccountMutuallyExclusiveFlags-13]
+	_ = x[AccountOverflowsDebits-14]
+	_ = x[AccountOverflowsCredits-15]
+	_ = x[AccountExceedsCredits-16]
+	_ = x[AccountExceedsDebits-17]
+	_ = x[AccountExistsWithDifferentFlags-18]
+	_ = x[AccountExistsWithDifferentUserData-19]
+	_ = x[AccountExistsWithDifferentLedger-20]
+	_ = x[AccountExistsWithDifferentCode-21]
+	_ = x[AccountExists-22]
 }
 
-const _CreateAccountResult_name = "LinkedEventFailedLinkedEventChainOpenReservedFlagReservedFieldIdMustNotBeZeroLedgerMustNotBeZeroCodeMustNotBeZeroDebitsPendingMustBeZeroDebitsPostedMustBeZeroCreditsPendingMustBeZeroCreditsPostedMustBeZeroMutuallyExclusiveFlagsOverflowsDebitsOverflowsCreditsExceedsCreditsExceedsDebitsExistsWithDifferentFlagsExistsWithDifferentUserDataExistsWithDifferentLedgerExistsWithDifferentCodeExist"
+const _CreateAccountResult_name = "LinkedEventFailedLinkedEventChainOpenReservedFlagReservedFieldIdMustNotBeZeroIdMustNotBeIntMaxLedgerMustNotBeZeroCodeMustNotBeZeroDebitsPendingMustBeZeroDebitsPostedMustBeZeroCreditsPendingMustBeZeroCreditsPostedMustBeZeroMutuallyExclusiveFlagsOverflowsDebitsOverflowsCreditsExceedsCreditsExceedsDebitsExistsWithDifferentFlagsExistsWithDifferentUserDataExistsWithDifferentLedgerExistsWithDifferentCodeExists"
 
-var _CreateAccountResult_index = [...]uint16{0, 17, 37, 49, 62, 77, 96, 113, 136, 158, 182, 205, 227, 242, 258, 272, 285, 309, 336, 361, 384, 389}
+var _CreateAccountResult_index = [...]uint16{0, 17, 37, 49, 62, 77, 94, 113, 130, 153, 175, 199, 222, 244, 259, 275, 289, 302, 326, 353, 378, 401, 407}
 
 func (i CreateAccountResult) String() string {
 	i -= 1
