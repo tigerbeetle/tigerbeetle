@@ -197,7 +197,13 @@ const Environment = struct {
     fn forest_checkpoint_callback(forest: *Forest) void {
         const env = @fieldParentPtr(@This(), "forest", forest);
         env.change_state(.forest_checkpointing, .superblock_checkpointing);
-        env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context);
+        env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
+            .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
+            .commit_min = env.superblock.working.vsr_state.commit_min + 1,
+            .commit_max = env.superblock.working.vsr_state.commit_max + 1,
+            .view_normal = 0,
+            .view = 0,
+        });
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
@@ -239,11 +245,12 @@ const Environment = struct {
 
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
             log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
-            //TODO(@djg) Restore these when dj-vopr-workload merges.
-            //const storage_size_used = storage.size_used();
-            //log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
-            //const model_size = model.count() * @sizeOf(Account);
-            //log.debug("space_amplification = {d:.2}", .{@intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size)});
+            const storage_size_used = storage.size_used();
+            log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
+            const model_size = model.count() * @sizeOf(Account);
+            log.debug("space_amplification = {d:.2}", .{
+                @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
+            });
             // Apply fuzz_op to the forest and the model.
             switch (fuzz_op) {
                 .compact => |compact| {
@@ -394,10 +401,10 @@ pub fn main() !void {
 
     try run_fuzz_ops(
         Storage.Options{
-            .read_latency_min = read_latency_min,
-            .read_latency_mean = read_latency_min + fuzz.random_int_exponential(random, u64, 20),
-            .write_latency_min = write_latency_min,
-            .write_latency_mean = write_latency_min + fuzz.random_int_exponential(random, u64, 20),
+            .read_latency_min = 0,
+            .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
+            .write_latency_min = 0,
+            .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
         },
         fuzz_ops
     );
