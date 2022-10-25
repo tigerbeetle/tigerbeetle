@@ -76,11 +76,54 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const benchmark = b.addExecutable("eytzinger_benchmark", "src/eytzinger_benchmark.zig");
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(.ReleaseSafe);
+        const run_cmd = benchmark.run();
+
+        const step = b.step("eytzinger_benchmark", "Benchmark array search");
+        step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const benchmark = b.addExecutable("benchmark_ewah", "src/ewah_benchmark.zig");
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(.ReleaseSafe);
+        const run_cmd = benchmark.run();
+
+        const step = b.step("benchmark_ewah", "Benchmark EWAH codec");
+        step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const benchmark = b.addExecutable(
+            "benchmark_segmented_array",
+            "src/lsm/segmented_array_benchmark.zig",
+        );
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(.ReleaseSafe);
+        benchmark.setMainPkgPath("src/");
+        const run_cmd = benchmark.run();
+
+        const step = b.step("benchmark_segmented_array", "Benchmark SegmentedArray search");
+        step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const output_dir = "zig-out";
+
+        const build_options = b.addOptions();
+        build_options.addOption([]const u8, "output_dir", output_dir);
+
+        const tb_client_header = b.addExecutable("tb_client_header", "src/c/tb_client_header.zig");
+        tb_client_header.setMainPkgPath("src");
+        tb_client_header.addPackage(build_options.getPackage("build_options"));
+
         const tb_client = b.addStaticLibrary("tb_client", "src/c/tb_client.zig");
         tb_client.setMainPkgPath("src");
         tb_client.setTarget(target);
         tb_client.setBuildMode(mode);
-        tb_client.setOutputDir("zig-out");
+        tb_client.setOutputDir(output_dir);
         tb_client.pie = true;
         tb_client.bundle_compiler_rt = true;
 
@@ -91,6 +134,7 @@ pub fn build(b: *std.build.Builder) void {
 
         const build_step = b.step("tb_client", "Build C client shared library");
         build_step.dependOn(&tb_client.step);
+        build_step.dependOn(&tb_client_header.run().step);
     }
 
     {
