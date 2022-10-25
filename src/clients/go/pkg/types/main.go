@@ -68,30 +68,30 @@ type AccountEventResult struct {
 
 type CreateAccountResult uint32
 
-//go:generate stringer -type=CreateAccountResult -trimprefix=Account
+//go:generate go run golang.org/x/tools/cmd/stringer -type=CreateAccountResult -trimprefix=Account
 
 const (
-	AccountLinkedEventFailed                 CreateAccountResult = 1
-	AccountReservedFlag                      CreateAccountResult = 2
-	AccountReservedField                     CreateAccountResult = 3
-	AccountIdMustNotBeZero                   CreateAccountResult = 4
-	AccountIdMustNotBeMaxInt                 CreateAccountResult = 5
-	AccountLedgerMustNotBeZero               CreateAccountResult = 6
-	AccountCodeMustNotBeZero                 CreateAccountResult = 7
-	AccountMutuallyExclusiveFlags            CreateAccountResult = 8
-	AccountOverflowsDebits                   CreateAccountResult = 9
-	AccountOverflowsCredits                  CreateAccountResult = 10
-	AccountExceedsCredits                    CreateAccountResult = 11
-	AccountExceedsDebits                     CreateAccountResult = 12
-	AccountExistsWithDifferentFlags          CreateAccountResult = 13
-	AccountExistsWithDifferentUserData       CreateAccountResult = 14
-	AccountExistsWithDifferentLedger         CreateAccountResult = 15
-	AccountExistsWithDifferentCode           CreateAccountResult = 16
-	AccountExistsWithDifferentDebitsPending  CreateAccountResult = 17
-	AccountExistsWithDifferentDebitsPosted   CreateAccountResult = 18
-	AccountExistsWithDifferentCreditsPending CreateAccountResult = 19
-	AccountExistsWithDifferentCreditsPosted  CreateAccountResult = 20
-	AccountExists                            CreateAccountResult = 21
+	AccountLinkedEventFailed           CreateAccountResult = 1
+	AccountLinkedEventChainOpen        CreateAccountResult = 2
+	AccountReservedFlag                CreateAccountResult = 3
+	AccountReservedField               CreateAccountResult = 4
+	AccountIdMustNotBeZero             CreateAccountResult = 5
+	AccountLedgerMustNotBeZero         CreateAccountResult = 6
+	AccountCodeMustNotBeZero           CreateAccountResult = 7
+	AccountDebitsPendingMustBeZero     CreateAccountResult = 8
+	AccountDebitsPostedMustBeZero      CreateAccountResult = 9
+	AccountCreditsPendingMustBeZero    CreateAccountResult = 10
+	AccountCreditsPostedMustBeZero     CreateAccountResult = 11
+	AccountMutuallyExclusiveFlags      CreateAccountResult = 12
+	AccountOverflowsDebits             CreateAccountResult = 13
+	AccountOverflowsCredits            CreateAccountResult = 14
+	AccountExceedsCredits              CreateAccountResult = 15
+	AccountExceedsDebits               CreateAccountResult = 16
+	AccountExistsWithDifferentFlags    CreateAccountResult = 17
+	AccountExistsWithDifferentUserData CreateAccountResult = 18
+	AccountExistsWithDifferentLedger   CreateAccountResult = 19
+	AccountExistsWithDifferentCode     CreateAccountResult = 20
+	AccountExist                       CreateAccountResult = 21
 )
 
 type Transfer struct {
@@ -146,60 +146,57 @@ type TransferEventResult struct {
 
 type CreateTransferResult uint32
 
-//go:generate stringer -type=CreateTransferResult -trimprefix=Transfer
+//go:generate go run golang.org/x/tools/cmd/stringer -type=CreateTransferResult -trimprefix=Transfer
 
 const (
 	TransferLinkedEventFailed                          CreateTransferResult = 1
-	TransferReservedFlag                               CreateTransferResult = 2
-	TransferReservedField                              CreateTransferResult = 3
-	TransferIdMustNotBeZero                            CreateTransferResult = 4
-	TransferIdMustNotBeMaxInt                          CreateTransferResult = 5
+	TransferLinkedEventChainOpen                       CreateTransferResult = 2
+	TransferReservedFlag                               CreateTransferResult = 3
+	TransferReservedField                              CreateTransferResult = 4
+	TransferIdMustNotBeZero                            CreateTransferResult = 5
 	TransferDebitAccountIdMustNotBeZero                CreateTransferResult = 6
-	TransferDebitAccountIdMustNotBeMaxInt              CreateTransferResult = 7
-	TransferCreditAccountIdMustNotBeZero               CreateTransferResult = 8
-	TransferCreditAccountIdMustNotBeMaxInt             CreateTransferResult = 9
-	TransferAccountsMustBeDifferent                    CreateTransferResult = 10
-	TransferPendingIdMustBeZero                        CreateTransferResult = 11
-	TransferPendingTransferMustTimeout                 CreateTransferResult = 12
-	TransferLedgerMustNotBeZero                        CreateTransferResult = 13
-	TransferCodeMustNotBeZero                          CreateTransferResult = 14
-	TransferAmountMustNotBeZero                        CreateTransferResult = 15
-	TransferDebitAccountNotFound                       CreateTransferResult = 16
-	TransferCreditAccountNotFound                      CreateTransferResult = 17
-	TransferAccountsMustHaveTheSameLedger              CreateTransferResult = 18
-	TransferTransferMustHaveTheSameLedgerAsAccounts    CreateTransferResult = 19
-	TransferExistsWithDifferentFlags                   CreateTransferResult = 20
-	TransferExistsWithDifferentDebitAccountId          CreateTransferResult = 21
-	TransferExistsWithDifferentCreditAccountId         CreateTransferResult = 22
-	TransferExistsWithDifferentUserData                CreateTransferResult = 23
-	TransferExistsWithDifferentPendingId               CreateTransferResult = 24
-	TransferExistsWithDifferentTimeout                 CreateTransferResult = 25
-	TransferExistsWithDifferentCode                    CreateTransferResult = 26
-	TransferExistsWithDifferentAmount                  CreateTransferResult = 27
-	TransferExists                                     CreateTransferResult = 28
-	TransferOverflowsDebitsPending                     CreateTransferResult = 29
-	TransferOverflowsCreditsPending                    CreateTransferResult = 30
-	TransferOverflowsDebitsPosted                      CreateTransferResult = 31
-	TransferOverflowsCreditsPosted                     CreateTransferResult = 32
-	TransferOverflowsDebits                            CreateTransferResult = 33
-	TransferOverflowsCredits                           CreateTransferResult = 34
-	TransferExceedsCredits                             CreateTransferResult = 35
-	TransferExceedsDebits                              CreateTransferResult = 36
-	TransferCannotPostAndVoidPendingTransfer           CreateTransferResult = 37
-	TransferPendingTransferCannotPostOrVoidAnother     CreateTransferResult = 38
-	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 39
-	TransferPendingIdMustNotBeZero                     CreateTransferResult = 40
-	TransferPendingIdMustNotBeMaxInt                   CreateTransferResult = 41
-	TransferPendingIdMustBeDifferent                   CreateTransferResult = 42
-	TransferPendingTransferNotFound                    CreateTransferResult = 43
-	TransferPendingTransferNotPending                  CreateTransferResult = 44
-	TransferPendingTransferHasDifferentDebitAccountId  CreateTransferResult = 45
-	TransferPendingTransferHasDifferentCreditAccountId CreateTransferResult = 46
-	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 47
-	TransferPendingTransferHasDifferentCode            CreateTransferResult = 48
-	TransferExceedsPendingTransferAmount               CreateTransferResult = 49
-	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 50
-	TransferPendingTransferAlreadyPosted               CreateTransferResult = 51
-	TransferPendingTransferAlreadyVoided               CreateTransferResult = 52
-	TransferPendingTransferExpired                     CreateTransferResult = 53
+	TransferCreditAccountIdMustNotBeZero               CreateTransferResult = 7
+	TransferAccountsMustBeDifferent                    CreateTransferResult = 8
+	TransferPendingIdMustBeZero                        CreateTransferResult = 9
+	TransferPendingTransferMustTimeout                 CreateTransferResult = 10
+	TransferLedgerMustNotBeZero                        CreateTransferResult = 11
+	TransferCodeMustNotBeZero                          CreateTransferResult = 12
+	TransferAmountMustNotBeZero                        CreateTransferResult = 13
+	TransferDebitAccountNotFound                       CreateTransferResult = 14
+	TransferCreditAccountNotFound                      CreateTransferResult = 15
+	TransferAccountsMustHaveTheSameLedger              CreateTransferResult = 16
+	TransferTransferMustHaveTheSameLedgerAsAccounts    CreateTransferResult = 17
+	TransferExistsWithDifferentFlags                   CreateTransferResult = 18
+	TransferExistsWithDifferentDebitAccountId          CreateTransferResult = 19
+	TransferExistsWithDifferentCreditAccountId         CreateTransferResult = 20
+	TransferExistsWithDifferentUserData                CreateTransferResult = 21
+	TransferExistsWithDifferentPendingId               CreateTransferResult = 22
+	TransferExistsWithDifferentTimeout                 CreateTransferResult = 23
+	TransferExistsWithDifferentCode                    CreateTransferResult = 24
+	TransferExistsWithDifferentAmount                  CreateTransferResult = 25
+	TransferExists                                     CreateTransferResult = 26
+	TransferOverflowsDebitsPending                     CreateTransferResult = 27
+	TransferOverflowsCreditsPending                    CreateTransferResult = 28
+	TransferOverflowsDebitsPosted                      CreateTransferResult = 29
+	TransferOverflowsCreditsPosted                     CreateTransferResult = 30
+	TransferOverflowsDebits                            CreateTransferResult = 31
+	TransferOverflowsCredits                           CreateTransferResult = 32
+	TransferExceedsCredits                             CreateTransferResult = 33
+	TransferExceedsDebits                              CreateTransferResult = 34
+	TransferCannotPostAndVoidPendingTransfer           CreateTransferResult = 35
+	TransferPendingTransferCannotPostOrVoidAnother     CreateTransferResult = 36
+	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 37
+	TransferPendingIdMustNotBeZero                     CreateTransferResult = 38
+	TransferPendingIdMustBeDifferent                   CreateTransferResult = 39
+	TransferPendingTransferNotFound                    CreateTransferResult = 40
+	TransferPendingTransferNotPending                  CreateTransferResult = 41
+	TransferPendingTransferHasDifferentDebitAccountId  CreateTransferResult = 42
+	TransferPendingTransferHasDifferentCreditAccountId CreateTransferResult = 43
+	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 44
+	TransferPendingTransferHasDifferentCode            CreateTransferResult = 45
+	TransferExceedsPendingTransferAmount               CreateTransferResult = 46
+	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 47
+	TransferPendingTransferAlreadyPosted               CreateTransferResult = 48
+	TransferPendingTransferAlreadyVoided               CreateTransferResult = 49
+	TransferPendingTransferExpired                     CreateTransferResult = 50
 )

@@ -9,31 +9,31 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[AccountLinkedEventFailed-1]
-	_ = x[AccountReservedFlag-2]
-	_ = x[AccountReservedField-3]
-	_ = x[AccountIdMustNotBeZero-4]
-	_ = x[AccountIdMustNotBeMaxInt-5]
+	_ = x[AccountLinkedEventChainOpen-2]
+	_ = x[AccountReservedFlag-3]
+	_ = x[AccountReservedField-4]
+	_ = x[AccountIdMustNotBeZero-5]
 	_ = x[AccountLedgerMustNotBeZero-6]
 	_ = x[AccountCodeMustNotBeZero-7]
-	_ = x[AccountMutuallyExclusiveFlags-8]
-	_ = x[AccountOverflowsDebits-9]
-	_ = x[AccountOverflowsCredits-10]
-	_ = x[AccountExceedsCredits-11]
-	_ = x[AccountExceedsDebits-12]
-	_ = x[AccountExistsWithDifferentFlags-13]
-	_ = x[AccountExistsWithDifferentUserData-14]
-	_ = x[AccountExistsWithDifferentLedger-15]
-	_ = x[AccountExistsWithDifferentCode-16]
-	_ = x[AccountExistsWithDifferentDebitsPending-17]
-	_ = x[AccountExistsWithDifferentDebitsPosted-18]
-	_ = x[AccountExistsWithDifferentCreditsPending-19]
-	_ = x[AccountExistsWithDifferentCreditsPosted-20]
-	_ = x[AccountExists-21]
+	_ = x[AccountDebitsPendingMustBeZero-8]
+	_ = x[AccountDebitsPostedMustBeZero-9]
+	_ = x[AccountCreditsPendingMustBeZero-10]
+	_ = x[AccountCreditsPostedMustBeZero-11]
+	_ = x[AccountMutuallyExclusiveFlags-12]
+	_ = x[AccountOverflowsDebits-13]
+	_ = x[AccountOverflowsCredits-14]
+	_ = x[AccountExceedsCredits-15]
+	_ = x[AccountExceedsDebits-16]
+	_ = x[AccountExistsWithDifferentFlags-17]
+	_ = x[AccountExistsWithDifferentUserData-18]
+	_ = x[AccountExistsWithDifferentLedger-19]
+	_ = x[AccountExistsWithDifferentCode-20]
+	_ = x[AccountExist-21]
 }
 
-const _CreateAccountResult_name = "LinkedEventFailedReservedFlagReservedFieldIdMustNotBeZeroIdMustNotBeMaxIntLedgerMustNotBeZeroCodeMustNotBeZeroMutuallyExclusiveFlagsOverflowsDebitsOverflowsCreditsExceedsCreditsExceedsDebitsExistsWithDifferentFlagsExistsWithDifferentUserDataExistsWithDifferentLedgerExistsWithDifferentCodeExistsWithDifferentDebitsPendingExistsWithDifferentDebitsPostedExistsWithDifferentCreditsPendingExistsWithDifferentCreditsPostedExists"
+const _CreateAccountResult_name = "LinkedEventFailedLinkedEventChainOpenReservedFlagReservedFieldIdMustNotBeZeroLedgerMustNotBeZeroCodeMustNotBeZeroDebitsPendingMustBeZeroDebitsPostedMustBeZeroCreditsPendingMustBeZeroCreditsPostedMustBeZeroMutuallyExclusiveFlagsOverflowsDebitsOverflowsCreditsExceedsCreditsExceedsDebitsExistsWithDifferentFlagsExistsWithDifferentUserDataExistsWithDifferentLedgerExistsWithDifferentCodeExist"
 
-var _CreateAccountResult_index = [...]uint16{0, 17, 29, 42, 57, 74, 93, 110, 132, 147, 163, 177, 190, 214, 241, 266, 289, 321, 352, 385, 417, 423}
+var _CreateAccountResult_index = [...]uint16{0, 17, 37, 49, 62, 77, 96, 113, 136, 158, 182, 205, 227, 242, 258, 272, 285, 309, 336, 361, 384, 389}
 
 func (i CreateAccountResult) String() string {
 	i -= 1
