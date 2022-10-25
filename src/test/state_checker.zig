@@ -43,15 +43,6 @@ pub const StateChecker = struct {
     /// The number of times the canonical state has been advanced.
     requests_committed: u64 = 0,
 
-    //requests_committed: u64 = 0,
-
-    ///// The number of times the canonical state has been advanced excluding:
-    ///// * `register` operations, and
-    ///// * the root message.
-    ///// (That is, correspond 1:1 with `client.request()` calls).
-    //requests_committed: u64 = 0,
-
-
     pub fn init(
         allocator: mem.Allocator,
         cluster: u32,
