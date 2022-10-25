@@ -98,6 +98,8 @@ pub fn build(b: *std.build.Builder) void {
     {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
+        // Ensure that we get stack traces even in release builds.
+        simulator.omit_frame_pointer = false;
 
         const run_cmd = simulator.run();
 
@@ -115,6 +117,8 @@ pub fn build(b: *std.build.Builder) void {
     {
         const vopr = b.addExecutable("vopr", "src/vopr.zig");
         vopr.setTarget(target);
+        // Ensure that we get stack traces even in release builds.
+        vopr.omit_frame_pointer = false;
 
         const run_cmd = vopr.run();
 
