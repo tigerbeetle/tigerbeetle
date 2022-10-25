@@ -18,20 +18,27 @@ pub fn random_int_exponential(random: std.rand.Random, comptime T: type, avg: T)
     return std.math.lossyCast(T, exp);
 }
 
+pub fn Distribution(comptime Enum: type) type {
+    return std.enums.EnumFieldStruct(Enum, f64, null);
+}
+
 /// Return a distribution for use with `random_enum`.
 pub fn random_enum_distribution(
     random: std.rand.Random,
     comptime Enum: type,
-) [@typeInfo(Enum).Enum.fields.len]f64 {
-    var distribution: [@typeInfo(Enum).Enum.fields.len]f64 = undefined;
+) Distribution(Enum) {
+    const fields = @typeInfo(Distribution(Enum)).Struct.fields;
+    var distribution: Distribution(Enum) = undefined;
     var total: f64 = 0;
-    while (true) {
-        for (distribution) |*p| p.* = @intToFloat(f64, random.uintLessThan(u8, 10));
-        total = 0;
-        for (distribution) |p| total += p;
-        if (total != 0) break;
+    inline for (fields) |field| {
+        const p = @intToFloat(f64, random.uintLessThan(u8, 10));
+        @field(distribution, field.name) = p;
+        total += p;
     }
-    for (distribution) |*p| p.* = p.* / total;
+    // Ensure that at least one field has non-zero probability.
+    if (total == 0) {
+        @field(distribution, fields[0].name) = 1;
+    }
     return distribution;
 }
 
@@ -39,12 +46,18 @@ pub fn random_enum_distribution(
 pub fn random_enum(
     random: std.rand.Random,
     comptime Enum: type,
-    distribution: [@typeInfo(Enum).Enum.fields.len]f64,
+    distribution: Distribution(Enum),
 ) Enum {
-    var choice = random.float(f64);
-    inline for (@typeInfo(Enum).Enum.fields) |enum_field, i| {
-        choice -= distribution[i];
-        if (choice < 0) return @intToEnum(Enum, enum_field.value);
+    const fields = @typeInfo(Enum).Enum.fields;
+    var total: f64 = 0;
+    inline for (fields) |field| {
+        total += @field(distribution, field.name);
+    }
+    assert(total > 0);
+    var choice = random.float(f64) * total;
+    inline for (fields) |field| {
+        choice -= @field(distribution, field.name);
+        if (choice < 0) return @intToEnum(Enum, field.value);
     }
     unreachable;
 }

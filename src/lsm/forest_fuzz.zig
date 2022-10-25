@@ -22,11 +22,15 @@ const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
 const FuzzOp = union(enum) {
-    // TODO Test checkpointing, secondary index lookups and range queries.
-    compact,
-    put: Account,
+    // TODO Test secondary index lookups and range queries.
+    compact: struct {
+        op: u64,
+        checkpoint: bool,
+    },
+    put_account: Account,
     get_account: u128,
 };
+const FuzzOpTag = std.meta.Tag(FuzzOp);
 
 const Environment = struct {
     const cluster = 32;
@@ -46,6 +50,15 @@ const Environment = struct {
         .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
     });
 
+    // Each account put can generate a put and a tombstone in each index.
+    const puts_since_compact_max = @divTrunc(forest_options.accounts.tree_options_object.commit_entries_max, 2);
+
+    const compacts_per_checkpoint = std.math.divCeil(
+        usize,
+        config.journal_slot_count,
+        config.lsm_batch_multiple,
+    ) catch unreachable;
+
     const State = enum {
         uninit,
         init,
@@ -53,6 +66,8 @@ const Environment = struct {
         superblock_open,
         forest_open,
         forest_compacting,
+        forest_checkpointing,
+        superblock_checkpointing,
     };
 
     state: State,
@@ -168,6 +183,24 @@ const Environment = struct {
         env.change_state(.forest_compacting, .forest_open);
     }
 
+    pub fn checkpoint(env: *Environment) void {
+        env.change_state(.forest_open, .forest_checkpointing);
+        env.forest.checkpoint(forest_checkpoint_callback);
+        env.tick_until_state_change(.forest_checkpointing, .superblock_checkpointing);
+        env.tick_until_state_change(.superblock_checkpointing, .forest_open);
+    }
+
+    fn forest_checkpoint_callback(forest: *Forest) void {
+        const env = @fieldParentPtr(@This(), "forest", forest);
+        env.change_state(.forest_checkpointing, .superblock_checkpointing);
+        env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context);
+    }
+
+    fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
+        const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+        env.change_state(.superblock_checkpointing, .forest_open);
+    }
+
     fn prefetch_account(env: *Environment, id: u128) void {
         const groove = &env.forest.grooves.accounts;
         const Groove = @TypeOf(groove.*);
@@ -200,18 +233,21 @@ const Environment = struct {
         var model = std.hash_map.AutoHashMap(u128, Account).init(allocator);
         defer model.deinit();
 
-        // We need an op number for compact.
-        var op: u64 = 1;
-
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
-            log.debug("Running fuzz_ops[{}] == {}", .{ fuzz_op_index, fuzz_op });
+            log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
+            //TODO(@djg) Restore these when dj-vopr-workload merges.
+            //const storage_size_used = storage.size_used();
+            //log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
+            //const model_size = model.count() * @sizeOf(Account);
+            //log.debug("space_amplification = {d:.2}", .{@intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size)});
             // Apply fuzz_op to the forest and the model.
             switch (fuzz_op) {
-                .compact => {
-                    env.compact(op);
-                    op += 1;
+                .compact => |compact| {
+                    env.compact(compact.op);
+                    if (compact.checkpoint)
+                        env.checkpoint();
                 },
-                .put => |account| {
+                .put_account => |account| {
                     env.forest.grooves.accounts.put(&account);
                     try model.put(account.id, account);
                 },
@@ -280,34 +316,58 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
         @as(usize, 1E7),
         fuzz.random_int_exponential(random, usize, 1E6),
     );
+    log.info("fuzz_op_count = {}", .{fuzz_op_count});
+
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    const fuzz_op_distribution = fuzz.random_enum_distribution(random, std.meta.Tag(FuzzOp));
+    var fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
+        // Maybe compact more often than forced to by `puts_since_compact`.
+        .compact = if (random.boolean()) 0 else 1,
+        // Always do puts, and always more puts than removes.
+        .put_account = config.lsm_batch_multiple * 2,
+        // Maybe do some gets.
+        .get_account = if (random.boolean()) 0 else config.lsm_batch_multiple,
+    };
     log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
-    // We're not allowed to go more than Environment.cache_entries_max puts without compacting.
-    var puts_since_compact: usize = 0;
+    log.info("puts_since_compact_max = {}", .{Environment.puts_since_compact_max});
+    log.info("compacts_per_checkpoint = {}", .{Environment.compacts_per_checkpoint});
 
     var id_to_timestamp = std.hash_map.AutoHashMap(u128, u64).init(allocator);
     defer id_to_timestamp.deinit();
 
+    var op: u64 = 1;
+    var puts_since_compact: usize = 0;
     for (fuzz_ops) |*fuzz_op, fuzz_op_index| {
-        fuzz_op.* = if (puts_since_compact >= Environment.cache_entries_max)
+        const fuzz_op_tag: FuzzOpTag = if (puts_since_compact >= Environment.puts_since_compact_max)
             // We have to compact before doing any other operations.
-            FuzzOp{ .compact = {} }
+            .compact
         else
-        // Otherwise pick a random FuzzOp.
-        switch (fuzz.random_enum(random, std.meta.Tag(FuzzOp), fuzz_op_distribution)) {
-            .compact => FuzzOp{
-                .compact = {},
+            // Otherwise pick a random FuzzOp.
+            fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
+        fuzz_op.* = switch (fuzz_op_tag) {
+            .compact => compact: {
+                const compact_op = op;
+                op += 1;
+                const checkpoint =
+                    // Can only checkpoint on the last beat of the bar.
+                    compact_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1 and
+                    // Checkpoint at roughly the same rate as log wraparound.
+                    random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
+                break :compact FuzzOp{
+                    .compact = .{
+                        .op = compact_op,
+                        .checkpoint = checkpoint,
+                    },
+                };
             },
-            .put => put: {
+            .put_account => put_account: {
                 const id = random_id(random, u128);
                 // `timestamp` just needs to be unique, but we're not allowed to change the timestamp of an existing account.
                 const timestamp = id_to_timestamp.get(id) orelse fuzz_op_index;
                 try id_to_timestamp.put(id, timestamp);
-                break :put FuzzOp{ .put = Account{
+                break :put_account FuzzOp{ .put_account = Account{
                     .id = id,
                     .timestamp = timestamp,
                     .user_data = random_id(random, u128),
@@ -330,7 +390,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
         };
         switch (fuzz_op.*) {
             .compact => puts_since_compact = 0,
-            .put => puts_since_compact += 1,
+            .put_account => puts_since_compact += 1,
             .get_account => {},
         }
     }
@@ -346,4 +406,6 @@ pub fn main() !void {
     defer allocator.free(fuzz_ops);
 
     try run_fuzz_ops(fuzz_ops);
+
+    log.info("Passed!", .{});
 }
