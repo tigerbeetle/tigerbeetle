@@ -17,7 +17,7 @@ const StateChecker = @import("test/state_checker.zig").StateChecker;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
 const MessageBus = @import("test/message_bus.zig").MessageBus;
 const auditor = @import("test/accounting/auditor.zig");
-const Workload = @import("test/accounting/workload.zig").AccountingWorkloadType(StateMachine);
+const Workload = @import("test/accounting/workload.zig").WorkloadType(StateMachine);
 const Conductor = @import("test/conductor.zig").ConductorType(Client, MessageBus, StateMachine, Workload);
 const IdPermutation = @import("test/id.zig").IdPermutation;
 
@@ -36,9 +36,6 @@ pub const log_level: std.log.Level = if (log_state_transitions_only) .info else 
 
 /// Modifies compile-time constants on "config.zig".
 pub const deployment_environment = .simulation;
-
-const accounts_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Account));
-const transfers_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Transfer));
 
 const cluster_id = 0;
 
@@ -97,13 +94,13 @@ pub fn main() !void {
 
     // TODO: When block recovery and state transfer are implemented, remove this flag to allow
     // crashes to coexist with WAL wraps.
-    const committed_requests_max: usize = config.journal_slot_count * 3;
+    const requests_committed_max: usize = config.journal_slot_count * 3;
 
     const cluster_options: ClusterOptions = .{
         .cluster = cluster_id,
         .replica_count = replica_count,
         .client_count = client_count,
-        // TODO Compute an upper-bound for this based on committed_requests_max.
+        // TODO Compute an upper-bound for this based on requests_committed_max.
         .grid_size_max = 1024 * 1024 * 256,
         .seed = random.int(u64),
         .on_change_state = on_change_replica,
@@ -150,7 +147,6 @@ pub fn main() !void {
             .cache_entries_accounts = 2048,
             .cache_entries_transfers = 2048,
             .cache_entries_posted = 2048,
-            .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
         },
     };
 
@@ -190,9 +186,15 @@ pub fn main() !void {
         .pending_timeout_mean = std.math.maxInt(u64) / 2,
         // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
         .accounts_batch_size_min = 0,
-        .accounts_batch_size_span = 1 + random.uintLessThan(usize, accounts_batch_size_max),
+        .accounts_batch_size_span = 1 + random.uintLessThan(
+            usize,
+            StateMachine.constants.batch_max.create_accounts,
+        ),
         .transfers_batch_size_min = 0,
-        .transfers_batch_size_span = 1 + random.uintLessThan(usize, transfers_batch_size_max),
+        .transfers_batch_size_span = 1 + random.uintLessThan(
+            usize,
+            StateMachine.constants.batch_max.create_transfers,
+        ),
     };
 
     output.info(
@@ -268,7 +270,7 @@ pub fn main() !void {
         .replica_count = replica_count,
         .client_count = client_count,
         .message_bus_options = .{ .network = &cluster.network },
-        .requests_max = committed_requests_max,
+        .requests_max = requests_committed_max,
         .request_probability = request_probability,
         .idle_on_probability = idle_on_probability,
         .idle_off_probability = idle_off_probability,
@@ -382,21 +384,14 @@ pub fn main() !void {
         cluster.network.packet_simulator.tick(cluster.health);
         conductor.tick();
 
-        if (state_checker.committed_requests == committed_requests_max) {
-            if (state_checker.convergence() and conductor.done() and
-                cluster.replica_up_count() == replica_count)
-            {
-                break;
-            }
-            continue;
-        } else {
-            assert(state_checker.committed_requests < committed_requests_max);
+        if (state_checker.convergence() and conductor.done() and
+            cluster.replica_up_count() == replica_count)
+        {
+            break;
         }
-    }
-
-    if (state_checker.committed_requests < committed_requests_max) {
+    } else {
         output.err("you can reproduce this failure with seed={}", .{seed});
-        fatal(.liveness, "unable to complete committed_requests_max before ticks_max", .{});
+        fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
 
     assert(state_checker.convergence());
@@ -447,7 +442,7 @@ fn random_partition_mode(random: std.rand.Random) PartitionMode {
 fn random_id_permutation(random: std.rand.Random) IdPermutation {
     return switch (random.uintLessThan(usize, 4)) {
         0 => .{ .identity = {} },
-        1 => .{ .reflect = {} },
+        1 => .{ .inversion = {} },
         2 => .{ .zigzag = {} },
         3 => .{ .random = random.int(u64) },
         else => unreachable,

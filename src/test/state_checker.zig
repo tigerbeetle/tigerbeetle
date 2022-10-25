@@ -40,15 +40,17 @@ pub const StateChecker = struct {
     /// The highest canonical state reached by the cluster.
     state: u128 = 0,
 
-    /// The number of times the canonical state has been advanced
-    /// including `register` operations, but excluding the root message.
-    committed_messages: u64 = 0,
+    /// The number of times the canonical state has been advanced.
+    requests_committed: u64 = 0,
 
-    /// The number of times the canonical state has been advanced excluding:
-    /// * `register` operations, and
-    /// * the root message.
-    /// (That is, correspond 1:1 with `client.request()` calls).
-    committed_requests: u64 = 0,
+    //requests_committed: u64 = 0,
+
+    ///// The number of times the canonical state has been advanced excluding:
+    ///// * `register` operations, and
+    ///// * the root message.
+    ///// (That is, correspond 1:1 with `client.request()` calls).
+    //requests_committed: u64 = 0,
+
 
     pub fn init(
         allocator: mem.Allocator,
@@ -67,7 +69,7 @@ pub const StateChecker = struct {
             .replicas = replicas,
             .clients = clients,
         };
-        try state_checker.history.putNoClobber(root_checksum, state_checker.committed_messages);
+        try state_checker.history.putNoClobber(root_checksum, state_checker.requests_committed);
 
         return state_checker;
     }
@@ -105,7 +107,7 @@ pub const StateChecker = struct {
             // transitioned may not regress.
             log.info(
                 "{d:0>4}/{d:0>4} {x:0>32} > {x:0>32} {}",
-                .{ transition, state_checker.committed_messages, a, b, replica_index },
+                .{ transition, state_checker.requests_committed, a, b, replica_index },
             );
             return;
         }
@@ -136,28 +138,24 @@ pub const StateChecker = struct {
         // prepare body's accounts/transfers.
 
         const transitions_executed = state_checker.history.get(a).?;
-        if (transitions_executed < state_checker.committed_messages) {
+        if (transitions_executed < state_checker.requests_committed) {
             return error.ReplicaSkippedInterimTransitions;
         } else {
-            assert(transitions_executed == state_checker.committed_messages);
+            assert(transitions_executed == state_checker.requests_committed);
         }
 
         state_checker.state = b;
-        state_checker.committed_messages += 1;
-        state_checker.committed_requests += @boolToInt(
-            commit_header.?.operation != .register and
-                commit_header.?.operation != .root,
-        );
-        assert(state_checker.committed_messages == commit_header.?.op);
+        state_checker.requests_committed += 1;
+        assert(state_checker.requests_committed == commit_header.?.op);
 
         log.info("     {d:0>4} {x:0>32} > {x:0>32} {}", .{
-            state_checker.committed_messages,
+            state_checker.requests_committed,
             a,
             b,
             replica_index,
         });
 
-        state_checker.history.putNoClobber(b, state_checker.committed_messages) catch {
+        state_checker.history.putNoClobber(b, state_checker.requests_committed) catch {
             @panic("state checker unable to allocate memory for history.put()");
         };
     }
@@ -169,12 +167,12 @@ pub const StateChecker = struct {
         }
 
         const transitions_executed = state_checker.history.get(a).?;
-        if (transitions_executed < state_checker.committed_messages) {
+        if (transitions_executed < state_checker.requests_committed) {
             // Cluster reached convergence but on a regressed state.
             // A replica reached the transition limit, crashed, then repaired.
             return false;
         } else {
-            assert(transitions_executed == state_checker.committed_messages);
+            assert(transitions_executed == state_checker.requests_committed);
         }
 
         return true;

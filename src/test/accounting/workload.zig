@@ -32,9 +32,6 @@ const fuzz = @import("../fuzz.zig");
 // TODO(zig) This won't be necessary in Zig 0.10.
 const PriorityQueue = @import("../priority_queue.zig").PriorityQueue;
 
-const accounts_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Account));
-const transfers_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Transfer));
-
 // TODO Test linked create_accounts.
 
 const TransferOutcome = enum {
@@ -167,7 +164,7 @@ const transfer_templates = table: {
     break :table templates;
 };
 
-pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
+pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     const Operation = AccountingStateMachine.Operation;
 
     const Action = enum(u8) {
@@ -256,9 +253,11 @@ pub fn AccountingWorkloadType(comptime AccountingStateMachine: type) type {
             assert(options.linked_valid_probability <= 100);
             assert(options.linked_invalid_probability <= 100);
 
-            assert(options.accounts_batch_size_span + options.accounts_batch_size_min <= accounts_batch_size_max);
+            assert(options.accounts_batch_size_span + options.accounts_batch_size_min <=
+                AccountingStateMachine.constants.batch_max.create_accounts);
             assert(options.accounts_batch_size_span >= 1);
-            assert(options.transfers_batch_size_span + options.transfers_batch_size_min <= transfers_batch_size_max);
+            assert(options.transfers_batch_size_span + options.transfers_batch_size_min <=
+                AccountingStateMachine.constants.batch_max.create_transfers);
             assert(options.transfers_batch_size_span >= 1);
 
             var auditor = try Auditor.init(allocator, random, options.auditor_options);

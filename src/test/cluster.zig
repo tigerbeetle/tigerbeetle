@@ -11,7 +11,9 @@ const Message = MessagePool.Message;
 const Network = @import("network.zig").Network;
 const NetworkOptions = @import("network.zig").NetworkOptions;
 
-pub const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
+pub const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
+    .message_body_size_max = config.message_body_size_max,
+});
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;

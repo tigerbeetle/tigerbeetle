@@ -231,7 +231,10 @@ pub fn ConductorType(
 
             const request_metadata = self.workload.build_request(
                 client_index,
-                @alignCast(@alignOf(vsr.Header), request_message.buffer[@sizeOf(vsr.Header)..config.message_size_max]),
+                @alignCast(
+                    @alignOf(vsr.Header),
+                    request_message.buffer[@sizeOf(vsr.Header)..config.message_size_max],
+                ),
             );
             assert(request_metadata.size <= config.message_size_max - @sizeOf(vsr.Header));
 
@@ -270,7 +273,12 @@ pub fn ConductorType(
             };
         }
 
-        fn on_reply(context: ?*anyopaque, client: *Client, request_message: *Message, reply_message: *Message) void {
+        fn on_reply(
+            context: ?*anyopaque,
+            client: *Client,
+            request_message: *Message,
+            reply_message: *Message,
+        ) void {
             const self = @ptrCast(*Self, @alignCast(@alignOf(*Self), context.?));
             assert(reply_message.header.cluster == self.options.cluster);
             assert(reply_message.header.invalid() == null);

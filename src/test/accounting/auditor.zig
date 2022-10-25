@@ -14,14 +14,18 @@ const IdPermutation = @import("../id.zig").IdPermutation;
 
 // TODO(zig) This won't be necessary in Zig 0.10.
 const PriorityQueue = @import("../priority_queue.zig").PriorityQueue;
+const Storage = @import("../storage.zig").Storage;
+const StateMachine = @import("../../state_machine.zig").StateMachineType(Storage, .{
+    .message_body_size_max = config.message_body_size_max,
+});
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
 pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult);
 
 /// Batch sizes apply to both `create` and `lookup` operations.
 /// (More ids would fit in the `lookup` request, but then the response wouldn't fit.)
-const accounts_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Account));
-const transfers_batch_size_max = @divFloor(config.message_size_max - @sizeOf(vsr.Header), @sizeOf(tb.Transfer));
+const accounts_batch_size_max = StateMachine.constants.batch_max.create_accounts;
+const transfers_batch_size_max = StateMachine.constants.batch_max.create_transfers;
 
 /// Store expected possible results for an in-flight request.
 /// This reply validation takes advantage of the Workload's additional context about the request.

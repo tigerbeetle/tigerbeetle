@@ -17,7 +17,9 @@ const Storage = @import("storage.zig").Storage;
 
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const MessagePool = @import("message_pool.zig").MessagePool;
-const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
+    .message_body_size_max = config.message_body_size_max,
+});
 
 const vsr = @import("vsr.zig");
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
@@ -132,7 +134,6 @@ const Command = struct {
                 .cache_entries_accounts = config.cache_accounts_max,
                 .cache_entries_transfers = config.cache_transfers_max,
                 .cache_entries_posted = config.cache_transfers_pending_max,
-                .message_body_size_max = config.message_size_max - @sizeOf(vsr.Header),
             },
             .message_bus_options = .{
                 .configuration = addresses,

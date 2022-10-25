@@ -94,7 +94,7 @@ pub const MessagePool = struct {
     }
 
     pub fn init_capacity(allocator: mem.Allocator, messages_max: usize) error{OutOfMemory}!MessagePool {
-        var ret: MessagePool = .{
+        var pool: MessagePool = .{
             .free_list = null,
         };
         {
@@ -110,13 +110,13 @@ pub const MessagePool = struct {
                 message.* = .{
                     .header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]),
                     .buffer = buffer,
-                    .next = ret.free_list,
+                    .next = pool.free_list,
                 };
-                ret.free_list = message;
+                pool.free_list = message;
             }
         }
 
-        return ret;
+        return pool;
     }
 
     /// Frees all messages that were unused or returned to the pool via unref().

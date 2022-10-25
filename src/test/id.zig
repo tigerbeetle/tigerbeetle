@@ -10,7 +10,7 @@ pub const IdPermutation = union(enum) {
     identity: void,
 
     /// Ascending indices become descending ids.
-    reflect: void,
+    inversion: void,
 
     /// Ascending indices alternate between ascending/descending (e.g. 1,100,3,98,…).
     zigzag: void,
@@ -28,7 +28,7 @@ pub const IdPermutation = union(enum) {
     pub fn encode(self: *const IdPermutation, data: usize) u128 {
         return switch (self.*) {
             .identity => data,
-            .reflect => std.math.maxInt(u128) - @as(u128, data),
+            .inversion => std.math.maxInt(u128) - @as(u128, data),
             .zigzag => {
                 if (data % 2 == 0) {
                     return data;
@@ -50,7 +50,7 @@ pub const IdPermutation = union(enum) {
     pub fn decode(self: *const IdPermutation, id: u128) usize {
         return switch (self.*) {
             .identity => @intCast(usize, id),
-            .reflect => @intCast(usize, std.math.maxInt(u128) - id),
+            .inversion => @intCast(usize, std.math.maxInt(u128) - id),
             .zigzag => {
                 if (id % 2 == 0) {
                     return @intCast(usize, id);
@@ -70,7 +70,7 @@ test "IdPermutation" {
 
     for ([_]IdPermutation{
         .{ .identity = {} },
-        .{ .reflect = {} },
+        .{ .inversion = {} },
         .{ .zigzag = {} },
         .{ .random = random.int(u64) },
     }) |permutation| {

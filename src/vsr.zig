@@ -243,6 +243,8 @@ pub const Header = extern struct {
 
     pub fn calculate_checksum_body(self: *const Header, body: []const u8) u128 {
         assert(self.size == @sizeOf(Header) + body.len);
+        const checksum_size = @sizeOf(@TypeOf(self.checksum_body));
+        assert(checksum_size == 16);
         const checksum_value = checksum(body);
         assert(@TypeOf(checksum_value) == @TypeOf(self.checksum_body));
         return checksum_value;
@@ -957,7 +959,7 @@ pub fn sector_ceil(offset: u64) u64 {
 }
 
 pub fn checksum(source: []const u8) u128 {
-    var target: [32]u8 = undefined;
-    std.crypto.hash.Blake3.hash(source, target[0..], .{});
-    return @bitCast(u128, target[0..@sizeOf(u128)].*);
+    var target: u128 = undefined;
+    std.crypto.hash.Blake3.hash(source, std.mem.asBytes(&target), .{});
+    return target;
 }

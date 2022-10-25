@@ -14,7 +14,9 @@ const IO = @import("io.zig").IO;
 const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
-const StateMachine = @import("state_machine.zig").StateMachineType(Storage);
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
+    .message_body_size_max = config.message_body_size_max,
+});
 
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
