@@ -290,10 +290,11 @@ const Environment = struct {
 
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
             log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
-            const storage_size_used = storage.size_used();
-            log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
-            const model_size = model.count() * @sizeOf(Key.Value);
-            log.debug("space_amplification = {d:.2}", .{@intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size)});
+            //TODO(@djg) Restore these when dj-vopr-workload merges.
+            //const storage_size_used = storage.size_used();
+            //log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
+            //const model_size = model.count() * @sizeOf(Key.Value);
+            //log.debug("space_amplification = {d:.2}", .{@intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size)});
             // Apply fuzz_op to the tree and the model.
             switch (fuzz_op) {
                 .compact => |compact| {
