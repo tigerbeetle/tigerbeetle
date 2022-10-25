@@ -3,8 +3,9 @@ test {
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
     _ = @import("vsr/superblock.zig");
-    _ = @import("vsr/superblock_manifest.zig");
     _ = @import("vsr/superblock_free_set.zig");
+    _ = @import("vsr/superblock_manifest.zig");
+    _ = @import("vsr/superblock_quorums.zig");
     // TODO: clean up logging of clock test and enable it here.
     //_ = @import("vsr/clock.zig");
 

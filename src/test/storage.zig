@@ -131,7 +131,7 @@ pub const Storage = struct {
 
     memory: []align(config.sector_size) u8,
     /// Set bits correspond to sectors that have ever been written to.
-    memory_occupied: std.DynamicBitSetUnmanaged,
+    memory_written: std.DynamicBitSetUnmanaged,
     /// Set bits correspond to faulty sectors. The underlying sectors of `memory` is left clean.
     faults: std.DynamicBitSetUnmanaged,
 
@@ -158,11 +158,11 @@ pub const Storage = struct {
         // TODO: random data
         mem.set(u8, memory, 0);
 
-        var memory_occupied = try std.DynamicBitSetUnmanaged.initEmpty(
+        var memory_written = try std.DynamicBitSetUnmanaged.initEmpty(
             allocator,
             @divExact(size, config.sector_size),
         );
-        errdefer memory_occupied.deinit(allocator);
+        errdefer memory_written.deinit(allocator);
 
         var faults = try std.DynamicBitSetUnmanaged.initEmpty(
             allocator,
@@ -181,7 +181,7 @@ pub const Storage = struct {
         return Storage{
             .allocator = allocator,
             .memory = memory,
-            .memory_occupied = memory_occupied,
+            .memory_written = memory_written,
             .faults = faults,
             .size = size,
             .options = options,
@@ -223,10 +223,16 @@ pub const Storage = struct {
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
         allocator.free(storage.memory);
-        storage.memory_occupied.deinit(allocator);
+        storage.memory_written.deinit(allocator);
         storage.faults.deinit(allocator);
         storage.reads.deinit();
         storage.writes.deinit();
+    }
+
+    pub fn size_used(storage: *const Storage) usize {
+        var sector_iterator = storage.memory_written.iterator(.{ .direction = .reverse });
+        const sector_max = sector_iterator.next() orelse 0;
+        return (sector_max + 1) * config.sector_size;
     }
 
     /// Copy state from `origin` to `storage`:
@@ -244,8 +250,8 @@ pub const Storage = struct {
 
         storage.ticks = origin.ticks;
         util.copy_disjoint(.exact, u8, storage.memory, origin.memory);
-        storage.memory_occupied.toggleSet(storage.memory_occupied);
-        storage.memory_occupied.toggleSet(origin.memory_occupied);
+        storage.memory_written.toggleSet(storage.memory_written);
+        storage.memory_written.toggleSet(origin.memory_written);
         storage.faults.toggleSet(storage.faults);
         storage.faults.toggleSet(origin.faults);
 
@@ -298,7 +304,7 @@ pub const Storage = struct {
             const sector_max = @divExact(offset_in_storage + buffer.len, config.sector_size);
             var sector: usize = sector_min;
             while (sector < sector_max) : (sector += 1) {
-                assert(storage.memory_occupied.isSet(sector));
+                assert(storage.memory_written.isSet(sector));
             }
         }
 
@@ -402,7 +408,7 @@ pub const Storage = struct {
         var sector: usize = sector_min;
         while (sector < sector_max) : (sector += 1) {
             storage.faults.unset(sector);
-            storage.memory_occupied.set(sector);
+            storage.memory_written.set(sector);
         }
 
         if (storage.x_in_100(storage.options.write_fault_probability)) {
@@ -672,7 +678,7 @@ pub const Storage = struct {
         const prepare_offset = vsr.Zone.wal_prepares.offset(header_slot * config.message_size_max);
         const prepare_sector = @divExact(prepare_offset, config.sector_size);
 
-        assert(storage.memory_occupied.isSet(prepare_sector));
+        assert(storage.memory_written.isSet(prepare_sector));
         if (header.command == .prepare) {
             assert(header.checksum == header_old.checksum or
                 header.checksum == prepare_header.checksum);

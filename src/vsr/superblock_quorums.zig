@@ -524,8 +524,13 @@ fn test_quorums_working(
         }
     }
 
-    // Shuffling the copies must never change the working quorum.
-    random.shuffle(SuperBlockSector, &sectors);
+    for (copies) |template| {
+        if (template.variant == .valid_high_copy) break;
+    } else {
+        // Shuffling copies can only change the working quorum when we have a corrupt copy index,
+        // because we guess that the true index is the slot.
+        random.shuffle(SuperBlockSector, &sectors);
+    }
 
     const threshold = switch (threshold_count) {
         2 => Quorums.Threshold.open,
