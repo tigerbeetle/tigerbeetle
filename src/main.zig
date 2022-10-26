@@ -123,7 +123,7 @@ const Command = struct {
         defer command.deinit(allocator);
 
         var replica: Replica = undefined;
-        try replica.open(allocator, .{
+        replica.open(allocator, .{
             .replica_count = @intCast(u8, addresses.len),
             .storage = &command.storage,
             .message_pool = &command.message_pool,
@@ -141,7 +141,7 @@ const Command = struct {
             },
         }) catch |err| switch (err) {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
-            else => err,
+            else => |e| return e,
         };
 
         // Calculate how many bytes are allocated inside `arena`.
