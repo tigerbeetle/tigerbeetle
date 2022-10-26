@@ -131,7 +131,7 @@ public abstract class Batch {
         final var nextPosition = position + 1;
         if (nextPosition >= this.length) {
             position = CursorStatus.INVALID_POSITION;
-            cursorStatus = CursorStatus.End;
+            cursorStatus = this.length > 0 ? CursorStatus.End : CursorStatus.Begin;
             return false;
         } else {
             setPosition(nextPosition);
