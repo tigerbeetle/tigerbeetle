@@ -82,15 +82,11 @@ public class BatchTest {
         assertFalse(batch.next());
         assertFalse(batch.isValidPosition());
 
-        // Calling next multiple times must throw an exception, preventing the user to assume that
-        // an iterated batch is an empty one.
-        try {
-            batch.next();
-            assert false;
-        } catch (IndexOutOfBoundsException exception) {
-            assert true;
-        }
-
+        // Calling next multiple times on an EMPTY batch is allowed since the cursor does not move.
+        // This allows reusing a single instance of an empty batch,
+        // avoiding allocations for the common case (empty batch == success).
+        batch.next();
+        batch.next();
         assertFalse(batch.isValidPosition());
 
         // Adding 2 elements
@@ -185,27 +181,23 @@ public class BatchTest {
         assertEquals(0, batch.getBufferLen());
         assertFalse(batch.isValidPosition());
 
-        // End of the batch
+        // Before the first element
         assertFalse(batch.next());
         assertFalse(batch.isValidPosition());
 
         // Resting an empty batch
         batch.beforeFirst();
 
-        // Still at the end of the batch
+        // Still, before the first element
         assertFalse(batch.next());
         assertFalse(batch.isValidPosition());
 
-        // Calling next multiple times must throw an exception, preventing the user to assume that
-        // an iterated batch is an empty one.
-        try {
-            batch.next();
-            assert false;
-        } catch (IndexOutOfBoundsException exception) {
-            assert true;
-        }
+        // Calling next multiple times on an EMPTY batch is allowed since the cursor does not move.
+        // This allows reusing a single instance of an empty batch,
+        // avoiding allocations for the common case (empty batch == success).
+        batch.next();
+        batch.next();
         assertFalse(batch.isValidPosition());
-
     }
 
     @Test
@@ -907,7 +899,7 @@ public class BatchTest {
         // Mimic the the binary response
         dummyCreateAccountResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyCreateAccountResultsStream.putInt(0).putInt(0); // Item 0 - OK
-        dummyCreateAccountResultsStream.putInt(1).putInt(22); // Item 1 - Exists
+        dummyCreateAccountResultsStream.putInt(1).putInt(18); // Item 1 - Exists
 
         createTransferResult1 = CreateTransferResult.Ok;
         createTransferResult2 = CreateTransferResult.ExceedsDebits;
