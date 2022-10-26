@@ -37,6 +37,10 @@ jobs:
         git submodule update
         ./scripts/install.sh
 
+    - name: Example programs
+      working-directory: examples
+      run: mvn compile
+
     - name: Build
       if: ${{ github.event_name == 'pull_request' }}
       working-directory: src/tigerbeetle-java
