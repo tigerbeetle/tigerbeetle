@@ -20,12 +20,6 @@
 
 		MutuallyExclusiveFlags,
 
-        OverflowsDebits,
-        OverflowsCredits,
-
-        ExceedsCredits,
-        ExceedsDebits,
-
         ExistsWithDifferentFlags,
         ExistsWithDifferentUserData,
         ExistsWithDifferentLedger,
