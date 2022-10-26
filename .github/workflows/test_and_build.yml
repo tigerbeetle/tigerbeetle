@@ -68,7 +68,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build fuzz_lsm_manifest_log
+      - run: zig/zig build fuzz_lsm_manifest_log -- --seed 123
 
   fuzz_lsm_segmented_array:
     name: 'Fuzz LSM SegmentedArray'
@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build fuzz_lsm_segmented_array
+      - run: zig/zig build fuzz_lsm_segmented_array -- --seed 123
 
   fuzz_vsr_superblock:
     name: 'Fuzz VSR SuperBlock'
@@ -84,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build fuzz_vsr_superblock
+      - run: zig/zig build fuzz_vsr_superblock -- --seed 123
 
   # This is just a canary to make sure that the simulator compiles
   # (and passes for at least a single seed).
@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
-      - run: zig/zig run -OReleaseSafe src/simulator.zig
+      - run: zig/zig run -OReleaseSafe src/simulator.zig -- 123
 
   # Verify that these build without errors:
   build-tools:
