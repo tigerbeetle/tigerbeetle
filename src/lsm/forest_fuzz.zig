@@ -401,6 +401,7 @@ pub fn main() !void {
 
     try run_fuzz_ops(
         Storage.Options{
+            .seed = random.int(u64),
             .read_latency_min = 0,
             .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
             .write_latency_min = 0,

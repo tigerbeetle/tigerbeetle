@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
@@ -181,24 +182,44 @@ const Command = struct {
 
         var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
         const stdout = stdout_buffer.writer();
+        // TODO Pass an actual version number in on build, instead of just saying "experimental".
         try stdout.writeAll("TigerBeetle version experimental\n");
 
         if (verbose) {
-            try std.fmt.format(stdout, "\ngit_commit=\"{s}\"\n", .{build_options.git_commit orelse "?"});
-            inline for (std.meta.declarations(config)) |config_field| {
-                if (config_field.is_pub) {
-                    const value = @field(config, config_field.name);
-                    if (@typeInfo(@TypeOf(value)) == .Pointer) {
-                        try std.fmt.format(stdout, "{s}=\"{s}\"\n", .{
-                            config_field.name,
-                            std.fmt.fmtSliceEscapeLower(value),
-                        });
-                    } else {
-                        try std.fmt.format(stdout, "{s}={}\n", .{ config_field.name, value });
-                    }
-                }
+            try std.fmt.format(
+                stdout,
+                \\
+                \\git_commit="{s}"
+                \\
+                , .{ build_options.git_commit orelse "?" },
+            );
+
+            try stdout.writeAll("\n");
+            inline for (.{ "zig_version", "mode" }) |declaration| {
+                try print_value(stdout, declaration, @field(builtin, declaration));
+            }
+
+            try stdout.writeAll("\n");
+            inline for (std.meta.declarations(config)) |declaration| {
+                if (!declaration.is_pub) continue;
+                try print_value(stdout, declaration.name, @field(config, declaration.name));
             }
         }
         try stdout_buffer.flush();
     }
 };
+
+fn print_value(
+    writer: anytype,
+    comptime field: []const u8,
+    comptime value: anytype,
+) !void {
+    if (@typeInfo(@TypeOf(value)) == .Pointer) {
+        try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
+            field,
+            std.fmt.fmtSliceEscapeLower(value),
+        });
+    } else {
+        try std.fmt.format(writer, "{s}={}\n", .{ field, value, });
+    }
+}
