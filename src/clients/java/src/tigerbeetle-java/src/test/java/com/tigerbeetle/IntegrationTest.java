@@ -1024,7 +1024,7 @@ public class IntegrationTest {
                     client.wait();
                 }
 
-                // And them close the client while several other threads are still working
+                // And then close the client while several other threads are still working
                 // Some of them have already submitted the request, others are waiting due to the
                 // maxConcurrency limit
                 client.close();
