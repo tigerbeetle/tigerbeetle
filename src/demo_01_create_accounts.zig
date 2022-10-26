@@ -15,7 +15,7 @@ pub fn main() !void {
             .debits_pending = 0,
             .debits_posted = 0,
             .credits_pending = 0,
-            .credits_posted = 10000, // Let's start with some liquidity.
+            .credits_posted = 0,
         },
         Account{
             .id = 2,

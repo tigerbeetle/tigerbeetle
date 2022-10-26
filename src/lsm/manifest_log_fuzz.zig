@@ -32,8 +32,6 @@ pub fn main() !void {
     const allocator = std.testing.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
-    log.info("seed={}", .{args.seed});
-
     var prng = std.rand.DefaultPrng.init(args.seed);
 
     const events = try generate_events(allocator, prng.random());
@@ -129,15 +127,20 @@ fn generate_events(
     };
 
     const events = try allocator.alloc(ManifestEvent, std.math.min(
-        @as(usize, 1E7),
-        fuzz.random_int_exponential(random, usize, 1e5),
+        @as(usize, 1e5),
+        fuzz.random_int_exponential(random, usize, 1e4),
     ));
     errdefer allocator.free(events);
 
     var event_distribution = fuzz.random_enum_distribution(random, EventType);
-    event_distribution.insert_new *= 10.0;
-    event_distribution.insert_change_level *= 2.0;
-    event_distribution.insert_change_snapshot *= 2.0;
+    // Don't remove too often, so that there are plenty of tables accumulating.
+    event_distribution.remove /= config.lsm_levels;
+    // Don't compact or checkpoint too often, to approximate a real workload.
+    // Additionally, checkpoint is slow because of the verification, so run it less
+    // frequently.
+    event_distribution.compact /= config.lsm_levels * config.lsm_batch_multiple;
+    event_distribution.checkpoint /= config.lsm_levels * config.journal_slot_count;
+
     log.info("event_distribution = {d:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
 
