@@ -7,15 +7,14 @@ public class CreateAccountResultTest {
 
     @Test
     public void testFromValue() {
-        var value = 15;
-        Assert.assertEquals(CreateAccountResult.OverflowsCredits,
-                CreateAccountResult.fromValue(value));
+        var value = 18;
+        Assert.assertEquals(CreateAccountResult.Exists, CreateAccountResult.fromValue(value));
     }
 
     @Test
     public void testOrdinal() {
-        var value = 20;
-        Assert.assertEquals(CreateAccountResult.ExistsWithDifferentLedger.ordinal(), value);
+        var value = 18;
+        Assert.assertEquals(CreateAccountResult.Exists.ordinal(), value);
     }
 
     @Test(expected = IllegalArgumentException.class)
