@@ -1,0 +1,48 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - 'main'
+
+jobs:
+  shellcheck_scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/shellcheck.sh
+
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - run: go test ./...
+
+  tests_windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./zgo.bat test ./...
+
+  build_sample:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd samples/basic && go build
+
+  build_sample_windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd samples/basic && ../../zgo.bat build

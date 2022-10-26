@@ -4,6 +4,9 @@ package types
 #include "../native/tb_client.h"
 */
 import "C"
+import "encoding/hex"
+import "fmt"
+import "unsafe"
 
 type Operation uint8
 
@@ -15,6 +18,58 @@ const (
 )
 
 type Uint128 C.tb_uint128_t
+
+func (value Uint128) Bytes() [16]byte {
+	return *(*[16]byte)(unsafe.Pointer(&value))
+}
+
+func (value Uint128) String() string {
+	bytes := value.Bytes()
+	s := hex.EncodeToString(bytes[:16])
+
+	// Prettier to drop preceeding zeros so you get "0" instead of "0000000000000000"
+	lastNonZero := 0
+	for s[lastNonZero] == '0' && lastNonZero < len(s)-1 {
+		lastNonZero++
+	}
+	return s[lastNonZero:]
+}
+
+// BytesToUint128 converts a raw [16]byte value to Uint128.
+func BytesToUint128(value [16]byte) Uint128 {
+	return *(*Uint128)(unsafe.Pointer(&value[0]))
+}
+
+// HexBytesToUint128 converts a hex-encoded integer to a Uint128.
+func HexBytesToUint128(value [32]byte) (Uint128, error) {
+	decoded := [16]byte{}
+	_, err := hex.Decode(decoded[:], value[:])
+	if err != nil {
+		return Uint128{}, err
+	}
+
+	return BytesToUint128(decoded), nil
+}
+
+// HexStringToUint128 converts a hex-encoded integer to a Uint128.
+func HexStringToUint128(value string) (Uint128, error) {
+	if len(value) > 32 {
+		return Uint128{}, fmt.Errorf("Uint128 hex string must not be more than 32 bytes.")
+	}
+	if len(value)%2 == 1 {
+		value = "0" + value
+	}
+	// Pad with zeroes
+	bytes := [32]byte{}
+	for i := range bytes {
+		if i < 32-len(value) {
+			bytes[i] = '0'
+		} else {
+			bytes[i] = value[i-(32-len(value))]
+		}
+	}
+	return HexBytesToUint128(bytes)
+}
 
 // EventResult is returned from TB only when an error occurred processing it.
 type EventResult struct {
