@@ -34,7 +34,6 @@ pub fn main() !void {
     const allocator = std.testing.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
-    log.info("seed={}", .{args.seed});
     try run_fuzz(allocator, args.seed);
 }
 
