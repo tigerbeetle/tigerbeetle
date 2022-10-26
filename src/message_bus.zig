@@ -146,8 +146,12 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             return bus;
         }
 
-        /// TODO This is required by the Client.
-        pub fn deinit(_: *Self, _: std.mem.Allocator) void {}
+        pub fn deinit(bus: *Self, _: std.mem.Allocator) void {
+            for (bus.connections) |*connection| {
+                if (connection.recv_message) |message| bus.unref(message);
+                while (connection.send_queue.pop()) |message| bus.unref(message);
+            }
+        }
 
         fn init_tcp(io: *IO, address: std.net.Address) !os.socket_t {
             const fd = try io.open_socket(
