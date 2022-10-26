@@ -343,18 +343,9 @@ const Environment = struct {
     }
 };
 
-pub fn run_fuzz_ops(fuzz_ops: []const FuzzOp) !void {
+pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) !void {
     // Init mocked storage.
-    var storage = try Storage.init(
-        allocator,
-        Environment.size_max,
-        Storage.Options{
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
-        },
-    );
+    var storage = try Storage.init(allocator, Environment.size_max, storage_options);
     defer storage.deinit(allocator);
 
     try Environment.format(&storage);
@@ -448,11 +439,20 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
 pub fn main() !void {
     const fuzz_args = try fuzz.parse_fuzz_args(allocator);
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
+    const random = rng.random();
 
-    const fuzz_ops = try generate_fuzz_ops(rng.random());
+    const fuzz_ops = try generate_fuzz_ops(random);
     defer allocator.free(fuzz_ops);
 
-    try run_fuzz_ops(fuzz_ops);
+    const storage_options = .{
+        .seed = random.int(u64),
+        .read_latency_min = 0,
+        .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
+        .write_latency_min = 0,
+        .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
+    };
+
+    try run_fuzz_ops(storage_options, fuzz_ops);
 
     log.info("Passed!", .{});
 }

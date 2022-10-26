@@ -229,10 +229,10 @@ pub const Storage = struct {
         storage.writes.deinit();
     }
 
+    /// Returns the number of bytes that have been written to, assuming that (the simulated)
+    /// `fallocate()` creates a sparse file.
     pub fn size_used(storage: *const Storage) usize {
-        var sector_iterator = storage.memory_written.iterator(.{ .direction = .reverse });
-        const sector_max = sector_iterator.next() orelse 0;
-        return (sector_max + 1) * config.sector_size;
+        return storage.memory_written.count() * config.sector_size;
     }
 
     /// Copy state from `origin` to `storage`:
@@ -603,7 +603,7 @@ pub const Storage = struct {
             const period = faulty_wal_areas.period;
 
             const offset_faulty =
-                faulty_wal_areas.first_offset + (offset_in_storage / period) * period;
+                faulty_wal_areas.first_offset + @divFloor(offset_in_storage, period) * period;
 
             const offset_start = std.math.max(offset_in_storage, offset_faulty);
             const offset_end = std.math.min(

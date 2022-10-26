@@ -146,11 +146,18 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             return bus;
         }
 
-        pub fn deinit(bus: *Self, _: std.mem.Allocator) void {
+        pub fn deinit(bus: *Self, allocator: std.mem.Allocator) void {
+            if (process_type == .replica) {
+                bus.process.clients.deinit(allocator);
+            }
+
             for (bus.connections) |*connection| {
                 if (connection.recv_message) |message| bus.unref(message);
                 while (connection.send_queue.pop()) |message| bus.unref(message);
             }
+            allocator.free(bus.connections);
+            allocator.free(bus.replicas);
+            allocator.free(bus.replicas_connect_attempts);
         }
 
         fn init_tcp(io: *IO, address: std.net.Address) !os.socket_t {
