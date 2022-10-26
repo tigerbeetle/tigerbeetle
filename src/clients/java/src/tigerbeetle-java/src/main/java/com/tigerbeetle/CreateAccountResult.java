@@ -19,12 +19,6 @@ public enum CreateAccountResult {
 
     MutuallyExclusiveFlags,
 
-    OverflowsDebits,
-    OverflowsCredits,
-
-    ExceedsCredits,
-    ExceedsDebits,
-
     ExistsWithDifferentFlags,
     ExistsWithDifferentUserData,
     ExistsWithDifferentLedger,
