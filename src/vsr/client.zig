@@ -136,6 +136,9 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            while (self.request_queue.pop()) |inflight| {
+                self.message_bus.unref(inflight.message);
+            }
             self.message_bus.deinit(allocator);
         }
 
