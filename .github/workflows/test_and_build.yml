@@ -111,7 +111,7 @@ jobs:
   build-and-push:
     name: 'Build and push Docker image'
     runs-on: ubuntu-latest
-    needs: [test_on_linux, test_on_macos, simulator]
+    needs: [test_on_linux, test_on_macos]
     permissions:
       contents: read
       packages: write
