@@ -96,15 +96,15 @@ pub const Manifest = struct {
 
         var size: u64 = 0;
 
-        const trees = target[size..][0 .. manifest.count * @sizeOf(u128)];
+        const trees = @alignCast(@alignOf(u128), target[size..][0 .. manifest.count * @sizeOf(u128)]);
         mem.copy(u128, mem.bytesAsSlice(u128, trees), manifest.trees[0..manifest.count]);
         size += trees.len;
 
-        const checksums = target[size..][0 .. manifest.count * @sizeOf(u128)];
+        const checksums = @alignCast(@alignOf(u128), target[size..][0 .. manifest.count * @sizeOf(u128)]);
         mem.copy(u128, mem.bytesAsSlice(u128, checksums), manifest.checksums[0..manifest.count]);
         size += checksums.len;
 
-        const addresses = target[size..][0 .. manifest.count * @sizeOf(u64)];
+        const addresses = @alignCast(@alignOf(u64), target[size..][0 .. manifest.count * @sizeOf(u64)]);
         mem.copy(u64, mem.bytesAsSlice(u64, addresses), manifest.addresses[0..manifest.count]);
         size += addresses.len;
 
@@ -125,15 +125,15 @@ pub const Manifest = struct {
 
         var size: u64 = 0;
 
-        const trees = source[size..][0 .. manifest.count * @sizeOf(u128)];
+        const trees = @alignCast(@alignOf(u128), source[size..][0 .. manifest.count * @sizeOf(u128)]);
         mem.copy(u128, manifest.trees[0..manifest.count], mem.bytesAsSlice(u128, trees));
         size += trees.len;
 
-        const checksums = source[size..][0 .. manifest.count * @sizeOf(u128)];
+        const checksums = @alignCast(@alignOf(u128), source[size..][0 .. manifest.count * @sizeOf(u128)]);
         mem.copy(u128, manifest.checksums[0..manifest.count], mem.bytesAsSlice(u128, checksums));
         size += checksums.len;
 
-        const addresses = source[size..][0 .. manifest.count * @sizeOf(u64)];
+        const addresses = @alignCast(@alignOf(u64), source[size..][0 .. manifest.count * @sizeOf(u64)]);
         mem.copy(u64, manifest.addresses[0..manifest.count], mem.bytesAsSlice(u64, addresses));
         size += addresses.len;
 

@@ -356,12 +356,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const snapshots = [_]u64{snapshot};
 
             if (key_exclusive == null) {
-                return manifest.levels[level].iterator(
+                var it = manifest.levels[level].iterator(
                     .visible,
                     &snapshots,
                     direction,
                     KeyRange{ .key_min = key_min, .key_max = key_max },
-                ).next();
+                );
+                return it.next();
             }
 
             assert(compare_keys(key_exclusive.?, key_min) != .lt);

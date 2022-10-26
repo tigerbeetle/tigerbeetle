@@ -17,7 +17,10 @@ pub fn RingBuffer(
             .pointer => *[count_max]T,
         } = switch (buffer_type) {
             .array => undefined,
-            .pointer => @compileError("init() must be used if buffer_type is .pointer!"),
+            // TODO(zig): 0.10 does not allow this @compileError() usage while 0.9 does. Open an
+            // issue to determine if this is intentional or not.
+            //.pointer => @compileError("init() must be used if buffer_type is .pointer!"),
+            .pointer => undefined,
         },
 
         /// The index of the slot with the first item, if any.

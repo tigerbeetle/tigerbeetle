@@ -464,7 +464,9 @@ pub fn GridType(comptime Storage: type) type {
         inline fn block_locked(grid: *Grid, block: BlockPtrConst) bool {
             var it = grid.read_iops.iterate();
             while (it.next()) |iop| {
-                if (block == iop.block) return true;
+                // TODO(zig): this @as() is a workaround for the following zig issue:
+                // https://github.com/ziglang/zig/issues/13310
+                if (block == @as(BlockPtrConst, iop.block)) return true;
             }
             return false;
         }

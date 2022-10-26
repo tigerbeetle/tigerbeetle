@@ -871,7 +871,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn read_prepare_log(self: *Self, op: u64, checksum: ?u128, notice: []const u8) void {
             log.info(
-                "{}: read_prepare: op={} checksum={}: {s}",
+                "{}: read_prepare: op={} checksum={?}: {s}",
                 .{ self.replica, op, checksum, notice },
             );
         }
@@ -1587,7 +1587,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const offset = offset_logical(.headers, slot_of_message);
             assert(offset % config.sector_size == 0);
 
-            const buffer: []u8 = write.header_sector(self);
+            const buffer: []align(@alignOf(Header)) u8 = write.header_sector(self);
             const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
             assert(buffer_headers.len == headers_per_sector);
 
