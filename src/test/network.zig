@@ -83,8 +83,8 @@ pub const Network = struct {
         // - replica → client paths
         // - client → replica paths
         // but not client→client paths; clients never message one another.
-        const path_count = replica_count * (replica_count - 1) +
-            2 * replica_count * client_count;
+        const path_count = @as(usize, replica_count) * @as(usize, replica_count - 1) +
+            2 * @as(usize, replica_count) * @as(usize, client_count);
         const message_pool = try MessagePool.init_capacity(
             allocator,
             // +1 so we can allocate an extra packet when all packet queues are at capacity,
