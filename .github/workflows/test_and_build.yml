@@ -86,6 +86,14 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build fuzz_vsr_superblock -- --seed 123
 
+  fuzz_vsr_superblock_quorums:
+    name: 'Fuzz VSR SuperBlock Quorums'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_vsr_superblock_quorums -- --seed 123
+
   # This is just a canary to make sure that the simulator compiles
   # (and passes for at least a single seed).
   simulator:

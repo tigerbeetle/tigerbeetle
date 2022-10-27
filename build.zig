@@ -196,6 +196,26 @@ pub fn build(b: *std.build.Builder) void {
         run_step.dependOn(&run_cmd.step);
     }
 
+    {
+        const fuzz_vsr_superblock_quorums = b.addExecutable(
+            "fuzz_vsr_superblock_quorums",
+            "src/vsr/superblock_quorums_fuzz.zig",
+        );
+        fuzz_vsr_superblock_quorums.setMainPkgPath("src");
+        fuzz_vsr_superblock_quorums.setTarget(target);
+        fuzz_vsr_superblock_quorums.setBuildMode(mode);
+        fuzz_vsr_superblock_quorums.omit_frame_pointer = false;
+
+        const run_cmd = fuzz_vsr_superblock_quorums.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step(
+            "fuzz_vsr_superblock_quorums",
+            "Fuzz the SuperBlock Quorums. Args: [--seed <seed>]",
+        );
+        run_step.dependOn(&run_cmd.step);
+    }
+
     inline for (.{
         .{
             .name = "benchmark_ewah",
