@@ -143,6 +143,8 @@ pub const FreeSet = struct {
     }
 
     /// Leave the address allocated for now, but free it at the next checkpoint.
+    /// (TODO) If the block was created since the last checkpoint then it's safe to free immediately.
+    ///        This may reduce space amplification, especially for smaller datasets.
     pub fn release_at_checkpoint(set: *FreeSet, address: u64) void {
         const block = address - 1;
         assert(!set.blocks.isSet(block));
