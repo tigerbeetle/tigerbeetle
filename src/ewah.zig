@@ -4,7 +4,7 @@ const math = std.math;
 const mem = std.mem;
 const util = @import("util.zig");
 const div_ceil = util.div_ceil;
-const is_disjoint = util.is_disjoint;
+const disjoint_slices = util.disjoint_slices;
 
 /// Encode or decode a bitset using Daniel Lemire's EWAH codec.
 /// ("Histogram-Aware Sorting for Enhanced Word-Aligned Compression in Bitmap Indexes")
@@ -63,7 +63,7 @@ pub fn ewah(comptime Word: type) type {
         pub fn decode(source: []align(@alignOf(Word)) const u8, target_words: []Word) usize {
             assert(source.len % @sizeOf(Word) == 0);
             assert(source.len >= @sizeOf(Marker));
-            assert(is_disjoint(u8, Word, source, target_words));
+            assert(disjoint_slices(u8, Word, source, target_words));
 
             const source_words = mem.bytesAsSlice(Word, source);
             var source_index: usize = 0;
@@ -95,7 +95,7 @@ pub fn ewah(comptime Word: type) type {
         pub fn encode(source_words: []const Word, target: []align(@alignOf(Word)) u8) usize {
             assert(target.len >= @sizeOf(Marker));
             assert(target.len == encode_size_max(source_words.len));
-            assert(is_disjoint(Word, u8, source_words, target));
+            assert(disjoint_slices(Word, u8, source_words, target));
 
             const target_words = mem.bytesAsSlice(Word, target);
             std.mem.set(Word, target_words, 0);
