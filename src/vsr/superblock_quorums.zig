@@ -35,9 +35,11 @@ pub fn QuorumsType(comptime options: Options) type {
         pub const QuorumCount = std.StaticBitSet(options.superblock_copies);
 
         pub const Error = error{
+            Fork,
             NotFound,
             QuorumLost,
             ParentNotConnected,
+            ParentSuperseded,
             VSRStateNotMonotonic,
         };
 
@@ -77,8 +79,11 @@ pub fn QuorumsType(comptime options: Options) type {
         count: u8 = 0,
 
         /// Returns the working superblock according to the quorum with the highest sequence number.
-        /// When a member of the parent quorum is still present, verify that the highest quorum is
-        /// connected.
+        ///
+        /// * When a member of the parent quorum is still present, verify that the highest quorum is
+        ///   connected.
+        /// * When there are 2 quorums: 1/4 new and 3/4 old, favor the 3/4 old since the 1/4's
+        ///   trailers may be damaged.
         pub fn working(
             quorums: *Quorums,
             copies: []SuperBlockSector,
@@ -141,13 +146,32 @@ pub fn QuorumsType(comptime options: Options) type {
                         a.sector.cluster,
                         b.sector.cluster,
                     });
-                } else if (a.sector.replica != b.sector.replica) {
+                    continue;
+                }
+
+                if (a.sector.replica != b.sector.replica) {
                     log.warn("superblock copy={} has replica={} instead of {}", .{
                         a.sector.copy,
                         a.sector.replica,
                         b.sector.replica,
                     });
-                } else if (a.sector.sequence + 1 == b.sector.sequence) {
+                    continue;
+                }
+
+                if (a.sector.sequence == b.sector.sequence) {
+                    // Two quorums, same cluster+replica+sequence, but different checksums.
+                    // This shouldn't ever happen — but if it does, we can't safely repair.
+                    assert(a.sector.checksum != b.sector.checksum);
+                    return error.Fork;
+                }
+
+                if (a.sector.sequence > b.sector.sequence + 1) {
+                    // We read sequences such as (2,2,2,4) — 2 isn't safe to use, but there isn't a
+                    // valid quorum for 4 either.
+                    return error.ParentSuperseded;
+                }
+
+                if (a.sector.sequence + 1 == b.sector.sequence) {
                     assert(a.sector.checksum != b.sector.checksum);
                     assert(a.sector.cluster == b.sector.cluster);
                     assert(a.sector.replica == b.sector.replica);
