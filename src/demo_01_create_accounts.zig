@@ -11,11 +11,11 @@ pub fn main() !void {
             .reserved = [_]u8{0} ** 48,
             .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
             .code = 1000, // A chart of accounts code to describe this as a clearing account.
-            .flags = .{ .debits_must_not_exceed_credits = true },
+            .flags = .{},
             .debits_pending = 0,
             .debits_posted = 0,
             .credits_pending = 0,
-            .credits_posted = 10000, // Let's start with some liquidity.
+            .credits_posted = 0,
         },
         Account{
             .id = 2,
