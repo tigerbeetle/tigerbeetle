@@ -31,7 +31,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         prepare_timestamp: u64 = 0,
         commit_timestamp: u64 = 0,
 
-        callback: ?fn (state_machine: *StateMachine) void = null,
+        callback: ?*const fn (state_machine: *StateMachine) void = null,
         callback_ticks: usize = 0,
 
         pub fn init(_: std.mem.Allocator, _: *Grid, options: Options) !StateMachine {
@@ -60,7 +60,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         /// Don't add latency to `StateMachine.open`: the simulator calls it synchronously during
         /// replica setup.
-        pub fn open(self: *StateMachine, callback: fn (*StateMachine) void) void {
+        pub fn open(self: *StateMachine, callback: *const fn (*StateMachine) void) void {
             callback(self);
         }
 
@@ -77,7 +77,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub fn prefetch(
             state_machine: *StateMachine,
-            callback: fn (*StateMachine) void,
+            callback: *const fn (*StateMachine) void,
             op: u64,
             operation: Operation,
             input: []const u8,
@@ -114,7 +114,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub fn compact(
             state_machine: *StateMachine,
-            callback: fn (*StateMachine) void,
+            callback: *const fn (*StateMachine) void,
             op: u64,
         ) void {
             _ = op;
@@ -126,7 +126,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub fn checkpoint(
             state_machine: *StateMachine,
-            callback: fn (*StateMachine) void,
+            callback: *const fn (*StateMachine) void,
         ) void {
             assert(state_machine.callback == null);
             assert(state_machine.callback_ticks == 0);

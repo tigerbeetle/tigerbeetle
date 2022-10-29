@@ -32,7 +32,7 @@ pub const ClusterOptions = struct {
     grid_size_max: usize,
 
     seed: u64,
-    on_change_state: fn (replica: *Replica) void,
+    on_change_state: *const fn (replica: *Replica) void,
 
     network_options: NetworkOptions,
     storage_options: Storage.Options,

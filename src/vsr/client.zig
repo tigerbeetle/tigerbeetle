@@ -21,7 +21,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         };
 
         const Request = struct {
-            const Callback = fn (
+            const Callback = *const fn (
                 user_data: u128,
                 operation: StateMachine.Operation,
                 results: Error![]const u8,

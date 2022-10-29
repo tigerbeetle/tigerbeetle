@@ -217,10 +217,7 @@ fn run_simulator(
 // Initializes and executes the simulator as a child process.
 // Terminates the VOPR if the simulator fails to run or exits without an exit code.
 fn run_child_process(allocator: mem.Allocator, argv: []const []const u8) u8 {
-    const child_process = std.ChildProcess.init(argv, allocator) catch |err| {
-        fatal("unable to initialize simulator as a child process. Error: {}", .{err});
-    };
-    defer child_process.deinit();
+    var child_process = std.ChildProcess.init(argv, allocator);
 
     child_process.stdout = std.io.getStdOut();
     child_process.stderr = std.io.getStdErr();
@@ -368,7 +365,7 @@ fn create_report(allocator: mem.Allocator, bug: Bug, seed: u64) Report {
     var message = Report{
         .checksum = undefined,
         .bug = bug_type,
-        .seed = @bitCast([8]u8, @byteSwap(u64, seed)),
+        .seed = @bitCast([8]u8, @byteSwap(seed)),
         .commit = commit_byte_array,
     };
 
@@ -410,21 +407,10 @@ fn parse_args(allocator: mem.Allocator) !Flags {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    // Keep track of the args from the ArgIterator above that were allocated
-    // then free them all at the end of the scope.
-    var args_allocated = std.ArrayList([:0]const u8).init(allocator);
-    defer {
-        for (args_allocated.items) |arg| allocator.free(arg);
-        args_allocated.deinit();
-    }
-
     // Skip argv[0] which is the name of this executable
     assert(args.skip());
 
-    while (args.next(allocator)) |arg_next| {
-        const arg = try arg_next;
-        try args_allocated.append(arg);
-
+    while (args.next()) |arg| {
         if (mem.startsWith(u8, arg, "--seed")) {
             const seed_string = parse_flag("--seed", arg);
             seed = simulator.parse_seed(seed_string);
