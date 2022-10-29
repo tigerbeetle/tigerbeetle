@@ -40,7 +40,7 @@ var accounts = [_]tb.Account{
         .user_data = 0,
         .reserved = [_]u8{0} ** 48,
         .ledger = 2,
-        .code = 0,
+        .code = 1,
         .flags = .{},
         .debits_pending = 0,
         .debits_posted = 0,
@@ -52,7 +52,7 @@ var accounts = [_]tb.Account{
         .user_data = 0,
         .reserved = [_]u8{0} ** 48,
         .ledger = 2,
-        .code = 0,
+        .code = 1,
         .flags = .{},
         .debits_pending = 0,
         .debits_posted = 0,
@@ -104,17 +104,18 @@ pub fn main() !void {
 
     for (transfers) |*transfer, index| {
         transfer.* = .{
-            .id = index,
+            .id = index + 1,
             .debit_account_id = accounts[0].id,
             .credit_account_id = accounts[1].id,
-            .pending_id = 0,
             .user_data = 0,
             .reserved = 0,
-            .code = 0,
+            .pending_id = 0,
+            .timeout = 0,
             .ledger = 2,
+            .code = 1,
             .flags = .{},
             .amount = 1,
-            .timeout = 0,
+            .timestamp = 0,
         };
     }
 
@@ -240,8 +241,6 @@ const TimedQueue = struct {
             @panic("Client returned error during benchmarking.");
         };
 
-        log.debug("response={s}", .{std.mem.bytesAsSlice(tb.CreateAccountsResult, value)});
-
         const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
         const completed_batch: ?Batch = self.batches.pop();
         assert(completed_batch != null);
@@ -253,8 +252,20 @@ const TimedQueue = struct {
         });
         const latency = now - self.batch_start.?;
         switch (operation) {
-            .create_accounts => {},
+            .create_accounts => {
+                const create_accounts_results = std.mem.bytesAsSlice(tb.CreateAccountsResult, value);
+                if (create_accounts_results.len > 0) {
+                    log.err("CreateAccountsResults={any}", .{create_accounts_results});
+                    @panic("Unexpected result creating accounts.");
+                }
+            },
             .create_transfers => {
+                const create_transfers_results = std.mem.bytesAsSlice(tb.CreateTransfersResult, value);
+                if (create_transfers_results.len > 0) {
+                    log.err("CreateTransfersResults={any}", .{create_transfers_results});
+                    @panic("Unexpected result creating transfers.");
+                }
+
                 if (latency > self.transfers_latency_max) {
                     self.transfers_latency_max = latency;
                 }
