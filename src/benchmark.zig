@@ -255,14 +255,14 @@ const TimedQueue = struct {
             .create_accounts => {
                 const create_accounts_results = std.mem.bytesAsSlice(tb.CreateAccountsResult, value);
                 if (create_accounts_results.len > 0) {
-                    log.err("CreateAccountsResults={s}", .{create_accounts_results});
+                    log.err("CreateAccountsResults={any}", .{create_accounts_results});
                     @panic("Unexpected result creating accounts.");
                 }
             },
             .create_transfers => {
                 const create_transfers_results = std.mem.bytesAsSlice(tb.CreateTransfersResult, value);
                 if (create_transfers_results.len > 0) {
-                    log.err("CreateTransfersResults={s}", .{create_transfers_results});
+                    log.err("CreateTransfersResults={any}", .{create_transfers_results});
                     @panic("Unexpected result creating transfers.");
                 }
 
