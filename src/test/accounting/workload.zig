@@ -165,17 +165,17 @@ const transfer_templates = table: {
 };
 
 pub fn WorkloadType(comptime AccountingStateMachine: type) type {
-    const Operation = AccountingStateMachine.Operation;
-
-    const Action = enum(u8) {
-        create_accounts = @enumToInt(Operation.create_accounts),
-        create_transfers = @enumToInt(Operation.create_transfers),
-        lookup_accounts = @enumToInt(Operation.lookup_accounts),
-        lookup_transfers = @enumToInt(Operation.lookup_transfers),
-    };
-
     return struct {
         const Self = @This();
+
+        const Operation = AccountingStateMachine.Operation;
+
+        const Action = enum(u8) {
+            create_accounts = @enumToInt(Operation.create_accounts),
+            create_transfers = @enumToInt(Operation.create_transfers),
+            lookup_accounts = @enumToInt(Operation.lookup_accounts),
+            lookup_transfers = @enumToInt(Operation.lookup_transfers),
+        };
 
         pub const Options = struct {
             auditor_options: Auditor.Options,
