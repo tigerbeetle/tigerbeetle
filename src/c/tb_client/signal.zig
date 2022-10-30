@@ -8,7 +8,7 @@ const Atomic = std.atomic.Atomic;
 
 const log = std.log.scoped(.tb_client_signal);
 
-/// A Signal is a way to trigger a registered callback on a tigerbeetle IO instace 
+/// A Signal is a way to trigger a registered callback on a tigerbeetle IO instance 
 /// when notification occurs from another thread.
 /// It does this by using OS sockets (which are thread safe) 
 /// to resolve IO.Completions on the tigerbeetle thread.

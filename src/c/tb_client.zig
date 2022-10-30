@@ -44,14 +44,12 @@ const DefaultContext = blk: {
     break :blk ContextType(StateMachine, MessageBus);
 };
 
-// const TestingContext = blk: {
-//     const MessageBus = @import("test_message_bus.zig").MessageBusClient;
-//     const StateMachine = @import("../state_machine.zig").StateMachine;
-//     break :blk ContextType(StateMachine, MessageBus);
-// };
+const TestingContext = @import("tb_client/testing_context.zig").TestingContext;
 
 // Pick the most suitable allocator
-const global_allocator = if (builtin.link_libc)
+const global_allocator = if (builtin.is_test)
+    std.testing.allocator
+else if (builtin.link_libc)
     std.heap.c_allocator
 else if (builtin.target.os.tag == .windows)
     (struct {
@@ -70,22 +68,32 @@ pub export fn tb_client_init(
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
 ) tb_status_t {
-    var init_fn = DefaultContext.init;
-    // if (addresses_len == 0) {
-    //     init_fn = TestingContext.init;
-    // }
+    const Context = if (builtin.is_test) TestingContext else DefaultContext;
 
-    return (init_fn)(
+    const addresses = @ptrCast([*]const u8, addresses_ptr)[0..addresses_len];
+    const context = Context.create(
         global_allocator,
-        out_client,
-        out_packets,
         cluster_id,
-        addresses_ptr,
-        addresses_len,
+        addresses,
         num_packets,
         on_completion_ctx,
         on_completion_fn,
-    );
+    ) catch |err| switch (err) {
+        error.Unexpected => return .unexpected,
+        error.OutOfMemory => return .out_of_memory,
+        error.InvalidAddress => return .invalid_address,
+        error.SystemResources => return .system_resources,
+        error.NetworkSubsystemFailed => return .network_subsystem,
+    };
+
+    out_client.* = context_to_client(&context.implementation);
+    var list = tb_packet_list_t{};
+    for (context.packets) |*packet| {
+        list.push(tb_packet_list_t.from(packet));
+    }
+
+    out_packets.* = list;
+    return .success;
 }
 
 pub export fn tb_client_submit(
