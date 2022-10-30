@@ -19,47 +19,64 @@ to each [client session](#client-sessions).
 But consistency models can seem arcane.
 What specific guarantees does TigerBeetle provide to applications?
 
-- [**Client sessions**](#client-sessions)
-  - A client session may have at most one in-flight request.
-  - A client session reads its own writes.
-  - A client session observes writes in the order that they occur on the cluster.
-  - A client session observes [`debits_posted`](../reference/accounts.md#debits_posted) and
-    [`credits_posted`](../reference/accounts.md#credits_posted) as monotonically increasing.
-    That is, a client session will never see `credits_posted` or `debits_posted` decrease.
-  - A client session never observes uncommitted updates.
-  - A client session never observes a broken invariant (e.g.
-    [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flags.credits_must_not_exceed_debits)).
-  - Multiple client sessions may receive replies [out of order](#reply-order) relative to one another.
-  - A client session can consider a request executed when it receives a reply for the request.
-- [**Requests**](#requests)
-  - A request executes within the cluster at most once.
-  - Requests do not [time out](#retries) — a timeout typically implies failure, which cannot be
-    conclusively determined in the context of network faults.
-  - Requests retried by their original client session receive identical replies.
-  - Requests retried by a different client (same request body, different session) may receive
-    [different replies](#consistency-with-foreign-databases).
-  - Operations within a request are executed in sequential order.
-  - Operations within a request do not interleave with operations from other requests.
-    (TODO: Can timeouts interleave batches, or should we shift the batch so that timeouts land
-    entirely before/after?)
-- **Operations**
-  - Once committed, an operation will always be committed — the cluster's state never backtracks.
-  - [Accounts](../reference/accounts.md) are immutable — once created, they are never modified
-    (excluding balance fields, which are modified by transfers).
-  - [Transfers](../reference/transfers.md) are immutable — once created, they are never modified.
-  - Transfer [timeouts](../reference/transfers.md#timeout) are deterministic, driven by the
-    cluster's timestamp.
-  - Within a cluster, object timestamps are unique.
-    For all objects `A` and `B` stored in the same cluster, `A.timestamp ≠ B.timestamp`.
-  - Within a cluster, object timestamps are strictly increasing.
-    For all objects `A` and `B` stored in the same cluster, if `A.timestamp < B.timestamp`,
-    then `A` was committed earlier than `B`.
-  - If a client session is terminated and restarts, it is guaranteed to see updates for which the
-    corresponding reply was received prior to termination.
-  - If a client session is terminated and restarts, it is _not_ guaranteed to see updates for
-    which the corresponding reply was _not_ received prior to the restart. Those updates may
-    occur at any point in the future, or never. Handling application crash recovery safely requires
-    [using `id`s to idempotently retry operations](#consistency-with-foreign-databases).
+#### [Client Sessions](#client-sessions)
+
+- A client session may have at most one in-flight request.
+- A client session reads its own writes.
+- A client session observes writes in the order that they occur on the cluster.
+- A client session observes [`debits_posted`](../reference/accounts.md#debits_posted) and
+  [`credits_posted`](../reference/accounts.md#credits_posted) as monotonically increasing.
+  That is, a client session will never see `credits_posted` or `debits_posted` decrease.
+- A client session never observes uncommitted updates.
+- A client session never observes a broken invariant (e.g.
+  [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits)).
+- Multiple client sessions may receive replies [out of order](#reply-order) relative to one another.
+- A client session can consider a request executed when it receives a reply for the request.
+
+#### [Requests](#requests)
+
+- A request executes within the cluster at most once.
+- Requests do not [time out](#retries) — a timeout typically implies failure, which cannot be
+  conclusively determined in the context of network faults.
+- Requests retried by their original client session receive identical replies.
+- Requests retried by a different client (same request body, different session) may receive
+  [different replies](#consistency-with-foreign-databases).
+- Events within a request are executed in sequential order.
+- Events within a request do not interleave with events from other requests.
+  (TODO: Can timeouts interleave batches, or should we shift the batch so that timeouts land
+  entirely before/after?)
+- All events within a request batch are committed, or none are.
+
+#### [Events](../reference/operations/index.md)
+
+- Once committed, an event will always be committed — the cluster's state never backtracks.
+- Within a cluster, object timestamps are unique.
+  For all objects `A` and `B` stored in the same cluster, `A.timestamp ≠ B.timestamp`.
+- Within a cluster, object timestamps are strictly increasing.
+  For all objects `A` and `B` stored in the same cluster, if `A.timestamp < B.timestamp`,
+  then `A` was committed earlier than `B`.
+- If a client session is terminated and restarts, it is guaranteed to see updates for which the
+  corresponding reply was received prior to termination.
+- If a client session is terminated and restarts, it is _not_ guaranteed to see updates for
+  which the corresponding reply was _not_ received prior to the restart. Those updates may
+  occur at any point in the future, or never. Handling application crash recovery safely requires
+  [using `id`s to idempotently retry events](#consistency-with-foreign-databases).
+
+#### [Accounts](../reference/accounts.md)
+
+- Accounts are immutable — once created, they are never modified
+  (excluding balance fields, which are modified by transfers).
+- There is at most one `Account` with a particular `id`.
+- The sum of all accounts' `debits_pending` equals the sum of all accounts' `credits_pending`.
+- The sum of all accounts' `debits_posted` equals the sum of all accounts' `credits_posted`.
+
+#### [Transfers](../reference/transfers.md)
+
+- Transfers are immutable — once created, they are never modified.
+- There is at most one `Transfer` with a particular `id`.
+- A [pending transfer](../recipes/two-phase-transfers.md) resolves at most once.
+- Transfer [timeouts](../reference/transfers.md#timeout) are deterministic, driven
+  by the cluster's timestamp.
 
 ### Reply Order
 
@@ -144,7 +161,7 @@ would be misleading. An error would imply that a request did not execute, when t
 TigerBeetle objects may correspond to objects in a foreign data store (e.g. another DBMS). Keeping
 multiple data stores consistent (in sync) is subtle in the context of application process faults.
 
-Object creation operations are idempotent, but the first attempt will return `.ok`,
+Object creation events are idempotent, but only the first attempt will return `.ok`,
 while all successive identical attempts return `.exists`. The client may crash after creating
 the object, but before receiving the `.ok` reply. Because the session resets, neither that client
 nor any others will see the object's corresponding `.ok` result.
@@ -162,8 +179,8 @@ This scenario depicts the typical case:
   1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and
     `U₁.account_exists = false`.
   2. _Application_: Send "create account" request `A₁` to the cluster.
-  3. _Cluster_: Create `A₁`; reply `CreateAccountResult.ok`.
-  4. _Application_: Receive reply `A₁: CreateAccountResult.ok` from the cluster.
+  3. _Cluster_: Create `A₁`; reply `ok`.
+  4. _Application_: Receive reply `A₁: ok` from the cluster.
   5. _Application_: Set `U₁.account_exists = true`.
 
 But suppose the application crashes and restarts immediately after sending its request (step 2):
@@ -172,11 +189,11 @@ But suppose the application crashes and restarts immediately after sending its r
     `U₁.account_exists = false`.
   2. _Application_: Send "create account" request `A₁` to the cluster.
   3. _Application_: Crash. Restart.
-  4. _Cluster_: Create `A₁`; reply `CreateAccountResult.ok` — but the application session has reset,
+  4. _Cluster_: Create `A₁`; reply `ok` — but the application session has reset,
     so this reply never reaches the application).
   5. _Application_: Send "create account" request `A₁` to the cluster.
-  6. _Cluster_: Create `A₁`; reply `CreateAccountResult.exists`.
-  7. _Application_: Receive reply `A₁: CreateAccountResult.exists` from the cluster.
+  6. _Cluster_: Create `A₁`; reply `exists`.
+  7. _Application_: Receive reply `A₁: exists` from the cluster.
   8. _Application_: Set `U₁.account_exists = true`.
 
 In the second case, the application observes that the account is created by receiving `.exists`
@@ -203,7 +220,7 @@ a reply.
 
 TigerBeetle has a [hard limit](#client-session-eviction) on the number of concurrent
 client sessions, and encourages minimizing the number of concurrent clients to
-[maximize throughput](#batching-operations).
+[maximize throughput](#batching-events).
 
 ### Client Session Lifecycle
 
@@ -243,57 +260,53 @@ to self-terminate, bubbling up to the application as an `session evicted` error.
 (TODO: Right now evicted clients panic — fix that so this is accurate.)
 
 If active clients are terminating with `session evicted` errors, it (most likely) indicates that
-the application is trying to run [too many](#batching-operations) concurrent clients.
+the application is trying to run [too many](#batching-events) concurrent clients.
 
 
 
 ## Requests
 
-A _request_ is a [batch](#batching-operations) of one or more operation events sent to the cluster
-in a single message.
+A _request_ is a [batch](#batching-events) of one or more
+[operation events](../reference/operations/index.md) sent to the cluster in a single message.
 
-- The cluster commits an entire batch at once, each operation in series.
-- Unless [linked](../reference/transfers.md#flags.linked), operations within
-  a request can succeed or fail independently.
+- All events within a request batch share the same operation type.
+- The cluster commits an entire batch at once, each event in series.
 - The cluster returns a single reply for each unique request it commits.
-- All operations within a request batch share the same type.
-
-(TODO: Link "succeed or fail" to the `CreateAccountResult`/`CreateTransferResult` docs when they
-are done to clarify that we are talking about failure at a state machine level).
-
+- The cluster's reply contains results corresponding to each event in the request.
+- Unless [linked](../reference/transfers.md#flagslinked), events within a request
+  [succeed or fail](../reference/operations/create_transfers.md#result) independently.
 
 
-### Batching Operations
+### Batching Events
 
 To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by
-batching many operations in each request. For the best performance, each request should batch as
-many operations as possible. Typically this means funneling operations through fewer client
-instances.
+batching many operation events in each request. For the best performance, each request should batch
+as many events as possible. Typically this means funneling events through fewer client instances.
 
-The maximum number of operations per batch is dependent on the maximum message size
+The maximum number of events per batch depends on the maximum message size
 (`config.message_size_max`) and the operation type.
 (TODO: Expose batch size in the client instead).
 
 In the default configuration, the batch sizes are:
 
-| operation          | batch size |
+| Operation          | Batch Size |
 | ------------------ | ---------: |
 | `lookup_accounts`  | 8191       |
 | `lookup_transfers` | 8191       |
 | `create_accounts`  | 8191       |
 | `create_transfers` | 8191       |
 
-Presently the client application is responsible for batching operations, but only as a stopgap
+Presently the client application is responsible for batching events, but only as a stopgap
 because this has not yet been implemented within the clients themselves.
 
 #### API Layer Architecture
 
 In some application architectures, the number of services that need to query TigerBeetle may:
 - [exceed `config.clients_max`](#client-session-eviction), or
-- may require additional [batching](#batching-operations) to optimize throughput.
+- may require additional [batching](#batching-events) to optimize throughput.
 
 Rather than each service connecting to TigerBeetle directly, application services can forward their
-requests to a pool of intermediate services (the "API layer") which can coalesce operations from
+requests to a pool of intermediate services (the "API layer") which can coalesce events from
 many application services into requests, and forward back the respective
 replies. This approach enables larger batch sizes and higher throughput, but comes at a cost: the
 application services' sessions are no longer linearizable, because the API services may restart at
