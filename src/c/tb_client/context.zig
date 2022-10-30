@@ -234,28 +234,28 @@ pub fn ContextType(
             defer self.message_pool.unref(message);
             self.available_messages -= 1;
 
-            // Get the size of each request structure in the packet.data
+            // Get the size of each request structure in the packet.data:
             const request_size: usize = operation_size_of(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
             };
 
-            // Make sure the packet.data size is correct.
+            // Make sure the packet.data size is correct:
             const readable = packet.data[0..packet.data_size];
             if (readable.len == 0 or readable.len % request_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
 
-            // Make sure the packet.data wouldn't overflow a message.
+            // Make sure the packet.data wouldn't overflow a message:
             const writable = message.buffer[@sizeOf(Header)..];
             if (readable.len > writable.len) {
                 return self.on_complete(packet, error.TooMuchData);
             }
 
-            // Write the packet data to the message
+            // Write the packet data to the message:
             std.mem.copy(u8, writable, readable);
             const wrote = readable.len;
 
-            // .. and submit the message for processing
+            // Submit the message for processing:
             self.client.request(
                 @bitCast(u128, UserData{
                     .self = self,
@@ -288,7 +288,7 @@ pub fn ContextType(
             const tb_client = api.context_to_client(&self.implementation);
             const bytes = result catch |err| {
                 packet.status = switch (err) {
-                    // If there's too many requests, (re)try submitting the packet later
+                    // If there's too many requests, (re)try submitting the packet later.
                     error.TooManyOutstandingRequests => {
                         return self.thread.submit(Packet.List.from(packet));
                     },
@@ -299,7 +299,7 @@ pub fn ContextType(
                 return (self.on_completion_fn)(self.on_completion_ctx, tb_client, packet, null, 0);
             };
 
-            // The packet completed normally
+            // The packet completed normally.
             packet.status = .ok;
             (self.on_completion_fn)(self.on_completion_ctx, tb_client, packet, bytes.ptr, @intCast(u32, bytes.len));
         }

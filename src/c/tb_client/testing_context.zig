@@ -114,9 +114,9 @@ pub const TestingContext = struct {
 
     pub fn run(self: *Context) void {
         while (!self.thread.signal.is_shutdown()) {
-            self.io.run_for_ns(config.tick_ms * std.time.ns_per_ms) catch |err| {
-                log.warn("run_for_ns: {}", .{err});
-                std.debug.panic("io.run_for_ns(): {}", .{err});
+            self.io.tick() catch |err| {
+                log.err("IO.tick() failed with {}", .{err});
+                std.debug.panic("IO.tick() failed with {}", .{err});
             };
             while (self.echo_stack.pop()) |packet| {
                 const result = blk: {
@@ -153,9 +153,11 @@ pub const TestingContext = struct {
         const tb_client = api.context_to_client(&self.implementation);
         const bytes = result catch |err| {
             packet.status = switch (err) {
-                // If there's too many requests, (re)try submitting the packet later
+                // If there's too many requests, (re)try submitting the packet later.
                 error.TooManyOutstandingRequests => {
-                    return self.thread.submit(Packet.List.from(packet));
+                    std.log.err("submit state: {s}", .{ @tagName(self.thread.signal.state.value)});
+                    //return self.thread.submit(Packet.List.from(packet));
+                    return self.thread.retry.push(Packet.List.from(packet));
                 },
                 error.InvalidDataSize => .invalid_data_size,
             };

@@ -75,19 +75,19 @@ const Completion = struct {
     }
 };
 
-// When builtin.is_test == true, the c_client uses a test context that echoes the data back
+// When initialized with tb_client_echo_init, the c_client uses a test context that echoes the data back
 // without creating an actual client or connecting to a cluster.
 //
-// This same test should be implemented by the target programming languages, asserting that:
-// 1. the c_client threading/signaling mechanism is initialized correctly.
+// This same test should be implemented by all the target programming languages, asserting that:
+// 1. the c_client threading/signaling mechanism was initialized correctly.
 // 2. the client usage is correct, and they can submit and receive messages through the completion callback.
-// 3. the data marshaling is correct, and the exact same data sent was received back, no matter the message length.
+// 3. the data marshaling is correct, and exactly the same data sent was received back, no matter the message length.
 test "c_client echo" {
     const tb_completion_ctx: usize = 42;
     var client: api.tb_client_t = undefined;
     var packet_list: api.tb_packet_list_t = undefined;
 
-    // We ensure the retry mechanism is being tested by exceeding "messages_max_client" simultaneous requests.
+    // We ensure that the retry mechanism is being tested by allowing more simultaneous packets than "messages_max_client".
     const num_packets = message_pool.messages_max_client * 2;
 
     const result = api.tb_client_init(
@@ -104,7 +104,7 @@ test "c_client echo" {
     try testing.expectEqual(api.tb_status_t.success, result);
     defer api.tb_client_deinit(client);
 
-    var max_repetitions: u32 = 100;
+    var max_repetitions: u32 = 1_000;
     while (max_repetitions > 0) : (max_repetitions -= 1) {
         var completion = Completion{ .pending = num_packets };
         var requests: [num_packets]RequestContext = undefined;
