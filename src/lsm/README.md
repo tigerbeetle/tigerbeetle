@@ -55,7 +55,7 @@ Each compaction compacts a [single table](#table-selection) from `level_a` into 
 
 Invariants:
 * At the end of every beat, there is space in mutable table for the next beat.
-* The manifest is compacted at the end of every beat.
+* The manifest log is compacted at the end of every beat.
 * The compactions' output tables are not [visible](#snapshots-and-compaction) until the compaction has finished.
 
 1. First half-bar, first beat ("first beat"):
@@ -212,3 +212,91 @@ At the end of the last beat of the compaction bar (`23`):
 - Updates from ops `0→B` (`0…15`) are on disk.
 - Updates from ops `B→C` (`16…23`) are moved from the mutable table to the immutable table.
 - `tree.lookup_snapshot_max` is `x` when committing op `x` (for `x ∈ {24,25,…}`).
+
+
+## Manifest
+
+The manifest is a tree's index of table locations and metadata.
+(Not to be confused with the [SuperBlock Manifest](../vsr/README.md#manifest)).
+
+Each manifest has two components:
+- a single [`ManifestLog`](#manifest-log) shared by all levels, and
+- one [`ManifestLevel`](#manifest-level) for each on-disk level.
+
+### Manifest Log
+
+The manifest log is an on-disk log of all updates to the tree's table index.
+
+The manifest log tracks:
+
+  - tables created as compaction output
+  - tables updated as compaction input (modifying their `snapshot_max`)
+  - tables moved between levels by compaction
+  - tables deleted after compaction
+
+Updates are accumulated in-memory before being flushed:
+
+  - incrementally during compaction, or
+  - in their entirety during checkpoint.
+
+The manifest log is periodically compacted to remove older entries that have been superseded by
+newer entries. For example, if a table is created and later deleted, manifest log compaction
+will eventually remove any reference to the table from the log blocks.
+
+All manifest log blocks are tracked in the superblock manifest.
+
+### Manifest Level
+
+A `ManifestLevel` is an in-memory collection of the table metadata for a single level of a tree.
+
+For a given level and snapshot, there may be gaps in the key ranges of the visible tables,
+but the key ranges are disjoint.
+
+Manifest levels are queried for tables at a target snapshot and within a key range.
+
+#### Example
+
+Given the `ManifestLevel` tables (with values chosen for visualization, not realism):
+
+           label   A   B   C   D   E   F   G   H   I   J   K   L   M
+         key_min   0   4  12  16   4   8  12  26   4  25   4  16  24
+         key_max   3  11  15  19   7  11  15  27   7  27  11  19  27
+    snapshot_min   1   1   1   1   3   3   3   3   5   5   7   7   7
+    snapshot_max   9   3   3   7   5   7   9   5   7   7   9   9   9
+
+A level's tables can be visualized in 2D as a partitioned rectangle:
+
+      0         1         2
+      0   4   8   2   6   0   4   8
+    9┌───┬───────┬───┬───┬───┬───┐
+     │   │   K   │   │ L │###│ M │
+    7│   ├───┬───┤   ├───┤###└┬──┤
+     │   │ I │   │ G │   │####│ J│
+    5│ A ├───┤ F │   │   │####└┬─┤
+     │   │ E │   │   │ D │#####│H│
+    3│   ├───┴───┼───┤   │#####└─┤
+     │   │   B   │ C │   │#######│
+    1└───┴───────┴───┴───┴───────┘
+
+Example iterations:
+
+    visibility  snapshots   direction  key_min  key_max  tables
+       visible          2   ascending        0       28  A, B, C, D
+       visible          4   ascending        0       28  A, E, F, G, D, H
+       visible          6  descending       12       28  J, D, G
+       visible          8   ascending        0       28  A, K, G, L, M
+     invisible    2, 4, 6   ascending        0       28  K, L, M
+
+Legend:
+
+  - `#` represents a gap — no tables cover these keys during the snapshot.
+  - The horizontal axis represents the key range.
+  - The vertical axis represents the snapshot range.
+  - Each rectangle is a table within the manifest level.
+  - The sides of each rectangle depict:
+    - left:   `table.key_min` (the diagram is inclusive, and the `table.key_min` is inclusive)
+    - right:  `table.key_max` (the diagram is EXCLUSIVE, but the `table.key_max` is INCLUSIVE)
+    - bottom: `table.snapshot_min` (inclusive)
+    - top:    `table.snapshot_max` (inclusive)
+  - (Not depicted: tables may have `table.key_min == table.key_max`.)
+  - (Not depicted: the newest set of tables would have `table.snapshot_max == maxInt(u64)`.)
