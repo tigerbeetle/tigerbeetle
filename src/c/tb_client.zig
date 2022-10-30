@@ -70,7 +70,7 @@ pub export fn tb_client_init(
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
 ) tb_status_t {
-    var init_fn = DefaultContext.init;
+    const init_fn = DefaultContext.init;
     // if (addresses_len == 0) {
     //     init_fn = TestingContext.init;
     // }
