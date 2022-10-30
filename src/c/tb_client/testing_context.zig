@@ -114,16 +114,18 @@ pub const TestingContext = struct {
 
     pub fn run(self: *Context) void {
         while (!self.thread.signal.is_shutdown()) {
-            self.io.run_for_ns(config.tick_ms * std.time.ns_per_ms) catch unreachable;
+            self.io.run_for_ns(config.tick_ms * std.time.ns_per_ms) catch |err| {
+                log.warn("run_for_ns: {}", .{err});
+                std.debug.panic("io.run_for_ns(): {}", .{err});
+            };
             while (self.echo_stack.pop()) |packet| {
-
-                // Reproducing the same "TooManyOutstandingRequests" behavior:
                 const result = blk: {
+                    // We don't use a message_pool, yet we simulate the "TooManyOutstandingRequests" behavior:
                     const current_queue_size = message_pool.messages_max_client - self.available_messages;
-                    break :blk if (current_queue_size > config.client_request_queue_max)
-                        error.TooManyOutstandingRequests
-                    else if (packet.data_size == 0)
+                    break :blk if (packet.data_size == 0)
                         error.InvalidDataSize
+                    else if (current_queue_size > config.client_request_queue_max)
+                        error.TooManyOutstandingRequests
                     else
                         packet.data[0..packet.data_size];
                 };
