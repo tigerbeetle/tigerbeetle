@@ -54,14 +54,14 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
     var args = std.process.args();
+    defer args.deinit();
 
     // Skip argv[0] which is the name of this executable:
-    _ = args_next(&args, allocator);
+    _ = args.skip();
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
-        const arg_two = args_next(&args, allocator) orelse break :seed_from_arg seed_random;
-        defer allocator.free(arg_two);
+        const arg_two = args.next() orelse break :seed_from_arg seed_random;
         break :seed_from_arg parse_seed(arg_two);
     };
 
@@ -417,12 +417,6 @@ fn fatal(exit_code: ExitCode, comptime fmt_string: []const u8, args: anytype) no
 fn chance_f64(random: std.rand.Random, p: f64) bool {
     assert(p <= 100.0);
     return random.float(f64) < p;
-}
-
-/// Returns the next argument for the simulator or null (if none available)
-fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]const u8 {
-    const err_or_bytes = args.next(allocator) orelse return null;
-    return err_or_bytes catch @panic("Unable to extract next value from args");
 }
 
 fn on_change_replica(replica: *Replica) void {

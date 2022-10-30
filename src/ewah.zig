@@ -287,7 +287,7 @@ fn test_decode_with_word(comptime Word: type) !void {
     }
 }
 
-fn test_decode(comptime Word: type, encoded_expect_words: []Word) !void {
+fn test_decode(comptime Word: type, encoded_expect_words: []const Word) !void {
     const encoded_expect = mem.sliceAsBytes(encoded_expect_words);
     const codec = ewah(Word);
     const decoded_expect_data = try std.testing.allocator.alloc(Word, 4 * math.maxInt(Word));

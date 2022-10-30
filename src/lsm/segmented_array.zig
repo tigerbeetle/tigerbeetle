@@ -374,7 +374,7 @@ fn SegmentedArrayType(
             source: []const T,
         ) void {
             assert(target + source.len <= a.len + b.len);
-            const target_a = a[@minimum(target, a.len)..@minimum(target + source.len, a.len)];
+            const target_a = a[@min(target, a.len)..@min(target + source.len, a.len)];
             const target_b = b[target -| a.len..(target + source.len) -| a.len];
             assert(target_a.len + target_b.len == source.len);
             const source_a = source[0..target_a.len];
@@ -1015,7 +1015,7 @@ fn TestContext(
             if (count_free == 0) return;
 
             var buffer: [TestArray.node_capacity * 3]T = undefined;
-            const count_max = @minimum(count_free, TestArray.node_capacity * 3);
+            const count_max = @min(count_free, TestArray.node_capacity * 3);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
             context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
 
@@ -1047,7 +1047,7 @@ fn TestContext(
             const reference_len = @intCast(u32, context.reference.items.len);
             if (reference_len == 0) return;
 
-            const count_max = @minimum(reference_len, TestArray.node_capacity * 3);
+            const count_max = @min(reference_len, TestArray.node_capacity * 3);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
 
             assert(context.reference.items.len <= element_count_max);
@@ -1221,7 +1221,7 @@ pub fn run_tests(seed: u64, comptime options: Options) !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const Key = @import("composite_key.zig").CompositeKey(u64);
+    const Key = @import("composite_key.zig").CompositeKeyType(u64);
     const TableType = @import("table.zig").TableType;
     const TableInfoType = @import("manifest.zig").TableInfoType;
     const TableInfo = TableInfoType(TableType(
