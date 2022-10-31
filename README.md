@@ -33,10 +33,16 @@ Check out our [short-term roadmap](#short-term-roadmap) below for where we're he
   - [Hardware](./docs/operation/hardware.md)
 - Usage
   - [Integration](./docs/usage/integration.md)
+  - [Data Modeling](./docs/usage/data-modeling.md)
   - [Creating accounts and transfers in the Node CLI](./usage/node-cli.md)
 - Reference
   - [Accounts](./docs/reference/accounts.md)
   - [Transfers](./docs/reference/transfers.md)
+  - [Operations](./reference/operations.md)
+    - [`create_accounts`](./reference/operations/create_accounts.md)
+    - [`create_transfers`](./reference/operations/create_transfers.md)
+    - [`lookup_accounts`](./reference/operations/lookup_accounts.md)
+    - [`lookup_transfers`](./reference/operations/lookup_transfers.md)
 
 ## QuickStart
 

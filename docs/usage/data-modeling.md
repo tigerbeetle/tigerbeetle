@@ -10,6 +10,41 @@ When possible, encoding application invariants directly in TigerBeetle rather th
 them in the application itself (or with a foreign database) minimizes round-trips and coordination.
 This is useful for both maintaining consistency and performance.
 
+## Debits vs Credits
+
+In double-entry accounting, an account balance is either computed as either `debits - credits` or
+`credits - debits`, depending on the type of account. It is up to the application to compute
+the balance — TigerBeetle tracks the cumulative posted debits and cumulative posted credits,
+not their difference.
+
+From the database's perspective the distinction is arbitrary, but by convention:
+
+  - `balance = debits - credits` for accounts representing the database operator's assets.
+    - Known as a "debit balance".
+    - Account limits use
+      [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits).
+  - `balance = credits - debits` for accounts representing the database operator's liabilities.
+    - Known as a "credit balance".
+    - Account limits use
+      [`flags.debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits).
+  - A transfer "from" account `A` "to" account `B` credits account `A` and debits account `B`.
+
+### Example
+
+For example, if TigerBeetle is operated by a bank, with customers Alice and Bob, its
+ledger might look something like this:
+
+| Account Owner | Debits Posted | Credits Posted | Flags                            |
+| :------------ | ------------: | -------------: | :------------------------------- |
+| Bank          |            30 |              0 | `credits_must_not_exceed_debits` |
+| Alice         |             0 |             20 | `debits_must_not_exceed_credits` |
+| Bob           |             0 |             10 | `debits_must_not_exceed_credits` |
+
+- The bank has a total of $30 in assets.
+- Alice and Bob have deposited money ($20 and $10 respectively) in the bank — from the bank's
+  perspective this is a liability.
+- Alice and Bob cannot "overdraw" their account — that is, their balance will never be negative.
+
 ## `user_data`
 
 `user_data` is the most flexible field in the schema (for both
@@ -27,6 +62,9 @@ Example uses:
   (TODO: Can we use this for join queries via the query API, or must the application implement them?)
 
 ## `id`
+
+The primary purpose of an `id` (for both accounts and transfers) is to serve as an "idempotency key".
+In other words, to allow the database to ignore duplicate events.
 
 [`Account`](../reference/accounts.md#id) and [`Transfer`](../reference/transfers.md#id) identifiers
 must be unique, so randomly-generated UUIDs are the natural choice — but not the only option.
@@ -74,7 +112,7 @@ without relying on a [foreign database](#reuse-foreign-identifier) to store meta
 member of the group.
 
 A group may (but does not necessarily) correspond to objects chained by
-[`flags.linked`](../reference/transfers.md#flags.linked).
+[`flags.linked`](../reference/transfers.md#flagslinked).
 
 ##### Identifier Offsets
 

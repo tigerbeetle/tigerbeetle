@@ -22,10 +22,22 @@ Once you've got a TigerBeetle server, check out:
 
 * [Creating accounts and transfers in the Node CLI](./usage/node-cli.md)
 * [Integrating TigerBeetle with an application](./usage/integration.md)
+* [Modeling application data within TigerBeetle](./usage/data-modeling.md)
 
 # Reference
 
 To understand TigerBeetle's data model, see:
 
-* [Accounts](./reference/accounts)
-* [Transfers](./reference/transfers)
+* [Accounts](./reference/accounts.md)
+* [Transfers](./reference/transfers.md)
+* [Operations](./reference/operations/index.md)
+  - [`create_accounts`](./reference/operations/create_accounts.md)
+  - [`create_transfers`](./reference/operations/create_transfers.md)
+  - [`lookup_accounts`](./reference/operations/lookup_accounts.md)
+  - [`lookup_transfers`](./reference/operations/lookup_transfers.md)
+
+# Community
+
+- [Twitter](https://twitter.com/tigerbeetledb)
+- [GitHub](https://github.com/tigerbeetledb/tigerbeetle)
+- [Slack](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
