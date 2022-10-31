@@ -33,6 +33,8 @@ external entity.
 As an example, you might use a UUID that ties together a group of
 accounts.
 
+For more information, see [Data Modeling](../usage/data-modeling.md#user_data).
+
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
@@ -51,10 +53,12 @@ Constraints:
 This is an identifier that partitions the sets of accounts that can
 transact with each other. Put another way, money cannot transfer
 between two accounts with different `ledger` values. See:
-`errors.accounts_must_have_the_same_ledger`.
+[`accounts_must_have_the_same_ledger`](./operations/create_accounts.md#accounts_must_have_the_same_ledger).
+
+[Asset exchange](../recipes/asset-exchange.md) is implemented with two or more linked transfers.
 
 In a typical use case:
-* Map each currency tracked within the database to a distinct ledger. And,
+* Map each asset or currency tracked within the database to a distinct ledger. And,
 * Tag each account with the `ledger` indicating the currency in which the balance is denominated.
 
 Constraints:
@@ -98,11 +102,12 @@ account in the chain is visible to the next, and so that the chain is
 either visible or invisible as a unit to subsequent accounts after the
 chain. The account that was the first to break the chain will have a
 unique error result. Other accounts in the chain will have their error
-result set to `linked_event_failed`.
+result set to
+[`linked_event_failed`](./operations/create_accounts.md#linked_event_failed).
 
 After the link has executed, the association of each event is lost.
 To save the association, it must be
-[encoded into the data model](../usage/integration.md#data-modeling).
+[encoded into the data model](../usage/data-modeling.md).
 
 #### `flags.debits_must_not_exceed_credits`
 
@@ -122,9 +127,11 @@ This cannot be set when `debits_must_not_exceed_credits` is also set.
 
 ### `debits_pending`
 
-`debits_pending` counts debits reserved by pending transfers. When a pending transfer posts, voids, or times out, the amount is removed from `debits_pending`.
+`debits_pending` counts debits reserved by pending transfers. When a pending transfer posts, voids,
+or times out, the amount is removed from `debits_pending`.
 
-Money in `debits_pending` is reserved — that is, it cannot be spent until the corresponding pending transfer finishes.
+Money in `debits_pending` is reserved — that is, it cannot be spent until the corresponding pending
+transfer resolves.
 
 Constraints:
 
