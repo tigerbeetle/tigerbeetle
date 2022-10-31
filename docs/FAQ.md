@@ -52,7 +52,7 @@ and ledger primitives, which are subtle to get right!
 
 TigerBeetle is focused on just one thing: accounting reliably at
 scale. TigerBeetle does double-entry accounting and as a database has
-only two data types: accounts and transfers of money between
+only two data types: accounts, and transfers of money between
 accounts. TigerBeetle also goes beyond typical ledgers in that it’s
 not only great at tracking money within a system, but has a built-in
 two-phase commit coordinator to help you track money as it moves
