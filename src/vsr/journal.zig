@@ -617,7 +617,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             op_max: u64,
         ) ?HeaderRange {
             assert(op_max >= op_min);
-            assert(op_max - op_min < slot_count);
+            assert(op_max - op_min + 1 <= slot_count);
             var range: ?HeaderRange = null;
 
             // We set B, the op after op_max, to null because we only examine breaks < op_max:
