@@ -39,7 +39,7 @@ pub fn QuorumsType(comptime options: Options) type {
             NotFound,
             QuorumLost,
             ParentNotConnected,
-            ParentSuperseded,
+            ParentSkipped,
             VSRStateNotMonotonic,
         };
 
@@ -168,7 +168,7 @@ pub fn QuorumsType(comptime options: Options) type {
                 if (a.sector.sequence > b.sector.sequence + 1) {
                     // We read sequences such as (2,2,2,4) — 2 isn't safe to use, but there isn't a
                     // valid quorum for 4 either.
-                    return error.ParentSuperseded;
+                    return error.ParentSkipped;
                 }
 
                 if (a.sector.sequence + 1 == b.sector.sequence) {
