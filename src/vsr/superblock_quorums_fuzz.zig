@@ -62,7 +62,7 @@ pub fn fuzz_quorums_working(random: std.rand.Random) !void {
     try t(r, 3, &.{ o(1), o(2), o(3), o(3) }, error.QuorumLost);
 
     // Skipped sequence.
-    try t(r, 2, &.{ o(2), o(2), o(2), o(4) }, error.ParentSuperseded); // open after 1/4
+    try t(r, 2, &.{ o(2), o(2), o(2), o(4) }, error.ParentSkipped); // open after 1/4
     try t(r, 2, &.{ o(2), o(2), o(4), o(4) }, 4); // open after 2/4
     try t(r, 2, &.{ o(2), o(2), o(4), o(4) }, 4); // open after 3/4
 

@@ -1121,9 +1121,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     superblock.release(context);
                 }
             } else |err| switch (err) {
+                error.Fork => @panic("superblock forked"),
                 error.NotFound => @panic("superblock not found"),
                 error.QuorumLost => @panic("superblock quorum lost"),
                 error.ParentNotConnected => @panic("superblock parent not connected"),
+                error.ParentSkipped => @panic("superblock parent superseded"),
                 error.VSRStateNotMonotonic => @panic("superblock vsr state not monotonic"),
             }
         }
