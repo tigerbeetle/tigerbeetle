@@ -5,7 +5,7 @@ or currencies. Transfers between pairs of accounts with different `ledger`s are
 [not permitted](../reference/operations/create_transfers.md#accounts_must_have_the_same_ledger).
 
 Instead, asset exchange (i.e. currency conversion) is implemented by creating two
-[atomically linked](../reference/transfers.md#flags.linked)
+[atomically linked](../reference/transfers.md#flagslinked)
 different-ledger transfers between two pairs of same-ledger accounts.
 
 A simple asset exchange involves four accounts:
@@ -28,10 +28,10 @@ The transfer amounts vary according to the exchange rate.
 Consider sending `$100` from account `A₁` (denominated in USD) to account `A₂` (denominated in INR).
 Assuming an exchange rate of `$1.00 = ₹82.42135`, `$100.00 = ₹8242.135`:
 
-| Ledger | Credit Account | Debit Account |  Amount | `flags.linked` |
-| -----: | -------------: | ------------: | ------: | -------------: |
-|    USD |           `A₁` |          `L₁` |   10000 |           true |
-|    INR |           `L₂` |          `A₂` | 8242135 |          false |
+| Ledger | Debit Account | Credit Account |  Amount | `flags.linked` |
+| -----: | ------------: | -------------: | ------: | -------------: |
+|    USD |          `L₁` |           `A₁` |   10000 |           true |
+|    INR |          `A₂` |           `L₂` | 8242135 |          false |
 
 - Amounts are [represented as integers](./fractional-amounts.md).
 - Because both liquidity accounts belong to the same entity, the entity does not lose money on
