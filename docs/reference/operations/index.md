@@ -13,12 +13,12 @@ There are four operations available to clients:
 
 Each operation has a corresponding _event_ and _result_ type.
 
+- The client sends events to the cluster.
+- The client receives results from the cluster (1:1 for each event sent).
 - Events and results for the same operation are
   [batched](../../usage/integration.md#batching-events) for throughput.
 - A batch of an operation's events is called a [_request_](../../usage/integration.md#requests).
 - A batch of an operation's results is called a _reply_.
-- The client sends events to the cluster (request).
-- The client receives results from the cluster (reply).
 
 Client implementations provide an API for sending events and decoding the corresponding results.
 
