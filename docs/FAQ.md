@@ -4,7 +4,7 @@ sidebar_position: 6
 
 # FAQ
 
-## What is double entry accounting?
+## What is double-entry accounting?
 
 Double entry accounting tracks transfers between accounts. It stores
 the amount of the transfer along with where the amount came from and
