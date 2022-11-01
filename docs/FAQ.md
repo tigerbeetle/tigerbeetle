@@ -44,7 +44,7 @@ every prudent master of a house should introduce it into his economy.”
 
 You can do accounting with any database, it’s true. Existing companies
 use PostgreSQL or MongoDB or any other general-purpose
-database. However, this leaves significant work on the user and
+database. However, this leaves significant work for the developer and
 operator. You must figure out high availability, fault-tolerance, and
 consistency. You must figure out how to scale as you add users and
 transfers. And of course, you must re-implement all the double-entry
