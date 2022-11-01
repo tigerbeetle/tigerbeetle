@@ -99,7 +99,7 @@ they cannot be used by either the payer or payee.
 2. Later (in a future "commit", i.e. a separate request), the
 application creates another transfer — either a post-pending transfer
 or a void-pending transfer. The former moves all (or part) of the
-reserved funds to the destination, the latter reverts them to the
+reserved funds to the destination; the latter reverts them to the
 original account. The pending transfer's amount is reserved in a way
 that this second step will never cause the account's configured
 balance invariants (e.g. debits < credits) to be broken.
