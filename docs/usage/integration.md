@@ -2,7 +2,7 @@
 
 TigerBeetle is designed to guard against bugs not only in its [own code](../TIGER_STYLE.md), but
 at the boundaries, in the application code which interfaces with TigerBeetle.
-This is exhibited by the client's API design, which may be surfacing (see [Retries](#retries)) when
+This is exhibited by the client's API design, which may be surprising (see [Retries](#retries)) when
 contrasted with a more conventional database.
 
 Strict consistency guarantees (at the database level) simplify application logic and error handling
