@@ -163,7 +163,7 @@ pub fn ThreadType(
 
             self.retry = .{};
             self.submitted = .{};
-            self.available_messages = message_pool.messages_max_client;
+            self.available_messages = config.client_request_queue_max;
             self.on_completion_fn = on_completion_fn;
 
             log.debug("init: initializing Signal.", .{});
@@ -215,7 +215,7 @@ pub fn ThreadType(
             }
         }
 
-        fn on_signal(signal: *Signal) void {
+        fn on_signal(signal: *Signal) bool {
             const self = @fieldParentPtr(Self, "signal", signal);
             self.client.tick();
 
@@ -242,6 +242,9 @@ pub fn ThreadType(
                 self.available_messages -= 1;
                 self.request(packet, message);
             }
+
+            // Returns true if we have used all available messages.
+            return self.available_messages == 0;
         }
 
         fn request(self: *Self, packet: *Packet, message: *Message) void {
