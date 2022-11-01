@@ -215,39 +215,33 @@ pub fn ThreadType(
             }
         }
 
-        fn on_signal(signal: *Signal) bool {
+        fn on_signal(signal: *Signal) void {
             const self = @fieldParentPtr(Self, "signal", signal);
             self.client.tick();
 
-            if (self.available_messages > 0) {
+            // Consume all of retry here to avoid infinite loop
+            // if the code below pushes to self.retry while we're dequeueing.
+            var pending = self.retry;
+            self.retry = .{};
 
-                // Consume all of retry here to avoid infinite loop
-                // if the code below pushes to self.retry while we're dequeueing.
-                var pending = self.retry;
-                self.retry = .{};
-
-                // The loop below can exit early without processing all of pending
-                // if available_messages becomes zero.
-                // In such a case we need to restore self.retry we consumed above
-                // with those that weren't processed.
-                defer {
-                    pending.push(self.retry);
-                    self.retry = pending;
-                }
-
-                // Process packets from either pending or submitted as long as we have messages.
-                while (self.available_messages > 0) {
-                    const packet = pending.pop() orelse self.submitted.pop() orelse break;
-                    const message = self.client.get_message();
-                    defer self.client.unref(message);
-
-                    self.available_messages -= 1;
-                    self.request(packet, message);
-                }
+            // The loop below can exit early without processing all of pending
+            // if available_messages becomes zero.
+            // In such a case we need to restore self.retry we consumed above
+            // with those that weren't processed.
+            defer {
+                pending.push(self.retry);
+                self.retry = pending;
             }
 
-            // Returns true if we have used all available messages.
-            return self.available_messages == 0;
+            // Process packets from either pending or submitted as long as we have messages.
+            while (self.available_messages > 0) {
+                const packet = pending.pop() orelse self.submitted.pop() orelse break;
+                const message = self.client.get_message();
+                defer self.client.unref(message);
+
+                self.available_messages -= 1;
+                self.request(packet, message);
+            }
         }
 
         fn request(self: *Self, packet: *Packet, message: *Message) void {
@@ -312,6 +306,9 @@ pub fn ThreadType(
         ) void {
             assert(self.available_messages < message_pool.messages_max_client);
             self.available_messages += 1;
+
+            // Signal to resume sending requests that was waiting for available messages.
+            if (self.available_messages == 1) self.signal.notify();
 
             const bytes = result catch |err| {
                 packet.status = switch (err) {
