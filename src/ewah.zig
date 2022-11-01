@@ -60,6 +60,8 @@ pub fn ewah(comptime Word: type) type {
 
         /// Decodes the compressed bitset in `source` into `target_words`.
         /// Returns the number of *words* written to `target_words`.
+        // TODO Refactor to return an error when `source` is invalid,
+        // so that we can test invalid encodings.
         pub fn decode(source: []align(@alignOf(Word)) const u8, target_words: []Word) usize {
             assert(source.len % @sizeOf(Word) == 0);
             assert(source.len >= @sizeOf(Marker));
