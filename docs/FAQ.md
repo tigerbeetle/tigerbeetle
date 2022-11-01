@@ -70,7 +70,7 @@ that processing transactions for these customers will contend for row
 locks when touching these bank accounts and deoptimize the ability of
 group commit to amortize disk flushes. With these challenges in mind,
 we've designed TigerBeetle to achieve 1,000,000 transfers per second
-on commodity laptop hardware.
+on commodity hardware.
 
 With financial data, it's also important not to lump it together with
 general purpose data. The risk profile is different: retention
