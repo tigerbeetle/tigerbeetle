@@ -219,28 +219,31 @@ pub fn ThreadType(
             const self = @fieldParentPtr(Self, "signal", signal);
             self.client.tick();
 
-            // Consume all of retry here to avoid infinite loop
-            // if the code below pushes to self.retry while we're dequeueing.
-            var pending = self.retry;
-            self.retry = .{};
+            if (self.available_messages > 0) {
 
-            // The loop below can exit early without processing all of pending
-            // if available_messages becomes zero.
-            // In such a case we need to restore self.retry we consumed above
-            // with those that weren't processed.
-            defer {
-                pending.push(self.retry);
-                self.retry = pending;
-            }
+                // Consume all of retry here to avoid infinite loop
+                // if the code below pushes to self.retry while we're dequeueing.
+                var pending = self.retry;
+                self.retry = .{};
 
-            // Process packets from either pending or submitted as long as we have messages.
-            while (self.available_messages > 0) {
-                const packet = pending.pop() orelse self.submitted.pop() orelse break;
-                const message = self.client.get_message();
-                defer self.client.unref(message);
+                // The loop below can exit early without processing all of pending
+                // if available_messages becomes zero.
+                // In such a case we need to restore self.retry we consumed above
+                // with those that weren't processed.
+                defer {
+                    pending.push(self.retry);
+                    self.retry = pending;
+                }
 
-                self.available_messages -= 1;
-                self.request(packet, message);
+                // Process packets from either pending or submitted as long as we have messages.
+                while (self.available_messages > 0) {
+                    const packet = pending.pop() orelse self.submitted.pop() orelse break;
+                    const message = self.client.get_message();
+                    defer self.client.unref(message);
+
+                    self.available_messages -= 1;
+                    self.request(packet, message);
+                }
             }
 
             // Returns true if we have used all available messages.
