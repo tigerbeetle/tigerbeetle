@@ -63,45 +63,53 @@ Example uses:
 
 ## `id`
 
-The primary purpose of an `id` (for both accounts and transfers) is to serve as an "idempotency key".
-In other words, to allow the database to ignore duplicate events.
+The primary purpose of an `id` (for both [accounts](../reference/accounts.md#id) and
+[transfers](../reference/transfers.md#id)) is to serve as an "idempotency key".
+The database uses ids to avoid repeating duplicate events.
 
-[`Account`](../reference/accounts.md#id) and [`Transfer`](../reference/transfers.md#id) identifiers
-must be unique, so randomly-generated UUIDs are the natural choice — but not the only option.
+[Randomly-generated UUIDs](#uuidv4) are recommended for most applications.
 
-`id` is mostly accessed by point queries, but it is indexed for efficient range queries as well.
+When selecting an `id` scheme:
 
-When designing any id scheme:
-
-- `id`'s primary purpose is to ensure idempotence of object creation — this can be
-  [difficult in the context of application crash recovery](./integration.md#consistency-with-foreign-databases).
+- Idempotency is particularly important (and difficult) in the context of
+  [application crash recovery](./integration.md#consistency-with-foreign-databases).
 - Be careful to [avoid `id` collisions](https://en.wikipedia.org/wiki/Birthday_problem).
 - An account and a transfer may share the same `id` — they belong to different "namespaces".
 - Avoid requiring a central oracle to generate each unique `id` (e.g. an auto-increment field in SQL).
   A central oracle may become a performance bottleneck when creating accounts/transfers.
+- `id` is mostly accessed by point queries, but it is indexed for efficient range queries as well.
 
 ### Examples
+#### UUIDv4
+
+Randomly-generated identifiers (UUID version 4) are recommended for most applications.
+
+- UUIDv4 _does_ require coordination with a secondary database to implement idempotent
+  [application crash recovery](./integration.md#consistency-with-foreign-databases).
+- UUIDv4 has an insignificant risk of collisions.
+- UUIDv4 does not require a central oracle.
+- Only point queries are useful for fetching randomly-generated identifiers.
+
 #### Reuse Foreign Identifier
 
-Set `id` to a "foreign key" — that is, reuse an identifier of a corresponding object from
-another database.
+This technique is most appropriate when integrating TigerBeetle with an existing application
+where TigerBeetle accounts or transfers map one-to-one with an entity in the foreign database.
 
-For example, if every user (within the application's database) has a single account, then the
-identifier within the foreign database can be used as the `Account.id` within TigerBeetle.
+Set `id` to a "foreign key" — that is, reuse an identifier of a corresponding object from another
+database. For example, if every user (within the application's database) has a single account, then
+the identifier within the foreign database can be used as the `Account.id` within TigerBeetle.
 
 To reuse the foreign identifier, it must conform to TigerBeetle's `id`
 [constraints](../reference/accounts.md#id).
 
-This technique is most appropriate when integrating TigerBeetle with an existing application.
-It is not ideal because it
-[complicates consistency around application crash recover](./integration.md#consistency-with-foreign-databases)
-and may have a bottleneck at the foreign database.
+Like [UUIDv4](#uuidv4), this technique requires careful coordination with the foreign database
+for idempotent [application crash recovery](./integration.md#consistency-with-foreign-databases).
 
 #### Logically Grouped Objects
 
 Often accounts or transfers are logically grouped together from the application's perspective.
-For example, a simple currency exchange transaction is one logical transfer conducted between
-four accounts — two physical transfers.
+For example, a [simple currency exchange](../recipes/asset-exchange.md) transaction is one logical
+transfer conducted between four accounts — two physical transfers.
 
 A non-random identifier scheme can:
 
