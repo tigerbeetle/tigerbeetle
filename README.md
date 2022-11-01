@@ -1,5 +1,9 @@
 # tigerbeetle
 
+GitHub doesn't have a great way for you to stay in the loop. So don't
+just star the repo, [join the mailing
+list](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)!
+
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
 **Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/tigerbeetledb/viewstamped-replication-made-famous)**
@@ -203,7 +207,8 @@ For further reading:
 
 ## Community
 
-[Join the TigerBeetle community on Slack.](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
+* [Join the TigerBeetle community on Slack.](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
+* [Subscribe to our monthly newsletter.](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
 
 ## Benchmarks
 
