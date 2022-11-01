@@ -89,6 +89,8 @@ domains across replicas.
 The operator may consider the use of RAID 10 to reduce the need for
 remote recovery if a replica's disk fails.
 
+ECC memory is recommended for production deployments.
+
 TigerBeetle requires only a single core per replica
 machine. TigerBeetle at present does not utilize more cores, but may
 in future.
