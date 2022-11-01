@@ -93,7 +93,7 @@ are created.
 In contrast to single-phase transfers, a two-phase transfer moves
 funds in stages:
 
-1. First, the pending transfer reserves from funds. While reserved,
+1. First, the pending transfer reserves funds. While reserved,
 they cannot be used by either the payer or payee.
 
 2. Later (in a future "commit", i.e. a separate request), the
