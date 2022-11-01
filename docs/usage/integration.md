@@ -29,7 +29,8 @@ What specific guarantees does TigerBeetle provide to applications?
   That is, a client session will never see `credits_posted` or `debits_posted` decrease.
 - A client session never observes uncommitted updates.
 - A client session never observes a broken invariant (e.g.
-  [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits)).
+  [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits)
+  or [`flags.linked`](../reference/transfers.md#flagslinked)).
 - Multiple client sessions may receive replies [out of order](#reply-order) relative to one another.
 - A client session can consider a request executed when it receives a reply for the request.
 
