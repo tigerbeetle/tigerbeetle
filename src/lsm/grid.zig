@@ -170,17 +170,21 @@ pub fn GridType(comptime Storage: type) type {
             // Resolve reads that were seen in the cache during start_read()
             // but deferred to be asynchronously resolved on the next tick.
             //
-            // Make a copy to avoid a potential infinite loop here.
-            // If any new reads are added to the read_cached_queue they will be started on
-            // the next tick.
-            var copy = grid.read_cached_queue;
-            grid.read_cached_queue = .{};
-            while (copy.pop()) |read| {
+            // Drains directly from the queue to that cache reads that could be serviced immediately
+            // aren't deferred until the next tick (which could be milliseconds from IO.run_for_ns).
+            //
+            // Even still, there should still be a cap on reads processed to prevent going over
+            // any implicit time slice expected of Grid.tick(). This limit is fairly arbitrary.
+            var max_retry: u32 = grid.read_iops_max * 4;
+            while (grid.read_cached_queue.pop()) |read| {
                 if (grid.cache.get(read.address)) |block| {
                     read.callback(read, block);   
                 } else {
                     grid.start_read(read);
                 }
+
+                max_retry -|= 1;
+                if (max_retry == 0) break;
             }
         }
 
