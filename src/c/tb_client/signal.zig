@@ -24,7 +24,7 @@ pub const Signal = struct {
     recv_buffer: [1]u8,
     send_buffer: [1]u8,
 
-    on_signal_fn: fn (*Signal) bool,
+    on_signal_fn: fn (*Signal) void,
     state: Atomic(enum(u8) {
         running,
         waiting,
@@ -32,7 +32,7 @@ pub const Signal = struct {
         shutdown,
     }),
 
-    pub fn init(self: *Signal, io: *IO, on_signal_fn: fn (*Signal) bool) !void {
+    pub fn init(self: *Signal, io: *IO, on_signal_fn: fn (*Signal) void) !void {
         self.io = io;
         self.server_socket = os.socket(
             os.AF.INET,
@@ -274,12 +274,8 @@ pub const Signal = struct {
             .Acquire,
             .Acquire,
         ) orelse {
-            const pending = (self.on_signal_fn)(self);
-            self.wait();
-
-            // Run again on the next tick if there are still packets to process.
-            if (pending) self.notify();
-            return;
+            (self.on_signal_fn)(self);
+            return self.wait();
         };
 
         switch (state) {
