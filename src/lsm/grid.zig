@@ -190,7 +190,7 @@ pub fn GridType(comptime Storage: type) type {
             return grid.superblock.free_set.acquire().?;
         }
 
-        /// This function should be used to release addresses, instead of release_at_checkpoint()
+        /// This function should be used to release addresses, instead of release()
         /// on the free set directly, as this also demotes the address within the block cache.
         /// This reduces conflict misses in the block cache, by freeing ways soon after they are
         /// released.
@@ -199,12 +199,12 @@ pub fn GridType(comptime Storage: type) type {
         /// checkpoint.
         ///
         /// Asserts that the address is not currently being read from or written to.
-        pub fn release_at_checkpoint(grid: *Grid, address: u64) void {
+        pub fn release(grid: *Grid, address: u64) void {
             grid.assert_not_writing(address, null);
             grid.assert_not_reading(address, null);
 
             grid.cache.demote(address);
-            grid.superblock.free_set.release_at_checkpoint(address);
+            grid.superblock.free_set.release(address);
         }
 
         /// Assert that the address is not currently being written to.
