@@ -274,11 +274,11 @@ pub const Signal = struct {
             .Acquire,
             .Acquire,
         ) orelse {
-            const retry = (self.on_signal_fn)(self);
+            const pending = (self.on_signal_fn)(self);
             self.wait();
 
-            // Wakes up immediately if there are still packets to process.
-            if (retry) self.notify();
+            // Run again on the next tick if there are still packets to process.
+            if (pending) self.notify();
             return;
         };
 
