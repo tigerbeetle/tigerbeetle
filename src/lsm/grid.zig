@@ -175,7 +175,7 @@ pub fn GridType(comptime Storage: type) type {
             //
             // Even still, there should still be a cap on reads processed to prevent going over
             // any implicit time slice expected of Grid.tick(). This limit is fairly arbitrary.
-            var max_retry: u32 = grid.read_iops_max * 4;
+            var max_retry: u32 = Grid.read_iops_max * 4;
             while (grid.read_cached_queue.pop()) |read| {
                 if (grid.cache.get(read.address)) |block| {
                     read.callback(read, block);   
