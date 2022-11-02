@@ -40,17 +40,18 @@ for fields that TigerBeetle, not you (the user), are responsible.
 
 Single-phase transfers post funds to accounts immediately when they are created.
 
-### Pending Transfer
+### Two-Phase Transfer
 
-A pending transfer (denoted by [`flags.pending`](#flagspending) followed by a post-pending transfer,
-void-pending transfer, or a timeout is called a "two-phase transfer".
+A pending transfer followed by a post-pending transfer, void-pending transfer, or a timeout is
+called a "two-phase transfer". Unlike a single-phase transfer, a two-phase transfer moves funds in
+stages:
 
-Unlike a single-phase transfer, a two-phase transfer moves funds in stages. Initially, the pending
-transfer reserves its [`amount`](#amount) (the _pending amount_) in the debit/credit accounts'
-[`debits_pending`](./accounts.md#debits_pending)/[`credits_pending`](./accounts.md#credits_pending)
-fields respectively, leaving `debits_posted`/`credits_posted` unmodified.
-Pending amounts cannot be spent by either the payer or payee until the pending transfer is
-_resolved_ — that is, until the first of the following events occur:
+1. [Reserve funds](#pending-transfer).
+2. Resolve funds (post, void, or timeout).
+
+Pending amounts (the pending transfer's [`amount`](#amount)) cannot be spent by either the payer or
+payee until the pending transfer is _resolved_ — that is, until the first of the following events
+occur:
 
 * If a corresponding [`post_pending_transfer`](#post-pending-transfer) is
   committed, some or all of the pending transfer's reserved funds are
@@ -69,7 +70,14 @@ Attempting to resolve a pending transfer more than once will return the applicab
 - [`pending_transfer_already_voided`](./operations/create_transfers.md#pending_transfer_already_voided)
 - [`pending_transfer_expired`](./operations/create_transfers.md#pending_transfer_expired)
 
-### Post-Pending Transfer
+#### Pending Transfer
+
+A pending transfer, denoted by [`flags.pending`](#flagspending),
+reserves its `amount` in the debit/credit accounts'
+[`debits_pending`](./accounts.md#debits_pending)/[`credits_pending`](./accounts.md#credits_pending)
+fields respectively, leaving `debits_posted`/`credits_posted` unmodified.
+
+#### Post-Pending Transfer
 
 A post-pending transfer, denoted by [`flags.post_pending_transfer`](#flagspost_pending_transfer),
 causes the corresponding pending transfer (referenced by [`pending_id`](#pending_id)) to "post",
@@ -95,9 +103,9 @@ value of the pending transfer's field:
 * `ledger`
 * `code`
 
-#### Examples
+##### Examples
 
-##### Post Full Pending Amount
+###### Post Full Pending Amount
 
 | Account `A` |            | Account `B`   |            | Transfers |        |            |                         |
 | ----------: | ---------: | ------------: | ---------: | :-------- | :----- | ---------: | :---------------------- |
@@ -107,7 +115,7 @@ value of the pending transfer's field:
 |   123 + `w` |        `x` |     123 + `y` |        `z` | `A`       | `B`    |        123 | `pending`               |
 |         `w` |  123 + `x` |           `y` |  123 + `z` | `A`       | `B`    |        123 | `post_pending_transfer` |
 
-##### Post Partial Pending Amount
+###### Post Partial Pending Amount
 
 | Account `A` |            | Account `B`   |            | Transfers |        |            |                         |
 | ----------: | ---------: | ------------: | ---------: | :-------- | :----- | ---------: | :---------------------- |
@@ -117,7 +125,7 @@ value of the pending transfer's field:
 |   123 + `w` |        `x` |     123 + `y` |        `z` | `A`       | `B`    |        123 | `pending`               |
 |         `w` |  100 + `x` |           `y` |  100 + `z` | `A`       | `B`    |        100 | `post_pending_transfer` |
 
-### Void-Pending Transfer
+#### Void-Pending Transfer
 
 A void-pending transfer, denoted by [`flags.void_pending_transfer`](#flagsvoid_pending_transfer),
 causes the pending transfer (referenced by [`pending_id`](#pending_id)) to void. The pending amount
@@ -137,7 +145,7 @@ value of the pending transfer's field:
 * `code`
 * `amount`
 
-##### Example
+###### Example
 
 | Account `A` |            | Account `B`   |            | Transfers |        |            |                         |
 | ----------: | ---------: | ------------: | ---------: | :-------- | :----- | ---------: | :---------------------- |
@@ -154,7 +162,8 @@ value of the pending transfer's field:
 
 This is a unique identifier for the transaction.
 
-As an example, you might generate a UUID to identify each transaction.
+As an example, you might generate a [random id](../usage/data-modeling.md#random-identifer) to
+identify each transaction.
 
 Constraints:
 
@@ -199,8 +208,8 @@ Constraints:
 This is an optional secondary identifier to link this transfer to an
 external entity.
 
-As an example, you might use a UUID that ties together a group of
-transfers.
+As an example, you might use a [random id](../usage/data-modeling.md#random-identifer) that ties
+together a group of transfers.
 
 For more information, see [Data Modeling](../usage/data-modeling.md#user_data).
 
@@ -258,7 +267,8 @@ transact with each other. Put another way, money cannot transfer
 between two accounts with different `ledger` values. See:
 [`accounts_must_have_the_same_ledger`](./operations/create_transfers.md#accounts_must_have_the_same_ledger).
 
-[Asset exchange](../recipes/asset-exchange.md) is implemented with two or more linked transfers.
+[Currency exchange](../recipes/currency-exchange.md) is implemented with two or more linked
+transfers.
 
 Constraints:
 
@@ -336,7 +346,7 @@ To save the association, it must be
 
 ##### Examples
 
-- [Asset Exchange](../recipes/asset-exchange.md)
+- [Currency Exchange](../recipes/currency-exchange.md)
 
 #### `flags.pending`
 

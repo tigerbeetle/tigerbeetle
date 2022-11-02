@@ -6,26 +6,26 @@ design, it provides excellent performance, integrated business logic, and powerf
 This section is a sample of techniques for mapping an application's requirements onto TigerBeetle's
 data model. Which (if any) of these techniques are suitable is highly application-specific.
 
-When possible, encoding application invariants directly in TigerBeetle rather than implementing
-them in the application itself (or with a foreign database) minimizes round-trips and coordination.
-This is useful for both maintaining consistency and performance.
+When possible, round trips and coordination can be minimized by encoding application invariants
+directly in TigerBeetle rather than implementing them in the application itself (or with a foreign
+database). This is useful for both maintaining consistency and performance.
 
 ## Debits vs Credits
 
-In double-entry accounting, an account balance is either computed as either `debits - credits` or
-`credits - debits`, depending on the type of account. It is up to the application to compute
-the balance — TigerBeetle tracks the cumulative posted debits and cumulative posted credits,
-not their difference.
+TigerBeetle tracks each account's cumulative posted debits and cumulative posted credits.
+In double-entry accounting, an account balance is the difference between the two — computed as
+either `debits - credits` or `credits - debits` depending on the type of account. It is up to the
+application to compute the balance from the cumulative debits/credits.
 
 From the database's perspective the distinction is arbitrary, but by convention:
 
   - `balance = debits - credits` for accounts representing the database operator's assets.
     - Known as a "debit balance".
-    - Account limits use
+    - Accounts with limits use
       [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits).
   - `balance = credits - debits` for accounts representing the database operator's liabilities.
     - Known as a "credit balance".
-    - Account limits use
+    - Accounts with limits use
       [`flags.debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits).
   - A transfer "from" account `A` "to" account `B` credits account `A` and debits account `B`.
 
@@ -77,7 +77,6 @@ When selecting an `id` scheme:
 - An account and a transfer may share the same `id` — they belong to different "namespaces".
 - Avoid requiring a central oracle to generate each unique `id` (e.g. an auto-increment field in SQL).
   A central oracle may become a performance bottleneck when creating accounts/transfers.
-- `id` is mostly accessed by point queries, but it is indexed for efficient range queries as well.
 
 ### Examples
 #### Random Identifier
@@ -90,7 +89,8 @@ Randomly-generated identifiers are recommended for most applications.
 - Random identifiers do not require a central oracle.
 - Only point queries are useful for fetching randomly-generated identifiers.
 
-To maximize id entropy, prefer a cryptographically-secure PRNG.
+To maximize id entropy, prefer a cryptographically-secure PRNG (most languages have one in their
+cryptography library). We don't recommend UUIDv4 because it uses a few fixed bits.
 
 #### Reuse Foreign Identifier
 
@@ -108,11 +108,18 @@ Like [randomly-generated identifiers](#random-identifier), this technique requir
 coordination with the foreign database for idempotent
 [application crash recovery](./integration.md#consistency-with-foreign-databases).
 
+### Examples (Advanced)
+
+[Randomly-generated identifiers](#random-identifier) are recommended for most applications.
+
+`id` is mostly accessed by point queries, but it is indexed for efficient iteration by range
+queries as well. The schemes described in this section take advantage of that index ordering.
+
 #### Logically Grouped Objects
 
 Often accounts or transfers are logically grouped together from the application's perspective.
-For example, a [simple currency exchange](../recipes/asset-exchange.md) transaction is one logical
-transfer conducted between four accounts — two physical transfers.
+For example, a [simple currency exchange](../recipes/currency-exchange.md) transaction is one
+logical transfer conducted between four accounts — two physical transfers.
 
 A non-random identifier scheme can:
 

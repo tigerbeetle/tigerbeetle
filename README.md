@@ -25,6 +25,9 @@ Check out our [short-term roadmap](#short-term-roadmap) below for where we're he
 
 ## Documentation
 
+Check out [docs.tigerbeetle.com](https://docs.tigerbeetle.com/).
+Here are a few key pages you might be interested in:
+
 - Deployment
   - [Hardware](https://docs.tigerbeetle.com/deployment/hardware)
 - Usage
@@ -208,7 +211,6 @@ accounted for!
 
 For further reading:
 
-* [Creating accounts and transfers in the Node CLI](https://docs.tigerbeetle.com/usage/node-cli)
 * [Running a 3-node cluster locally with docker-compose](https://docs.tigerbeetle.com/deployment/with-docker-compose)
 * [Run a single-node cluster with Docker](https://docs.tigerbeetle.com/deployment/with-docker)
 * [Run a single-node cluster from source](https://docs.tigerbeetle.com/deployment/from-source)

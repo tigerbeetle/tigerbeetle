@@ -228,7 +228,7 @@ client sessions, and encourages minimizing the number of concurrent clients to
 
 A client session begins when a client registers itself with the cluster.
 
-- Each client session has a unique identifier ("client id") — an ephemeral random 128-bit UUID.
+- Each client session has a unique identifier ("client id") — an ephemeral random 128-bit id.
 - The client sends a special "register" message which is committed by the cluster, at which point
   the client is "registered" — once it receives the reply, it may begin sending requests.
 - Client registration is handled automatically by the TigerBeetle client implementation when the
