@@ -20,7 +20,8 @@ Each operation has a corresponding _event_ and _result_ type.
 - A batch of an operation's events is called a [_request_](../../usage/integration.md#requests).
 - A batch of an operation's results is called a _reply_.
 
-Client implementations provide an API for sending events and decoding the corresponding results.
+Client implementations provide an API for sending batched events and decoding the corresponding
+batched results.
 
 | Operation          | Event                                        | Result                                                 |
 | ------------------ | -------------------------------------------- | ------------------------------------------------------ |

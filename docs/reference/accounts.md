@@ -30,8 +30,8 @@ Constraints:
 This is an optional secondary identifier to link this account to an
 external entity.
 
-As an example, you might use a UUID that ties together a group of
-accounts.
+As an example, you might use a [random id](../usage/data-modeling.md#random-identifer)
+that ties together a group of accounts.
 
 For more information, see [Data Modeling](../usage/data-modeling.md#user_data).
 
@@ -55,7 +55,8 @@ transact with each other. Put another way, money cannot transfer
 between two accounts with different `ledger` values. See:
 [`accounts_must_have_the_same_ledger`](./operations/create_accounts.md#accounts_must_have_the_same_ledger).
 
-[Asset exchange](../recipes/asset-exchange.md) is implemented with two or more linked transfers.
+[Currency exchange](../recipes/currency-exchange.md) is implemented with two or more linked
+transfers.
 
 In a typical use case:
 * Map each asset or currency tracked within the database to a distinct ledger. And,
