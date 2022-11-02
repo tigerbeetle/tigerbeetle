@@ -12,9 +12,9 @@ for mission critical safety and performance.
 
 To get TigerBeetle up-and-running locally, check out:
 
-* [Run a single-node cluster with Docker](./setup/with-docker)
-* Or [run a single-node cluster from source](./setup/from-source)
-* Or [run a three-node cluster with docker-compose](./setup/with-docker-compose)
+* [Run a single-node cluster with Docker](./deployment/with-docker.md)
+* Or [run a single-node cluster from source](./deployment/from-source.md)
+* Or [run a three-node cluster with docker-compose](./deployment/with-docker-compose.md)
 
 # Using TigerBeetle
 

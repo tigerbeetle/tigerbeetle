@@ -4,7 +4,7 @@ Fetch one or more transfers by their `id`s.
 
 ## Event
 
-An [`id`](./transfers.md#id) belonging to a [`Transfer`](../transfers.md).
+An [`id`](../transfers.md#id) belonging to a [`Transfer`](../transfers.md).
 
 ## Result
 

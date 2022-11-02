@@ -67,7 +67,7 @@ The primary purpose of an `id` (for both [accounts](../reference/accounts.md#id)
 [transfers](../reference/transfers.md#id)) is to serve as an "idempotency key".
 The database uses ids to avoid repeating duplicate events.
 
-[Randomly-generated UUIDs](#uuidv4) are recommended for most applications.
+[Randomly-generated identifiers](#random-identifier) are recommended for most applications.
 
 When selecting an `id` scheme:
 
@@ -80,15 +80,17 @@ When selecting an `id` scheme:
 - `id` is mostly accessed by point queries, but it is indexed for efficient range queries as well.
 
 ### Examples
-#### UUIDv4
+#### Random Identifier
 
-Randomly-generated identifiers (UUID version 4) are recommended for most applications.
+Randomly-generated identifiers are recommended for most applications.
 
-- UUIDv4 _does_ require coordination with a secondary database to implement idempotent
+- Random identifiers require coordination with a secondary database to implement idempotent
   [application crash recovery](./integration.md#consistency-with-foreign-databases).
-- UUIDv4 has an insignificant risk of collisions.
-- UUIDv4 does not require a central oracle.
+- Random identifiers have an insignificant risk of collisions.
+- Random identifiers do not require a central oracle.
 - Only point queries are useful for fetching randomly-generated identifiers.
+
+To maximize id entropy, prefer a cryptographically-secure PRNG.
 
 #### Reuse Foreign Identifier
 
@@ -102,8 +104,9 @@ the identifier within the foreign database can be used as the `Account.id` withi
 To reuse the foreign identifier, it must conform to TigerBeetle's `id`
 [constraints](../reference/accounts.md#id).
 
-Like [UUIDv4](#uuidv4), this technique requires careful coordination with the foreign database
-for idempotent [application crash recovery](./integration.md#consistency-with-foreign-databases).
+Like [randomly-generated identifiers](#random-identifier), this technique requires careful
+coordination with the foreign database for idempotent
+[application crash recovery](./integration.md#consistency-with-foreign-databases).
 
 #### Logically Grouped Objects
 

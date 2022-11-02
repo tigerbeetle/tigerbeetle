@@ -1,6 +1,7 @@
 # Integration
 
-TigerBeetle is designed to guard against bugs not only in its [own code](../TIGER_STYLE.md), but
+TigerBeetle is designed to guard against bugs not only in its
+[own code](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/TIGER_STYLE.md), but
 at the boundaries, in the application code which interfaces with TigerBeetle.
 This is exhibited by the client's API design, which may be surprising (see [Retries](#retries)) when
 contrasted with a more conventional database.
@@ -52,9 +53,9 @@ What specific guarantees does TigerBeetle provide to applications?
 
 - Once committed, an event will always be committed — the cluster's state never backtracks.
 - Within a cluster, object timestamps are unique.
-  For all objects `A` and `B` stored in the same cluster, `A.timestamp ≠ B.timestamp`.
+  For all objects `A` and `B` belonging to the same cluster, `A.timestamp ≠ B.timestamp`.
 - Within a cluster, object timestamps are strictly increasing.
-  For all objects `A` and `B` stored in the same cluster, if `A.timestamp < B.timestamp`,
+  For all objects `A` and `B` belonging to the same cluster, if `A.timestamp < B.timestamp`,
   then `A` was committed earlier than `B`.
 - If a client session is terminated and restarts, it is guaranteed to see updates for which the
   corresponding reply was received prior to termination.
@@ -75,7 +76,7 @@ What specific guarantees does TigerBeetle provide to applications?
 
 - Transfers are immutable — once created, they are never modified.
 - There is at most one `Transfer` with a particular `id`.
-- A [pending transfer](../recipes/two-phase-transfers.md) resolves at most once.
+- A [pending transfer](../reference/transfers.md#pending-transfer) resolves at most once.
 - Transfer [timeouts](../reference/transfers.md#timeout) are deterministic, driven
   by the cluster's timestamp.
 
@@ -167,8 +168,8 @@ while all successive identical attempts return `.exists`. The client may crash a
 the object, but before receiving the `.ok` reply. Because the session resets, neither that client
 nor any others will see the object's corresponding `.ok` result.
 
-Therefore, as an application synchronizes updates between multiple data stores, it must treat
-`.exists` as equivalent to `.ok`.
+Therefore, to recover to the correct state after a crash, an application that synchronizes updates
+between multiple data stores must treat `.exists` as equivalent to `.ok`.
 
 #### Example
 
