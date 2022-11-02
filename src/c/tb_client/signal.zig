@@ -48,7 +48,7 @@ pub const Signal = struct {
 
         // Windows requires that the socket is bound before listening
         if (builtin.target.os.tag == .windows) {
-            var addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0); // zero port lets the OS choose
+            const addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0); // zero port lets the OS choose
             os.bind(self.server_socket, &addr.any, addr.getOsSockLen()) catch |err| {
                 log.err("failed to bind the server socket to a local random port: {}", .{err});
                 return switch (err) {

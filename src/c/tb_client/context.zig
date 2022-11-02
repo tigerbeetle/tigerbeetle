@@ -51,8 +51,8 @@ pub fn ContextType(
 
         comptime {
             assert(@sizeOf(UserData) == @sizeOf(u128));
-        }        
-        
+        }
+
         const PacketError = Client.Error || error{
             TooMuchData,
             InvalidOperation,

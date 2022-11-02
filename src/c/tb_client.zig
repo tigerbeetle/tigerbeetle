@@ -23,8 +23,25 @@ pub const tb_completion_t = fn (
     result_len: u32,
 ) callconv(.C) void;
 
+const config = @import("../config.zig");
+const Storage = @import("../storage.zig").Storage;
+const MessageBus = @import("../message_bus.zig").MessageBusClient;
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
+    .message_body_size_max = config.message_body_size_max,
+});
+
 const ContextType = @import("tb_client/context.zig").ContextType;
 const ContextImplementation = @import("tb_client/context.zig").ContextImplementation;
+
+const DefaultContext = blk: {
+    const Client = @import("../vsr/client.zig").Client(StateMachine, MessageBus);
+    break :blk ContextType(Client);
+};
+
+const TestingContext = blk: {
+    const EchoClient = @import("tb_client/echo_client.zig").EchoClient(StateMachine, MessageBus);
+    break :blk ContextType(EchoClient);
+};
 
 pub fn context_to_client(implementation: *ContextImplementation) tb_client_t {
     return @ptrCast(tb_client_t, implementation);
@@ -33,19 +50,6 @@ pub fn context_to_client(implementation: *ContextImplementation) tb_client_t {
 fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
     return @ptrCast(*ContextImplementation, @alignCast(@alignOf(ContextImplementation), tb_client));
 }
-
-const DefaultContext = blk: {
-    const config = @import("../config.zig");
-    const Storage = @import("../storage.zig").Storage;
-    const MessageBus = @import("../message_bus.zig").MessageBusClient;
-    const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
-        .message_body_size_max = config.message_body_size_max,
-    });
-    const Client = @import("../vsr/client.zig").Client(StateMachine, MessageBus);
-    break :blk ContextType(Client);
-};
-
-const TestingContext = @import("tb_client/testing_context.zig").TestingContext;
 
 // Pick the most suitable allocator
 const global_allocator = if (builtin.is_test)
@@ -69,8 +73,53 @@ pub export fn tb_client_init(
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
 ) tb_status_t {
-    const Context = if (builtin.is_test) TestingContext else DefaultContext;
+    return init(
+        DefaultContext,
+        out_client,
+        out_packets,
+        cluster_id,
+        addresses_ptr,
+        addresses_len,
+        num_packets,
+        on_completion_ctx,
+        on_completion_fn,
+    );
+}
 
+pub export fn tb_client_echo_init(
+    out_client: *tb_client_t,
+    out_packets: *tb_packet_list_t,
+    cluster_id: u32,
+    addresses_ptr: [*:0]const u8,
+    addresses_len: u32,
+    num_packets: u32,
+    on_completion_ctx: usize,
+    on_completion_fn: tb_completion_t,
+) tb_status_t {
+    return init(
+        TestingContext,
+        out_client,
+        out_packets,
+        cluster_id,
+        addresses_ptr,
+        addresses_len,
+        num_packets,
+        on_completion_ctx,
+        on_completion_fn,
+    );
+}
+
+fn init(
+    comptime Context: type,
+    out_client: *tb_client_t,
+    out_packets: *tb_packet_list_t,
+    cluster_id: u32,
+    addresses_ptr: [*:0]const u8,
+    addresses_len: u32,
+    num_packets: u32,
+    on_completion_ctx: usize,
+    on_completion_fn: tb_completion_t,
+) tb_status_t {
     const addresses = @ptrCast([*]const u8, addresses_ptr)[0..addresses_len];
     const context = Context.init(
         global_allocator,

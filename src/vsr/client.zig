@@ -48,7 +48,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             }
 
             return null;
-        }        
+        }
 
         allocator: mem.Allocator,
         message_bus: MessageBus,

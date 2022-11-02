@@ -19,15 +19,16 @@ const Mutex = std.Thread.Mutex;
 const Condition = std.Thread.Condition;
 
 const RequestContext = struct {
+    const request_size = 128;
+
     completion: *Completion,
-    sent_data: [128]u8 = undefined,
+    sent_data: [request_size]u8 = undefined,
     packet: *tb_packet_t = undefined,
     result: ?struct {
         context: usize,
         client: tb_client_t,
         packet: *tb_packet_t,
-        result_ptr: ?[*]const u8,
-        result_len: u32,
+        reply: ?[request_size]u8 = null,
     } = null,
 
     pub fn on_complete(
@@ -43,9 +44,14 @@ const RequestContext = struct {
             .context = context,
             .client = client,
             .packet = packet,
-            .result_ptr = result_ptr,
-            .result_len = result_len,
         };
+
+        // Copy the message to the context buffer:
+        if (result_ptr != null and result_len > 0) {
+            assert(result_len == request_size);
+            self.result.?.reply = [_]u8{0} ** request_size;
+            std.mem.copy(u8, &self.result.?.reply.?, result_ptr.?[0..result_len]);
+        }
     }
 };
 
@@ -87,10 +93,10 @@ test "c_client echo" {
     var client: api.tb_client_t = undefined;
     var packet_list: api.tb_packet_list_t = undefined;
 
-    // We ensure that the retry mechanism is being tested by allowing more simultaneous packets than "messages_max_client".
-    const num_packets = message_pool.messages_max_client * 2;
+    // We ensure that the retry mechanism is being tested by allowing more simultaneous packets than "client_request_queue_max".
+    const num_packets = config.client_request_queue_max * 2;
 
-    const result = api.tb_client_init(
+    const result = api.tb_client_echo_init(
         &client,
         &packet_list,
         0,
@@ -117,6 +123,7 @@ test "c_client echo" {
 
             request.packet = blk: {
                 var packet = packet_list.pop().?;
+                packet.operation = 3;
                 packet.user_data = @ptrToInt(request);
                 packet.data = &request.sent_data;
                 packet.data_size = @intCast(u32, request.sent_data.len);
@@ -140,11 +147,8 @@ test "c_client echo" {
             try testing.expectEqual(tb_completion_ctx, request.result.?.context);
             try testing.expectEqual(client, request.result.?.client);
             try testing.expectEqual(request.packet, request.result.?.packet);
-            try testing.expect(request.result.?.result_ptr != null);
-            try testing.expect(request.result.?.result_len == request.sent_data.len);
-
-            const echo = request.result.?.result_ptr.?[0..request.result.?.result_len];
-            try testing.expectEqualSlices(u8, &request.sent_data, echo);
+            try testing.expect(request.result.?.reply != null);
+            try testing.expectEqualSlices(u8, &request.sent_data, &request.result.?.reply.?);
         }
     }
 }
