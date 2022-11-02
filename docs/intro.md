@@ -26,5 +26,5 @@ Once you've got a TigerBeetle server, check out:
 
 To understand TigerBeetle's data model, see:
 
-* [Accounts](./reference/accounts)
+* [Accounts](./reference/accounts12)
 * [Transfers](./reference/transfers)
