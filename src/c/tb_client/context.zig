@@ -3,7 +3,7 @@ const os = std.os;
 const assert = std.debug.assert;
 
 const config = @import("../../config.zig");
-const log = std.log.scoped(.tb_client);
+const log = std.log.scoped(.tb_client_context);
 
 const vsr = @import("../../vsr.zig");
 const Header = vsr.Header;
@@ -30,53 +30,34 @@ pub const ContextImplementation = struct {
     deinit_fn: fn (*ContextImplementation) void,
 };
 
-pub const Error = error{
+pub const Error = std.mem.Allocator.Error || error{
     Unexpected,
-    OutOfMemory,
     InvalidAddress,
     SystemResources,
     NetworkSubsystemFailed,
 };
 
 pub fn ContextType(
-    comptime StateMachine: type,
-    comptime MessageBus: type,
+    comptime Client: type,
 ) type {
     return struct {
         const Context = @This();
         const Thread = ThreadType(Context);
-        const Client = vsr.Client(StateMachine, MessageBus);
-        const Operation = StateMachine.Operation;
 
-        const UserData = packed struct {
+        const UserData = extern struct {
             self: *Context,
             packet: *Packet,
         };
 
+        comptime {
+            assert(@sizeOf(UserData) == @sizeOf(u128));
+        }        
+        
         const PacketError = Client.Error || error{
             TooMuchData,
             InvalidOperation,
             InvalidDataSize,
         };
-
-        fn operation_size_of(op: u8) ?usize {
-            const allowed_operations = [_]Operation{
-                .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-            };
-
-            inline for (allowed_operations) |operation| {
-                if (op == @enumToInt(operation)) {
-                    return @sizeOf(StateMachine.Event(operation));
-                }
-            }
-
-            return null;
-        }
-
-        /////////////////////////////////////////////////////////////////////////
 
         allocator: std.mem.Allocator,
         client_id: u128,
@@ -85,27 +66,23 @@ pub fn ContextType(
         addresses: []std.net.Address,
         io: IO,
         message_pool: MessagePool,
-        message_bus: MessageBus,
         client: Client,
 
         on_completion_ctx: usize,
         on_completion_fn: tb_completion_t,
         implementation: ContextImplementation,
         thread: Thread,
-        available_messages: usize,
+        messages_available: usize,
 
-        pub fn create(
+        pub fn init(
             allocator: std.mem.Allocator,
             cluster_id: u32,
             addresses: []const u8,
-            num_packets: u32,
+            packets_count: u32,
             on_completion_ctx: usize,
             on_completion_fn: tb_completion_t,
         ) Error!*Context {
-            var context = allocator.create(Context) catch |err| {
-                log.err("failed to create context: {}", .{err});
-                return err;
-            };
+            var context = try allocator.create(Context);
             errdefer allocator.destroy(context);
 
             context.allocator = allocator;
@@ -113,7 +90,7 @@ pub fn ContextType(
             log.debug("init: initializing client_id={}.", .{context.client_id});
 
             log.debug("init: allocating tb_packets.", .{});
-            context.packets = context.allocator.alloc(Packet, num_packets) catch |err| {
+            context.packets = context.allocator.alloc(Packet, packets_count) catch |err| {
                 log.err("failed to allocate tb_packets: {}", .{err});
                 return err;
             };
@@ -144,24 +121,7 @@ pub fn ContextType(
             };
             errdefer context.message_pool.deinit(context.allocator);
 
-            log.debug("init: initializing MessageBus.", .{});
-            context.message_bus = MessageBus.init(
-                context.allocator,
-                cluster_id,
-                .{ .client = context.client_id },
-                &context.message_pool,
-                Client.on_message,
-                .{
-                    .configuration = context.addresses,
-                    .io = &context.io,
-                },
-            ) catch |err| {
-                log.err("failed to initialize MessageBus: {}.", .{err});
-                return err;
-            };
-            errdefer context.message_bus.deinit(context.allocator);
-
-            log.debug("init: Initializing client(cluster_id={d}, client_id={d}, addresses={o})", .{
+            log.debug("init: Initializing client(cluster_id={}, client_id={}, addresses={any})", .{
                 cluster_id,
                 context.client_id,
                 context.addresses,
@@ -182,7 +142,7 @@ pub fn ContextType(
             };
             errdefer context.client.deinit(context.allocator);
 
-            context.available_messages = message_pool.messages_max_client;
+            context.messages_available = config.client_request_queue_max;
             context.on_completion_ctx = on_completion_ctx;
             context.on_completion_fn = on_completion_fn;
             context.implementation = .{
@@ -202,11 +162,10 @@ pub fn ContextType(
             return context;
         }
 
-        pub fn destroy(self: *Context) void {
+        pub fn deinit(self: *Context) void {
             self.thread.deinit();
 
             self.client.deinit(self.allocator);
-            self.message_bus.deinit(self.allocator);
             self.message_pool.deinit(self.allocator);
             self.io.deinit();
 
@@ -232,16 +191,16 @@ pub fn ContextType(
         pub fn request(self: *Context, packet: *Packet) void {
             const message = self.message_pool.get_message();
             defer self.message_pool.unref(message);
-            self.available_messages -= 1;
+            self.messages_available -= 1;
 
             // Get the size of each request structure in the packet.data:
-            const request_size: usize = operation_size_of(packet.operation) orelse {
+            const event_size: usize = Client.operation_event_size(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
             };
 
             // Make sure the packet.data size is correct:
             const readable = packet.data[0..packet.data_size];
-            if (readable.len == 0 or readable.len % request_size != 0) {
+            if (readable.len == 0 or readable.len % event_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
 
@@ -262,13 +221,13 @@ pub fn ContextType(
                     .packet = packet,
                 }),
                 Context.on_result,
-                @intToEnum(Operation, packet.operation),
+                @intToEnum(Client.Operation, packet.operation),
                 message,
                 wrote,
             );
         }
 
-        fn on_result(raw_user_data: u128, op: Operation, results: Client.Error![]const u8) void {
+        fn on_result(raw_user_data: u128, op: Client.Operation, results: Client.Error![]const u8) void {
             const user_data = @bitCast(UserData, raw_user_data);
             const self = user_data.self;
             const packet = user_data.packet;
@@ -282,15 +241,18 @@ pub fn ContextType(
             packet: *Packet,
             result: PacketError![]const u8,
         ) void {
-            assert(self.available_messages < message_pool.messages_max_client);
-            self.available_messages += 1;
+            assert(self.messages_available < message_pool.messages_max_client);
+            self.messages_available += 1;
+
+            // Signal to resume sending requests that was waiting for available messages.
+            if (self.messages_available == 1) self.thread.signal.notify();
 
             const tb_client = api.context_to_client(&self.implementation);
             const bytes = result catch |err| {
                 packet.status = switch (err) {
                     // If there's too many requests, (re)try submitting the packet later.
                     error.TooManyOutstandingRequests => {
-                        return self.thread.submit(Packet.List.from(packet));
+                        return self.thread.retry.push(Packet.List.from(packet));
                     },
                     error.TooMuchData => .too_much_data,
                     error.InvalidOperation => .invalid_operation,
@@ -311,7 +273,7 @@ pub fn ContextType(
 
         fn on_deinit(implementation: *ContextImplementation) void {
             const context = @fieldParentPtr(Context, "implementation", implementation);
-            context.destroy();
+            context.deinit();
         }
     };
 }

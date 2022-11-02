@@ -80,7 +80,7 @@ pub fn ThreadType(
             }
 
             // Process packets from either pending or submitted as long as we have messages.
-            while (self.context.available_messages > 0) {
+            while (self.context.messages_available > 0) {
                 const packet = pending.pop() orelse self.submitted.pop() orelse break;
                 self.context.request(packet);
             }

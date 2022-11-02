@@ -41,7 +41,8 @@ const DefaultContext = blk: {
     const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
         .message_body_size_max = config.message_body_size_max,
     });
-    break :blk ContextType(StateMachine, MessageBus);
+    const Client = @import("../vsr/client.zig").Client(StateMachine, MessageBus);
+    break :blk ContextType(Client);
 };
 
 const TestingContext = @import("tb_client/testing_context.zig").TestingContext;
@@ -71,7 +72,7 @@ pub export fn tb_client_init(
     const Context = if (builtin.is_test) TestingContext else DefaultContext;
 
     const addresses = @ptrCast([*]const u8, addresses_ptr)[0..addresses_len];
-    const context = Context.create(
+    const context = Context.init(
         global_allocator,
         cluster_id,
         addresses,

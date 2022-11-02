@@ -42,13 +42,13 @@ pub const TestingContext = struct {
     on_completion_fn: tb_completion_t,
     implementation: ContextImplementation,
     thread: Thread,
-    available_messages: usize,
+    messages_available: usize,
 
-    pub fn create(
+    pub fn init(
         allocator: std.mem.Allocator,
         cluster_id: u32,
         addresses: []const u8,
-        num_packets: u32,
+        packets_count: u32,
         on_completion_ctx: usize,
         on_completion_fn: tb_completion_t,
     ) Error!*Context {
@@ -59,12 +59,12 @@ pub const TestingContext = struct {
             log.err("failed to create context: {}", .{err});
             return err;
         };
-        errdefer context.destroy();
+        errdefer context.deinit();
 
         context.allocator = allocator;
 
         log.debug("init: allocating tb_packets.", .{});
-        context.packets = context.allocator.alloc(Packet, num_packets) catch |err| {
+        context.packets = context.allocator.alloc(Packet, packets_count) catch |err| {
             log.err("failed to allocate tb_packets: {}", .{err});
             return err;
         };
@@ -82,7 +82,7 @@ pub const TestingContext = struct {
         errdefer context.io.deinit();
 
         context.echo_stack = .{};
-        context.available_messages = message_pool.messages_max_client;
+        context.messages_available = config.client_request_queue_max;
         context.on_completion_ctx = on_completion_ctx;
         context.on_completion_fn = on_completion_fn;
         context.implementation = .{
@@ -102,7 +102,7 @@ pub const TestingContext = struct {
         return context;
     }
 
-    pub fn destroy(self: *Context) void {
+    pub fn deinit(self: *Context) void {
         self.thread.deinit();
         self.allocator.free(self.packets);
         self.allocator.destroy(self);
@@ -121,7 +121,7 @@ pub const TestingContext = struct {
             while (self.echo_stack.pop()) |packet| {
                 const result = blk: {
                     // We don't use a message_pool, yet we simulate the "TooManyOutstandingRequests" behavior:
-                    const current_queue_size = message_pool.messages_max_client - self.available_messages;
+                    const current_queue_size = config.client_request_queue_max - self.messages_available;
                     break :blk if (packet.data_size == 0)
                         error.InvalidDataSize
                     else if (current_queue_size > config.client_request_queue_max)
@@ -136,8 +136,8 @@ pub const TestingContext = struct {
     }
 
     pub fn request(self: *Context, packet: *Packet) void {
-        assert(self.available_messages > 0);
-        self.available_messages -= 1;
+        assert(self.messages_available > 0);
+        self.messages_available -= 1;
 
         self.echo_stack.push(Packet.List.from(packet));
     }
@@ -147,8 +147,8 @@ pub const TestingContext = struct {
         packet: *Packet,
         result: PacketError![]const u8,
     ) void {
-        assert(self.available_messages < message_pool.messages_max_client);
-        self.available_messages += 1;
+        assert(self.messages_available < config.client_request_queue_max);
+        self.messages_available += 1;
 
         const tb_client = api.context_to_client(&self.implementation);
         const bytes = result catch |err| {
@@ -175,6 +175,6 @@ pub const TestingContext = struct {
 
     fn on_deinit(implementation: *ContextImplementation) void {
         const context = @fieldParentPtr(Context, "implementation", implementation);
-        context.destroy();
+        context.deinit();
     }
 };

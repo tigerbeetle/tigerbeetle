@@ -104,18 +104,19 @@ test "c_client echo" {
     try testing.expectEqual(api.tb_status_t.success, result);
     defer api.tb_client_deinit(client);
 
-    var max_repetitions: u32 = 1_000;
-    while (max_repetitions > 0) : (max_repetitions -= 1) {
+    var prng = std.rand.DefaultPrng.init(tb_completion_ctx);
+    var repetition: u32 = 0;
+    while (repetition < 1_000) : (repetition += 1) {
         var completion = Completion{ .pending = num_packets };
         var requests: [num_packets]RequestContext = undefined;
 
         // Submitting some random data to be echoed back:
         for (requests) |*request| {
             request.* = .{ .completion = &completion };
-            std.crypto.random.bytes(&request.sent_data);
+            prng.random().bytes(&request.sent_data);
 
             request.packet = blk: {
-                var packet = packet_list.pop() orelse unreachable;
+                var packet = packet_list.pop().?;
                 packet.user_data = @ptrToInt(request);
                 packet.data = &request.sent_data;
                 packet.data_size = @intCast(u32, request.sent_data.len);
