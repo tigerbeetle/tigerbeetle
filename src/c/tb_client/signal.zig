@@ -12,8 +12,6 @@ const log = std.log.scoped(.tb_client_signal);
 /// when notification occurs from another thread.
 /// It does this by using OS sockets (which are thread safe) 
 /// to resolve IO.Completions on the tigerbeetle thread.
-///
-/// TODO: implement a simpler version of this eventually..
 pub const Signal = struct {
     io: *IO,
     server_socket: os.socket_t,
