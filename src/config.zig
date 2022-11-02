@@ -263,6 +263,8 @@ pub const lsm_growth_factor = 8;
 /// The maximum key size for an LSM tree in bytes.
 pub const lsm_key_size_max = 32;
 
+/// The maximum cumulative size of a table — computed as the sum of the size of the index block,
+/// filter blocks, and data blocks.
 pub const lsm_table_size_max = 64 * 1024 * 1024;
 
 /// Size of nodes used by the LSM tree manifest implementation.
