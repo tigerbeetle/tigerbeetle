@@ -9,7 +9,11 @@ Available at [GitHub Packages Registry](https://github.com/orgs/tigerbeetledb/pa
 
 You can install it by just downloading and placing the `jar` package directly in your `classpath` or by using a package management system such as [Maven](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-apache-maven-registry) or [Gradle](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-gradle-registry).
 
-## Usage
+## Examples
+
+See the [examples page](./examples/README.md) for more details.
+
+## API Usage
 
 A client needs to be configured with a `clusterID` and `replicaAddresses`. 
 The `Client` class is thread-safe and for better performance, a single instance should be shared between multiple concurrent tasks.
@@ -169,8 +173,9 @@ cd tigerbeetle-java
 
 ## Other clients and documentation
 
-- [Tigerbeetle Node](https://github.com/tigerbeetledb/tigerbeetle-node)
-- [Tigerbeetle Go](https://github.com/tigerbeetledb/tigerbeetle-go)
+- [TigerBeetle documentation](https://docs.tigerbeetle.com/)
+- [TigerBeetle Node](https://github.com/tigerbeetledb/tigerbeetle-node)
+- [TigerBeetle Go](https://github.com/tigerbeetledb/tigerbeetle-go)
 
 ## License
 
