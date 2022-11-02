@@ -200,6 +200,7 @@ pub fn TableType(
             );
 
             // Compute the number of data and filter blocks by solving the constraints:
+            // * the cumulative table size must not exceed lsm_table_size_max
             // * the filter and data blocks' metadata must fix in the index block
             // * the filter blocks must index all data blocks
             // * minimize the number of filter blocks
