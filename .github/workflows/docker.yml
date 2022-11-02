@@ -17,6 +17,12 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  validate_docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/validated_docs.sh
+
   shellcheck_scripts:
     runs-on: ubuntu-latest
     steps:
