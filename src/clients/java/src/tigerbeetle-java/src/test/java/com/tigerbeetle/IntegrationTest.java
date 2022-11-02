@@ -1066,6 +1066,77 @@ public class IntegrationTest {
         }
     }
 
+    /**
+     * This test asserts that async tasks will respect client's maxConcurrency.
+     */
+    @Test
+    public void testAsyncTasks() throws Throwable {
+
+        try (var server = new Server()) {
+
+            // Defining the maxConcurrency greater than tasks_qty
+            // The goal here is to allow to all requests being submitted at once simultaneously
+            final int tasks_qty = 100;
+
+            try (var client = new Client(0, new String[] {Server.TB_PORT}, tasks_qty)) {
+
+                var errors = client.createAccounts(accounts);
+                assertTrue(errors.getLength() == 0);
+
+                final var tasks = new CompletableFuture[tasks_qty];
+                for (int i = 0; i < tasks_qty; i++) {
+
+                    final var transfers = new TransferBatch(1);
+                    transfers.add();
+
+                    transfers.setId(UInt128.asBytes(UUID.randomUUID()));
+                    transfers.setCreditAccountId(account1Id);
+                    transfers.setDebitAccountId(account2Id);
+                    transfers.setLedger(720);
+                    transfers.setCode((short) 1);
+                    transfers.setAmount(100);
+
+                    // Starting async batch
+                    tasks[i] = client.createTransfersAsync(transfers);
+                }
+
+                // Wait for all threads
+                for (int i = 0; i < tasks_qty; i++) {
+                    @SuppressWarnings("unchecked")
+                    final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
+                    final var result = future.get();
+                    assertEquals(0, result.getLength());
+                }
+
+                // Asserting if all transfers were submitted correctly
+                var lookupAccounts = client.lookupAccounts(accountIds);
+                assertEquals(2, lookupAccounts.getLength());
+
+                accounts.beforeFirst();
+
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals((long) (100 * tasks_qty), lookupAccounts.getCreditsPosted());
+                assertEquals(0L, lookupAccounts.getDebitsPosted());
+
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals((long) (100 * tasks_qty), lookupAccounts.getDebitsPosted());
+                assertEquals(0L, lookupAccounts.getCreditsPosted());
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
     private static void assertAccounts(AccountBatch account1, AccountBatch account2) {
 
         assertArrayEquals(account1.getId(), account2.getId());

@@ -6,6 +6,8 @@ const builtin = @import("builtin");
 const jui = @import("jui");
 const tb = @import("tigerbeetle");
 
+const log = std.log.scoped(.jni);
+
 const assert = std.debug.assert;
 const jni_version = jui.JNIVersion{ .major = 10, .minor = 0 };
 
@@ -131,7 +133,7 @@ const RequestReflection = struct {
                 // Cannot allocate a ByteBuffer, it's likely the JVM has run out of resources
                 // Printing the buffer size here just to help diagnosing how much memory was required
                 env.describeException();
-                std.log.err("JNI: Error allocating a new direct ByteBuffer len={}", .{value.len});
+                log.err("Error allocating a new direct ByteBuffer len={}", .{value.len});
                 @panic("JNI: Error allocating a new direct ByteBuffer");
             };
 
@@ -271,7 +273,7 @@ const JNIClient = struct {
 
         var jvm = @intToPtr(*jui.JavaVM, context);
         var env = jvm.attachCurrentThreadAsDaemon() catch |err| {
-            std.log.err("JNI: Error {s} attaching the native thread as daemon.", .{@errorName(err)});
+            log.err("Error {s} attaching the native thread as daemon.", .{@errorName(err)});
             @panic("JNI: Error attaching the native thread as daemon.");
         };
 
