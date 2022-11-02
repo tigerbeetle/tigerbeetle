@@ -18,42 +18,42 @@ const tb_packet_list_t = api.tb_packet_list_t;
 const Mutex = std.Thread.Mutex;
 const Condition = std.Thread.Condition;
 
-const RequestContext = struct {
-    const request_size = 128;
+fn RequestContextType(comptime request_size: comptime_int) type {
+    return struct {
+        completion: *Completion,
+        sent_data: [request_size]u8 = undefined,
+        packet: *tb_packet_t = undefined,
+        result: ?struct {
+            context: usize,
+            client: tb_client_t,
+            packet: *tb_packet_t,
+            reply: ?[request_size]u8 = null,
+        } = null,
 
-    completion: *Completion,
-    sent_data: [request_size]u8 = undefined,
-    packet: *tb_packet_t = undefined,
-    result: ?struct {
-        context: usize,
-        client: tb_client_t,
-        packet: *tb_packet_t,
-        reply: ?[request_size]u8 = null,
-    } = null,
+        pub fn on_complete(
+            context: usize,
+            client: tb_client_t,
+            packet: *tb_packet_t,
+            result_ptr: ?[*]const u8,
+            result_len: u32,
+        ) callconv(.C) void {
+            var self = @intToPtr(*@This(), packet.user_data);
+            defer self.completion.complete();
+            self.result = .{
+                .context = context,
+                .client = client,
+                .packet = packet,
+            };
 
-    pub fn on_complete(
-        context: usize,
-        client: tb_client_t,
-        packet: *tb_packet_t,
-        result_ptr: ?[*]const u8,
-        result_len: u32,
-    ) callconv(.C) void {
-        var self = @intToPtr(*@This(), packet.user_data);
-        defer self.completion.complete();
-        self.result = .{
-            .context = context,
-            .client = client,
-            .packet = packet,
-        };
-
-        // Copy the message to the context buffer:
-        if (result_ptr != null and result_len > 0) {
-            assert(result_len == request_size);
-            self.result.?.reply = [_]u8{0} ** request_size;
-            std.mem.copy(u8, &self.result.?.reply.?, result_ptr.?[0..result_len]);
+            // Copy the message's body to the context buffer:
+            if (result_ptr != null and result_len > 0) {
+                assert(result_len == request_size);
+                self.result.?.reply = [_]u8{0} ** request_size;
+                std.mem.copy(u8, &self.result.?.reply.?, result_ptr.?[0..result_len]);
+            }
         }
-    }
-};
+    };
+}
 
 // Notifies the main thread when all pending requests are completed.
 const Completion = struct {
@@ -96,12 +96,19 @@ test "c_client echo" {
     // We ensure that the retry mechanism is being tested by allowing more simultaneous packets than "client_request_queue_max".
     const num_packets = config.client_request_queue_max * 2;
 
+    // Using the create_accounts operation for this test.
+    const RequestContext = RequestContextType(@sizeOf(@import("../tigerbeetle.zig").Account));
+    const create_accounts_operation: u8 = 3;
+
+    // Initializing an echo client for testing purposes.
+    const cluster_id = 0;
+    const address = "3000";
     const result = api.tb_client_echo_init(
         &client,
         &packet_list,
-        0,
-        "",
-        0,
+        cluster_id,
+        address,
+        address.len,
         num_packets,
         tb_completion_ctx,
         RequestContext.on_complete,
@@ -111,8 +118,12 @@ test "c_client echo" {
     defer api.tb_client_deinit(client);
 
     var prng = std.rand.DefaultPrng.init(tb_completion_ctx);
+
+    // Repeating the same test multiple times to stress the
+    // cycle of message exhaustion followed by completions.
+    const repetitions_max = 250;
     var repetition: u32 = 0;
-    while (repetition < 1_000) : (repetition += 1) {
+    while (repetition < repetitions_max) : (repetition += 1) {
         var completion = Completion{ .pending = num_packets };
         var requests: [num_packets]RequestContext = undefined;
 
@@ -123,7 +134,7 @@ test "c_client echo" {
 
             request.packet = blk: {
                 var packet = packet_list.pop().?;
-                packet.operation = 3;
+                packet.operation = create_accounts_operation;
                 packet.user_data = @ptrToInt(request);
                 packet.data = &request.sent_data;
                 packet.data_size = @intCast(u32, request.sent_data.len);

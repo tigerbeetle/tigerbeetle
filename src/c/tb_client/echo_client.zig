@@ -49,7 +49,7 @@ pub fn EchoClient(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         pub fn tick(self: *Self) void {
-            if (self.request_queue.count > 0) {
+            while (self.request_queue.count > 0) {
                 self.on_reply();
             }
         }
