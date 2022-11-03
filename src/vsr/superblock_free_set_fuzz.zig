@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock_free_set);
 
 const FreeSet = @import("./superblock_free_set.zig").FreeSet;
-const AddressReservation = @import("./superblock_free_set.zig").AddressReservation;
+const Reservation = @import("./superblock_free_set.zig").Reservation;
 const fuzz = @import("../test/fuzz.zig");
 
 pub fn main() !void {
@@ -19,11 +19,12 @@ pub fn main() !void {
     const events = try generate_events(allocator, prng.random(), blocks_count);
     defer allocator.free(events);
 
-    try run_fuzz(allocator, blocks_count, events);
+    try run_fuzz(allocator, prng.random(), blocks_count, events);
 }
 
 fn run_fuzz(
     allocator: std.mem.Allocator,
+    random: std.rand.Random,
     blocks_count: usize,
     events: []const FreeSetEvent,
 ) !void {
@@ -33,7 +34,7 @@ fn run_fuzz(
     var free_set_model = try FreeSetModel.init(allocator, blocks_count);
     defer free_set_model.deinit(allocator);
 
-    var active_reservations = std.ArrayList(AddressReservation).init(allocator);
+    var active_reservations = std.ArrayList(Reservation).init(allocator);
     defer active_reservations.deinit();
 
     var active_addresses = std.ArrayList(u64).init(allocator);
@@ -46,13 +47,19 @@ fn run_fuzz(
                 const reservation_actual = free_set.reserve(reserve.blocks);
                 const reservation_expect = free_set_model.reserve(reserve.blocks);
                 assert(std.meta.eql(reservation_expect, reservation_actual));
+
                 if (reservation_expect) |reservation| {
+                    assert(reserve.blocks == free_set_model.count_free_reserved(reservation));
+                    assert(reserve.blocks == free_set.count_free_reserved(reservation));
                     try active_reservations.append(reservation);
                 }
             },
-            .reserve_done => {
-                free_set.reserve_done();
-                free_set_model.reserve_done();
+            .forfeit => {
+                random.shuffle(Reservation, active_reservations.items);
+                for (active_reservations.items) |reservation| {
+                    free_set.forfeit();
+                    free_set_model.forfeit(reservation);
+                }
                 active_reservations.clearRetainingCapacity();
             },
             .acquire => |data| {
@@ -60,8 +67,8 @@ fn run_fuzz(
                 const reservation = active_reservations.items[
                     data.reservation % active_reservations.items.len
                 ];
-                const address_actual = free_set.acquire_reserved(reservation);
-                const address_expect = free_set_model.acquire_reserved(reservation);
+                const address_actual = free_set.acquire(reservation);
+                const address_expect = free_set_model.acquire(reservation);
                 assert(std.meta.eql(address_expect, address_actual));
                 if (address_expect) |address| {
                     try active_addresses.append(address);
@@ -70,13 +77,17 @@ fn run_fuzz(
             .release => |data| {
                 if (active_addresses.items.len == 0) continue;
 
-                const address = active_addresses.swapRemove(data.address % active_addresses.items.len);
+                const address_index = data.address % active_addresses.items.len;
+                const address = active_addresses.swapRemove(address_index);
                 free_set.release(address);
                 free_set_model.release(address);
             },
             .checkpoint => {
-                free_set.reserve_done();
-                free_set_model.reserve_done();
+                random.shuffle(Reservation, active_reservations.items);
+                for (active_reservations.items) |reservation| {
+                    free_set.forfeit();
+                    free_set_model.forfeit(reservation);
+                }
                 active_reservations.clearRetainingCapacity();
 
                 free_set.checkpoint();
@@ -84,19 +95,27 @@ fn run_fuzz(
             },
         }
 
+        assert(free_set_model.count_reservations() == free_set.count_reservations());
         assert(free_set_model.count_free() == free_set.count_free());
         assert(free_set_model.count_acquired() == free_set.count_acquired());
         assert(std.meta.eql(
             free_set_model.highest_address_acquired(),
             free_set.highest_address_acquired(),
         ));
+
+        for (active_reservations.items) |reservation| {
+            assert(
+                free_set_model.count_free_reserved(reservation) ==
+                    free_set.count_free_reserved(reservation),
+            );
+        }
     }
 }
 
 const FreeSetEventType = std.meta.Tag(FreeSetEvent);
 const FreeSetEvent = union(enum) {
     reserve: struct { blocks: usize },
-    reserve_done: void,
+    forfeit: void,
     acquire: struct { reservation: usize },
     release: struct { address: usize },
     checkpoint: void,
@@ -109,14 +128,14 @@ fn generate_events(
 ) ![]const FreeSetEvent {
     const event_distribution = fuzz.Distribution(FreeSetEventType){
         .reserve = 1 + random.float(f64) * 100,
-        .reserve_done = 1,
+        .forfeit = 1,
         .acquire = random.float(f64) * 1000,
         .release = if (random.boolean()) 0 else 500 * random.float(f64),
         .checkpoint = random.floatExp(f64) * 10,
     };
 
     const events = try allocator.alloc(FreeSetEvent, std.math.min(
-        @as(usize, blocks_count * 1000),
+        @as(usize, 2_000_000),
         fuzz.random_int_exponential(random, usize, blocks_count * 100),
     ));
     errdefer allocator.free(events);
@@ -130,7 +149,7 @@ fn generate_events(
             .reserve => FreeSetEvent{ .reserve = .{
                 .blocks = 1 + fuzz.random_int_exponential(random, usize, reservation_blocks_mean),
             } },
-            .reserve_done => FreeSetEvent{ .reserve_done = {} },
+            .forfeit => FreeSetEvent{ .forfeit = {} },
             .acquire => FreeSetEvent{ .acquire = .{ .reservation = random.int(usize) } },
             .release => FreeSetEvent{ .release = .{
                 .address = random.int(usize),
@@ -148,7 +167,10 @@ const FreeSetModel = struct {
     /// Set bits indicate blocks that will be released at the next checkpoint.
     blocks_released: std.DynamicBitSetUnmanaged,
 
-    blocks_reserved: usize = 0,
+    /// Set bits indicate blocks that are currently reserved and not yet forfeited.
+    blocks_reserved: std.DynamicBitSetUnmanaged,
+
+    reservation_count: usize = 0,
 
     fn init(allocator: std.mem.Allocator, blocks_count: usize) !FreeSetModel {
         var blocks_acquired = try std.DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
@@ -157,22 +179,47 @@ const FreeSetModel = struct {
         var blocks_released = try std.DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
         errdefer blocks_released.deinit(allocator);
 
+        var blocks_reserved = try std.DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
+        errdefer blocks_reserved.deinit(allocator);
+
         return FreeSetModel{
             .blocks_acquired = blocks_acquired,
             .blocks_released = blocks_released,
+            .blocks_reserved = blocks_reserved,
         };
     }
 
     fn deinit(set: *FreeSetModel, allocator: std.mem.Allocator) void {
         set.blocks_acquired.deinit(allocator);
         set.blocks_released.deinit(allocator);
+        set.blocks_reserved.deinit(allocator);
     }
 
-    pub fn count_free(set: FreeSetModel) u64 {
+    pub fn count_reservations(set: FreeSetModel) usize {
+        return set.reservation_count;
+    }
+
+    pub fn count_free(set: FreeSetModel) usize {
         return set.blocks_acquired.capacity() - set.blocks_acquired.count();
     }
 
-    pub fn count_acquired(set: FreeSetModel) u64 {
+    pub fn count_free_reserved(set: FreeSetModel, reservation: Reservation) usize {
+        assert(reservation.block_count > 0);
+        set.assert_reservation_active(reservation);
+
+        var count: usize = 0;
+        var iterator = set.blocks_acquired.iterator(.{ .kind = .unset });
+        while (iterator.next()) |block| {
+            if (block >= reservation.block_base and
+                block < reservation.block_base + reservation.block_count)
+            {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
+    pub fn count_acquired(set: FreeSetModel) usize {
         return set.blocks_acquired.count();
     }
 
@@ -183,11 +230,49 @@ const FreeSetModel = struct {
         return block + 1;
     }
 
-    pub fn acquire_reserved(set: *FreeSetModel, reservation: AddressReservation) ?u64 {
+    pub fn reserve(set: *FreeSetModel, reserve_count: usize) ?Reservation {
+        assert(reserve_count > 0);
+
+        var blocks_found_free: usize = 0;
+        var iterator = set.blocks_acquired.iterator(.{ .kind = .unset });
+        while (iterator.next()) |block| {
+            if (block < set.blocks_reserved.count()) {
+                assert(set.blocks_reserved.isSet(block));
+                continue;
+            }
+
+            blocks_found_free += 1;
+            if (blocks_found_free == reserve_count) {
+                const block_base = set.blocks_reserved.count();
+                const block_count = block + 1 - block_base;
+
+                var i: usize = 0;
+                while (i < block_count) : (i += 1) set.blocks_reserved.set(block_base + i);
+
+                set.reservation_count += 1;
+                return Reservation{
+                    .block_base = block_base,
+                    .block_count = block_count,
+                };
+            }
+        }
+        return null;
+    }
+
+    pub fn forfeit(set: *FreeSetModel, reservation: Reservation) void {
+        set.assert_reservation_active(reservation);
+        set.reservation_count -= 1;
+
+        var i: usize = 0;
+        while (i < reservation.block_count) : (i += 1) {
+            set.blocks_reserved.unset(reservation.block_base + i);
+        }
+    }
+
+    pub fn acquire(set: *FreeSetModel, reservation: Reservation) ?u64 {
         assert(reservation.block_count > 0);
         assert(reservation.block_base < set.blocks_acquired.capacity());
-        assert(reservation.block_base < set.blocks_reserved);
-        assert(reservation.block_base + reservation.block_count <= set.blocks_reserved);
+        set.assert_reservation_active(reservation);
 
         var iterator = set.blocks_acquired.iterator(.{ .kind = .unset });
         while (iterator.next()) |block| {
@@ -204,33 +289,6 @@ const FreeSetModel = struct {
         return null;
     }
 
-    pub fn reserve(set: *FreeSetModel, reserve_count: usize) ?AddressReservation {
-        assert(reserve_count > 0);
-
-        var blocks_found_free: usize = 0;
-        var iterator = set.blocks_acquired.iterator(.{ .kind = .unset });
-        while (iterator.next()) |block| {
-            if (block < set.blocks_reserved) continue;
-
-            blocks_found_free += 1;
-            if (blocks_found_free == reserve_count) {
-                const block_count = block + 1 - set.blocks_reserved;
-                const block_base = set.blocks_reserved;
-                set.blocks_reserved += block_count;
-
-                return AddressReservation{
-                    .block_base = block_base,
-                    .block_count = block_count,
-                };
-            }
-        }
-        return null;
-    }
-
-    pub fn reserve_done(set: *FreeSetModel) void {
-        set.blocks_reserved = 0;
-    }
-
     pub fn is_free(set: *FreeSetModel, address: u64) bool {
         return !set.blocks_acquired.isSet(address - 1);
     }
@@ -241,7 +299,7 @@ const FreeSetModel = struct {
     }
 
     pub fn checkpoint(set: *FreeSetModel) void {
-        assert(set.blocks_reserved == 0);
+        assert(set.blocks_reserved.count() == 0);
 
         var iterator = set.blocks_released.iterator(.{});
         while (iterator.next()) |block| {
@@ -252,5 +310,14 @@ const FreeSetModel = struct {
             set.blocks_acquired.unset(block);
         }
         assert(set.blocks_released.count() == 0);
+    }
+
+    fn assert_reservation_active(set: FreeSetModel, reservation: Reservation) void {
+        assert(set.reservation_count > 0);
+
+        var i: usize = 0;
+        while (i < reservation.block_count) : (i += 1) {
+            assert(set.blocks_reserved.isSet(reservation.block_base + i));
+        }
     }
 };
