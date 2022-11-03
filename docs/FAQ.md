@@ -114,8 +114,8 @@ payment system.
 
 You might keep account metadata in your existing database (say,
 PostgreSQL or MongoDB). Then create an account in TigerBeetle with a
-UUID mapping it back to the account with metadata in your existing
-database.
+[random id](./usage/data-modeling.md#random-identifier) mapping it
+back to the account with metadata in your existing database.
 
 Then as you need to process transfers between accounts, you store
 those transfers in TigerBeetle.
