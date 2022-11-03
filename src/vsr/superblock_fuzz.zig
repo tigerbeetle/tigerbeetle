@@ -120,7 +120,9 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64) !void {
         // Trailers are only updated on-disk by checkpoint(), never view_change().
         // Trailers must not be mutated while a checkpoint() is in progress.
         if (!env.pending.contains(.checkpoint) and random.boolean()) {
-            _ = env.superblock.free_set.acquire().?;
+            const range = env.superblock.free_set.reserve(1).?;
+            _ = env.superblock.free_set.acquire(range).?;
+            env.superblock.free_set.reserve_done();
         }
     }
 }
