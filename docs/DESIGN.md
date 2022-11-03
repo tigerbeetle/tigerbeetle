@@ -199,9 +199,9 @@ We adopt the following fault models with respect to storage, network, memory and
 
 ### Memory Fault Model
 
-* Memory is protected with error-correcting codes sufficient for our purpose. We make no further effort to protect against memory faults.
+* Memory protected with error-correcting codes is sufficient for our purpose. We make no further effort to protect against memory faults.
 
-* Non-ECC memory is not supported by TigerBeetle.
+* Non-ECC memory is not recommended by TigerBeetle.
 
 ### Processing Fault Model
 
