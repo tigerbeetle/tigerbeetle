@@ -75,10 +75,10 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 pub const lookup_transfers = operation_batch_max(.lookup_transfers);
 
                 comptime {
-                    assert(create_accounts >= 0);
-                    assert(create_transfers >= 0);
-                    assert(lookup_accounts >= 0);
-                    assert(lookup_transfers >= 0);
+                    assert(create_accounts > 0);
+                    assert(create_transfers > 0);
+                    assert(lookup_accounts > 0);
+                    assert(lookup_transfers > 0);
                 }
 
                 fn operation_batch_max(comptime operation: Operation) usize {
