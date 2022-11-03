@@ -132,6 +132,21 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const fuzz_ewah = b.addExecutable("fuzz_ewah", "src/ewah_fuzz.zig");
+        fuzz_ewah.setMainPkgPath("src");
+        fuzz_ewah.setTarget(target);
+        fuzz_ewah.setBuildMode(mode);
+        // Ensure that we get stack traces even in release builds.
+        fuzz_ewah.omit_frame_pointer = false;
+
+        const run_cmd = fuzz_ewah.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("fuzz_ewah", "Fuzz EWAH codec. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
         const fuzz_lsm_forest = b.addExecutable("fuzz_lsm_forest", "src/lsm/forest_fuzz.zig");
         fuzz_lsm_forest.setMainPkgPath("src");
         fuzz_lsm_forest.setTarget(target);

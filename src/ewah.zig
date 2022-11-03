@@ -160,6 +160,24 @@ pub fn ewah(comptime Word: type) type {
     };
 }
 
+test "ewah encode→decode cycle" {
+    const fuzz = @import("./ewah_fuzz.zig");
+    var prng = std.rand.DefaultPrng.init(123);
+
+    inline for (.{ u8, u16, u32, u64, usize }) |Word| {
+        var decoded: [4096]Word = undefined;
+
+        std.mem.set(Word, &decoded, 0);
+        try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
+
+        std.mem.set(Word, &decoded, std.math.maxInt(Word));
+        try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
+
+        prng.random().bytes(std.mem.asBytes(&decoded));
+        try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
+    }
+}
+
 test "ewah Word=u8 decode→encode→decode" {
     try test_decode_with_word(u8);
 
@@ -176,35 +194,6 @@ test "ewah Word=u8 decode→encode→decode" {
             34,
             56,
         });
-    }
-}
-
-test "ewah Word=u8 encode→decode→encode" {
-    const codec = ewah(u8);
-
-    var seed: u64 = undefined;
-    try std.os.getrandom(mem.asBytes(&seed));
-
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
-
-    var decoded_expect: [4096]u8 = undefined;
-    var decoded_actual: [4096]u8 = undefined;
-
-    const encoded_actual = try std.testing.allocator.alignedAlloc(
-        u8,
-        @alignOf(u8),
-        codec.encode_size_max(decoded_expect.len),
-    );
-    defer std.testing.allocator.free(encoded_actual);
-
-    var t: usize = 0;
-    while (t < 100) : (t += 1) {
-        random.bytes(decoded_expect[0..]);
-        _ = codec.encode(decoded_expect[0..], encoded_actual);
-        const decoded_actual_length = codec.decode(encoded_actual[0..], decoded_actual[0..]);
-        try std.testing.expectEqual(decoded_expect.len, decoded_actual_length);
-        try std.testing.expectEqual(decoded_expect, decoded_actual);
     }
 }
 
