@@ -1,3 +1,7 @@
+---
+sidebar_position: 3
+---
+
 # 3-node cluster with Docker Compose
 
 First, provision the data file for each node:

@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 # Creating accounts and transfers in the Node CLI
 
 Once you've got the TigerBeetle server running, let's connect to the
