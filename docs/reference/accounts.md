@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 # Accounts
 
 An `Account` is a record storing the cumulative effect of committed

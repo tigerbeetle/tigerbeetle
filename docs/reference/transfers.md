@@ -1,3 +1,7 @@
+---
+sidebar_position: 2
+---
+
 # Transfers
 
 A `transfer` is an immutable record of a financial transaction between
