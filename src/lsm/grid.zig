@@ -187,7 +187,10 @@ pub fn GridType(comptime Storage: type) type {
         pub fn acquire(grid: *Grid) u64 {
             // We will reject incoming data before it reaches the point
             // where storage is full, so this assertion is safe.
-            return grid.superblock.free_set.acquire().?;
+            const reservation = grid.superblock.free_set.reserve(1).?;
+            defer grid.superblock.free_set.forfeit();
+
+            return grid.superblock.free_set.acquire(reservation).?;
         }
 
         /// This function should be used to release addresses, instead of release()

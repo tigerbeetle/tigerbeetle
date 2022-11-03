@@ -12,7 +12,7 @@ const div_ceil = @import("../util.zig").div_ceil;
 
 /// This is logically a range of addresses within the FreeSet, but its actual fields are block
 /// indexes for ease of calculation.
-pub const AddressReservation = struct {
+pub const Reservation = struct {
     block_base: usize,
     block_count: usize,
 };
@@ -20,6 +20,21 @@ pub const AddressReservation = struct {
 /// The 0 address is reserved for usage as a sentinel and will never be returned by acquire().
 ///
 /// Set bits indicate free blocks, unset bits are allocated.
+///
+/// Concurrent callers must reserve free blocks before acquiring them to ensure that
+/// acquisition order is deterministic despite concurrent jobs acquiring blocks in
+/// nondeterministic order.
+///
+/// The reservation lifecycle is:
+///
+///   1. Reserve: In deterministic order, each job (e.g. compaction) calls `reserve()` to
+///      reserve the upper bound of blocks that it may need to acquire to complete.
+///   2. Acquire: The jobs run concurrently. Each job acquires blocks only from its respective
+///      reservation (via `acquire()`).
+///   3. Forfeit: When a job finishes, it calls `forfeit()` to drop its reservation.
+///   4. Done: When all pending reservations are forfeited, the reserved (but unacquired) space
+///      is reclaimed.
+///
 pub const FreeSet = struct {
     /// Each bit of `index` is the OR of `shard_size` bits of `blocks`.
     /// That is, if a shard has any free blocks, the corresponding index bit is set.
@@ -29,7 +44,17 @@ pub const FreeSet = struct {
     /// The number of blocks that are reserved, counting both acquired and free blocks
     /// from the start of `blocks`.
     /// Alternatively, the index of the first non-reserved block in `blocks`.
-    blocks_reserved: usize = 0,
+    reservation_blocks: usize = 0,
+
+    /// The number of active reservations.
+    reservation_count: usize = 0,
+
+    /// When the caller transitions from creating reservations to forfeiting them, all reservations
+    /// must be forfeited before additional reservations can be created.
+    reservation_state: enum {
+        reserving,
+        forfeiting,
+    } = .reserving,
 
     /// Set bits indicate blocks to be released at the next checkpoint.
     staging: DynamicBitSetUnmanaged,
@@ -82,13 +107,33 @@ pub const FreeSet = struct {
         set.staging.deinit(allocator);
     }
 
+    /// Returns the number of active reservations.
+    pub fn count_reservations(set: FreeSet) usize {
+        return set.reservation_count;
+    }
+
     /// Returns the number of free blocks.
-    pub fn count_free(set: FreeSet) u64 {
+    pub fn count_free(set: FreeSet) usize {
         return set.blocks.count();
     }
 
+    /// Returns the number of free blocks in the reservation.
+    pub fn count_free_reserved(set: FreeSet, reservation: Reservation) usize {
+        assert(set.reservation_count > 0);
+        assert(reservation.block_count > 0);
+        assert(reservation.block_base < set.reservation_blocks);
+        assert(reservation.block_base + reservation.block_count <= set.reservation_blocks);
+
+        var count: u64 = 0;
+        var i: u64 = 0;
+        while (i < reservation.block_count) : (i += 1) {
+            if (set.blocks.isSet(reservation.block_base + i)) count += 1;
+        }
+        return count;
+    }
+
     /// Returns the number of acquired blocks.
-    pub fn count_acquired(set: FreeSet) u64 {
+    pub fn count_acquired(set: FreeSet) usize {
         return set.blocks.capacity() - set.blocks.count();
     }
 
@@ -111,40 +156,29 @@ pub const FreeSet = struct {
 
     /// Reserve `reserve_count` free blocks. The blocks are not acquired yet.
     ///
-    /// Concurrent callers must reserve free blocks before acquiring them to ensure that
-    /// acquisition order is deterministic despite concurrent jobs acquiring blocks in
-    /// nondeterministic order. The reservation lifecycle is:
-    ///
-    /// 1. Setup: In deterministic order, each job (e.g. compaction) calls `reserve()` to reserve
-    ///    the upper bound of blocks that it may need to acquire to complete.
-    /// 2. Work: The jobs run concurrently. Each job acquires blocks only from its respective
-    ///    reservation (via `acquire_reserved()`).
-    /// 3. Finish: When all jobs are finished, all leftover reserved blocks are forfeited by
-    ///    `reserve_done()`.
-    ///
     /// Invariants:
-    /// - If a reservation is returned, it covers exactly `reserve_count` free blocks, along with
-    ///   any interleaved already-acquired blocks.
-    /// - Active reservations are exclusive (i.e. disjoint).
-    ///   (A reservation is active until `reserve_done()` is called.)
     ///
-    /// Returns a range which can be used with `acquire_reserved()`.
+    ///   - If a reservation is returned, it covers exactly `reserve_count` free blocks, along with
+    ///     any interleaved already-acquired blocks.
+    ///   - Active reservations are exclusive (i.e. disjoint).
+    ///     (A reservation is active until `forfeit()` is called.)
+    ///
     /// Returns null if there are not enough blocks free and vacant.
-    /// The caller should consider the returned AddressReservation as opaque and immutable.
-    pub fn reserve(set: *FreeSet, reserve_count: usize) ?AddressReservation {
+    /// Returns a reservation which can be used with `acquire()`:
+    /// - The caller should consider the returned Reservation as opaque and immutable.
+    /// - Each `reserve()` call which returns a non-null Reservation must correspond to exactly one
+    ///   `forfeit()` call.
+    pub fn reserve(set: *FreeSet, reserve_count: usize) ?Reservation {
+        assert(set.reservation_state == .reserving);
         assert(reserve_count > 0);
 
         var shard_start = find_first_set_bit(
             set.index,
-            @divFloor(set.blocks_reserved, shard_size),
+            @divFloor(set.reservation_blocks, shard_size),
             set.index.bit_length,
         ) orelse return null;
 
-        var block = std.math.max(
-            shard_start * shard_size,
-            set.blocks_reserved,
-        );
-
+        var block = std.math.max(shard_start * shard_size, set.reservation_blocks);
         var reserved: usize = 0;
         while (reserved < reserve_count) : (reserved += 1) {
             block = 1 + (find_first_set_bit(
@@ -154,47 +188,31 @@ pub const FreeSet = struct {
             ) orelse return null);
         }
 
-        const block_base = set.blocks_reserved;
-        const block_count = block - set.blocks_reserved;
-        set.blocks_reserved += block_count;
+        const block_base = set.reservation_blocks;
+        const block_count = block - set.reservation_blocks;
+        set.reservation_blocks += block_count;
+        set.reservation_count += 1;
 
-        return AddressReservation{
+        return Reservation{
             .block_base = block_base,
             .block_count = block_count,
         };
     }
 
-    pub fn reserve_done(set: *FreeSet) void {
-        set.blocks_reserved = 0;
-    }
-
-    /// Marks a free block as allocated, and returns the address.
-    /// Returns null if no free block is available.
-    // TODO remove
-    pub fn acquire(set: *FreeSet) ?u64 {
-        if (set.index.findFirstSet()) |shard| {
-            const block = set.find_free_block_in_shard(shard).?;
-            const address = block + 1;
-            set.acquire_address(address);
-            return address;
+    /// After invoking `forfeit()`, any previous reservations must never be used.
+    pub fn forfeit(set: *FreeSet) void {
+        set.reservation_count -= 1;
+        if (set.reservation_count == 0) {
+            // All reservations have been dropped.
+            set.reservation_blocks = 0;
+            set.reservation_state = .reserving;
+        } else {
+            set.reservation_state = .forfeiting;
         }
-        return null;
-    }
-
-    /// Mark the specified free block as allocated.
-    fn acquire_address(set: *FreeSet, address: u64) void {
-        const block = address - 1;
-        const shard = @divFloor(block, shard_size);
-        assert(set.index.isSet(shard));
-        assert(set.blocks.isSet(block));
-        assert(!set.staging.isSet(block));
-
-        set.blocks.unset(block);
-        // Update the index when every block in the shard is allocated.
-        if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
     }
 
     /// Marks a free block from the reservation as allocated, and returns the address.
+    /// The reservation must not have been forfeited — that is, they must have been no calls to
     ///
     /// Invariants:
     ///
@@ -202,34 +220,43 @@ pub const FreeSet = struct {
     ///     has been checkpointed.
     ///
     /// Returns null if no free block is available in the reservation.
-    // TODO rename to acquire()
-    pub fn acquire_reserved(set: *FreeSet, reservation: AddressReservation) ?u64 {
+    pub fn acquire(set: *FreeSet, reservation: Reservation) ?u64 {
+        assert(set.reservation_count > 0);
         assert(reservation.block_count > 0);
-        assert(reservation.block_base < set.blocks_reserved);
-        assert(reservation.block_base + reservation.block_count <= set.blocks_reserved);
+        assert(reservation.block_base < set.reservation_blocks);
+        assert(reservation.block_base + reservation.block_count <= set.reservation_blocks);
 
         const shard = find_first_set_bit(
             set.index,
             @divFloor(reservation.block_base, shard_size),
             div_ceil(reservation.block_base + reservation.block_count, shard_size),
         ) orelse return null;
+        assert(set.index.isSet(shard));
 
         const reservation_start = std.math.max(
             shard * shard_size,
             reservation.block_base,
         );
         const reservation_end = reservation.block_base + reservation.block_count;
-        const block = find_first_set_bit(set.blocks, reservation_start, reservation_end) orelse return null;
+        const block = find_first_set_bit(
+            set.blocks,
+            reservation_start,
+            reservation_end,
+        ) orelse return null;
         assert(block >= reservation.block_base);
         assert(block <= reservation.block_base + reservation.block_count);
+        assert(set.blocks.isSet(block));
+        assert(!set.staging.isSet(block));
+
+        set.blocks.unset(block);
+        // Update the index when every block in the shard is allocated.
+        if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
 
         const address = block + 1;
-        set.acquire_address(address);
-
         return address;
     }
 
-    fn find_free_block_in_shard(set: *FreeSet, shard: usize) ?usize {
+    fn find_free_block_in_shard(set: FreeSet, shard: usize) ?usize {
         const shard_start = shard * shard_size;
         const shard_end = shard_start + shard_size;
         assert(shard_start < set.blocks.bit_length);
@@ -237,7 +264,7 @@ pub const FreeSet = struct {
         return find_first_set_bit(set.blocks, shard_start, shard_end);
     }
 
-    pub fn is_free(set: *FreeSet, address: u64) bool {
+    pub fn is_free(set: FreeSet, address: u64) bool {
         const block = address - 1;
         return set.blocks.isSet(block);
     }
@@ -268,7 +295,8 @@ pub const FreeSet = struct {
     /// Free all staged blocks.
     /// Checkpoint must not be called while there are outstanding reservations.
     pub fn checkpoint(set: *FreeSet) void {
-        assert(set.blocks_reserved == 0);
+        assert(set.reservation_count == 0);
+        assert(set.reservation_blocks == 0);
 
         var it = set.staging.iterator(.{ .kind = .set });
         while (it.next()) |block| {
@@ -305,7 +333,8 @@ pub const FreeSet = struct {
     pub fn decode(set: *FreeSet, source: []align(@alignOf(usize)) const u8) void {
         // Verify that this FreeSet is entirely unallocated.
         assert(set.index.count() == set.index.bit_length);
-        assert(set.blocks_reserved == 0);
+        assert(set.reservation_count == 0);
+        assert(set.reservation_blocks == 0);
 
         const words_decoded = ewah.decode(source, bit_set_masks(set.blocks));
         assert(words_decoded * @bitSizeOf(MaskInt) <= set.blocks.bit_length);
@@ -329,7 +358,8 @@ pub const FreeSet = struct {
     /// The encoded data does *not* include staged changes.
     pub fn encode(set: FreeSet, target: []align(@alignOf(usize)) u8) usize {
         assert(target.len == FreeSet.encode_size_max(set.blocks.bit_length));
-        assert(set.blocks_reserved == 0);
+        assert(set.reservation_count == 0);
+        assert(set.reservation_blocks == 0);
 
         return ewah.encode(bit_set_masks(set.blocks), target);
     }
@@ -354,30 +384,49 @@ fn bit_set_masks(bit_set: DynamicBitSetUnmanaged) []usize {
     return bit_set.masks[0..len];
 }
 
+test "FreeSet block shard count" {
+    const blocks_in_tb = (1 << 40) / config.block_size;
+    try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
+    try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - FreeSet.shard_size);
+    try test_block_shards_count(1, FreeSet.shard_size); // Must be at least one index bit.
+}
+
+fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !void {
+    var set = try FreeSet.init(std.testing.allocator, blocks_count);
+    defer set.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(expect_shards_count, set.index.bit_length);
+}
+
 test "FreeSet highest_address_acquired" {
     const expectEqual = std.testing.expectEqual;
     const blocks_count = FreeSet.shard_size;
     var set = try FreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
-    try expectEqual(@as(?u64, null), set.highest_address_acquired());
-    try expectEqual(@as(?u64, 1), set.acquire());
-    try expectEqual(@as(?u64, 2), set.acquire());
-    try expectEqual(@as(?u64, 3), set.acquire());
+    {
+        const reservation = set.reserve(6).?;
+        defer set.forfeit();
 
-    try expectEqual(@as(?u64, 3), set.highest_address_acquired());
-    set.release_now(2);
-    try expectEqual(@as(?u64, 3), set.highest_address_acquired());
+        try expectEqual(@as(?u64, null), set.highest_address_acquired());
+        try expectEqual(@as(?u64, 1), set.acquire(reservation));
+        try expectEqual(@as(?u64, 2), set.acquire(reservation));
+        try expectEqual(@as(?u64, 3), set.acquire(reservation));
 
-    set.release_now(3);
-    try expectEqual(@as(?u64, 1), set.highest_address_acquired());
+        try expectEqual(@as(?u64, 3), set.highest_address_acquired());
+        set.release_now(2);
+        try expectEqual(@as(?u64, 3), set.highest_address_acquired());
 
-    set.release_now(1);
-    try expectEqual(@as(?u64, null), set.highest_address_acquired());
+        set.release_now(3);
+        try expectEqual(@as(?u64, 1), set.highest_address_acquired());
 
-    try expectEqual(@as(?u64, 1), set.acquire());
-    try expectEqual(@as(?u64, 2), set.acquire());
-    try expectEqual(@as(?u64, 3), set.acquire());
+        set.release_now(1);
+        try expectEqual(@as(?u64, null), set.highest_address_acquired());
+
+        try expectEqual(@as(?u64, 1), set.acquire(reservation));
+        try expectEqual(@as(?u64, 2), set.acquire(reservation));
+        try expectEqual(@as(?u64, 3), set.acquire(reservation));
+    }
 
     {
         set.release(3);
@@ -410,66 +459,79 @@ fn test_acquire_release(blocks_count: usize) !void {
     var empty = try FreeSet.init(std.testing.allocator, blocks_count);
     defer empty.deinit(std.testing.allocator);
 
-    var i: usize = 0;
-    while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire());
-    try expectEqual(@as(?u64, null), set.acquire());
+    {
+        const range = set.reserve(blocks_count).?;
+        defer set.forfeit();
+
+        var i: usize = 0;
+        while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire(range));
+        try expectEqual(@as(?u64, null), set.acquire(range));
+    }
 
     try expectEqual(@as(u64, set.blocks.bit_length), set.count_acquired());
     try expectEqual(@as(u64, 0), set.count_free());
 
-    i = 0;
-    while (i < blocks_count) : (i += 1) set.release_now(@as(u64, i + 1));
-    try expect_free_set_equal(empty, set);
+    {
+        var i: usize = 0;
+        while (i < blocks_count) : (i += 1) set.release_now(@as(u64, i + 1));
+        try expect_free_set_equal(empty, set);
+    }
 
     try expectEqual(@as(u64, 0), set.count_acquired());
     try expectEqual(@as(u64, set.blocks.bit_length), set.count_free());
 
-    i = 0;
-    while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire());
-    try expectEqual(@as(?u64, null), set.acquire());
+    {
+        const range = set.reserve(blocks_count).?;
+        defer set.forfeit();
+
+        var i: usize = 0;
+        while (i < blocks_count) : (i += 1) try expectEqual(@as(?u64, i + 1), set.acquire(range));
+        try expectEqual(@as(?u64, null), set.acquire(range));
+    }
 }
 
-test "FreeSet block shard count" {
-    const blocks_in_tb = (1 << 40) / config.block_size;
-    try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
-    try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - FreeSet.shard_size);
-    try test_block_shards_count(1, FreeSet.shard_size); // Must be at least one index bit.
-}
-
-fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !void {
-    var set = try FreeSet.init(std.testing.allocator, blocks_count);
+test "FreeSet.reserve/acquire" {
+    const blocks_count_total = 4096;
+    var set = try FreeSet.init(std.testing.allocator, blocks_count_total);
     defer set.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(expect_shards_count, set.index.bit_length);
-}
+    // At most `blocks_count_total` blocks are initially available for reservation.
+    try std.testing.expectEqual(set.reserve(blocks_count_total + 1), null);
+    try std.testing.expect(set.reserve(blocks_count_total - 1) != null);
+    try std.testing.expect(set.reserve(1) != null);
+    try std.testing.expectEqual(set.reserve(1), null);
+    set.forfeit();
+    set.forfeit();
 
-test "FreeSet.reserve/acquire_reserved" {
-    var set = try FreeSet.init(std.testing.allocator, 4096);
-    defer set.deinit(std.testing.allocator);
-
-    _ = set.reserve(1);
-    set.reserve_done();
-
-    var base: usize = 1; // Start at 1 because addresses are >0.
+    var address: usize = 1; // Start at 1 because addresses are >0.
     {
         const range = set.reserve(2).?;
-        try std.testing.expectEqual(set.acquire_reserved(range), base + 0);
-        try std.testing.expectEqual(set.acquire_reserved(range), base + 1);
-        try std.testing.expectEqual(set.acquire_reserved(range), null);
+        defer set.forfeit();
+
+        try std.testing.expectEqual(set.count_free_reserved(range), 2);
+        try std.testing.expectEqual(set.acquire(range), address + 0);
+        try std.testing.expectEqual(set.count_free_reserved(range), 1);
+        try std.testing.expectEqual(set.acquire(range), address + 1);
+        try std.testing.expectEqual(set.count_free_reserved(range), 0);
+        try std.testing.expectEqual(set.acquire(range), null);
     }
-    base += 2;
+    address += 2;
 
     {
+        // Blocks are acquired from the target reservation.
         const range1 = set.reserve(2).?;
+        defer set.forfeit();
         const range2 = set.reserve(2).?;
-        try std.testing.expectEqual(set.acquire_reserved(range1), base + 0);
-        try std.testing.expectEqual(set.acquire_reserved(range2), base + 2);
-        try std.testing.expectEqual(set.acquire_reserved(range1), base + 1);
-        try std.testing.expectEqual(set.acquire_reserved(range1), null);
-        try std.testing.expectEqual(set.acquire_reserved(range2), base + 3);
-        try std.testing.expectEqual(set.acquire_reserved(range2), null);
+        defer set.forfeit();
+
+        try std.testing.expectEqual(set.acquire(range1), address + 0);
+        try std.testing.expectEqual(set.acquire(range2), address + 2);
+        try std.testing.expectEqual(set.acquire(range1), address + 1);
+        try std.testing.expectEqual(set.acquire(range1), null);
+        try std.testing.expectEqual(set.acquire(range2), address + 3);
+        try std.testing.expectEqual(set.acquire(range2), null);
     }
-    base += 4;
+    address += 4;
 }
 
 test "FreeSet checkpoint" {
@@ -484,16 +546,25 @@ test "FreeSet checkpoint" {
     var full = try FreeSet.init(std.testing.allocator, blocks_count);
     defer full.deinit(std.testing.allocator);
 
-    var i: usize = 0;
-    while (i < full.blocks.bit_length) : (i += 1) {
-        try expectEqual(@as(?u64, i + 1), full.acquire());
+    {
+        // Acquire all of `full`'s blocks.
+        const range = full.reserve(blocks_count).?;
+        defer full.forfeit();
+
+        var i: usize = 0;
+        while (i < full.blocks.bit_length) : (i += 1) {
+            try expectEqual(@as(?u64, i + 1), full.acquire(range));
+        }
     }
 
     {
-        // Allocate & stage-release every block.
-        i = 0;
+        // Acquire & stage-release every block.
+        const range = set.reserve(blocks_count).?;
+        defer set.forfeit();
+
+        var i: usize = 0;
         while (i < set.blocks.bit_length) : (i += 1) {
-            try expectEqual(@as(?u64, i + 1), set.acquire());
+            try expectEqual(@as(?u64, i + 1), set.acquire(range));
             set.release(i + 1);
 
             // These count functions treat staged blocks as allocated.
@@ -501,7 +572,7 @@ test "FreeSet checkpoint" {
             try expectEqual(@as(u64, set.blocks.bit_length - i - 1), set.count_free());
         }
         // All blocks are still allocated, though staged to release at the next checkpoint.
-        try expectEqual(@as(?u64, null), set.acquire());
+        try expectEqual(@as(?u64, null), set.acquire(range));
     }
 
     // Free all the blocks.
@@ -512,11 +583,15 @@ test "FreeSet checkpoint" {
     // Redundant checkpointing is a noop (but safe).
     set.checkpoint();
 
-    // Allocate & stage-release all blocks again.
-    i = 0;
-    while (i < set.blocks.bit_length) : (i += 1) {
-        try expectEqual(@as(?u64, i + 1), set.acquire());
-        set.release(i + 1);
+    {
+        // Allocate & stage-release all blocks again.
+        const range = set.reserve(blocks_count).?;
+        defer set.forfeit();
+        var i: usize = 0;
+        while (i < set.blocks.bit_length) : (i += 1) {
+            try expectEqual(@as(?u64, i + 1), set.acquire(range));
+            set.release(i + 1);
+        }
     }
 
     var set_encoded = try std.testing.allocator.alignedAlloc(
@@ -669,9 +744,15 @@ test "FreeSet decode small bitset into large bitset" {
     var small_set = try FreeSet.init(std.testing.allocator, shard_size);
     defer small_set.deinit(std.testing.allocator);
 
-    // Set up a small bitset (with blocks_count==shard_size) with no free blocks.
-    var i: usize = 0;
-    while (i < small_set.blocks.bit_length) : (i += 1) _ = small_set.acquire();
+    {
+        // Set up a small bitset (with blocks_count==shard_size) with no free blocks.
+        const range = small_set.reserve(small_set.blocks.bit_length).?;
+        defer small_set.forfeit();
+
+        var i: usize = 0;
+        while (i < small_set.blocks.bit_length) : (i += 1) _ = small_set.acquire(range);
+    }
+
     var small_buffer = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
