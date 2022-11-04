@@ -202,7 +202,7 @@ pub fn ContextType(
             };
 
             // Make sure the packet.data size is correct:
-            const readable = packet.data[0..packet.data_size];
+            const readable = @ptrCast([*]const u8, packet.data)[0..packet.data_size];
             if (readable.len == 0 or readable.len % event_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
