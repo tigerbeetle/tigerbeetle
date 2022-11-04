@@ -51,6 +51,14 @@ const half_bar_beat_count = @divExact(config.lsm_batch_multiple, 2);
 /// The maximum number of tables for a single tree.
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
+// +1: from level A
+// +2: from level B, on either edge of the lsm_growth_factor tables.
+pub const compaction_tables_input_max = 1 + config.lsm_growth_factor + 2;
+pub const compaction_tables_output_max = compaction_tables_input_max;
+
+/// The maximum number of concurrent compactions (per tree).
+pub const compactions_max = div_ceil(config.lsm_levels, 2);
+
 pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_name: []const u8) type {
     const Key = TreeTable.Key;
     const Value = TreeTable.Value;

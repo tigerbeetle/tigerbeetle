@@ -47,7 +47,7 @@ The first half of the bar compacts even levels while the latter compacts odd lev
 Mutable table changes are sorted and compacted into the immutable table.
 The immutable table is compacted into level 0 during the odd level half of the bar.
 
-At any given point, there are at most `levels/2` compactions running concurrently.
+At any given point, there are at most `⌈levels/2⌉` compactions running concurrently.
 The source level is denoted as `level_a` and the target level as `level_b`.
 The last level in the LSM tree has no target level so it is never a source level.
 Each compaction compacts a [single table](#table-selection) from `level_a` into all tables in
