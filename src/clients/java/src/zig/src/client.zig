@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const jui = @import("jui");
 const tb = @import("tigerbeetle");
 
-const log = std.log.scoped(.jni);
+const log = std.log.scoped(.tb_client_jni);
 
 const assert = std.debug.assert;
 const jni_version = jui.JNIVersion{ .major = 10, .minor = 0 };
@@ -156,7 +156,7 @@ const RequestReflection = struct {
             // The "endRequest" method isn't expected to throw any exception,
             // We can't rethrow here, since this function is called from the native callback.
             env.describeException();
-            @panic("JNI: Error calling endRequest method.");
+            @panic("JNI: Error calling endRequest method");
         };
     }
 };
@@ -238,7 +238,7 @@ const JNIClient = struct {
         // Holds a global reference to prevent GC during the callback
         var global_ref = env.newReference(.global, request_obj) catch {
             // NewGlobalRef fails only when the JVM runs out of memory
-            @panic("JNI: Error creating a global reference.");
+            @panic("JNI: Error creating a global reference");
         };
 
         assert(global_ref != null);
@@ -247,11 +247,11 @@ const JNIClient = struct {
         var buffer = RequestReflection.buffer(env, request_obj) orelse {
             // It is unexpected to the buffer be null here
             // The java side must allocate a new buffer prior to invoking "submit".
-            @panic("JNI: Request buffer cannot be null.");
+            @panic("JNI: Request buffer cannot be null");
         };
 
         packet.operation = RequestReflection.operation(env, request_obj);
-        packet.user_data = @ptrToInt(global_ref);
+        packet.user_data = global_ref;
         packet.data = buffer.ptr;
         packet.data_size = @intCast(u32, buffer.len);
         packet.next = null;
@@ -273,13 +273,13 @@ const JNIClient = struct {
 
         var jvm = @intToPtr(*jui.JavaVM, context);
         var env = jvm.attachCurrentThreadAsDaemon() catch |err| {
-            log.err("Error {s} attaching the native thread as daemon.", .{@errorName(err)});
-            @panic("JNI: Error attaching the native thread as daemon.");
+            log.err("Error {s} attaching the native thread as daemon", .{@errorName(err)});
+            @panic("JNI: Error attaching the native thread as daemon");
         };
 
         // Retrieves the request instance, and drops the GC reference
-        assert(packet.user_data != 0);
-        var request_obj = @intToPtr(jui.jobject, packet.user_data);
+        assert(packet.user_data != null);
+        var request_obj = @ptrCast(jui.jobject, packet.user_data);
         defer env.deleteReference(.global, request_obj);
 
         var result: ?[]const u8 = switch (packet.status) {
@@ -301,7 +301,7 @@ const JNIClient = struct {
         var packet = packet_list.pop() orelse {
             // It is unexpeted to packet_list be empty.
             // The java side must syncronize how many threads call this function.
-            @panic("JNI fatal error: Packet list cannot be empty.");
+            @panic("JNI fatal error: Packet list cannot be empty");
         };
 
         ClientReflection.set_packet_list(env, client_obj, packet_list);
