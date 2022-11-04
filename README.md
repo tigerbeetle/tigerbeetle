@@ -23,6 +23,20 @@ structures.
 
 Check out our [short-term roadmap](#short-term-roadmap) below for where we're heading!
 
+## Documentation
+
+Check out [docs.tigerbeetle.com](https://docs.tigerbeetle.com/).
+Here are a few key pages you might be interested in:
+
+- Deployment
+  - [Hardware](https://docs.tigerbeetle.com/deployment/hardware)
+- Usage
+  - [Integration](https://docs.tigerbeetle.com/usage/integration)
+- Reference
+  - [Accounts](https://docs.tigerbeetle.com/reference/accounts)
+  - [Transfers](https://docs.tigerbeetle.com/reference/transfers)
+  - [Operations](https://docs.tigerbeetle.com/reference/operations)
+
 ## QuickStart
 
 TigerBeetle is easy to run with or without Docker, depending on your
@@ -50,7 +64,7 @@ info(main): 0: cluster=0: listening on 0.0.0.0:3000
 
 Note: if you are on macOS, you will need to call the Docker run
 command with `--cap-add IPC_LOCK` or `--ulimit memlock=-1:-1`. See
-[here](docs/setup/with-docker.md##error-systemresources-on-macos) for
+[here](https://docs.tigerbeetle.com/deployment/with-docker#error-systemresources-on-macos) for
 more information.
 
 ### From Source
@@ -197,7 +211,9 @@ accounted for!
 
 For further reading:
 
-* [Running a 3-node cluster locally with docker-compose](./docs/setup/with-docker-compose.md)
+* [Running a 3-node cluster locally with docker-compose](https://docs.tigerbeetle.com/deployment/with-docker-compose)
+* [Run a single-node cluster with Docker](https://docs.tigerbeetle.com/deployment/with-docker)
+* [Run a single-node cluster from source](https://docs.tigerbeetle.com/deployment/from-source)
 
 ## Clients
 

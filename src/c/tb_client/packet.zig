@@ -4,11 +4,11 @@ const Atomic = std.atomic.Atomic;
 
 pub const Packet = extern struct {
     next: ?*Packet,
-    user_data: usize,
+    user_data: ?*anyopaque,
     operation: u8,
     status: Status,
     data_size: u32,
-    data: [*]const u8,
+    data: ?*anyopaque,
 
     pub const Status = enum(u8) {
         ok,
