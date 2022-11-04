@@ -18,6 +18,7 @@ test {
     _ = @import("ewah.zig");
     _ = @import("util.zig");
 
+    _ = @import("c/test.zig");
     _ = @import("c/tb_client_header_test.zig");
 
     // TODO Add remaining unit tests from lsm namespace.
@@ -28,6 +29,4 @@ test {
     _ = @import("test/id.zig");
     _ = @import("test/accounting/auditor.zig");
     _ = @import("test/accounting/workload.zig");
-
-    _ = @import("c/test.zig");
 }

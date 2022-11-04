@@ -112,14 +112,20 @@ pub fn ContextType(
 
             log.debug("{}: init: parsing vsr addresses", .{context.client_id});
             context.addresses = vsr.parse_addresses(context.allocator, addresses, config.replicas_max) catch |err| {
-                log.err("failed to parse vsr addresses: {}", .{err});
+                log.err("{}: failed to parse vsr addresses: {s}", .{
+                    context.client_id,
+                    @errorName(err),
+                });
                 return error.InvalidAddress;
             };
             errdefer context.allocator.free(context.addresses);
 
             log.debug("{}: init: initializing IO", .{context.client_id});
             context.io = IO.init(32, 0) catch |err| {
-                log.err("failed to initialize IO: {}", .{err});
+                log.err("{}: failed to initialize IO: {s}", .{
+                    context.client_id,
+                    @errorName(err),
+                });
                 return switch (err) {
                     error.ProcessFdQuotaExceeded => error.SystemResources,
                     error.Unexpected => error.Unexpected,
@@ -185,7 +191,10 @@ pub fn ContextType(
             while (!self.thread.signal.is_shutdown()) {
                 self.tick();
                 self.io.run_for_ns(config.tick_ms * std.time.ns_per_ms) catch |err| {
-                    log.err("IO.run() failed with {}", .{err});
+                    log.err("{}: IO.run() failed: {s}", .{
+                        self.client_id,
+                        @errorName(err),
+                    });
                     @panic("IO.run() failed");
                 };
             }

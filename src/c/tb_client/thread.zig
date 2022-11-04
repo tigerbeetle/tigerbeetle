@@ -29,13 +29,16 @@ pub fn ThreadType(
             self.retry = .{};
             self.submitted = .{};
 
-            log.debug("init: initializing signal", .{});
+            log.debug("{}: init: initializing signal", .{context.client_id});
             try self.signal.init(&context.io, Self.on_signal);
             errdefer self.signal.deinit();
 
-            log.debug("init: spawning thread", .{});
+            log.debug("{}: init: spawning thread", .{context.client_id});
             self.thread = std.Thread.spawn(.{}, Context.run, .{context}) catch |err| {
-                log.err("failed to spawn thread: {}", .{err});
+                log.err("{}: failed to spawn thread: {s}", .{
+                    context.client_id,
+                    @errorName(err),
+                });
                 return switch (err) {
                     error.Unexpected => error.Unexpected,
                     error.OutOfMemory => error.OutOfMemory,

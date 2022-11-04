@@ -127,7 +127,7 @@ test "c_client echo" {
 
     // Repeating the same test multiple times to stress the
     // cycle of message exhaustion followed by completions.
-    const repetitions_max = 250;
+    const repetitions_max = 100;
     var repetition: u32 = 0;
     while (repetition < repetitions_max) : (repetition += 1) {
         var completion = Completion{ .pending = num_packets };
