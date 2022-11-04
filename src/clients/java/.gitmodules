@@ -3,4 +3,4 @@
 	url = https://github.com/zig-java/jui.git
 [submodule "src/zig/lib/tigerbeetle"]
 	path = src/zig/lib/tigerbeetle
-	url = https://github.com/coilhq/tigerbeetle.git
+	url = https://github.com/tigerbeetledb/tigerbeetle.git
