@@ -53,6 +53,23 @@ pub fn ContextType(
             assert(@sizeOf(UserData) == @sizeOf(u128));
         }
 
+        fn operation_event_size(op: u8) ?usize {
+            const allowed_operations = [_]Client.StateMachine.Operation{
+                .create_accounts,
+                .create_transfers,
+                .lookup_accounts,
+                .lookup_transfers,
+            };
+
+            inline for (allowed_operations) |operation| {
+                if (op == @enumToInt(operation)) {
+                    return @sizeOf(Client.StateMachine.Event(operation));
+                }
+            }
+
+            return null;
+        }
+
         const PacketError = Client.Error || error{
             TooMuchData,
             InvalidOperation,
@@ -63,16 +80,16 @@ pub fn ContextType(
         client_id: u128,
         packets: []Packet,
 
-        addresses: []std.net.Address,
+        addresses: []const std.net.Address,
         io: IO,
         message_pool: MessagePool,
+        messages_available: usize,
         client: Client,
 
         on_completion_ctx: usize,
         on_completion_fn: tb_completion_t,
         implementation: ContextImplementation,
         thread: Thread,
-        messages_available: usize,
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -87,25 +104,22 @@ pub fn ContextType(
 
             context.allocator = allocator;
             context.client_id = std.crypto.random.int(u128);
-            log.debug("init: initializing client_id={}.", .{context.client_id});
+            log.debug("{}: init: initializing", .{context.client_id});
 
-            log.debug("init: allocating tb_packets.", .{});
-            context.packets = context.allocator.alloc(Packet, packets_count) catch |err| {
-                log.err("failed to allocate tb_packets: {}", .{err});
-                return err;
-            };
+            log.debug("{}: init: allocating tb_packets", .{context.client_id});
+            context.packets = try context.allocator.alloc(Packet, packets_count);
             errdefer context.allocator.free(context.packets);
 
-            log.debug("init: parsing vsr addresses.", .{});
+            log.debug("{}: init: parsing vsr addresses", .{context.client_id});
             context.addresses = vsr.parse_addresses(context.allocator, addresses, config.replicas_max) catch |err| {
-                log.err("failed to parse vsr addresses: {}.", .{err});
+                log.err("failed to parse vsr addresses: {}", .{err});
                 return error.InvalidAddress;
             };
             errdefer context.allocator.free(context.addresses);
 
-            log.debug("init: initializing IO.", .{});
+            log.debug("{}: init: initializing IO", .{context.client_id});
             context.io = IO.init(32, 0) catch |err| {
-                log.err("failed to initialize IO: {}.", .{err});
+                log.err("failed to initialize IO: {}", .{err});
                 return switch (err) {
                     error.ProcessFdQuotaExceeded => error.SystemResources,
                     error.Unexpected => error.Unexpected,
@@ -114,19 +128,16 @@ pub fn ContextType(
             };
             errdefer context.io.deinit();
 
-            log.debug("init: initializing MessagePool", .{});
-            context.message_pool = MessagePool.init(allocator, .client) catch |err| {
-                log.err("failed to initialize MessagePool: {}", .{err});
-                return err;
-            };
+            log.debug("{}: init: initializing MessagePool", .{context.client_id});
+            context.message_pool = try MessagePool.init(allocator, .client);
             errdefer context.message_pool.deinit(context.allocator);
 
-            log.debug("init: Initializing client(cluster_id={}, client_id={}, addresses={any})", .{
-                cluster_id,
+            log.debug("{}: init: initializing client (cluster_id={}, addresses={any})", .{
                 context.client_id,
+                cluster_id,
                 context.addresses,
             });
-            context.client = Client.init(
+            context.client = try Client.init(
                 allocator,
                 context.client_id,
                 cluster_id,
@@ -136,10 +147,7 @@ pub fn ContextType(
                     .configuration = context.addresses,
                     .io = &context.io,
                 },
-            ) catch |err| {
-                log.err("failed to initalize client: {}", .{err});
-                return err;
-            };
+            );
             errdefer context.client.deinit(context.allocator);
 
             context.messages_available = config.client_request_queue_max;
@@ -150,13 +158,8 @@ pub fn ContextType(
                 .deinit_fn = Context.on_deinit,
             };
 
-            log.debug("init: initializing thread.", .{});
-            context.thread.init(
-                context,
-            ) catch |err| {
-                log.err("failed to initalize thread: {}", .{err});
-                return err;
-            };
+            log.debug("{}: init: initializing thread", .{context.client_id});
+            try context.thread.init(context);
             errdefer context.thread.deinit(context.allocator);
 
             return context;
@@ -180,10 +183,10 @@ pub fn ContextType(
 
         pub fn run(self: *Context) void {
             while (!self.thread.signal.is_shutdown()) {
-                self.client.tick();
+                self.tick();
                 self.io.run_for_ns(config.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("IO.run() failed with {}", .{err});
-                    @panic("IO.run() failed.");
+                    @panic("IO.run() failed");
                 };
             }
         }
@@ -194,7 +197,7 @@ pub fn ContextType(
             self.messages_available -= 1;
 
             // Get the size of each request structure in the packet.data:
-            const event_size: usize = Client.operation_event_size(packet.operation) orelse {
+            const event_size: usize = operation_event_size(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
             };
 
@@ -221,13 +224,17 @@ pub fn ContextType(
                     .packet = packet,
                 }),
                 Context.on_result,
-                @intToEnum(Client.Operation, packet.operation),
+                @intToEnum(Client.StateMachine.Operation, packet.operation),
                 message,
                 wrote,
             );
         }
 
-        fn on_result(raw_user_data: u128, op: Client.Operation, results: Client.Error![]const u8) void {
+        fn on_result(
+            raw_user_data: u128,
+            op: Client.StateMachine.Operation,
+            results: Client.Error![]const u8,
+        ) void {
             const user_data = @bitCast(UserData, raw_user_data);
             const self = user_data.self;
             const packet = user_data.packet;
@@ -241,8 +248,8 @@ pub fn ContextType(
             packet: *Packet,
             result: PacketError![]const u8,
         ) void {
-            assert(self.messages_available < message_pool.messages_max_client);
             self.messages_available += 1;
+            assert(self.messages_available <= config.client_request_queue_max);
 
             // Signal to resume sending requests that was waiting for available messages.
             if (self.messages_available == 1) self.thread.signal.notify();

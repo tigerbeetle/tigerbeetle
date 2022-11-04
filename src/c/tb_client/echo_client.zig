@@ -10,18 +10,21 @@ const RingBuffer = @import("../../ring_buffer.zig").RingBuffer;
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = @import("../../message_pool.zig").MessagePool.Message;
 
-pub fn EchoClient(comptime StateMachine: type, comptime MessageBus: type) type {
+pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {
         const Self = @This();
 
-        pub const Operation = StateMachine.Operation;
+        // Exposing the same types the real client does:
+        pub usingnamespace blk: {
+            const Client = @import("../../vsr/client.zig").Client(StateMachine_, MessageBus);
+            break :blk struct {
+                pub const StateMachine = Client.StateMachine;
+                pub const Error = Client.Error;
+                pub const Request = Client.Request;
+            };
+        };
 
-        const Client = @import("../../vsr/client.zig").Client(StateMachine, MessageBus);
-        pub const Error = Client.Error;
-        pub const Request = Client.Request;
-        pub const operation_event_size = Client.operation_event_size;
-
-        request_queue: RingBuffer(Request, config.client_request_queue_max, .array) = .{},
+        request_queue: RingBuffer(Self.Request, config.client_request_queue_max, .array) = .{},
         message_pool: *MessagePool,
 
         pub fn init(
@@ -44,21 +47,20 @@ pub fn EchoClient(comptime StateMachine: type, comptime MessageBus: type) type {
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            _ = self;
             _ = allocator;
+            // Drains all pending requests before deiniting.
+            self.reply();
         }
 
         pub fn tick(self: *Self) void {
-            while (self.request_queue.count > 0) {
-                self.on_reply();
-            }
+            self.reply();
         }
 
         pub fn request(
             self: *Self,
             user_data: u128,
-            callback: Request.Callback,
-            operation: Operation,
+            callback: Self.Request.Callback,
+            operation: Self.StateMachine.Operation,
             message: *Message,
             message_body_size: usize,
         ) void {
@@ -67,7 +69,7 @@ pub fn EchoClient(comptime StateMachine: type, comptime MessageBus: type) type {
                 .request = 0,
                 .cluster = 0,
                 .command = .request,
-                .operation = vsr.Operation.from(StateMachine, operation),
+                .operation = vsr.Operation.from(Self.StateMachine, operation),
                 .size = @intCast(u32, @sizeOf(Header) + message_body_size),
             };
 
@@ -91,15 +93,16 @@ pub fn EchoClient(comptime StateMachine: type, comptime MessageBus: type) type {
             self.message_pool.unref(message);
         }
 
-        fn on_reply(self: *Self) void {
-            const inflight = self.request_queue.pop().?;
-            defer self.message_pool.unref(inflight.message);
+        fn reply(self: *Self) void {
+            while (self.request_queue.pop()) |inflight| {
+                defer self.unref(inflight.message);
 
-            inflight.callback(
-                inflight.user_data,
-                inflight.message.header.operation.cast(StateMachine),
-                inflight.message.body(),
-            );
+                inflight.callback(
+                    inflight.user_data,
+                    inflight.message.header.operation.cast(Self.StateMachine),
+                    inflight.message.body(),
+                );
+            }
         }
     };
 }

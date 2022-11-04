@@ -27,7 +27,7 @@ fn RequestContextType(comptime request_size: comptime_int) type {
             context: usize,
             client: tb_client_t,
             packet: *tb_packet_t,
-            reply: ?[request_size]u8 = null,
+            reply: ?[request_size]u8,
         } = null,
 
         pub fn on_complete(
@@ -39,18 +39,19 @@ fn RequestContextType(comptime request_size: comptime_int) type {
         ) callconv(.C) void {
             var self = @intToPtr(*@This(), packet.user_data);
             defer self.completion.complete();
+
             self.result = .{
                 .context = context,
                 .client = client,
                 .packet = packet,
+                .reply = if (result_ptr != null and result_len > 0) blk: {
+                    // Copy the message's body to the context buffer:
+                    assert(result_len == request_size);
+                    var buffer: [request_size]u8 = undefined;
+                    std.mem.copy(u8, &buffer, result_ptr.?[0..result_len]);
+                    break :blk buffer;
+                } else null,
             };
-
-            // Copy the message's body to the context buffer:
-            if (result_ptr != null and result_len > 0) {
-                assert(result_len == request_size);
-                self.result.?.reply = [_]u8{0} ** request_size;
-                std.mem.copy(u8, &self.result.?.reply.?, result_ptr.?[0..result_len]);
-            }
         }
     };
 }
@@ -81,19 +82,20 @@ const Completion = struct {
     }
 };
 
-// When initialized with tb_client_echo_init, the c_client uses a test context that echoes the data back
-// without creating an actual client or connecting to a cluster.
+// When initialized with tb_client_init_echo, the c_client uses a test context that echoes
+// the data back without creating an actual client or connecting to a cluster.
 //
 // This same test should be implemented by all the target programming languages, asserting that:
-// 1. the c_client threading/signaling mechanism was initialized correctly.
-// 2. the client usage is correct, and they can submit and receive messages through the completion callback.
-// 3. the data marshaling is correct, and exactly the same data sent was received back, no matter the message length.
+// 1. the c_client api was initialized correctly.
+// 2. the application can submit messages and receive replies through the completion callback.
+// 3. the data marshaling is correct, and exactly the same data sent was received back.
 test "c_client echo" {
     const tb_completion_ctx: usize = 42;
     var client: api.tb_client_t = undefined;
     var packet_list: api.tb_packet_list_t = undefined;
 
-    // We ensure that the retry mechanism is being tested by allowing more simultaneous packets than "client_request_queue_max".
+    // We ensure that the retry mechanism is being tested
+    // by allowing more simultaneous packets than "client_request_queue_max".
     const num_packets = config.client_request_queue_max * 2;
 
     // Using the create_accounts operation for this test.
@@ -103,7 +105,7 @@ test "c_client echo" {
     // Initializing an echo client for testing purposes.
     const cluster_id = 0;
     const address = "3000";
-    const result = api.tb_client_echo_init(
+    const result = api.tb_client_init_echo(
         &client,
         &packet_list,
         cluster_id,

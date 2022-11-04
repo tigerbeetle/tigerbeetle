@@ -86,7 +86,7 @@ pub export fn tb_client_init(
     );
 }
 
-pub export fn tb_client_echo_init(
+pub export fn tb_client_init_echo(
     out_client: *tb_client_t,
     out_packets: *tb_packet_list_t,
     cluster_id: u32,

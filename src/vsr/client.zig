@@ -12,11 +12,11 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 
 const log = std.log.scoped(.client);
 
-pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
+pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {
         const Self = @This();
 
-        pub const Operation = StateMachine.Operation;
+        pub const StateMachine = StateMachine_;
 
         pub const Error = error{
             TooManyOutstandingRequests,
@@ -25,30 +25,13 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
         pub const Request = struct {
             pub const Callback = fn (
                 user_data: u128,
-                operation: Operation,
+                operation: StateMachine.Operation,
                 results: Error![]const u8,
             ) void;
             user_data: u128,
             callback: Callback,
             message: *Message,
         };
-
-        pub fn operation_event_size(op: u8) ?usize {
-            const allowed_operations = [_]Operation{
-                .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-            };
-
-            inline for (allowed_operations) |operation| {
-                if (op == @enumToInt(operation)) {
-                    return @sizeOf(StateMachine.Event(operation));
-                }
-            }
-
-            return null;
-        }
 
         allocator: mem.Allocator,
         message_bus: MessageBus,
@@ -203,7 +186,7 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             self: *Self,
             user_data: u128,
             callback: Request.Callback,
-            operation: Operation,
+            operation: StateMachine.Operation,
             message: *Message,
             message_body_size: usize,
         ) void {

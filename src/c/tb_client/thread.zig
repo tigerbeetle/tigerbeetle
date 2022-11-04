@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const config = @import("../../config.zig");
-const log = std.log.scoped(.tb_client);
+const log = std.log.scoped(.tb_client_thread);
 
 const Packet = @import("packet.zig").Packet;
 const Signal = @import("signal.zig").Signal;
@@ -29,16 +29,13 @@ pub fn ThreadType(
             self.retry = .{};
             self.submitted = .{};
 
-            log.debug("init: initializing Signal.", .{});
-            self.signal.init(&context.io, Self.on_signal) catch |err| {
-                log.err("failed to initialize Signal: {}.", .{err});
-                return err;
-            };
+            log.debug("init: initializing signal", .{});
+            try self.signal.init(&context.io, Self.on_signal);
             errdefer self.signal.deinit();
 
-            log.debug("init: spawning Context thread.", .{});
+            log.debug("init: spawning thread", .{});
             self.thread = std.Thread.spawn(.{}, Context.run, .{context}) catch |err| {
-                log.err("failed to spawn context thread: {}.", .{err});
+                log.err("failed to spawn thread: {}", .{err});
                 return switch (err) {
                     error.Unexpected => error.Unexpected,
                     error.OutOfMemory => error.OutOfMemory,

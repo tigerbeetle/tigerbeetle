@@ -209,6 +209,17 @@ TB_STATUS tb_client_init(
     void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
 );
 
+TB_STATUS tb_client_init_echo(
+    tb_client_t* out_client,
+    tb_packet_list_t* out_packets,
+    uint32_t cluster_id,
+    const char* address_ptr,
+    uint32_t address_len,
+    uint32_t num_packets,
+    uintptr_t on_completion_ctx,
+    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
+);
+
 void tb_client_submit(
     tb_client_t client,
     tb_packet_list_t* packets
