@@ -38,6 +38,10 @@ pub fn build(b: *std.build.Builder) void {
         const unit_tests = b.addTest("src/unit_tests.zig");
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
+        
+        // for src/c/test.zig to use cImport on tb_client.h
+        unit_tests.linkLibC();
+        unit_tests.addIncludeDir("src/c/");
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
