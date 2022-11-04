@@ -28,10 +28,12 @@ const log = std.log.scoped(.manifest_log);
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+const util = @import("../util.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("grid.zig").GridType;
 const BlockType = @import("grid.zig").BlockType;
+const tree = @import("tree.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 /// ManifestLog block schema:
@@ -93,14 +95,31 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert((entry_count_max * @sizeOf(TableInfo)) % alignment == 0);
         }
 
+        /// The maximum number of table updates to the manifest by a half-measure of compaction.
+        const compaction_tables_max = tree.compactions_max * (
+            tree.compaction_tables_input_max +
+            tree.compaction_tables_output_max);
+
+        /// The upper-bound of manifest log blocks we must buffer.
+        /// `blocks` must have sufficient capacity for:
+        /// - table updates from a half bar of compactions. (This is typically +1 block, but may
+        ///   be more when the block size is small).
+        /// - a manifest log compaction (+1 block in the worst case).
+        /// - a leftover open block from the previous ops (+1 block).
+        const blocks_count_max = 1 + 1 + util.div_ceil(compaction_tables_max, entry_count_max);
+
+        comptime{
+            assert(blocks_count_max >= 3);
+            assert(blocks_count_max == 3 or config.block_size < 64 * 1024);
+        }
+
         superblock: *SuperBlock,
         grid: *Grid,
         tree_hash: u128,
 
         /// The head block is used to accumulate a full block, to be written at the next flush.
         /// The remaining blocks must accommodate all further appends.
-        // TODO Assert the relation between the number of blocks, and flush/compact/append.
-        blocks: RingBuffer(BlockPtr, 3, .array),
+        blocks: RingBuffer(BlockPtr, blocks_count_max, .array),
 
         /// The number of blocks that have been appended to, filled up, and then closed.
         blocks_closed: u8 = 0,
@@ -131,26 +150,21 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         pub fn init(allocator: mem.Allocator, grid: *Grid, tree_hash: u128) !ManifestLog {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
 
-            const a = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
-            errdefer allocator.free(a);
+            var blocks: [blocks_count_max]BlockPtr = undefined;
+            for (blocks) |*block, i| {
+                errdefer for (blocks[0..i]) |b| allocator.free(b);
 
-            const b = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
-            errdefer allocator.free(b);
-
-            const c = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
-            errdefer allocator.free(b);
+                const block_slice =
+                    try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
+                block.* = block_slice[0..config.block_size];
+            }
+            errdefer for (blocks) |b| allocator.free(b);
 
             return ManifestLog{
                 .superblock = grid.superblock,
                 .grid = grid,
                 .tree_hash = tree_hash,
-                .blocks = .{
-                    .buffer = .{
-                        a[0..config.block_size],
-                        b[0..config.block_size],
-                        c[0..config.block_size],
-                    },
-                },
+                .blocks = .{ .buffer = blocks },
             };
         }
 

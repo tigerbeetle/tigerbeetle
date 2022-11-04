@@ -152,10 +152,26 @@ fn generate_events(
 
     var entry_count: usize = 0;
     for (events) |*event, i| {
-        event.* = if (entry_count == entries_max_buffered)
-            // We must compact or checkpoint periodically to avoid overfilling the ManifestLog.
-            if (random.boolean()) ManifestEvent{ .compact = {} } else ManifestEvent{ .checkpoint = {} }
-        else switch (fuzz.random_enum(random, EventType, event_distribution)) {
+        const event_type = blk: {
+            if (entry_count == entries_max_buffered) {
+                // We must compact or checkpoint periodically to avoid overfilling the ManifestLog.
+                break :blk if (random.boolean()) EventType.compact else EventType.checkpoint;
+            }
+
+            const event_type_random = fuzz.random_enum(random, EventType, event_distribution);
+            if (tables.items.len == 0) {
+                if (event_type_random == .insert_change_level or
+                    event_type_random == .insert_change_snapshot or
+                    event_type_random == .remove)
+                {
+                    break :blk .insert_new;
+                }
+            }
+
+            break :blk event_type_random;
+        };
+
+        event.* = switch (event_type) {
             .insert_new => insert: {
                 const level = random.uintLessThan(u7, config.lsm_levels);
                 const table = .{
@@ -177,7 +193,6 @@ fn generate_events(
             },
 
             .insert_change_level => insert: {
-                if (tables.items.len == 0) break :insert ManifestEvent{ .noop = {} };
                 const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
                 if (table.level == config.lsm_levels - 1) break :insert ManifestEvent{ .noop = {} };
 
@@ -189,8 +204,6 @@ fn generate_events(
             },
 
             .insert_change_snapshot => insert: {
-                if (tables.items.len == 0) break :insert ManifestEvent{ .noop = {} };
-
                 const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
                 table.table.snapshot_max += 1;
                 break :insert ManifestEvent{ .insert = .{
@@ -200,8 +213,6 @@ fn generate_events(
             },
 
             .remove => remove: {
-                if (tables.items.len == 0) break :remove ManifestEvent{ .noop = {} };
-
                 const table = tables.swapRemove(random.uintLessThan(usize, tables.items.len));
                 break :remove ManifestEvent{ .remove = .{
                     .level = table.level,
@@ -215,9 +226,12 @@ fn generate_events(
 
         switch (event.*) {
             .compact => {
-                if (entry_count >= entries_max_buffered) {
+                while (entry_count >= entries_max_buffered) {
                     entry_count -= entries_max_per_block;
                 }
+                // In the worst case, we add back an (almost) whole block of entries.
+                // -1 because at least one of its entries will be dropped by the log compaction.
+                entry_count += entries_max_per_block - 1;
             },
             .checkpoint => entry_count = 0,
             .noop => {},
@@ -359,6 +373,9 @@ const Environment = struct {
     }
 
     fn checkpoint(env: *Environment) !void {
+        // Checkpoint always follows compaction.
+        try env.compact();
+
         try env.manifest_log_model.checkpoint();
 
         env.pending += 1;
@@ -430,10 +447,6 @@ const Environment = struct {
         assert(env.manifest_log_opening == null);
         env.manifest_log_opening = try env.manifest_log_model.tables.clone();
         defer {
-            var it = env.manifest_log_opening.?.iterator();
-            while (it.next()) |kv| {
-                std.debug.print("K={} V={}\n", .{ kv.key_ptr.*, kv.value_ptr.* });
-            }
             assert(env.manifest_log_opening.?.count() == 0);
             env.manifest_log_opening.?.deinit();
             env.manifest_log_opening = null;
@@ -487,13 +500,14 @@ const Environment = struct {
 };
 
 const ManifestLogModel = struct {
-    /// Stores the checkpointed version of every table.
+    /// Stores the latest checkpointed version of every table.
     /// Indexed by table address.
     const TableMap = std.AutoHashMap(u64, struct {
         level: u7,
         table: TableInfo,
     });
 
+    /// Stores table updates that are not yet checkpointed.
     const AppendList = std.ArrayList(struct {
         event: enum { insert, remove },
         level: u7,
