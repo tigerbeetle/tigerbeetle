@@ -250,8 +250,13 @@ pub fn ThreadType(
                 return self.on_complete(packet, error.InvalidOperation);
             };
 
+            // Make sure there's packet.data
+            const data_ptr = packet.data orelse {
+                return self.on_complete(packet, error.InvalidDataSize);
+            };
+
             // Make sure the packet.data size is correct.
-            const readable = packet.data[0..packet.data_size];
+            const readable = @ptrCast([*]const u8, data_ptr)[0..packet.data_size];
             if (readable.len == 0 or readable.len % request_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
