@@ -193,9 +193,11 @@ typedef enum TB_STATUS {
     TB_STATUS_SUCCESS = 0,
     TB_STATUS_UNEXPECTED = 1,
     TB_STATUS_OUT_OF_MEMORY = 2,
-    TB_STATUS_INVALID_ADDRESS = 3,
-    TB_STATUS_SYSTEM_RESOURCES = 4,
-    TB_STATUS_NETWORK_SUBSYSTEM = 5,
+    TB_STATUS_ADDRESS_INVALID = 3,
+    TB_STATUS_ADDRESS_LIMIT_EXCEEDED = 4,
+    TB_STATUS_PACKETS_COUNT_INVALID = 5,
+    TB_STATUS_SYSTEM_RESOURCES = 6,
+    TB_STATUS_NETWORK_SUBSYSTEM = 7,
 } TB_STATUS;
 
 TB_STATUS tb_client_init(
@@ -204,7 +206,7 @@ TB_STATUS tb_client_init(
     uint32_t cluster_id,
     const char* address_ptr,
     uint32_t address_len,
-    uint32_t num_packets,
+    uint32_t packets_count,
     uintptr_t on_completion_ctx,
     void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
 );
@@ -215,7 +217,7 @@ TB_STATUS tb_client_init_echo(
     uint32_t cluster_id,
     const char* address_ptr,
     uint32_t address_len,
-    uint32_t num_packets,
+    uint32_t packets_count,
     uintptr_t on_completion_ctx,
     void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
 );

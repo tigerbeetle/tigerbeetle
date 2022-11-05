@@ -176,6 +176,61 @@ test "c_client echo" {
     }
 }
 
+// Asserts the validation rules associated with the "TB_STATUS" enum.
+test "c_client tb_status" {
+    const assert_status = struct {
+        pub fn action(
+            packets_count: u32,
+            addresses: []const u8,
+            expected_status: c_uint,
+        ) !void {
+            var tb_client: c.tb_client_t = undefined;
+            var tb_packet_list: c.tb_packet_list_t = undefined;
+            const cluster_id = 0;
+            const tb_context: usize = 0;
+            const result = c.tb_client_init_echo(
+                &tb_client,
+                &tb_packet_list,
+                cluster_id,
+                addresses.ptr,
+                @intCast(u32, addresses.len),
+                packets_count,
+                tb_context,
+                RequestContextType(0).on_complete,
+            );
+            defer if (result == c.TB_STATUS_SUCCESS) c.tb_client_deinit(tb_client);
+
+            try testing.expectEqual(expected_status, result);
+        }
+    }.action;
+
+    // Valid addresses and packets count should return TB_STATUS_SUCCESS:
+    try assert_status(1, "3000", c.TB_STATUS_SUCCESS);
+    try assert_status(32, "127.0.0.1", c.TB_STATUS_SUCCESS);
+    try assert_status(128, "127.0.0.1:3000", c.TB_STATUS_SUCCESS);
+    try assert_status(512, "3000,3001,3002", c.TB_STATUS_SUCCESS);
+    try assert_status(1024, "127.0.0.1,127.0.0.2,172.0.0.3", c.TB_STATUS_SUCCESS);
+    try assert_status(4096, "127.0.0.1:3000,127.0.0.1:3002,127.0.0.1:3003", c.TB_STATUS_SUCCESS);
+
+    // Invalid or empty address should return "TB_STATUS_ADDRESS_INVALID":
+    try assert_status(1, "invalid", c.TB_STATUS_ADDRESS_INVALID);
+    try assert_status(1, "", c.TB_STATUS_ADDRESS_INVALID);
+
+    // More addresses thant "replicas_max" should return "TB_STATUS_ADDRESS_LIMIT_EXCEEDED":
+    try assert_status(
+        1,
+        ("3000," ** config.replicas_max) ++ "3001",
+        c.TB_STATUS_ADDRESS_LIMIT_EXCEEDED,
+    );
+
+    // Packets count zero or greater than 4096 should return "TB_STATUS_INVALID_PACKETS_COUNT":
+    try assert_status(0, "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
+    try assert_status(std.math.maxInt(u16), "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
+    try assert_status(std.math.maxInt(u32), "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
+
+    // All other status are not testable.
+}
+
 // Asserts the validation rules associated with the "TB_PACKET_STATUS" enum.
 test "c_client tb_packet_status" {
     const RequestContext = RequestContextType(config.message_body_size_max);
@@ -200,14 +255,12 @@ test "c_client tb_packet_status" {
     try testing.expectEqual(@as(c_uint, c.TB_STATUS_SUCCESS), result);
     defer c.tb_client_deinit(tb_client);
 
-    var validator: struct {
-        client: c.tb_client_t,
-        packet_list: *Packet.List,
-
+    const assert_result = struct {
         // Asserts if the packet's status matches the expected status
         // for a given operation and request_size.
-        pub fn assert(
-            self: *@This(),
+        pub fn action(
+            client: c.tb_client_t,
+            packet_list: *Packet.List,
             operation: u8,
             request_size: u32,
             tb_packet_status_expected: c_int,
@@ -219,7 +272,7 @@ test "c_client tb_packet_status" {
             };
 
             request.packet = blk: {
-                var packet = self.packet_list.pop().?;
+                var packet = packet_list.pop().?;
                 packet.operation = operation;
                 packet.user_data = &request;
                 packet.data = &request.sent_data;
@@ -228,60 +281,90 @@ test "c_client tb_packet_status" {
                 packet.status = .ok;
                 break :blk packet;
             };
+            defer packet_list.push(Packet.List.from(request.packet));
 
             var list = @bitCast(c.tb_packet_list_t, Packet.List.from(request.packet));
-            c.tb_client_submit(self.client, &list);
+            c.tb_client_submit(client, &list);
 
             completion.wait_pending();
 
-            defer self.packet_list.push(Packet.List.from(request.packet));
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
-            try testing.expectEqual(self.client, request.reply.?.tb_client);
+            try testing.expectEqual(client, request.reply.?.tb_client);
             try testing.expectEqual(@ptrToInt(request.packet), @ptrToInt(request.reply.?.tb_packet));
             try testing.expectEqual(tb_packet_status_expected, @enumToInt(request.packet.status));
         }
-    } = .{
-        .client = tb_client,
-        .packet_list = @ptrCast(*Packet.List, &tb_packet_list),
-    };
+    }.action;
+
+    var packet_list = @ptrCast(*Packet.List, &tb_packet_list);
 
     // Messages larger than config.message_body_size_max should return "too_much_data":
-    try validator.assert(
+    try assert_result(
+        tb_client,
+        packet_list,
         c.TB_OP_CREATE_TRANSFERS,
         config.message_body_size_max + @sizeOf(c.tb_transfer_t),
         c.TB_PACKET_TOO_MUCH_DATA,
     );
 
     // All reserved and unknown operations should return "invalid_operation":
-    try validator.assert(0, 0, c.TB_PACKET_INVALID_OPERATION);
-    try validator.assert(1, 0, c.TB_PACKET_INVALID_OPERATION);
-    try validator.assert(2, 0, c.TB_PACKET_INVALID_OPERATION);
-    try validator.assert(99, 0, c.TB_PACKET_INVALID_OPERATION);
+    try assert_result(
+        tb_client,
+        packet_list,
+        0,
+        @sizeOf(u128),
+        c.TB_PACKET_INVALID_OPERATION,
+    );
+    try assert_result(
+        tb_client,
+        packet_list,
+        1,
+        @sizeOf(u128),
+        c.TB_PACKET_INVALID_OPERATION,
+    );
+    try assert_result(
+        tb_client,
+        packet_list,
+        2,
+        @sizeOf(u128),
+        c.TB_PACKET_INVALID_OPERATION,
+    );
+    try assert_result(
+        tb_client,
+        packet_list,
+        99,
+        @sizeOf(u128),
+        c.TB_PACKET_INVALID_OPERATION,
+    );
 
     // Messages length 0 or not a multiple of the event size
     // should return "invalid_data_size":
-    try validator.assert(
+    try assert_result(
+        tb_client,
+        packet_list,
         c.TB_OP_CREATE_ACCOUNTS,
         0,
         c.TB_PACKET_INVALID_DATA_SIZE,
     );
-
-    try validator.assert(
+    try assert_result(
+        tb_client,
+        packet_list,
         c.TB_OP_CREATE_TRANSFERS,
         @sizeOf(c.tb_transfer_t) - 1,
         c.TB_PACKET_INVALID_DATA_SIZE,
     );
-
-    try validator.assert(
+    try assert_result(
+        tb_client,
+        packet_list,
         c.TB_OP_LOOKUP_TRANSFERS,
         @sizeOf(u128) + 1,
         c.TB_PACKET_INVALID_DATA_SIZE,
     );
-
-    try validator.assert(
+    try assert_result(
+        tb_client,
+        packet_list,
         c.TB_OP_LOOKUP_ACCOUNTS,
-        (@sizeOf(u128) * 10) - 1,
+        @sizeOf(u128) * 2.5,
         c.TB_PACKET_INVALID_DATA_SIZE,
     );
 }

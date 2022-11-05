@@ -10,7 +10,9 @@ pub const tb_status_t = enum(c_int) {
     success = 0,
     unexpected,
     out_of_memory,
-    invalid_address,
+    address_invalid,
+    address_limit_exceeded,
+    packets_count_invalid,
     system_resources,
     network_subsystem,
 };
@@ -69,7 +71,7 @@ pub export fn tb_client_init(
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
-    num_packets: u32,
+    packets_count: u32,
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
 ) tb_status_t {
@@ -80,7 +82,7 @@ pub export fn tb_client_init(
         cluster_id,
         addresses_ptr,
         addresses_len,
-        num_packets,
+        packets_count,
         on_completion_ctx,
         on_completion_fn,
     );
@@ -92,7 +94,7 @@ pub export fn tb_client_init_echo(
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
-    num_packets: u32,
+    packets_count: u32,
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
 ) tb_status_t {
@@ -103,7 +105,7 @@ pub export fn tb_client_init_echo(
         cluster_id,
         addresses_ptr,
         addresses_len,
-        num_packets,
+        packets_count,
         on_completion_ctx,
         on_completion_fn,
     );
@@ -116,7 +118,7 @@ fn init(
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
-    num_packets: u32,
+    packets_count: u32,
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
 ) tb_status_t {
@@ -125,13 +127,15 @@ fn init(
         global_allocator,
         cluster_id,
         addresses,
-        num_packets,
+        packets_count,
         on_completion_ctx,
         on_completion_fn,
     ) catch |err| switch (err) {
         error.Unexpected => return .unexpected,
         error.OutOfMemory => return .out_of_memory,
-        error.InvalidAddress => return .invalid_address,
+        error.AddressInvalid => return .address_invalid,
+        error.AddressLimitExceeded => return .address_limit_exceeded,
+        error.PacketsCountInvalid => return .packets_count_invalid,
         error.SystemResources => return .system_resources,
         error.NetworkSubsystemFailed => return .network_subsystem,
     };

@@ -32,7 +32,9 @@ pub const ContextImplementation = struct {
 
 pub const Error = std.mem.Allocator.Error || error{
     Unexpected,
-    InvalidAddress,
+    AddressInvalid,
+    AddressLimitExceeded,
+    PacketsCountInvalid,
     SystemResources,
     NetworkSubsystemFailed,
 };
@@ -106,17 +108,23 @@ pub fn ContextType(
             context.client_id = std.crypto.random.int(u128);
             log.debug("{}: init: initializing", .{context.client_id});
 
+            const packets_count_max = 4096;
+            if (packets_count == 0 or packets_count > packets_count_max) {
+                return error.PacketsCountInvalid;
+            }
+
             log.debug("{}: init: allocating tb_packets", .{context.client_id});
             context.packets = try context.allocator.alloc(Packet, packets_count);
             errdefer context.allocator.free(context.packets);
 
-            log.debug("{}: init: parsing vsr addresses", .{context.client_id});
-            context.addresses = vsr.parse_addresses(context.allocator, addresses, config.replicas_max) catch |err| {
-                log.err("{}: failed to parse vsr addresses: {s}", .{
-                    context.client_id,
-                    @errorName(err),
-                });
-                return error.InvalidAddress;
+            log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
+            context.addresses = vsr.parse_addresses(
+                context.allocator,
+                addresses,
+                config.replicas_max,
+            ) catch |err| return switch (err) {
+                error.AddressLimitExceeded => error.AddressLimitExceeded,
+                else => error.AddressInvalid,
             };
             errdefer context.allocator.free(context.addresses);
 
