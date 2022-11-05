@@ -188,7 +188,7 @@ pub fn GridType(comptime Storage: type) type {
             // We will reject incoming data before it reaches the point
             // where storage is full, so this assertion is safe.
             const reservation = grid.superblock.free_set.reserve(1).?;
-            defer grid.superblock.free_set.forfeit();
+            defer grid.superblock.free_set.forfeit(reservation);
 
             return grid.superblock.free_set.acquire(reservation).?;
         }

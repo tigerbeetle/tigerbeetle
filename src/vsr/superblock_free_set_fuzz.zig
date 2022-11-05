@@ -57,7 +57,7 @@ fn run_fuzz(
             .forfeit => {
                 random.shuffle(Reservation, active_reservations.items);
                 for (active_reservations.items) |reservation| {
-                    free_set.forfeit();
+                    free_set.forfeit(reservation);
                     free_set_model.forfeit(reservation);
                 }
                 active_reservations.clearRetainingCapacity();
@@ -85,7 +85,7 @@ fn run_fuzz(
             .checkpoint => {
                 random.shuffle(Reservation, active_reservations.items);
                 for (active_reservations.items) |reservation| {
-                    free_set.forfeit();
+                    free_set.forfeit(reservation);
                     free_set_model.forfeit(reservation);
                 }
                 active_reservations.clearRetainingCapacity();
@@ -171,6 +171,7 @@ const FreeSetModel = struct {
     blocks_reserved: std.DynamicBitSetUnmanaged,
 
     reservation_count: usize = 0,
+    reservation_session: usize = 1,
 
     fn init(allocator: std.mem.Allocator, blocks_count: usize) !FreeSetModel {
         var blocks_acquired = try std.DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
@@ -253,6 +254,7 @@ const FreeSetModel = struct {
                 return Reservation{
                     .block_base = block_base,
                     .block_count = block_count,
+                    .session = set.reservation_session,
                 };
             }
         }
@@ -267,11 +269,17 @@ const FreeSetModel = struct {
         while (i < reservation.block_count) : (i += 1) {
             set.blocks_reserved.unset(reservation.block_base + i);
         }
+
+        if (set.reservation_count == 0) {
+            set.reservation_session +%= 1;
+            assert(set.blocks_reserved.count() == 0);
+        }
     }
 
     pub fn acquire(set: *FreeSetModel, reservation: Reservation) ?u64 {
         assert(reservation.block_count > 0);
         assert(reservation.block_base < set.blocks_acquired.capacity());
+        assert(reservation.session == set.reservation_session);
         set.assert_reservation_active(reservation);
 
         var iterator = set.blocks_acquired.iterator(.{ .kind = .unset });
@@ -314,6 +322,7 @@ const FreeSetModel = struct {
 
     fn assert_reservation_active(set: FreeSetModel, reservation: Reservation) void {
         assert(set.reservation_count > 0);
+        assert(set.reservation_session == reservation.session);
 
         var i: usize = 0;
         while (i < reservation.block_count) : (i += 1) {
