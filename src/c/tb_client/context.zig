@@ -217,7 +217,7 @@ pub fn ContextType(
             }
 
             // Make sure the packet.data wouldn't overflow a message:
-            const writable = message.buffer[@sizeOf(Header)..];
+            const writable = message.buffer[@sizeOf(Header)..][0..config.message_body_size_max];
             if (readable.len > writable.len) {
                 return self.on_complete(packet, error.TooMuchData);
             }
