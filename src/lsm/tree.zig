@@ -498,6 +498,21 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             tree.compaction_op = op;
 
+            if (op < config.lsm_batch_multiple) {
+                // There is nothing to compact for the first measure.
+                // We skip the main compaction code path first compaction bar entirely because it
+                // is a special case — its first beat is 1, not 0.
+
+                tree.lookup_snapshot_max = op + 1;
+                if (op + 1 == config.lsm_batch_multiple) {
+                    tree.compact_mutable_table_into_immutable();
+                }
+
+                // TODO Defer this callback until tick() to avoid stack growth.
+                callback(tree);
+                return;
+            }
+
             if (tree.grid.superblock.working.vsr_state.op_compacted(op)) {
                 // We recovered from a checkpoint, and must avoid replaying one bar of
                 // compactions that were applied before the checkpoint. Repeating these ops'
@@ -579,6 +594,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             );
 
             assert(range.table_count >= 1);
+            assert(range.table_count <= compaction_tables_input_max);
             assert(compare_keys(range.key_min, tree.table_immutable.key_min()) != .gt);
             assert(compare_keys(range.key_max, tree.table_immutable.key_max()) != .lt);
 
@@ -603,6 +619,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         }
 
         fn compact_start_table(tree: *Tree, op_min: u64, context: CompactionTableContext) void {
+            const compaction_beat = tree.compaction_op % half_bar_beat_count;
+            assert(compaction_beat == 0);
+
             assert(context.level_a < config.lsm_levels);
             assert(context.level_b < config.lsm_levels);
             assert(context.level_a + 1 == context.level_b);
@@ -610,15 +629,15 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // Do not start compaction if level A does not require compaction.
             const table_range = tree.manifest.compaction_table(context.level_a) orelse return;
             const table = table_range.table;
-            const range = table_range.range;
 
-            assert(range.table_count >= 1);
+            assert(table_range.range.table_count >= 1);
+            assert(table_range.range.table_count <= compaction_tables_input_max);
             assert(compare_keys(table.key_min, table.key_max) != .gt);
-            assert(compare_keys(range.key_min, table.key_min) != .gt);
-            assert(compare_keys(range.key_max, table.key_max) != .lt);
+            assert(compare_keys(table_range.range.key_min, table.key_min) != .gt);
+            assert(compare_keys(table_range.range.key_max, table.key_max) != .lt);
 
             log.debug(tree_name ++ ": compacting {d} tables from level {d} to level {d}", .{
-                range.table_count,
+                table_range.range.table_count,
                 context.level_a,
                 context.level_b,
             });
