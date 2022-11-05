@@ -780,6 +780,7 @@ pub const Storage = struct {
             vsr.Header,
             storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
         )[0];
+        assert(storage.memory_written.isSet(@divExact(block_offset, config.sector_size)));
         assert(block_header.valid_checksum());
         assert(block_header.size <= config.block_size);
 
