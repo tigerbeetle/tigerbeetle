@@ -547,6 +547,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             return true;
         }
 
+        pub fn reserve(manifest: *Manifest) void {
+            assert(manifest.compact_callback == null);
+            assert(manifest.checkpoint_callback == null);
+
+            manifest.manifest_log.reserve();
+        }
+
         pub fn compact(manifest: *Manifest, callback: Callback) void {
             assert(manifest.compact_callback == null);
             assert(manifest.checkpoint_callback == null);

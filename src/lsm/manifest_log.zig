@@ -101,20 +101,23 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             tree.compaction_tables_output_max);
 
         /// The upper-bound of manifest log blocks we must buffer.
+        ///
         /// `blocks` must have sufficient capacity for:
-        /// - table updates from a half bar of compactions. (This is typically +1 block, but may
-        ///   be more when the block size is small).
-        /// - a manifest log compaction (+1 block in the worst case).
-        /// - a leftover open block from the previous ops (+1 block).
+        /// - table updates from a half bar of compactions
+        ///   (This is typically +1 block, but may be more when the block size is small).
+        ///   TODO(Beat compaction): Only reserve enough for 1 beat.
+        /// - a manifest log compaction (+1 block in the worst case)
+        /// - a leftover open block from the previous ops (+1 block)
         const blocks_count_max = 1 + 1 + util.div_ceil(compaction_tables_max, entry_count_max);
 
-        comptime{
+        comptime {
             assert(blocks_count_max >= 3);
             assert(blocks_count_max == 3 or config.block_size < 64 * 1024);
         }
 
         superblock: *SuperBlock,
         grid: *Grid,
+        grid_reservation: ?Grid.Reservation = null,
         tree_hash: u128,
 
         /// The head block is used to accumulate a full block, to be written at the next flush.
@@ -442,11 +445,36 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.write_block();
         }
 
+        pub fn reserve(manifest_log: *ManifestLog) void {
+            assert(manifest_log.opened);
+            assert(!manifest_log.reading);
+            assert(!manifest_log.writing);
+            assert(manifest_log.read_callback == null);
+            assert(manifest_log.write_callback == null);
+            assert(manifest_log.grid_reservation == null);
+            // reserve() is called at the start of compaction, so we have:
+            // - at most 1 closed block, and
+            // - at most 1 open block
+            // due to the last log compaction plus a leftover partial block.
+            assert(manifest_log.blocks_closed <= 1);
+            assert(manifest_log.blocks.count <= manifest_log.blocks_closed + 1);
+
+            // TODO Make sure this cannot fail — before compaction begins verify that enough free
+            // blocks are available for all reservations.
+            // TODO Tighten this up. Some blocks are already acquired.
+            manifest_log.grid_reservation = manifest_log.grid.reserve(blocks_count_max).?;
+        }
+
         pub fn compact(manifest_log: *ManifestLog, callback: Callback) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
             assert(manifest_log.read_callback == null);
+            assert(manifest_log.grid_reservation != null);
+
+            const free_set = manifest_log.grid.superblock.free_set;
+            assert(free_set.count_free_reserved(manifest_log.grid_reservation.?) >= 1);
+
             manifest_log.read_callback = callback;
             manifest_log.flush(compact_flush_callback);
         }
@@ -458,12 +486,16 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
             assert(manifest_log.blocks_closed == 0);
+            assert(manifest_log.grid_reservation != null);
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
             // Compact a single manifest block — to minimize latency spikes, we want to do the bare
             // minimum of compaction work required.
-            // TODO Compact more than 1 block if fragmentation is outstripping the compaction rate.
+            // TODO Compact more than 1 block if fragmentation is outstripping the compaction rate
+            // (make sure to update the grid block reservation to account for this).
+            // Or maybe that can't happen, if half-measure of compactions can't rewrite more tables
+            // than fit in a single block.
             if (manifest.oldest_block_queued_for_compaction(manifest_log.tree_hash)) |block| {
                 assert(block.tree == manifest_log.tree_hash);
                 assert(block.address > 0);
@@ -480,6 +512,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 );
             } else {
                 manifest_log.read_callback = null;
+                manifest_log.grid.forfeit(manifest_log.grid_reservation.?);
+                manifest_log.grid_reservation = null;
                 callback(manifest_log);
             }
         }
@@ -545,6 +579,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(!manifest.queued_for_compaction(block_reference.address));
 
             manifest_log.grid.release(block_reference.address);
+            manifest_log.grid.forfeit(manifest_log.grid_reservation.?);
+            manifest_log.grid_reservation = null;
 
             const callback = manifest_log.read_callback.?;
             manifest_log.reading = false;
@@ -559,6 +595,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
             assert(manifest_log.write_callback == null);
+            assert(manifest_log.grid_reservation == null);
 
             manifest_log.writing = true;
             manifest_log.write_callback = callback;
@@ -587,7 +624,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             header.* = .{
                 .cluster = manifest_log.superblock.working.cluster,
-                .op = manifest_log.grid.acquire(),
+                .op = manifest_log.grid.acquire(manifest_log.grid_reservation.?),
                 .size = undefined,
                 .command = .block,
             };
