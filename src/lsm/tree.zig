@@ -558,6 +558,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 config.lsm_batch_multiple,
             });
 
+            if (start) tree.manifest.reserve();
+
             // Try to start compacting the immutable table.
             const even_levels = compaction_beat < half_bar_beat_count;
             if (even_levels) {

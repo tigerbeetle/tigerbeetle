@@ -121,6 +121,7 @@ pub fn CompactionType(
         };
 
         grid: *Grid,
+        grid_reservation: Grid.Reservation,
         range: Manifest.CompactionRange,
 
         /// `op_min` is the first op/beat of this compaction's half-bar.
@@ -165,6 +166,7 @@ pub fn CompactionType(
             return Compaction{
                 // Assigned by start()
                 .grid = undefined,
+                .grid_reservation = undefined,
                 .range = undefined,
                 .op_min = undefined,
                 .drop_tombstones = undefined,
@@ -227,6 +229,20 @@ pub fn CompactionType(
 
             compaction.* = .{
                 .grid = grid,
+                // Reserve enough blocks to write our output tables in the worst case:
+                // - no tombstones are dropped,
+                // - and no values are overwritten
+                // - all tables are full
+                //
+                // We must reserve before doing any async work so that the block acquisition order
+                // is deterministic (relative to other concurrent compactions).
+                // TODO The replica must stop accepting requests if it runs out of blocks/capacity,
+                // rather than panicking here.
+                // TODO(Compaction Pacing): Reserve smaller increments, at the start of each beat.
+                // (And likewise release the reservation at the end of each beat, instead of at the
+                // end of each half-bar).
+                // TODO(Move Table) Don't reserve these when we just move the table to the next level.
+                .grid_reservation = grid.reserve(range.table_count * Table.block_count_max).?,
                 .range = range,
                 .op_min = op_min,
                 .drop_tombstones = drop_tombstones,
@@ -441,7 +457,7 @@ pub fn CompactionType(
             {
                 compaction.table_builder.data_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(),
+                    .address = compaction.grid.acquire(compaction.grid_reservation),
                 });
 
                 // Mark the finished data block as writable for the next compact_tick() call.
@@ -457,7 +473,7 @@ pub fn CompactionType(
             {
                 compaction.table_builder.filter_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(),
+                    .address = compaction.grid.acquire(compaction.grid_reservation),
                 });
 
                 // Mark the finished filter block as writable for the next compact_tick() call.
@@ -473,7 +489,7 @@ pub fn CompactionType(
             {
                 const table = compaction.table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(),
+                    .address = compaction.grid.acquire(compaction.grid_reservation),
                     .snapshot_min = snapshot_min_for_table_output(compaction.op_min),
                     // TODO(Persistent Snapshots) set snapshot_max to the minimum snapshot_max of
                     // all the (original) input tables.
@@ -539,6 +555,10 @@ pub fn CompactionType(
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(compaction.merge_done);
+
+            // TODO(Beat Pacing) This should really be where the compaction callback is invoked,
+            // but currently that can occur multiple times per beat.
+            compaction.grid.forfeit(compaction.grid_reservation);
 
             compaction.status = .idle;
             compaction.merge_done = false;

@@ -264,6 +264,7 @@ const Environment = struct {
     manifest_log_verify: ManifestLog,
     manifest_log_model: ManifestLogModel,
     manifest_log_opening: ?ManifestLogModel.TableMap = null,
+    manifest_log_reserved: bool = false,
     pending: usize = 0,
 
     fn init(
@@ -333,8 +334,12 @@ const Environment = struct {
 
     fn open(env: *Environment) void {
         assert(env.pending == 0);
+        assert(!env.manifest_log_reserved);
+
         env.pending += 1;
         env.manifest_log.open(open_event, open_callback);
+        env.manifest_log.reserve();
+        env.manifest_log_reserved = true;
     }
 
     fn open_event(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
@@ -352,19 +357,30 @@ const Environment = struct {
     }
 
     fn insert(env: *Environment, level: u7, table: *const TableInfo) !void {
+        if (!env.manifest_log_reserved) env.manifest_log.reserve();
+        env.manifest_log_reserved = true;
+
         try env.manifest_log_model.insert(level, table);
         env.manifest_log.insert(level, table);
     }
 
     fn remove(env: *Environment, level: u7, table: *const TableInfo) !void {
+        if (!env.manifest_log_reserved) env.manifest_log.reserve();
+        env.manifest_log_reserved = true;
+
         try env.manifest_log_model.remove(level, table);
         env.manifest_log.remove(level, table);
     }
 
     fn compact(env: *Environment) !void {
+        if (!env.manifest_log_reserved) env.manifest_log.reserve();
+        env.manifest_log_reserved = true;
+
         env.pending += 1;
         env.manifest_log.compact(compact_callback);
         env.wait(&env.manifest_log);
+
+        env.manifest_log_reserved = false;
     }
 
     fn compact_callback(manifest_log: *ManifestLog) void {
