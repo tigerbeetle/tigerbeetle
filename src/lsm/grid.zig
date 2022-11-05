@@ -4,6 +4,7 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+const free_set = @import("../vsr/superblock_free_set.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
@@ -91,6 +92,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub const BlockPtr = *align(config.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+        pub const Reservation = free_set.Reservation;
 
         pub const Write = struct {
             callback: fn (*Grid.Write) void,
@@ -184,12 +186,19 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        pub fn acquire(grid: *Grid) u64 {
-            // We will reject incoming data before it reaches the point
-            // where storage is full, so this assertion is safe.
-            const reservation = grid.superblock.free_set.reserve(1).?;
-            defer grid.superblock.free_set.forfeit(reservation);
+        /// Returning null indicates that there are not enough free blocks to fill the reservation.
+        pub fn reserve(grid: *Grid, blocks_count: usize) ?Reservation {
+            return grid.superblock.free_set.reserve(blocks_count);
+        }
 
+        /// Forfeit a reservation.
+        pub fn forfeit(grid: *Grid, reservation: Reservation) void {
+            return grid.superblock.free_set.forfeit(reservation);
+        }
+
+        /// Returns a just-allocated block.
+        /// The caller is responsible for not acquiring more blocks than they reserved.
+        pub fn acquire(grid: *Grid, reservation: Reservation) u64 {
             return grid.superblock.free_set.acquire(reservation).?;
         }
 
