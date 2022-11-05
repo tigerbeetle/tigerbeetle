@@ -63,15 +63,20 @@ Invariants:
     * Allow the per-level table limits to overflow if needed (for example, if we may compact a table
       from level `A` to level `B`, where level `B` is already full).
     * Start compactions from even levels that have reached their table limit.
+    * Acquire reservations from the Free Set for all blocks (upper-bound) that will be written
+      during this half-bar.
 
 2. First half-bar, last beat:
     * Finish ticking any incomplete even-level compactions.
     * Assert on callback completion that all compactions are complete.
+    * Release reservations from the Free Set.
 
 3. Second half-bar, first beat ("middle beat"):
     * Assert no compactions are currently running.
     * Start compactions from odd levels that have reached their table limit.
     * Compact the immutable table if it contains any sorted values (it might be empty).
+    * Acquire reservations from the Free Set for all blocks (upper-bound) that will be written
+      during this half-bar.
 
 4. Second half-bar, last beat:
     * Finish ticking any incomplete odd-level and immutable table compactions.
@@ -79,6 +84,7 @@ Invariants:
     * Assert on callback completion that no level's table count overflows.
     * Flush, clear, and sort mutable table values into immutable table for next bar.
     * Remove input tables that are invisible to all current and persisted snapshots.
+    * Release reservations from the Free Set.
 
 ### Compaction Selection Policy
 
