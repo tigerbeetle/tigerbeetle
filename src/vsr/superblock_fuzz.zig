@@ -122,7 +122,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64) !void {
         if (!env.pending.contains(.checkpoint) and random.boolean()) {
             const range = env.superblock.free_set.reserve(1).?;
             _ = env.superblock.free_set.acquire(range).?;
-            env.superblock.free_set.reserve_done();
+            env.superblock.free_set.forfeit(range);
         }
     }
 }
