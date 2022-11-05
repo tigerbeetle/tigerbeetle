@@ -352,7 +352,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
         }
 
-        /// `flush` does not close a partial block; that is only necessary during `checkpoint`.
         fn flush(manifest_log: *ManifestLog, callback: Callback) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
@@ -366,6 +365,26 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 manifest_log.tree_hash,
                 manifest_log.blocks_closed,
             });
+
+            // The manifest is updated synchronously relative to the beginning of compact() and
+            // checkpoint() so that the SuperBlock.Manifest.append()s are deterministic relative
+            // to other trees' manifest logs.
+            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
+            var i: usize = 0;
+            while (i < manifest_log.blocks_closed) : (i += 1) {
+                const block = manifest_log.blocks.get_ptr(i).?.*;
+                verify_block(block, null, null);
+
+                const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+                const address = block_address(block);
+                assert(address > 0);
+
+                manifest.append(manifest_log.tree_hash, header.checksum, address);
+                if (block_entry_count(block) < entry_count_max) {
+                    manifest.queue_for_compaction(address);
+                }
+            }
+
             manifest_log.write_block();
         }
 
@@ -426,18 +445,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.opened);
             assert(manifest_log.writing);
 
-            const block = manifest_log.blocks.head().?;
-            verify_block(block, null, null);
-
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            const address = block_address(block);
-            assert(address > 0);
-
-            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
-
-            manifest.append(manifest_log.tree_hash, header.checksum, address);
-            if (block_entry_count(block) < entry_count_max) manifest.queue_for_compaction(address);
-
             manifest_log.blocks_closed -= 1;
             manifest_log.blocks.advance_head();
             assert(manifest_log.blocks_closed <= manifest_log.blocks.count);
@@ -465,11 +472,13 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.grid_reservation = manifest_log.grid.reserve(blocks_count_max).?;
         }
 
+        /// `compact` does not close a partial block; that is only necessary during `checkpoint`.
         pub fn compact(manifest_log: *ManifestLog, callback: Callback) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
             assert(manifest_log.read_callback == null);
+            assert(manifest_log.write_callback == null);
             assert(manifest_log.grid_reservation != null);
 
             const free_set = manifest_log.grid.superblock.free_set;
@@ -597,9 +606,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.write_callback == null);
             assert(manifest_log.grid_reservation == null);
 
-            manifest_log.writing = true;
-            manifest_log.write_callback = callback;
-
             if (manifest_log.entry_count > 0) {
                 manifest_log.close_block();
                 assert(manifest_log.entry_count == 0);
@@ -607,8 +613,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(manifest_log.blocks_closed == manifest_log.blocks.count);
             }
 
-            log.debug("checkpoint: writing {} block(s)", .{manifest_log.blocks_closed});
-            manifest_log.write_block();
+            manifest_log.flush(callback);
         }
 
         fn acquire_block(manifest_log: *ManifestLog) void {
@@ -627,6 +632,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 .op = manifest_log.grid.acquire(manifest_log.grid_reservation.?),
                 .size = undefined,
                 .command = .block,
+                .operation = BlockType.manifest.operation(),
             };
         }
 
@@ -641,8 +647,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             assert(header.cluster == manifest_log.superblock.working.cluster);
             assert(header.op > 0);
-            header.size = block_size(entry_count);
             assert(header.command == .block);
+            header.size = block_size(entry_count);
 
             // Zero unused labels:
             mem.set(u8, mem.sliceAsBytes(labels(block)[entry_count..]), 0);
@@ -650,7 +656,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // Zero unused tables, and padding:
             mem.set(u8, block[header.size..], 0);
 
-            header.operation = BlockType.manifest.operation();
             header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
             header.set_checksum();
 
