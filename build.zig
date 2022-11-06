@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub fn build(b: *std.build.Builder) void {
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{ });
     const mode = b.standardReleaseOptions();
 
     {
