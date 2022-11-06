@@ -38,7 +38,7 @@ pub fn build(b: *std.build.Builder) void {
         const unit_tests = b.addTest("src/unit_tests.zig");
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
-        
+
         // for src/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
         unit_tests.addIncludeDir("src/c/");
