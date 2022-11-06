@@ -166,7 +166,6 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn tick(grid: *Grid) void {
-
             // Resolve reads that were seen in the cache during start_read()
             // but deferred to be asynchronously resolved on the next tick.
             //

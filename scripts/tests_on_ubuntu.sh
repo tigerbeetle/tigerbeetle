@@ -9,7 +9,6 @@ apt-get update -y
 apt-get install -y curl xz-utils
 
 ./scripts/install_zig.sh
-zig/zig fmt . --check
 zig/zig build test
 ./scripts/install.sh
 "
