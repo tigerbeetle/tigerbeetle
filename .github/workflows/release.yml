@@ -17,6 +17,9 @@ jobs:
     - name: Build tigerbeetle
       run: ./scripts/install.sh
 
+    - name: Zig fmt lint
+      run: ./zig/zig fmt . --check       
+
     - name: Store current tag
       run: echo "GIT_TAG=`git tag --points-at HEAD`" >> $GITHUB_ENV
 

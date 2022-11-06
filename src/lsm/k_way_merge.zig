@@ -17,7 +17,7 @@ pub fn KWayMergeIterator(
     comptime stream_peek: fn (
         context: *const Context,
         stream_index: u32,
-    ) error{Empty, Drained}!Key,
+    ) error{ Empty, Drained }!Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
     /// Returns true if stream A has higher precedence than stream B.
     /// This is used to deduplicate values across streams.
@@ -69,7 +69,7 @@ pub fn KWayMergeIterator(
             var stream_index: u32 = 0;
             while (stream_index < stream_count_max) : (stream_index += 1) {
                 it.keys[it.k] = stream_peek(context, stream_index) catch |err| switch (err) {
-                    // On initialization, the streams should either have data already 
+                    // On initialization, the streams should either have data already
                     // buffered up to peek or be empty and have no more values to produce.
                     error.Drained => unreachable,
                     error.Empty => continue,
@@ -225,7 +225,7 @@ fn TestContext(comptime k_max: u32) type {
             return math.order(a, b);
         }
 
-        fn stream_peek(context: *const Self, stream_index: u32) error{Empty, Drained}!u32 {
+        fn stream_peek(context: *const Self, stream_index: u32) error{ Empty, Drained }!u32 {
             // TODO: test for Drained somehow as well
             const stream = context.streams[stream_index];
             if (stream.len == 0) return error.Empty;
