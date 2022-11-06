@@ -51,6 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
+      - run: zig/zig fmt . --check
       - run: zig/zig build test
       - run: ./scripts/install.sh
 
