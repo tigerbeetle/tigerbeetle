@@ -264,7 +264,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         /// - error.Empty when there are no values remaining to iterate.
         /// - error.Drained when the iterator isn't empty, but some values 
         ///   still need to be buffered into memory via tick().
-        pub fn peek(it: TableIterator) error{Empty, Drained}!Table.Key {
+        pub fn peek(it: TableIterator) error{ Empty, Drained }!Table.Key {
             assert(!it.read_pending);
             assert(!it.read_table_index);
 
