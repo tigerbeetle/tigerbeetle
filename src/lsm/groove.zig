@@ -860,13 +860,28 @@ pub fn GrooveType(
         /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
         const join_pending_max = 2 + std.meta.fields(IndexTrees).len;
 
-        fn JoinType(comptime join_op: JoinOp) type {
+        const OpenP = P("open", @import("../time.zig").Profile(@typeName(Object) ++ " groove.open(): {}ms"));
+        const CompactP = P("compact", @import("../time.zig").Profile(@typeName(Object) ++ " groove.compact(): {}ms"));
+        const CheckpointP = P("checkpoint", @import("../time.zig").Profile(@typeName(Object) ++ " groove.checkpoint(): {}ms"));
+        fn P(comptime n: []const u8, comptime Profile: type) type {
+            return struct {
+                const Pr = Profile;
+                var pr: Pr = undefined;
+                var last: u64 = undefined;
+                const name: []const u8 = n;
+            };
+        }
+
+        fn JoinType(comptime join_op: JoinOp, comptime PType: type) type {
             return struct {
                 pub fn start(groove: *Groove, join_callback: Callback) void {
                     // Make sure no sync op is currently running.
                     assert(groove.join_op == null);
                     assert(groove.join_pending == 0);
                     assert(groove.join_callback == null);
+
+                    PType.pr = PType.Pr.start();
+                    PType.last = PType.pr.time.monotonic();
 
                     // Start the sync operations
                     groove.join_op = join_op;
@@ -909,9 +924,28 @@ pub fn GrooveType(
                             assert(groove.join_callback != null);
                             assert(groove.join_pending <= join_pending_max);
 
+                            {
+                                const now = PType.pr.time.monotonic();
+                                const elapsed = (now - PType.last) / std.time.ns_per_ms;
+                                PType.last = now;
+
+                                const name = @typeName(Object) ++ "." ++ switch (join_field) {
+                                    .ids => "ids",
+                                    .objects => "objects",
+                                    .index => |f| f,
+                                };
+                                if (elapsed > 0) {
+                                    std.debug.print("{s}: groove {s} took {}ms ({})\n", .{
+                                        name, PType.name, elapsed,
+                                        groove.join_pending});
+                                }
+                            }
+
                             // Guard until all pending sync ops complete.
                             groove.join_pending -= 1;
                             if (groove.join_pending > 0) return;
+
+                            PType.pr.finish(.{});
 
                             const callback = groove.join_callback.?;
                             groove.join_op = null;
@@ -924,7 +958,7 @@ pub fn GrooveType(
         }
 
         pub fn open(groove: *Groove, callback: fn (*Groove) void) void {
-            const Join = JoinType(.open);
+            const Join = JoinType(.open, OpenP);
             Join.start(groove, callback);
 
             groove.ids.open(Join.tree_callback(.ids));
@@ -938,7 +972,7 @@ pub fn GrooveType(
 
         pub fn compact(groove: *Groove, callback: Callback, op: u64) void {
             // Start a compacting join operation.
-            const Join = JoinType(.compacting);
+            const Join = JoinType(.compacting, CompactP);
             Join.start(groove, callback);
 
             // Compact the ObjectTree and IdTree
@@ -954,7 +988,7 @@ pub fn GrooveType(
 
         pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
             // Start a checkpoint join operation.
-            const Join = JoinType(.checkpoint);
+            const Join = JoinType(.checkpoint, CheckpointP);
             Join.start(groove, callback);
 
             // Checkpoint the IdTree and ObjectTree.

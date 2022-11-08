@@ -7,6 +7,25 @@ const assert = std.debug.assert;
 const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
 
+pub fn Profile(comptime fmt: []const u8) type {
+    return struct {
+        time: Time,
+        timestamp: u64,
+
+        pub fn start() @This() {
+            var this: @This() = undefined;
+            this.time = .{};
+            this.timestamp = this.time.monotonic();
+            return this;
+        }
+
+        pub fn finish(self: *@This(), args: anytype) void {
+            const elapsed = (self.time.monotonic() - self.timestamp) / std.time.ns_per_ms;
+            std.debug.print(fmt ++ "\n", args ++ .{elapsed});
+        }
+    };
+}
+
 pub const Time = struct {
     const Self = @This();
 

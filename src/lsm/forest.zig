@@ -132,12 +132,24 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             allocator.destroy(forest.node_pool);
         }
 
-        fn JoinType(comptime join_op: JoinOp) type {
+        const OpenP = P(@import("../time.zig").Profile("forest.open(): {}ms"));
+        const CompactP = P(@import("../time.zig").Profile("forest.compact(): {}ms"));
+        const CheckpointP = P(@import("../time.zig").Profile("forest.checkpoint(): {}ms"));
+        fn P(comptime Profile: type) type {
+            return struct {
+                const Pr = Profile;
+                var pr: Pr = undefined;
+            };
+        }
+
+        fn JoinType(comptime join_op: JoinOp, comptime PType: type) type {
             return struct {
                 pub fn start(forest: *Forest, callback: Callback) void {
                     assert(forest.join_op == null);
                     assert(forest.join_pending == 0);
                     assert(forest.join_callback == null);
+
+                    PType.pr = PType.Pr.start();
 
                     forest.join_op = join_op;
                     forest.join_pending = std.meta.fields(Grooves).len;
@@ -160,8 +172,15 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                             assert(forest.join_callback != null);
                             assert(forest.join_pending <= std.meta.fields(Grooves).len);
 
+                            // if (PType == CompactP) {
+                            //     const elapsed = (PType.pr.time.monotonic() - PType.pr.timestamp) / std.time.ns_per_ms;
+                            //     std.debug.print("compact ready={} at {}ms\n", .{forest.join_pending, elapsed});
+                            // }
+
                             forest.join_pending -= 1;
                             if (forest.join_pending > 0) return;
+
+                            PType.pr.finish(.{});
 
                             const callback = forest.join_callback.?;
                             forest.join_op = null;
@@ -174,7 +193,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         }
 
         pub fn open(forest: *Forest, callback: Callback) void {
-            const Join = JoinType(.open);
+            const Join = JoinType(.open, OpenP);
             Join.start(forest, callback);
 
             inline for (std.meta.fields(Grooves)) |field| {
@@ -184,7 +203,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
             // Start a compacting join.
-            const Join = JoinType(.compacting);
+            const Join = JoinType(.compacting, CompactP);
             Join.start(forest, callback);
 
             inline for (std.meta.fields(Grooves)) |field| {
@@ -193,7 +212,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         }
 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
-            const Join = JoinType(.checkpoint);
+            const Join = JoinType(.checkpoint, CheckpointP);
             Join.start(forest, callback);
 
             inline for (std.meta.fields(Grooves)) |field| {
