@@ -83,8 +83,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
         const TableImmutableIteratorType = @import("table_immutable.zig").TableImmutableIteratorType;
 
-        const CompactionTable = CompactionType(Table, Storage, TableIteratorType);
-        const CompactionTableImmutable = CompactionType(Table, Storage, TableImmutableIteratorType);
+        const CompactionTable = CompactionType(name, Table, Storage, TableIteratorType);
+        const CompactionTableImmutable = CompactionType(name, Table, Storage, TableImmutableIteratorType);
 
         grid: *Grid,
         options: Options,

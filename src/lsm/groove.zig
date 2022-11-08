@@ -926,7 +926,7 @@ pub fn GrooveType(
 
                             {
                                 const now = PType.pr.time.monotonic();
-                                const elapsed = (now - PType.last) / std.time.ns_per_ms;
+                                const elapsed = (now - PType.pr.timestamp) / std.time.ns_per_ms;
                                 PType.last = now;
 
                                 const name = @typeName(Object) ++ "." ++ switch (join_field) {

@@ -45,6 +45,7 @@ const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
 const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
 
 pub fn CompactionType(
+    comptime name: []const u8,
     comptime Table: type,
     comptime Storage: type,
     comptime IteratorAType: anytype,
@@ -208,6 +209,8 @@ pub fn CompactionType(
             level_b: u8,
             iterator_a_context: IteratorA.Context,
         ) void {
+            std.debug.print(name ++ ".compaction_range = {}\n", .{range.table_count});
+
             assert(compaction.status == .idle);
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
