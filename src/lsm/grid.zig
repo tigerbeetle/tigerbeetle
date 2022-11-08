@@ -170,12 +170,14 @@ pub fn GridType(comptime Storage: type) type {
             // Resolve reads that were seen in the cache during start_read()
             // but deferred to be asynchronously resolved on the next tick.
             //
-            // Drains directly from the queue to that cache reads that could be serviced immediately
-            // aren't deferred until the next tick (which could be milliseconds from IO.run_for_ns).
+            // Drain directly from the queue so that new cache reads (added upon completion of old 
+            // cache reads) that can be serviced immediately aren't deferred until the next tick 
+            // (which may be milliseconds later due to IO.run_for_ns). This is necessary to ensure
+            // that groove prefetch completes promptly.
             //
-            // Even still, there should still be a cap on reads processed to prevent going over
+            // Even still, we cap the reads processed to prevent going over
             // any implicit time slice expected of Grid.tick(). This limit is fairly arbitrary.
-            var max_retry: u32 = Grid.read_iops_max * 4;
+            var retry_max: u32 = 100_000;
             while (grid.read_cached_queue.pop()) |read| {
                 if (grid.cache.get(read.address)) |block| {
                     read.callback(read, block);   
@@ -183,8 +185,8 @@ pub fn GridType(comptime Storage: type) type {
                     grid.start_read(read);
                 }
 
-                max_retry -|= 1;
-                if (max_retry == 0) break;
+                retry_max -= 1;
+                if (retry_max == 0) break;
             }
         }
 
