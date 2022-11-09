@@ -216,6 +216,26 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const fuzz_vsr_journal_format = b.addExecutable(
+            "fuzz_vsr_journal_format",
+            "src/vsr/journal_format_fuzz.zig",
+        );
+        fuzz_vsr_journal_format.setMainPkgPath("src");
+        fuzz_vsr_journal_format.setTarget(target);
+        fuzz_vsr_journal_format.setBuildMode(mode);
+        fuzz_vsr_journal_format.omit_frame_pointer = false;
+
+        const run_cmd = fuzz_vsr_journal_format.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step(
+            "fuzz_vsr_journal_format",
+            "Fuzz the WAL format. Args: [--seed <seed>]",
+        );
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
         const fuzz_vsr_superblock = b.addExecutable(
             "fuzz_vsr_superblock",
             "src/vsr/superblock_fuzz.zig",
