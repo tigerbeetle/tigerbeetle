@@ -86,6 +86,14 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build fuzz_lsm_segmented_array -- --seed 123
 
+  fuzz_vsr_journal_format:
+    name: 'Fuzz VSR WAL format'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_vsr_journal_format -- --seed 123
+
   fuzz_vsr_superblock:
     name: 'Fuzz VSR SuperBlock'
     runs-on: ubuntu-latest
