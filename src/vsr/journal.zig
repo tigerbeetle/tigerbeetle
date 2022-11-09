@@ -2225,6 +2225,7 @@ pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize
     assert(offset_logical <= config.journal_size_headers);
     assert(offset_logical % config.sector_size == 0);
     assert(target.len > 0);
+    assert(target.len % @sizeOf(Header) == 0);
     assert(target.len % config.sector_size == 0);
 
     var headers = std.mem.bytesAsSlice(Header, target);
@@ -2245,6 +2246,11 @@ pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize
     return headers_count * @sizeOf(Header);
 }
 
+test "format_wal_headers" {
+    const fuzz = @import("./journal_format_fuzz.zig");
+    try fuzz.fuzz_format_wal_headers(config.sector_size);
+}
+
 /// Format part of a new WAL's Zone.wal_prepares, writing to `target`.
 ///
 /// `offset_logical` is relative to the beginning of the `wal_prepares` zone.
@@ -2253,6 +2259,7 @@ pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usiz
     assert(offset_logical <= config.journal_size_prepares);
     assert(offset_logical % config.sector_size == 0);
     assert(target.len > 0);
+    assert(target.len % @sizeOf(Header) == 0);
     assert(target.len % config.sector_size == 0);
 
     const sectors_per_message = @divExact(config.message_size_max, config.sector_size);
@@ -2283,6 +2290,11 @@ pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usiz
         }
     }
     return target.len;
+}
+
+test "format_wal_prepares" {
+    const fuzz = @import("./journal_format_fuzz.zig");
+    try fuzz.fuzz_format_wal_prepares(256 * 1024);
 }
 
 test "format_wal" {
