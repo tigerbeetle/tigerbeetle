@@ -24,6 +24,7 @@ pub fn main() !void {
     log.info("write_size={} write_sectors={}", .{ write_size, write_sectors });
 
     try fuzz_format_wal_headers(write_size);
+    try fuzz_format_wal_prepares(write_size);
 }
 
 pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
@@ -46,6 +47,50 @@ pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
         }
     }
     assert(offset == config.journal_size_headers);
+}
+
+pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
+    assert(write_size_max > 0);
+    assert(write_size_max % @sizeOf(vsr.Header) == 0);
+    assert(write_size_max % config.sector_size == 0);
+
+    const write = try std.testing.allocator.alloc(u8, write_size_max);
+    defer std.testing.allocator.free(write);
+
+    var offset: usize = 0;
+    while (offset < config.journal_size_prepares) {
+        const write_size = journal.format_wal_prepares(cluster, offset, write);
+        defer offset += write_size;
+
+        var offset_checked: usize = 0;
+        while (offset_checked < write_size) {
+            const offset_header_next = std.mem.alignForward(
+                offset + offset_checked,
+                config.message_size_max,
+            ) - offset;
+
+            if (offset_checked == offset_header_next) {
+                // Message header.
+                const slot = @divExact(offset + offset_checked, config.message_size_max);
+                const header_bytes = write[offset_checked..][0..@sizeOf(vsr.Header)];
+                const header = std.mem.bytesToValue(vsr.Header, header_bytes);
+
+                try verify_slot_header(slot, header);
+                offset_checked += @sizeOf(vsr.Header);
+            } else {
+                // Message body.
+                const offset_message_end = std.math.min(offset_header_next, write_size);
+                const message_body_bytes = write[offset_checked..offset_message_end];
+                var byte: usize = 0;
+                for (std.mem.bytesAsSlice(usize, message_body_bytes)) |b| byte |= b;
+
+                try std.testing.expectEqual(byte, 0);
+                offset_checked = offset_message_end;
+            }
+        }
+        assert(offset_checked == write_size);
+    }
+    assert(offset == config.journal_size_prepares);
 }
 
 fn verify_slot_header(slot: usize, header: vsr.Header) !void {
