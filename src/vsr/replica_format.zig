@@ -28,7 +28,8 @@ pub fn format(
         .{
             .cluster = cluster,
             .replica = replica,
-            .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
+            // TODO Convert this to a runtime arg, to cap storage.
+            .size_max = config.size_max,
         },
     );
 
@@ -146,4 +147,70 @@ fn ReplicaFormatType(comptime Storage: type) type {
             self.formatting = false;
         }
     };
+}
+
+test "format" {
+    const superblock_zone_size = @import("./superblock.zig").superblock_zone_size;
+    const MessagePool = @import("../message_pool.zig").MessagePool;
+    const Storage = @import("../test/storage.zig").Storage;
+    const SuperBlock = vsr.SuperBlockType(Storage);
+    const allocator = std.testing.allocator;
+    const cluster = 0;
+    const replica = 1;
+
+    var storage = try Storage.init(
+        allocator,
+        superblock_zone_size + config.journal_size_headers + config.journal_size_prepares,
+        .{
+            .read_latency_min = 0,
+            .read_latency_mean = 0,
+            .write_latency_min = 0,
+            .write_latency_mean = 0,
+        },
+    );
+    defer storage.deinit(allocator);
+
+    var message_pool = try MessagePool.init(allocator, .replica);
+    defer message_pool.deinit(allocator);
+
+    var superblock = try SuperBlock.init(allocator, &storage, &message_pool);
+    defer superblock.deinit(allocator);
+
+    try format(Storage, allocator, cluster, replica, &storage, &superblock);
+
+    // Verify the superblock sectors.
+    var copy: u8 = 0;
+    while (copy < config.superblock_copies) : (copy += 1) {
+        const sector = storage.superblock_sector(copy);
+
+        try std.testing.expectEqual(sector.copy, copy);
+        try std.testing.expectEqual(sector.replica, replica);
+        try std.testing.expectEqual(sector.cluster, cluster);
+        try std.testing.expectEqual(sector.size, storage.size);
+        try std.testing.expectEqual(sector.sequence, 1);
+        try std.testing.expectEqual(sector.vsr_state.commit_min, 0);
+        try std.testing.expectEqual(sector.vsr_state.commit_max, 0);
+        try std.testing.expectEqual(sector.vsr_state.view, 0);
+        try std.testing.expectEqual(sector.vsr_state.view_normal, 0);
+    }
+
+    // Verify the WAL headers and prepares zones.
+    assert(storage.wal_headers().len == storage.wal_headers().len);
+    for (storage.wal_headers()) |header, slot| {
+        const message = storage.wal_prepares()[slot];
+        try std.testing.expect(std.meta.eql(header, message.header));
+
+        try std.testing.expect(header.valid_checksum());
+        try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
+        try std.testing.expectEqual(header.invalid(), null);
+        try std.testing.expectEqual(header.cluster, cluster);
+        try std.testing.expectEqual(header.op, slot);
+        try std.testing.expectEqual(header.size, @sizeOf(vsr.Header));
+        if (slot == 0) {
+            try std.testing.expectEqual(header.command, .prepare);
+            try std.testing.expectEqual(header.operation, .root);
+        } else {
+            try std.testing.expectEqual(header.command, .reserved);
+        }
+    }
 }
