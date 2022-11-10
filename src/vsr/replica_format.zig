@@ -62,7 +62,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 wal_write_size_max,
                 .exact,
             );
-            errdefer allocator.free(wal_buffer);
+            defer allocator.free(wal_buffer);
 
             // The logical offset *within the Zone*.
             // Even though the prepare zone follows the redundant header zone, write the prepares
