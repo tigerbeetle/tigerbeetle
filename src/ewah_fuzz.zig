@@ -118,7 +118,8 @@ fn ContextType(comptime Word: type) type {
 
             try std.testing.expectEqual(decoded_expect.len, decoded_actual_size);
             try std.testing.expectEqualSlices(
-                Word, decoded_expect,
+                Word,
+                decoded_expect,
                 context.decoded_actual[0..decoded_actual_size],
             );
             return encoded_size;

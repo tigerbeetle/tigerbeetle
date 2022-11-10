@@ -751,6 +751,15 @@ pub const Storage = struct {
         }
     }
 
+    pub fn superblock_sector(
+        storage: *const Storage,
+        copy_: u8,
+    ) *const superblock.SuperBlockSector {
+        const offset = vsr.Zone.superblock.offset(superblock.Layout.offset_sector(copy_));
+        const bytes = storage.memory[offset..][0..@sizeOf(superblock.SuperBlockSector)];
+        return mem.bytesAsValue(superblock.SuperBlockSector, bytes);
+    }
+
     pub fn wal_headers(storage: *const Storage) []const vsr.Header {
         const offset = vsr.Zone.wal_headers.offset(0);
         const size = vsr.Zone.wal_headers.size().?;
