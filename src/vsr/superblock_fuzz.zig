@@ -200,7 +200,7 @@ const Environment = struct {
         while (env.pending_verify) env.superblock_verify.storage.tick();
 
         assert(env.superblock_verify.working.checksum == env.superblock.working.checksum or
-            env.superblock_verify.working.checksum == env.superblock.writing.checksum);
+            env.superblock_verify.working.checksum == env.superblock.staging.checksum);
 
         // Verify the sequence we read from disk is monotonically increasing.
         if (env.latest_sequence < env.superblock_verify.working.sequence) {
@@ -283,14 +283,14 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = .{
-            .commit_min_checksum = env.superblock.writing.vsr_state.commit_min_checksum,
-            .commit_min = env.superblock.writing.vsr_state.commit_min,
-            .commit_max = env.superblock.writing.vsr_state.commit_max + 3,
-            .view_normal = env.superblock.writing.vsr_state.view_normal + 4,
-            .view = env.superblock.writing.vsr_state.view + 5,
+            .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum,
+            .commit_min = env.superblock.staging.vsr_state.commit_min,
+            .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
+            .view_normal = env.superblock.staging.vsr_state.view_normal + 4,
+            .view = env.superblock.staging.vsr_state.view + 5,
         };
 
-        assert(env.sequence_states.items.len == env.superblock.writing.sequence + 1);
+        assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
             .free_set = env.sequence_states.items[env.sequence_states.items.len - 1].free_set,
@@ -311,14 +311,14 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = .{
-            .commit_min_checksum = env.superblock.writing.vsr_state.commit_min_checksum + 1,
-            .commit_min = env.superblock.writing.vsr_state.commit_min + 1,
-            .commit_max = env.superblock.writing.vsr_state.commit_max + 1,
-            .view_normal = env.superblock.writing.vsr_state.view_normal + 1,
-            .view = env.superblock.writing.vsr_state.view + 1,
+            .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
+            .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
+            .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
+            .view_normal = env.superblock.staging.vsr_state.view_normal + 1,
+            .view = env.superblock.staging.vsr_state.view + 1,
         };
 
-        assert(env.sequence_states.items.len == env.superblock.writing.sequence + 1);
+        assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
             .free_set = checksum_free_set(env.superblock),

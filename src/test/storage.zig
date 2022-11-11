@@ -757,9 +757,13 @@ pub const Storage = struct {
         return mem.bytesAsSlice(vsr.Header, storage.memory[offset..][0..size]);
     }
 
-    const MessageRaw = struct {
+    const MessageRaw = extern struct {
         header: vsr.Header,
         body: [config.message_size_max - @sizeOf(vsr.Header)]u8,
+
+        comptime {
+            assert(@sizeOf(MessageRaw) * 8 == @bitSizeOf(MessageRaw));
+        }
     };
 
     pub fn wal_prepares(storage: *const Storage) []const MessageRaw {
