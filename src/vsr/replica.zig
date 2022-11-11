@@ -4045,8 +4045,9 @@ pub fn ReplicaType(
                 if (header.op == 0 and self.op_checkpoint == 0) {
                     // Repairing the root op is allowed until the first checkpoint.
                 } else {
-                    // Otherwise don't repair checkpointed ops, since their slots now belong to
-                    // the next wrap of the WAL.
+                    // It is critical that we do not repair checkpointed ops; their slots now belong
+                    // to the next wrap of the log, and overwriting a new op with an old op is a
+                    // correctness violation.
                     log.debug("{}: repair_header: false (precedes self.op_checkpoint={})", .{
                         self.replica,
                         self.op_checkpoint,
@@ -4343,7 +4344,7 @@ pub fn ReplicaType(
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
-            assert(self.op - self.commit_min < config.journal_slot_count);
+            assert(self.op - self.commit_min + 1 <= config.journal_slot_count);
 
             // Request enough prepares to utilize our max IO depth:
             var budget = self.journal.writes.available();
@@ -4390,12 +4391,16 @@ pub fn ReplicaType(
                         // If this op was between `op_checkpoint` and `commit_min`, we would have
                         // a header (since we couldn't have committed otherwise).
                         //
-                        // So this op must be less-than-or-equal-to `op_checkpoint` — we committed
-                        // before checkpointing, but the entry in our WAL was found corrupt after
-                        // recovering from a crash.
+                        // Therefore, this op must be either:
+                        // - less-than-or-equal-to `op_checkpoint` — we committed before
+                        //   checkpointing, but the entry in our WAL was found corrupt after
+                        //   recovering from a crash.
+                        // - or (indistinguishably) this might originally have been an op greater
+                        //   than replica.op, which was truncated, but is now corrupt.
                         //
-                        // Or (indistinguishably) this might originally have been an op greater
-                        // than replica.op, which was truncated, but is now corrupt.
+                        // we don't try to repair this op because the slot belongs (or will soon
+                        // belong) to a newer op, from the new WAL wrap. Additionally, we may not
+                        // still have access to its surrounding commits to verify the hash chain.
                         assert(op <= self.commit_min);
                         assert(op <= self.op_checkpoint);
                         assert(self.journal.faulty.bit(slot));

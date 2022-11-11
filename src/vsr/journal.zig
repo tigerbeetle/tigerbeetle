@@ -1512,6 +1512,10 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 assert(self.dirty.bit(slot));
                 // Do not clear any faulty bit for the same entry.
             } else {
+                // Overwriting a new op with an old op would be a correctness bug; it could cause a
+                // message to be uncommitted.
+                assert(self.headers[slot.index].op <= header.op);
+
                 self.headers[slot.index] = header.*;
                 self.dirty.set(slot);
                 self.faulty.clear(slot);
