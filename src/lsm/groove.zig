@@ -80,7 +80,7 @@ const IdTreeValue = extern struct {
 };
 
 /// Normalizes index tree field types into either u64 or u128 for CompositeKey
-fn IndexCompositeKeyType(comptime Field: type) type {
+pub fn IndexCompositeKeyType(comptime Field: type) type {
     switch (@typeInfo(Field)) {
         .Enum => |e| {
             return switch (@bitSizeOf(e.tag_type)) {
