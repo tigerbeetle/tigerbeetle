@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig fmt . --check     
+      - run: ./zig/zig fmt . --check
 
   test_on_linux:
     name: Run tests on Ubuntu
@@ -197,7 +197,6 @@ jobs:
 
   # Keep this around because Github CI looks for this job of this name.
   test:
-    name: 'Unit tests'
     runs-on: ubuntu-latest
     needs: [test_format, test_on_linux]
     steps:
