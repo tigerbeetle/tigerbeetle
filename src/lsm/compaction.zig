@@ -153,6 +153,8 @@ pub fn CompactionType(
         level_b: u8,
         level_a_input: ?TableInfo,
 
+        tables_output_count: usize = 0,
+
         pub fn init(allocator: mem.Allocator) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
             errdefer iterator_a.deinit(allocator);
@@ -500,6 +502,9 @@ pub fn CompactionType(
                 compaction.index.block = compaction.table_builder.index_block;
                 assert(!compaction.index.writable);
                 compaction.index.writable = true;
+
+                compaction.tables_output_count += 1;
+                assert(compaction.tables_output_count <= compaction.range.table_count);
             }
         }
 
