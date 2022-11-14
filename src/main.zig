@@ -191,7 +191,8 @@ const Command = struct {
                 \\
                 \\git_commit="{s}"
                 \\
-                , .{ build_options.git_commit orelse "?" },
+            ,
+                .{build_options.git_commit orelse "?"},
             );
 
             try stdout.writeAll("\n");
@@ -220,6 +221,9 @@ fn print_value(
             std.fmt.fmtSliceEscapeLower(value),
         });
     } else {
-        try std.fmt.format(writer, "{s}={}\n", .{ field, value, });
+        try std.fmt.format(writer, "{s}={}\n", .{
+            field,
+            value,
+        });
     }
 }
