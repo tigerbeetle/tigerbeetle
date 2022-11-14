@@ -150,10 +150,11 @@ fn generate_events(
     }).init(allocator);
     defer tables.deinit();
 
-    var entry_count: usize = 0;
+    // The number of appends since the last flush (compact or checkpoint).
+    var append_count: usize = 0;
     for (events) |*event, i| {
         const event_type = blk: {
-            if (entry_count == entries_max_buffered) {
+            if (append_count == ManifestLog.compaction_appends_max) {
                 // We must compact or checkpoint periodically to avoid overfilling the ManifestLog.
                 break :blk if (random.boolean()) EventType.compact else EventType.checkpoint;
             }
@@ -225,17 +226,9 @@ fn generate_events(
         };
 
         switch (event.*) {
-            .compact => {
-                while (entry_count >= entries_max_buffered) {
-                    entry_count -= entries_max_per_block;
-                }
-                // In the worst case, we add back an (almost) whole block of entries.
-                // -1 because at least one of its entries will be dropped by the log compaction.
-                entry_count += entries_max_per_block - 1;
-            },
-            .checkpoint => entry_count = 0,
+            .compact, .checkpoint => append_count = 0,
             .noop => {},
-            else => entry_count += 1,
+            else => append_count += 1,
         }
     }
     return events;
