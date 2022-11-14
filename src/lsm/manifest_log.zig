@@ -49,8 +49,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         const SuperBlock = SuperBlockType(Storage);
         const Grid = GridType(Storage);
 
+        pub const Block = ManifestLogBlockType(Storage, TableInfo);
         const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
+        const Label = Block.Label;
 
         pub const Callback = fn (manifest_log: *ManifestLog) void;
 
@@ -59,11 +61,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             level: u7,
             table: *const TableInfo,
         ) void;
-
-        pub const Label = packed struct {
-            level: u7,
-            event: enum(u1) { insert, remove },
-        };
 
         const alignment = 16;
 
@@ -80,24 +77,17 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // However, we still store Label ahead of TableInfo to save space on the network.
             // This means we store fewer entries per manifest block, to gain less padding,
             // since we must store entry_count_max of whichever array is first in the layout.
-            // For a better understanding of this decision, see block_size() below.
+            // For a better understanding of this decision, see Block.size() below.
             assert(@sizeOf(TableInfo) % alignment == 0);
         }
 
-        const block_body_size = config.block_size - @sizeOf(vsr.Header);
-        const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
-        const entry_count_max_unaligned = @divFloor(block_body_size, entry_size);
-        pub const entry_count_max = @divFloor(entry_count_max_unaligned, alignment) * alignment;
-
-        comptime {
-            assert(entry_count_max > 0);
-            assert((entry_count_max * @sizeOf(Label)) % alignment == 0);
-            assert((entry_count_max * @sizeOf(TableInfo)) % alignment == 0);
-        }
-
-        /// The maximum number of table updates to the manifest by a half-measure of compaction.
-        const compaction_tables_max = tree.compactions_max * (
-            tree.compaction_tables_input_max +
+        /// The maximum number of table updates to the manifest by a half-measure of table
+        /// compaction (not including manifest log compaction).
+        ///
+        /// Input tables are removed from the manifest.
+        /// Output tables are removed from the manifest.
+        pub const compaction_appends_max = tree.compactions_max *
+            (tree.compaction_tables_input_max +
             tree.compaction_tables_output_max);
 
         /// The upper-bound of manifest log blocks we must buffer.
@@ -108,7 +98,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         ///   TODO(Beat compaction): Only reserve enough for 1 beat.
         /// - a manifest log compaction (+1 block in the worst case)
         /// - a leftover open block from the previous ops (+1 block)
-        const blocks_count_max = 1 + 1 + util.div_ceil(compaction_tables_max, entry_count_max);
+        const blocks_count_max = 1 + 1 + util.div_ceil(
+            compaction_appends_max,
+            Block.entry_count_max,
+        );
 
         comptime {
             assert(blocks_count_max >= 3);
@@ -247,9 +240,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const block_reference = manifest_log.read_block_reference.?;
             verify_block(block, block_reference.checksum, block_reference.address);
 
-            const entry_count = block_entry_count(block);
-            const labels_used = labels_const(block)[0..entry_count];
-            const tables_used = tables_const(block)[0..entry_count];
+            const entry_count = Block.entry_count(block);
+            const labels_used = Block.labels_const(block)[0..entry_count];
+            const tables_used = Block.tables_const(block)[0..entry_count];
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
@@ -270,7 +263,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 }
             }
 
-            if (block_entry_count(block) < entry_count_max) {
+            if (Block.entry_count(block) < Block.entry_count_max) {
                 manifest.queue_for_compaction(block_reference.address);
             }
 
@@ -313,7 +306,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(manifest_log.blocks.count > 0);
             }
 
-            assert(manifest_log.entry_count < entry_count_max);
+            assert(manifest_log.entry_count < Block.entry_count_max);
             assert(manifest_log.blocks.count - manifest_log.blocks_closed == 1);
 
             log.debug(
@@ -332,11 +325,11 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             const block: BlockPtr = manifest_log.blocks.tail().?;
             const entry = manifest_log.entry_count;
-            labels(block)[entry] = label;
-            tables(block)[entry] = table.*;
+            Block.labels(block)[entry] = label;
+            Block.tables(block)[entry] = table.*;
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
-            const address = block_address(block);
+            const address = Block.address(block);
             if (manifest.update_table_extent(table.address, address, entry)) |previous_block| {
                 manifest.queue_for_compaction(previous_block);
                 if (label.event == .remove) manifest.queue_for_compaction(address);
@@ -346,7 +339,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
 
             manifest_log.entry_count += 1;
-            if (manifest_log.entry_count == entry_count_max) {
+            if (manifest_log.entry_count == Block.entry_count_max) {
                 manifest_log.close_block();
                 assert(manifest_log.entry_count == 0);
             }
@@ -376,11 +369,11 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 verify_block(block, null, null);
 
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                const address = block_address(block);
+                const address = Block.address(block);
                 assert(address > 0);
 
                 manifest.append(manifest_log.tree_hash, header.checksum, address);
-                if (block_entry_count(block) < entry_count_max) {
+                if (Block.entry_count(block) < Block.entry_count_max) {
                     manifest.queue_for_compaction(address);
                 }
             }
@@ -398,7 +391,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     assert(manifest_log.entry_count == 0);
                 } else {
                     assert(manifest_log.blocks.count == 1);
-                    assert(manifest_log.entry_count < entry_count_max);
+                    assert(manifest_log.entry_count < Block.entry_count_max);
                 }
 
                 const callback = manifest_log.write_callback.?;
@@ -413,16 +406,16 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             verify_block(block, null, null);
 
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            const address = block_address(block);
+            const address = Block.address(block);
             assert(address > 0);
 
-            const entry_count = block_entry_count(block);
+            const entry_count = Block.entry_count(block);
 
             if (manifest_log.blocks_closed == 1 and manifest_log.blocks.count == 1) {
                 // This might be the last block of a checkpoint, which can be a partial block.
                 assert(entry_count > 0);
             } else {
-                assert(entry_count == entry_count_max);
+                assert(entry_count == Block.entry_count_max);
             }
 
             log.debug("{}: write_block: checksum={} address={} entries={}", .{
@@ -536,9 +529,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const block_reference = manifest_log.read_block_reference.?;
             verify_block(block, block_reference.checksum, block_reference.address);
 
-            const entry_count = block_entry_count(block);
-            const labels_used = labels_const(block)[0..entry_count];
-            const tables_used = tables_const(block)[0..entry_count];
+            const entry_count = Block.entry_count(block);
+            const labels_used = Block.labels_const(block)[0..entry_count];
+            const tables_used = Block.tables_const(block)[0..entry_count];
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
             assert(manifest.tables.count() > 0);
@@ -577,7 +570,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             // Blocks may be compacted if they contain frees, or are not completely full.
             // For example, a partial block may be flushed as part of a checkpoint.
-            assert(frees > 0 or entry_count < entry_count_max);
+            assert(frees > 0 or entry_count < Block.entry_count_max);
 
             assert(manifest.queued_for_compaction(block_reference.address));
             manifest.remove(
@@ -642,16 +635,16 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const block: BlockPtr = manifest_log.blocks.tail().?;
             const entry_count = manifest_log.entry_count;
             assert(entry_count > 0);
-            assert(entry_count <= entry_count_max);
+            assert(entry_count <= Block.entry_count_max);
 
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             assert(header.cluster == manifest_log.superblock.working.cluster);
             assert(header.op > 0);
             assert(header.command == .block);
-            header.size = block_size(entry_count);
+            header.size = Block.size(entry_count);
 
             // Zero unused labels:
-            mem.set(u8, mem.sliceAsBytes(labels(block)[entry_count..]), 0);
+            mem.set(u8, mem.sliceAsBytes(Block.labels(block)[entry_count..]), 0);
 
             // Zero unused tables, and padding:
             mem.set(u8, block[header.size..], 0);
@@ -660,12 +653,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             header.set_checksum();
 
             verify_block(block, null, null);
-            assert(block_entry_count(block) == entry_count);
+            assert(Block.entry_count(block) == entry_count);
 
             log.debug("{}: close_block: checksum={} address={} entries={}", .{
                 manifest_log.tree_hash,
                 header.checksum,
-                block_address(block),
+                Block.address(block),
                 entry_count,
             });
 
@@ -685,65 +678,92 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             assert(checksum == null or header.checksum == checksum.?);
 
-            assert(block_address(block) > 0);
-            assert(address == null or block_address(block) == address.?);
+            assert(Block.address(block) > 0);
+            assert(address == null or Block.address(block) == address.?);
 
-            const entry_count = block_entry_count(block);
+            const entry_count = Block.entry_count(block);
             assert(entry_count > 0);
         }
+    };
+}
 
-        fn block_address(block: BlockPtrConst) u64 {
+fn ManifestLogBlockType(comptime Storage: type, comptime TableInfo: type) type {
+    return struct {
+        const Grid = GridType(Storage);
+        const BlockPtr = Grid.BlockPtr;
+        const BlockPtrConst = Grid.BlockPtrConst;
+
+        const block_body_size = config.block_size - @sizeOf(vsr.Header);
+        const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
+        const entry_count_max_unaligned = @divFloor(block_body_size, entry_size);
+        pub const entry_count_max = @divFloor(
+            entry_count_max_unaligned,
+            @alignOf(TableInfo),
+        ) * @alignOf(TableInfo);
+
+        comptime {
+            assert(entry_count_max > 0);
+            assert((entry_count_max * @sizeOf(Label)) % @alignOf(TableInfo) == 0);
+            assert((entry_count_max * @sizeOf(TableInfo)) % @alignOf(TableInfo) == 0);
+        }
+
+        pub const Label = packed struct {
+            level: u7,
+            event: enum(u1) { insert, remove },
+        };
+
+        pub fn address(block: BlockPtrConst) u64 {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             assert(header.command == .block);
 
-            const address = header.op;
-            assert(address > 0);
-            return address;
+            const block_address = header.op;
+            assert(block_address > 0);
+            return block_address;
         }
 
-        fn block_checksum(block: BlockPtrConst) u128 {
+        pub fn checksum(block: BlockPtrConst) u128 {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             assert(header.command == .block);
 
             return header.checksum;
         }
 
-        fn block_entry_count(block: BlockPtrConst) u32 {
+        pub fn entry_count(block: BlockPtrConst) u32 {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             assert(header.command == .block);
 
             const labels_size = entry_count_max * @sizeOf(Label);
             const tables_size = header.size - @sizeOf(vsr.Header) - labels_size;
 
-            const entry_count = @intCast(u32, @divExact(tables_size, @sizeOf(TableInfo)));
-            assert(entry_count > 0);
-            assert(entry_count <= entry_count_max);
-            return entry_count;
+            const entry_count_ = @intCast(u32, @divExact(tables_size, @sizeOf(TableInfo)));
+            assert(entry_count_ > 0);
+            assert(entry_count_ <= entry_count_max);
+            return entry_count_;
         }
 
-        fn block_size(entry_count: u32) u32 {
-            assert(entry_count > 0);
-            assert(entry_count <= entry_count_max);
+        pub fn size(entry_count_: u32) u32 {
+            assert(entry_count_ > 0);
+            assert(entry_count_ <= entry_count_max);
 
             // Encode the smaller type first because this will be multiplied by entry_count_max.
             const labels_size = entry_count_max * @sizeOf(Label);
             assert(labels_size == labels_size_max);
             assert((@sizeOf(vsr.Header) + labels_size) % @alignOf(TableInfo) == 0);
-            const tables_size = entry_count * @sizeOf(TableInfo);
+            const tables_size = entry_count_ * @sizeOf(TableInfo);
 
             return @sizeOf(vsr.Header) + labels_size + tables_size;
         }
 
         const labels_size_max = entry_count_max * @sizeOf(Label);
 
-        fn labels(block: BlockPtr) *[entry_count_max]Label {
+        pub fn labels(block: BlockPtr) *[entry_count_max]Label {
             return mem.bytesAsSlice(
                 Label,
                 block[@sizeOf(vsr.Header)..][0..labels_size_max],
             )[0..entry_count_max];
         }
 
-        fn labels_const(block: BlockPtrConst) *const [entry_count_max]Label {
+        pub fn labels_const(block: BlockPtrConst) *const [entry_count_max]Label {
             return mem.bytesAsSlice(
                 Label,
                 block[@sizeOf(vsr.Header)..][0..labels_size_max],
@@ -752,14 +772,14 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         const tables_size_max = entry_count_max * @sizeOf(TableInfo);
 
-        fn tables(block: BlockPtr) *[entry_count_max]TableInfo {
+        pub fn tables(block: BlockPtr) *[entry_count_max]TableInfo {
             return mem.bytesAsSlice(
                 TableInfo,
                 block[@sizeOf(vsr.Header) + labels_size_max ..][0..tables_size_max],
             )[0..entry_count_max];
         }
 
-        fn tables_const(block: BlockPtrConst) *const [entry_count_max]TableInfo {
+        pub fn tables_const(block: BlockPtrConst) *const [entry_count_max]TableInfo {
             return mem.bytesAsSlice(
                 TableInfo,
                 block[@sizeOf(vsr.Header) + labels_size_max ..][0..tables_size_max],

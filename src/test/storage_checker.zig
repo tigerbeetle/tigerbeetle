@@ -193,7 +193,9 @@ pub const StorageChecker = struct {
         var acquired = replica.superblock.free_set.blocks.iterator(.{ .kind = .unset });
         var checksum: u128 = 0;
         while (acquired.next()) |address_index| {
-            checksum ^= vsr.checksum(storage.grid_block(address_index + 1));
+            const block = storage.grid_block(address_index + 1);
+            const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            checksum ^= vsr.checksum(block[0..block_header.size]);
         }
         return checksum;
     }
