@@ -51,9 +51,16 @@ const half_bar_beat_count = @divExact(config.lsm_batch_multiple, 2);
 /// The maximum number of tables for a single tree.
 pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, config.lsm_levels);
 
-// +1: from level A
-// +2: from level B, on either edge of the lsm_growth_factor tables.
-pub const compaction_tables_input_max = 1 + config.lsm_growth_factor + 2;
+/// The upper-bound count of input tables to a single tree's compaction.
+///
+/// +1: from level A
+/// +1: from level B, with one edge overlapping the lsm_growth_factor tables.
+///     (This is not +2 because input table selection is least-overlap. If the input table overlaps
+///     on both edges, there must be another table with less overlap to select).
+pub const compaction_tables_input_max = 1 + config.lsm_growth_factor + 1;
+
+/// The upper-bound count of output tables from a single tree's compaction.
+/// In the "worst" case, no keys are overwritten/merged, and no tombstones are dropped.
 pub const compaction_tables_output_max = compaction_tables_input_max;
 
 /// The maximum number of concurrent compactions (per tree).
