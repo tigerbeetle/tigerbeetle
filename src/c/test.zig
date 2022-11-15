@@ -5,6 +5,7 @@ const testing = std.testing;
 
 const c = @cImport(@cInclude("tb_client.h"));
 
+const util = @import("../util.zig");
 const config = @import("../config.zig");
 const Packet = @import("tb_client/packet.zig").Packet;
 
@@ -46,7 +47,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
                     assert(result_len <= request_size_max);
                     var writable: [request_size_max]u8 = undefined;
                     const readable = @ptrCast([*]const u8, result_ptr.?);
-                    std.mem.copy(u8, &writable, readable[0..result_len]);
+                    util.copy_disjoint(.inexact, u8, &writable, readable[0..result_len]);
                     break :blk writable;
                 } else null,
                 .result_len = result_len,
