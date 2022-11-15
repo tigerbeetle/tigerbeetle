@@ -90,18 +90,17 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             (tree.compaction_tables_input_max +
             tree.compaction_tables_output_max);
 
+        const blocks_count_appends = util.div_ceil(compaction_appends_max, Block.entry_count_max);
+
         /// The upper-bound of manifest log blocks we must buffer.
         ///
         /// `blocks` must have sufficient capacity for:
-        /// - table updates from a half bar of compactions
-        ///   (This is typically +1 block, but may be more when the block size is small).
-        ///   TODO(Beat compaction): Only reserve enough for 1 beat.
         /// - a manifest log compaction (+1 block in the worst case)
         /// - a leftover open block from the previous ops (+1 block)
-        const blocks_count_max = 1 + 1 + util.div_ceil(
-            compaction_appends_max,
-            Block.entry_count_max,
-        );
+        /// - table updates from a half bar of compactions
+        ///   (This is typically +1 block, but may be more when the block size is small).
+        ///   TODO(Beat compaction): blocks_count_appends only needs enough for 1 beat.
+        const blocks_count_max = 1 + 1 + blocks_count_appends;
 
         comptime {
             assert(blocks_count_max >= 3);
@@ -461,8 +460,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             // TODO Make sure this cannot fail — before compaction begins verify that enough free
             // blocks are available for all reservations.
-            // TODO Tighten this up. Some blocks are already acquired.
-            manifest_log.grid_reservation = manifest_log.grid.reserve(blocks_count_max).?;
+            // +1 for the manifest log block compaction, which acquires at most one block.
+            manifest_log.grid_reservation = manifest_log.grid.reserve(1 + blocks_count_appends).?;
         }
 
         /// `compact` does not close a partial block; that is only necessary during `checkpoint`.
@@ -494,10 +493,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             // Compact a single manifest block — to minimize latency spikes, we want to do the bare
             // minimum of compaction work required.
-            // TODO Compact more than 1 block if fragmentation is outstripping the compaction rate
-            // (make sure to update the grid block reservation to account for this).
-            // Or maybe that can't happen, if half-measure of compactions can't rewrite more tables
-            // than fit in a single block.
+            // TODO Compact more than 1 block if fragmentation is outstripping the compaction rate.
+            // (Make sure to update the grid block reservation to account for this).
+            // Or assert that compactions cannot update blocks fast enough to outpace manifest
+            // log compaction (relative to the number of updates that fit in a manifest log block).
             if (manifest.oldest_block_queued_for_compaction(manifest_log.tree_hash)) |block| {
                 assert(block.tree == manifest_log.tree_hash);
                 assert(block.address > 0);
