@@ -4,7 +4,9 @@
 //! replicas.
 //!
 //! Areas verified at compaction (half-measure):
-//! - Acquired Grid blocks (ignores skipped recovery compactions) (TODO)
+//! - Acquired Grid blocks (ignores skipped recovery compactions)
+//!  TODO Because ManifestLog acquires blocks potentially several beats prior to actually writing
+//!  the block, this check will need to be removed or use a different strategy.
 //!
 //! Areas verified at checkpoint:
 //! - WAL prepares

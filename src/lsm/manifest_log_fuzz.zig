@@ -3,8 +3,8 @@
 //! Invariants checked:
 //!
 //! - Checkpoint flushes all buffered log blocks (including partial blocks).
-//! - The ManifestLog after recovery matches the ManifestLog after checkpoint.
-//! - The SuperBlock.Manifest after recovery matches the SuperBlock.Manifest after checkpoint.
+//! - The state of the ManifestLog/SuperBlock.Manifest immediately after recovery matches
+//!   the state of the ManifestLog/SuperBlock.Manifest immediately after the latest checkpoint.
 //! - SuperBlock.Manifest.open() only returns the latest version of each table.
 //! - SuperBlock.Manifest's compaction queue contains any blocks which:
 //!   - contain fewer than entry_count_max entries, or
@@ -30,8 +30,8 @@ const fuzz = @import("../test/fuzz.zig");
 
 const storage_size_max = data_file_size_min + config.block_size * 1024;
 
-const entries_max_per_block = ManifestLog.Block.entry_count_max;
-const entries_max_buffered = entries_max_per_block *
+const entries_max_block = ManifestLog.Block.entry_count_max;
+const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).field_type.count_max;
 
 pub fn main() !void {
