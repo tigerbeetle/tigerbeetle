@@ -205,6 +205,7 @@ test "c_client tb_status" {
     }.action;
 
     // Valid addresses and packets count should return TB_STATUS_SUCCESS:
+    try assert_status(0, "3000", c.TB_STATUS_SUCCESS);
     try assert_status(1, "3000", c.TB_STATUS_SUCCESS);
     try assert_status(32, "127.0.0.1", c.TB_STATUS_SUCCESS);
     try assert_status(128, "127.0.0.1:3000", c.TB_STATUS_SUCCESS);
@@ -223,9 +224,8 @@ test "c_client tb_status" {
         c.TB_STATUS_ADDRESS_LIMIT_EXCEEDED,
     );
 
-    // Packets count zero or greater than 4096 should return "TB_STATUS_INVALID_PACKETS_COUNT":
-    try assert_status(0, "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
-    try assert_status(std.math.maxInt(u16), "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
+    // Packets count greater than 4096 should return "TB_STATUS_INVALID_PACKETS_COUNT":
+    try assert_status(4097, "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
     try assert_status(std.math.maxInt(u32), "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
 
     // All other status are not testable.

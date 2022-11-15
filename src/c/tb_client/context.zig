@@ -109,7 +109,7 @@ pub fn ContextType(
             log.debug("{}: init: initializing", .{context.client_id});
 
             const packets_count_max = 4096;
-            if (packets_count == 0 or packets_count > packets_count_max) {
+            if (packets_count > packets_count_max) {
                 return error.PacketsCountInvalid;
             }
 
