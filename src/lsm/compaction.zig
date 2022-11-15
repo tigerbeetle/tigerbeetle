@@ -231,10 +231,10 @@ pub fn CompactionType(
 
             compaction.* = .{
                 .grid = grid,
-                // Reserve enough blocks to write our output tables in the worst case:
+                // Reserve enough blocks to write our output tables in the worst case, where:
                 // - no tombstones are dropped,
-                // - and no values are overwritten
-                // - all tables are full
+                // - no values are overwritten,
+                // - and all tables are full.
                 //
                 // We must reserve before doing any async work so that the block acquisition order
                 // is deterministic (relative to other concurrent compactions).

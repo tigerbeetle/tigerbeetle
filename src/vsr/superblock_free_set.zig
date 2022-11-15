@@ -15,6 +15,7 @@ const div_ceil = @import("../util.zig").div_ceil;
 pub const Reservation = struct {
     block_base: usize,
     block_count: usize,
+    /// An identifer for each reservation cycle, to verify that old reservations are not reused.
     session: usize,
 };
 
@@ -204,7 +205,7 @@ pub const FreeSet = struct {
         };
     }
 
-    /// After invoking `forfeit()`, any previous reservations must never be used.
+    /// After invoking `forfeit()`, the reservation must never be used again.
     pub fn forfeit(set: *FreeSet, reservation: Reservation) void {
         assert(set.reservation_session == reservation.session);
 
