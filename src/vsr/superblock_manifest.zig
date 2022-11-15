@@ -8,8 +8,7 @@ const mem = std.mem;
 const config = @import("../config.zig");
 const util = @import("../util.zig");
 
-// TODO Determine upper bound of manifest blocks per tree and assert it.
-// (And use it to size the trailer zone).
+// TODO Compute & use the upper bound of manifest blocks (per tree) to size the trailer zone.
 
 /// SuperBlock.Manifest schema:
 /// │ [manifest.count]u128 │ Tree id (for the owner of the ManifestLog)
