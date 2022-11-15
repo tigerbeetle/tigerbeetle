@@ -37,7 +37,6 @@ pub const messages_max_replica = messages_max: {
     // Handle Replica.commit_op's reply:
     // (This is separate from the burst +1 because they may occur concurrently).
     sum += 1;
-    sum += 20; // TODO Our network simulator allows up to 20 messages for path_capacity_max.
 
     break :messages_max sum;
 };
@@ -51,7 +50,6 @@ pub const messages_max_client = messages_max: {
     sum += config.client_request_queue_max; // Client.request_queue
     // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
     sum += 1;
-    sum += 20; // TODO Our network simulator allows up to 20 messages for path_capacity_max.
 
     break :messages_max sum;
 };
@@ -86,6 +84,8 @@ pub const MessagePool = struct {
     /// List of currently unused messages.
     free_list: ?*Message,
 
+    messages_max: usize,
+
     pub fn init(allocator: mem.Allocator, process_type: vsr.ProcessType) error{OutOfMemory}!MessagePool {
         return MessagePool.init_capacity(allocator, switch (process_type) {
             .replica => messages_max_replica,
@@ -96,6 +96,7 @@ pub const MessagePool = struct {
     pub fn init_capacity(allocator: mem.Allocator, messages_max: usize) error{OutOfMemory}!MessagePool {
         var pool: MessagePool = .{
             .free_list = null,
+            .messages_max = messages_max,
         };
         {
             var i: usize = 0;
@@ -121,11 +122,16 @@ pub const MessagePool = struct {
 
     /// Frees all messages that were unused or returned to the pool via unref().
     pub fn deinit(pool: *MessagePool, allocator: mem.Allocator) void {
+        var free_count: usize = 0;
         while (pool.free_list) |message| {
             pool.free_list = message.next;
             allocator.free(message.buffer);
             allocator.destroy(message);
+            free_count += 1;
         }
+        // If the MessagePool is being deinitialized, all messages should have already been
+        // released to the pool.
+        assert(free_count == pool.messages_max);
     }
 
     /// Get an unused message with a buffer of config.message_size_max.

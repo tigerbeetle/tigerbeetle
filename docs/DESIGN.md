@@ -341,4 +341,4 @@ of Hours of Disk and SSD Deployments](https://www.usenix.org/system/files/confer
 
 * [Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf) - Why we use Direct I/O in TigerBeetle and why the kernel page cache is a dangerous way to recover the journal, even when restarting from an fsync() failure panic.
 
-* [Coil's Mojaloop Performance Work 2020](https://docs.mojaloop.io/documentation/discussions/Mojaloop%20Performance%202020.pdf) - By Don Changfoot and Joran Dirk Greef, a performance analysis of Mojaloop's central ledger that sparked the idea for "an accounting database" as Adrian Hope-Bailie put it. And the rest, as they say, is history!
+* [Coil's Mojaloop Performance Work 2020](https://docs.mojaloop.io/legacy/discussions/Mojaloop%20Performance%202020.pdf) - By Don Changfoot and Joran Dirk Greef, a performance analysis of Mojaloop's central ledger that sparked the idea for "an accounting database" as Adrian Hope-Bailie put it. And the rest, as they say, is history!

@@ -29,6 +29,14 @@ jobs:
       - uses: actions/checkout@v2
       - run: ./scripts/shellcheck.sh
 
+  test_format:
+    name: Run zig fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig fmt . --check
+
   test_on_linux:
     name: Run tests on Ubuntu
     runs-on: ubuntu-latest
@@ -54,7 +62,62 @@ jobs:
       - run: zig/zig build test
       - run: ./scripts/install.sh
 
+  fuzz_lsm_manifest_log:
+    name: 'Fuzz LSM ManifestLog'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_lsm_manifest_log -- --seed 123
+
+  fuzz_lsm_segmented_array:
+    name: 'Fuzz LSM SegmentedArray'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_lsm_segmented_array -- --seed 123
+
+  fuzz_vsr_superblock:
+    name: 'Fuzz VSR SuperBlock'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_vsr_superblock -- --seed 123
+
+  fuzz_vsr_superblock_quorums:
+    name: 'Fuzz VSR SuperBlock Quorums'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_vsr_superblock_quorums -- --seed 123
+
+  # This is just a canary to make sure that the simulator compiles
+  # (and passes for at least a single seed).
+  simulator:
+    name: 'Simulator canary'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig run -OReleaseSafe src/simulator.zig -- 123
+
+  # Verify that these build without errors:
+  build-tools:
+    name: 'Verify build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build tb_client
+      - run: zig/zig build build_benchmark_ewah
+      - run: zig/zig build build_benchmark_eytzinger
+      - run: zig/zig build build_benchmark_segmented_array
+
   build-and-push:
+    name: 'Build and push Docker image'
     runs-on: ubuntu-latest
     needs: [test_on_linux, test_on_macos]
     permissions:
@@ -135,6 +198,6 @@ jobs:
   # Keep this around because Github CI looks for this job of this name.
   test:
     runs-on: ubuntu-latest
-    needs: [test_on_linux]
+    needs: [test_format, test_on_linux]
     steps:
       - run: echo "done"

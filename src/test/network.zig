@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+const util = @import("../util.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -27,9 +28,8 @@ pub const Network = struct {
         network: *Network,
         message: *Message,
 
-        pub fn deinit(packet: *const Packet, path: PacketSimulatorPath) void {
-            const source_bus = packet.network.buses.items[path.source];
-            source_bus.unref(packet.message);
+        pub fn deinit(packet: *const Packet) void {
+            packet.network.message_pool.unref(packet.message);
         }
     };
 
@@ -43,7 +43,7 @@ pub const Network = struct {
     options: NetworkOptions,
     packet_simulator: PacketSimulator(Packet),
 
-    // TODO If this stored a ?*MessageBus, then a process's bus could be set to `null` while
+    // TODO(Zig) If this stored a ?*MessageBus, then a process's bus could be set to `null` while
     // the replica is crashed, and replaced when it is destroy. Zig complains:
     //
     //   ./src/test/message_bus.zig:20:24: error: struct 'test.message_bus.MessageBus' depends on itself
@@ -54,6 +54,8 @@ pub const Network = struct {
     //       ^
     buses: std.ArrayListUnmanaged(*MessageBus),
     processes: std.ArrayListUnmanaged(u128),
+    /// A pool of messages that are in the network (sent, but not yet delivered).
+    message_pool: MessagePool,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -70,11 +72,27 @@ pub const Network = struct {
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
         errdefer processes.deinit(allocator);
 
-        const packet_simulator = try PacketSimulator(Packet).init(
+        var packet_simulator = try PacketSimulator(Packet).init(
             allocator,
             options.packet_simulator_options,
         );
         errdefer packet_simulator.deinit(allocator);
+
+        // Count:
+        // - replica → replica paths (excluding self-loops)
+        // - replica → client paths
+        // - client → replica paths
+        // but not client→client paths; clients never message one another.
+        const path_count = @as(usize, replica_count) * @as(usize, replica_count - 1) +
+            2 * @as(usize, replica_count) * @as(usize, client_count);
+        const message_pool = try MessagePool.init_capacity(
+            allocator,
+            // +1 so we can allocate an extra packet when all packet queues are at capacity,
+            // so that `PacketSimulator.submit_packet` can choose which packet to drop.
+            1 + @as(usize, options.packet_simulator_options.path_maximum_capacity) *
+                path_count,
+        );
+        errdefer message_pool.deinit(allocator);
 
         return Network{
             .allocator = allocator,
@@ -82,12 +100,15 @@ pub const Network = struct {
             .packet_simulator = packet_simulator,
             .buses = buses,
             .processes = processes,
+            .message_pool = message_pool,
         };
     }
 
     pub fn deinit(network: *Network) void {
         network.buses.deinit(network.allocator);
         network.processes.deinit(network.allocator);
+        network.packet_simulator.deinit(network.allocator);
+        network.message_pool.deinit(network.allocator);
     }
 
     pub fn link(network: *Network, process: Process, message_bus: *MessageBus) void {
@@ -112,16 +133,20 @@ pub const Network = struct {
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {
-        // TODO: we want to unref this message at some point between send()
-        // and recv() for better realism.
         log.debug("send_message: {} > {}: {}", .{
             path.source,
             path.target,
             message.header.command,
         });
+
+        const network_message = network.message_pool.get_message();
+        defer network.message_pool.unref(network_message);
+
+        util.copy_disjoint(.exact, u8, network_message.buffer, message.buffer);
+
         network.packet_simulator.submit_packet(
             .{
-                .message = message.ref(),
+                .message = network_message.ref(),
                 .network = network,
             },
             deliver_message,
@@ -147,11 +172,10 @@ pub const Network = struct {
         const network = packet.network;
 
         const target_bus = network.buses.items[path.target];
+        const target_message = target_bus.get_message();
+        defer target_bus.unref(target_message);
 
-        const message = target_bus.get_message();
-        defer target_bus.unref(message);
-
-        std.mem.copy(u8, message.buffer, packet.message.buffer);
+        util.copy_disjoint(.exact, u8, target_message.buffer, packet.message.buffer);
 
         const process_path = .{
             .source = raw_process_to_process(network.processes.items[path.source]),
@@ -164,16 +188,18 @@ pub const Network = struct {
             packet.message.header.command,
         });
 
-        if (message.header.command == .request or message.header.command == .prepare) {
-            const sector_ceil = vsr.sector_ceil(message.header.size);
-            if (message.header.size != sector_ceil) {
-                assert(message.header.size < sector_ceil);
-                assert(message.buffer.len == config.message_size_max + config.sector_size);
-                mem.set(u8, message.buffer[message.header.size..sector_ceil], 0);
+        if (target_message.header.command == .request or
+            target_message.header.command == .prepare)
+        {
+            const sector_ceil = vsr.sector_ceil(target_message.header.size);
+            if (target_message.header.size != sector_ceil) {
+                assert(target_message.header.size < sector_ceil);
+                assert(target_message.buffer.len == config.message_size_max + config.sector_size);
+                mem.set(u8, target_message.buffer[target_message.header.size..sector_ceil], 0);
             }
         }
 
-        target_bus.on_message_callback(target_bus, message);
+        target_bus.on_message_callback(target_bus, target_message);
     }
 
     fn raw_process_to_process(raw: u128) Process {

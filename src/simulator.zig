@@ -14,6 +14,7 @@ const ClusterOptions = @import("test/cluster.zig").ClusterOptions;
 const Replica = @import("test/cluster.zig").Replica;
 const StateMachine = @import("test/cluster.zig").StateMachine;
 const StateChecker = @import("test/state_checker.zig").StateChecker;
+const StorageChecker = @import("test/storage_checker.zig").StorageChecker;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
 const MessageBus = @import("test/message_bus.zig").MessageBus;
 const auditor = @import("test/accounting/auditor.zig");
@@ -28,8 +29,7 @@ const output = std.log.scoped(.state_checker);
 /// This will run much slower but will trace all logic across the cluster.
 const log_state_transitions_only = builtin.mode != .Debug;
 
-const log_health = std.log.scoped(.health);
-const log_faults = std.log.scoped(.faults);
+const log_simulator = std.log.scoped(.simulator);
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
@@ -41,6 +41,7 @@ const cluster_id = 0;
 
 var cluster: *Cluster = undefined;
 var state_checker: *StateChecker = undefined;
+var storage_checker: *StorageChecker = undefined;
 
 pub fn main() !void {
     comptime {
@@ -103,7 +104,9 @@ pub fn main() !void {
         // TODO Compute an upper-bound for this based on requests_committed_max.
         .grid_size_max = 1024 * 1024 * 256,
         .seed = random.int(u64),
-        .on_change_state = on_change_replica,
+        .on_change_state = on_replica_change_state,
+        .on_compact = on_replica_compact,
+        .on_checkpoint = on_replica_checkpoint,
         .network_options = .{
             .packet_simulator_options = .{
                 .replica_count = replica_count,
@@ -134,11 +137,17 @@ pub fn main() !void {
             .write_latency_mean = 3 + random.uintLessThan(u16, 100),
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
+            // TODO Allow WAL faults on crash when replica_count=1 when redundant-header-repair
+            // is implemented after recovering with decision=fix. Otherwise we can end up with
+            // multiple crashes faulting first a redundant headers, then a prepare, upgrading
+            // a decision=fix to decision=vsr.
+            .crash_fault_probability = if (replica_count == 1) 0 else 80 + random.uintLessThan(u8, 21),
+            .faulty_superblock = true,
         },
         .health_options = .{
-            .crash_probability = 0.0001,
+            .crash_probability = 0.000001,
             .crash_stability = random.uintLessThan(u32, 1_000),
-            .restart_probability = 0.01,
+            .restart_probability = 0.0001,
             .restart_stability = random.uintLessThan(u32, 1_000),
         },
         .state_machine_options = .{
@@ -292,6 +301,12 @@ pub fn main() !void {
     );
     defer state_checker.deinit();
 
+    storage_checker = try allocator.create(StorageChecker);
+    defer allocator.destroy(storage_checker);
+
+    storage_checker.* = StorageChecker.init(allocator);
+    defer storage_checker.deinit();
+
     // The minimum number of healthy replicas required for a crashed replica to be able to recover.
     const replica_normal_min = replicas: {
         if (replica_count == 1) {
@@ -330,14 +345,14 @@ pub fn main() !void {
                 // complete the VSR recovery protocol either.
                 if (cluster.health[replica] == .up and crashes == 0) {
                     if (storage.faulty) {
-                        log_faults.debug("{}: disable storage faults", .{replica});
+                        log_simulator.debug("{}: disable storage faults", .{replica});
                         storage.faulty = false;
                     }
                 } else {
                     // When a journal recovers for the first time, enable its storage faults.
                     // Future crashes will recover in the presence of faults.
                     if (!storage.faulty) {
-                        log_faults.debug("{}: enable storage faults", .{replica});
+                        log_simulator.debug("{}: enable storage faults", .{replica});
                         storage.faulty = true;
                     }
                 }
@@ -364,7 +379,7 @@ pub fn main() !void {
                     }
 
                     if (!try cluster.crash_replica(replica.replica)) continue;
-                    log_health.debug("{}: crash replica", .{replica.replica});
+                    log_simulator.debug("{}: crash replica", .{replica.replica});
                     crashes -= 1;
                 },
                 .down => |*ticks| {
@@ -375,7 +390,7 @@ pub fn main() !void {
                     assert(replica.status == .recovering);
                     if (ticks.* == 0 and chance_f64(random, health_options.restart_probability)) {
                         cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
-                        log_health.debug("{}: restart replica", .{replica.replica});
+                        log_simulator.debug("{}: restart replica", .{replica.replica});
                     }
                 },
             }
@@ -416,7 +431,7 @@ fn fatal(exit_code: ExitCode, comptime fmt_string: []const u8, args: anytype) no
 /// Returns true, `p` percent of the time, else false.
 fn chance_f64(random: std.rand.Random, p: f64) bool {
     assert(p <= 100.0);
-    return random.float(f64) < p;
+    return random.float(f64) * 100.0 < p;
 }
 
 /// Returns the next argument for the simulator or null (if none available)
@@ -425,9 +440,21 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
     return err_or_bytes catch @panic("Unable to extract next value from args");
 }
 
-fn on_change_replica(replica: *Replica) void {
+fn on_replica_change_state(replica: *const Replica) void {
     state_checker.check_state(replica.replica) catch |err| {
         fatal(.correctness, "state checker error: {}", .{err});
+    };
+}
+
+fn on_replica_compact(replica: *const Replica) void {
+    storage_checker.replica_compact(replica) catch |err| {
+        fatal(.correctness, "storage checker error: {}", .{err});
+    };
+}
+
+fn on_replica_checkpoint(replica: *const Replica) void {
+    storage_checker.replica_checkpoint(replica) catch |err| {
+        fatal(.correctness, "storage checker error: {}", .{err});
     };
 }
 

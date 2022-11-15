@@ -28,7 +28,7 @@ fn to_snakecase(comptime input: []const u8) []const u8 {
     inline for (input) |char, i| {
         const is_uppercase = (char >= 'A') and (char <= 'Z');
         if (is_uppercase and i > 0) output = "_" ++ output;
-        output = output ++ &[_]u8{ char };
+        output = output ++ &[_]u8{char};
     }
     return output;
 }
@@ -62,7 +62,7 @@ test "valid tb_client.h" {
             .Pointer => comptime assert(@sizeOf(ty) == @sizeOf(c_type)),
             .Enum => {
                 const prefix_offset = comptime std.mem.lastIndexOf(u8, c_type_name, "_").?;
-                comptime var c_enum_prefix: []const u8 = c_type_name[0..prefix_offset + 1];
+                comptime var c_enum_prefix: []const u8 = c_type_name[0 .. prefix_offset + 1];
                 comptime assert(c_type == c_uint);
 
                 // TB_STATUS is a special case in naming
@@ -83,7 +83,7 @@ test "valid tb_client.h" {
                 .Auto => @compileError("struct must be extern or packed to be used in C"),
                 .Packed => {
                     const prefix_offset = comptime std.mem.lastIndexOf(u8, c_type_name, "_").?;
-                    const c_enum_prefix = c_type_name[0..prefix_offset + 1];
+                    const c_enum_prefix = c_type_name[0 .. prefix_offset + 1];
                     comptime assert(c_type == c_uint);
 
                     inline for (std.meta.fields(ty)) |field| {
@@ -114,7 +114,7 @@ test "valid tb_client.h" {
                                 field_type = std.meta.Int(.unsigned, @bitSizeOf(field_type));
                             },
                             .Enum => |info| field_type = info.tag_type,
-                            else => {}
+                            else => {},
                         }
 
                         // In C, pointers are opaque so we compare only the field sizes,
@@ -130,6 +130,6 @@ test "valid tb_client.h" {
                 },
             },
             else => |i| @compileLog("TODO", i),
-        } 
+        }
     }
 }

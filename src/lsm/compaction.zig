@@ -85,7 +85,7 @@ pub fn CompactionType(
         );
 
         const MergeStreamSelector = struct {
-            fn peek(compaction: *const Compaction, stream_id: u32) error{Empty, Drained}!Key {
+            fn peek(compaction: *const Compaction, stream_id: u32) error{ Empty, Drained }!Key {
                 return switch (stream_id) {
                     0 => compaction.iterator_a.peek(),
                     1 => compaction.iterator_b.peek(),

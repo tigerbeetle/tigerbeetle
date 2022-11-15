@@ -12,6 +12,7 @@ const log = std.log.scoped(.message_bus);
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
+const util = @import("util.zig");
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
@@ -145,8 +146,19 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             return bus;
         }
 
-        /// TODO This is required by the Client.
-        pub fn deinit(_: *Self, _: std.mem.Allocator) void {}
+        pub fn deinit(bus: *Self, allocator: std.mem.Allocator) void {
+            if (process_type == .replica) {
+                bus.process.clients.deinit(allocator);
+            }
+
+            for (bus.connections) |*connection| {
+                if (connection.recv_message) |message| bus.unref(message);
+                while (connection.send_queue.pop()) |message| bus.unref(message);
+            }
+            allocator.free(bus.connections);
+            allocator.free(bus.replicas);
+            allocator.free(bus.replicas_connect_attempts);
+        }
 
         fn init_tcp(io: *IO, address: std.net.Address) !os.socket_t {
             const fd = try io.open_socket(
@@ -738,7 +750,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 if (connection.recv_progress == header.size) return connection.recv_message.?.ref();
 
                 const message = bus.get_message();
-                mem.copy(u8, message.buffer, data[0..header.size]);
+                util.copy_disjoint(.inexact, u8, message.buffer, data[0..header.size]);
                 return message;
             }
 
@@ -811,7 +823,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             /// Acquires a free message if necessary and then calls `recv()`.
-            /// Terminates the connection if a free message cannot be obtained.
             /// If the connection has a `recv_message` and the message being parsed is
             /// at pole position then calls `recv()` immediately, otherwise copies any
             /// partially received message into a new Message and sets `recv_message`,
@@ -831,7 +842,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     assert(connection.recv_progress > 0);
                     assert(connection.recv_parsed > 0);
                     const data = recv_message.buffer[connection.recv_parsed..connection.recv_progress];
-                    mem.copy(u8, new_message.buffer, data);
+                    util.copy_disjoint(.inexact, u8, new_message.buffer, data);
                     connection.recv_progress = data.len;
                     connection.recv_parsed = 0;
                 } else {

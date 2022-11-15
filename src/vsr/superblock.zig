@@ -1,3 +1,14 @@
+//! SuperBlock invariants:
+//!
+//!   * vsr_state
+//!     - vsr_state.commit_min is initially 0 (for a newly-formatted replica).
+//!     - vsr_state.commit_min ≤ vsr_state.commit_max
+//!     - vsr_state.view_normal ≤ vsr_state.view
+//!     - checkpoint() must advance the superblock's vsr_state.commit_min.
+//!     - view_change() must not advance the superblock's vsr_state.commit_min.
+//!     - All fields of vsr_state except commit_min_checksum are monotonically increasing over
+//!       view_change()/checkpoint().
+//!
 const std = @import("std");
 const assert = std.debug.assert;
 const crypto = std.crypto;
@@ -15,18 +26,11 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 pub const SuperBlockManifest = @import("superblock_manifest.zig").Manifest;
 pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
 pub const SuperBlockClientTable = @import("superblock_client_table.zig").ClientTable;
+pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
+    .superblock_copies = config.superblock_copies,
+});
 
-/// Identifies the type of a sector or block. Protects against misdirected I/O across valid types.
-pub const Magic = enum(u8) {
-    superblock,
-    manifest,
-    prepare,
-    index,
-    filter,
-    data,
-};
-
-pub const SuperBlockVersion: u8 = 0;
+pub const SuperBlockVersion: u16 = 0;
 
 // Fields are aligned to work as an extern or packed struct.
 pub const SuperBlockSector = extern struct {
@@ -38,14 +42,13 @@ pub const SuperBlockSector = extern struct {
     /// This simplifies writing and comparing multiple copies.
     copy: u8 = 0,
 
-    /// Protects against misdirected I/O for non-superblock sectors that have a valid checksum.
-    magic: Magic,
-
-    /// The version of the superblock format in use, reserved for major breaking changes.
-    version: u8,
-
     /// Protects against writing to or reading from the wrong data file.
     replica: u8,
+
+    /// The version of the superblock format in use, reserved for major breaking changes.
+    version: u16,
+
+    /// Protects against writing to or reading from the wrong data file.
     cluster: u32,
 
     /// The current size of the data file.
@@ -93,9 +96,12 @@ pub const SuperBlockSector = extern struct {
     /// The size of the client table entries stored in the superblock trailer.
     client_table_size: u32,
 
-    reserved: [3172]u8 = [_]u8{0} ** 3172,
+    reserved: [3148]u8 = [_]u8{0} ** 3148,
 
     pub const VSRState = extern struct {
+        /// The vsr.Header.checksum of commit_min's message.
+        commit_min_checksum: u128,
+
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
 
@@ -108,10 +114,22 @@ pub const SuperBlockSector = extern struct {
         /// The view number of the replica.
         view: u32,
 
+        reserved: [8]u8 = [_]u8{0} ** 8,
+
         comptime {
-            assert(@sizeOf(VSRState) == 24);
+            assert(@sizeOf(VSRState) == 48);
             // Assert that there is no implicit padding in the struct.
             assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
+        }
+
+        pub fn root(cluster: u32) VSRState {
+            return .{
+                .commit_min_checksum = vsr.Header.root_prepare(cluster).checksum,
+                .commit_min = 0,
+                .commit_max = 0,
+                .view_normal = 0,
+                .view = 0,
+            };
         }
 
         pub fn internally_consistent(state: VSRState) bool {
@@ -121,6 +139,10 @@ pub const SuperBlockSector = extern struct {
         pub fn monotonic(old: VSRState, new: VSRState) bool {
             assert(old.internally_consistent());
             assert(new.internally_consistent());
+            // The last case is for when checking monotonic() from the sequence=0 sector.
+            assert(old.commit_min != new.commit_min or
+                old.commit_min_checksum == new.commit_min_checksum or
+                (old.commit_min_checksum == 0 and old.commit_min == 0));
 
             if (old.view > new.view) return false;
             if (old.view_normal > new.view_normal) return false;
@@ -147,6 +169,7 @@ pub const SuperBlockSector = extern struct {
         /// But the corresponding `compact()` updates were preserved, and must not be repeated
         /// to ensure determinstic storage.
         pub fn op_compacted(state: VSRState, op: u64) bool {
+            // If commit_min is 0, we have never checkpointed, so no compactions are checkpointed.
             return state.commit_min > 0 and op <= state.commit_min + config.lsm_batch_multiple;
         }
     };
@@ -202,13 +225,13 @@ pub const SuperBlockSector = extern struct {
     }
 
     pub fn set_checksum(superblock: *SuperBlockSector) void {
-        assert(superblock.copy < superblock_copies_max);
-        assert(superblock.magic == .superblock);
+        assert(superblock.copy < config.superblock_copies);
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.flags == 0);
 
         assert(@bitCast(u32, superblock.reserved[0..4].*) == 0);
         for (mem.bytesAsSlice(u64, superblock.reserved[4..])) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &superblock.vsr_state.reserved)) |word| assert(word == 0);
 
         superblock.checksum = superblock.calculate_checksum();
     }
@@ -219,9 +242,6 @@ pub const SuperBlockSector = extern struct {
 
     /// Does not consider { checksum, copy } when comparing equality.
     pub fn equal(a: *const SuperBlockSector, b: *const SuperBlockSector) bool {
-        assert(a.magic == .superblock);
-        assert(b.magic == .superblock);
-
         if (a.version != b.version) return false;
         if (a.replica != b.replica) return false;
         if (a.cluster != b.cluster) return false;
@@ -243,6 +263,9 @@ pub const SuperBlockSector = extern struct {
         for (mem.bytesAsSlice(u64, a.reserved[4..])) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, b.reserved[4..])) |word| assert(word == 0);
 
+        for (mem.bytesAsSlice(u64, &a.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &b.vsr_state.reserved)) |word| assert(word == 0);
+
         return true;
     }
 };
@@ -255,20 +278,12 @@ comptime {
 }
 
 /// The size of the entire superblock storage zone.
-pub const superblock_zone_size = superblock_size * superblock_copies_max;
-
-/// A single set of copies (a copy set) consists of config.superblock_copies of a superblock.
-/// At least two copy sets are required for copy-on-write in order not to impair existing copies.
-///
-/// However, when writing only the superblock sector for a view change, we do update-in-place,
-/// which is necessary as we need to continue to reference the existing superblock trailer to
-/// decouple view changes from checkpoints, to not force an untimely checkpoint ahead of schedule.
-pub const superblock_copies_max = config.superblock_copies * 2;
+pub const superblock_zone_size = superblock_copy_size * config.superblock_copies;
 
 /// The size of an individual superblock including trailer.
-pub const superblock_size = @sizeOf(SuperBlockSector) + superblock_trailer_size_max;
+pub const superblock_copy_size = @sizeOf(SuperBlockSector) + superblock_trailer_size_max;
 comptime {
-    assert(superblock_size % config.sector_size == 0);
+    assert(superblock_copy_size % config.sector_size == 0);
 }
 
 /// The maximum possible size of the superblock trailer, following the superblock sector.
@@ -289,7 +304,9 @@ pub const superblock_trailer_size_max = blk: {
 
     // We order the smaller manifest section ahead of the block free set for better access locality.
     // For example, it's cheaper to skip over 1 MiB when reading from disk than to skip over 32 MiB.
-    break :blk superblock_trailer_manifest_size_max + superblock_trailer_free_set_size_max + superblock_trailer_client_table_size_max;
+    break :blk superblock_trailer_manifest_size_max +
+        superblock_trailer_free_set_size_max +
+        superblock_trailer_client_table_size_max;
 };
 
 // A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
@@ -322,6 +339,33 @@ pub const data_file_size_min = blk: {
     break :blk superblock_zone_size + config.journal_size_max;
 };
 
+/// This table shows the sequence number progression of the SuperBlock's sectors.
+///
+/// action        working  staging  disk
+/// format        seq      seq      seq
+///                0                 -        Initially the file has no sectors.
+///                0        1        -
+///                0        1        1        Write a copyset for the first sequence.
+///                1        1        1        Read quorum; verify 3/4 are valid.
+///
+/// open          seq      seq      seq
+///                                 a
+///               a                 a         Read quorum; verify 2/4 are valid.
+///               a        (a)      a         Repair any broken copies of `a`.
+///
+/// checkpoint    seq      seq      seq
+///               a        a        a
+///               a        a+1
+///               a        a+1      a+1
+///               a+1      a+1      a+1       Read quorum; verify 3/4 are valid.
+///
+/// view_change   seq      seq      seq
+///               a                 a
+///               a        a+1      a         The new sequence reuses the original parent.
+///               a        a+1      a+1
+///               a+1      a+1      a+1       Read quorum; verify 3/4 are valid.
+///               working  staging  disk
+///
 pub fn SuperBlockType(comptime Storage: type) type {
     return struct {
         const SuperBlock = @This();
@@ -344,8 +388,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             write: Storage.Write = undefined,
             read: Storage.Read = undefined,
-            copy: u8 = undefined,
-            vsr_state: SuperBlockSector.VSRState = undefined,
+            read_threshold: ?Quorums.Threshold = null,
+            copy: ?u8 = null,
+            /// Used by format(), checkpoint(), and view_change().
+            vsr_state: ?SuperBlockSector.VSRState = null,
+            repairs: ?Quorums.RepairIterator = null, // Used by open().
         };
 
         storage: *Storage,
@@ -360,14 +407,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
         working: *align(config.sector_size) SuperBlockSector,
 
         /// The superblock that will replace the current working superblock once written.
-        /// This is used when writing the staging superblock, or when changing views before then.
         /// We cannot mutate any working state directly until it is safely on stable storage.
         /// Otherwise, we may accidentally externalize guarantees that are not yet durable.
-        writing: *align(config.sector_size) SuperBlockSector,
-
-        /// The superblock that will be checkpointed next.
-        /// This may be updated incrementally several times before the next checkpoint.
-        /// For example, to track new snapshots as they are registered.
         staging: *align(config.sector_size) SuperBlockSector,
 
         /// The copies that we read into at startup or when verifying the written superblock.
@@ -421,11 +462,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const b = try allocator.allocAdvanced(SuperBlockSector, config.sector_size, 1, .exact);
             errdefer allocator.free(b);
 
-            const c = try allocator.allocAdvanced(SuperBlockSector, config.sector_size, 1, .exact);
-            errdefer allocator.free(c);
-
             const reading = try allocator.allocAdvanced(
-                [config.superblock_copies * 2]SuperBlockSector,
+                [config.superblock_copies]SuperBlockSector,
                 config.sector_size,
                 1,
                 .exact,
@@ -475,8 +513,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             return SuperBlock{
                 .storage = storage,
                 .working = &a[0],
-                .writing = &b[0],
-                .staging = &c[0],
+                .staging = &b[0],
                 .reading = &reading[0],
                 .manifest = manifest,
                 .free_set = free_set,
@@ -489,7 +526,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn deinit(superblock: *SuperBlock, allocator: mem.Allocator) void {
             allocator.destroy(superblock.working);
-            allocator.destroy(superblock.writing);
             allocator.destroy(superblock.staging);
             allocator.free(superblock.reading);
 
@@ -526,7 +562,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // We therefore use zero values to make this parent checksum as stable as possible.
             superblock.working.* = .{
                 .copy = 0,
-                .magic = .superblock,
                 .version = SuperBlockVersion,
                 .sequence = 0,
                 .replica = options.replica,
@@ -538,6 +573,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .free_set_checksum = 0,
                 .client_table_checksum = 0,
                 .vsr_state = .{
+                    .commit_min_checksum = 0,
                     .commit_min = 0,
                     .commit_max = 0,
                     .view_normal = 0,
@@ -557,15 +593,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.working.set_checksum();
 
-            superblock.staging.* = superblock.working.*;
-            superblock.staging.sequence = superblock.working.sequence + 1;
-            superblock.staging.parent = superblock.working.checksum;
-
             context.* = .{
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .format,
-                .copy = undefined,
+                .vsr_state = SuperBlockSector.VSRState.root(options.cluster),
             };
 
             // TODO At a higher layer, we must:
@@ -591,23 +623,33 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
+        /// The vsr_state must update the commit_min and commit_min_checksum.
+        // TODO Will the replica ever update view/view_normal by calling checkpoint() during a view
+        // change? If not, forbid it.
         pub fn checkpoint(
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
+            vsr_state: SuperBlockSector.VSRState,
         ) void {
             assert(superblock.opened);
+            // Checkpoint must advance commit_min, but never the view.
+            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
+            assert(superblock.staging.vsr_state.commit_min < vsr_state.commit_min);
+            assert(superblock.staging.vsr_state.commit_min_checksum !=
+                vsr_state.commit_min_checksum);
 
             context.* = .{
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .checkpoint,
-                .copy = undefined,
+                .vsr_state = vsr_state,
             };
 
             superblock.acquire(context);
         }
 
+        /// The vsr_state must not update the `commit_min` or `commit_min_checksum`.
         pub fn view_change(
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
@@ -615,20 +657,28 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state: SuperBlockSector.VSRState,
         ) void {
             assert(superblock.opened);
+            assert(vsr_state.commit_min == superblock.staging.vsr_state.commit_min);
+            assert(vsr_state.commit_min_checksum ==
+                superblock.staging.vsr_state.commit_min_checksum);
+            assert(superblock.staging.vsr_state.monotonic(vsr_state));
 
             log.debug(
-                "view_change: commit_min={}..{} commit_max={}..{} view_normal={}..{} view={}..{}",
+                "view_change: commit_min_checksum={}..{} commit_min={}..{} commit_max={}..{} " ++
+                    "view_normal={}..{} view={}..{}",
                 .{
-                    superblock.working.vsr_state.commit_min,
+                    superblock.staging.vsr_state.commit_min_checksum,
+                    vsr_state.commit_min_checksum,
+
+                    superblock.staging.vsr_state.commit_min,
                     vsr_state.commit_min,
 
-                    superblock.working.vsr_state.commit_max,
+                    superblock.staging.vsr_state.commit_max,
                     vsr_state.commit_max,
 
-                    superblock.working.vsr_state.view_normal,
+                    superblock.staging.vsr_state.view_normal,
                     vsr_state.view_normal,
 
-                    superblock.working.vsr_state.view,
+                    superblock.staging.vsr_state.view,
                     vsr_state.view,
                 },
             );
@@ -639,14 +689,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .view_change,
-                .copy = undefined,
                 .vsr_state = vsr_state,
             };
 
-            // Only this view_change() function may change the VSR state.
-            assert(meta.eql(superblock.working.vsr_state, superblock.staging.vsr_state));
-
-            if (!superblock.working.vsr_state.would_be_updated_by(context.vsr_state)) {
+            if (!superblock.staging.vsr_state.would_be_updated_by(context.vsr_state.?)) {
                 log.debug("view_change: no change", .{});
                 callback(context);
                 return;
@@ -672,34 +718,32 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         fn write_staging(superblock: *SuperBlock, context: *Context) void {
-            assert(context.caller == .format or context.caller == .checkpoint);
+            assert(context.caller != .open);
             assert(context.caller == .format or superblock.opened);
+            assert(context.copy == null);
+            assert(context.vsr_state.?.internally_consistent());
             assert(superblock.queue_head == context);
             assert(superblock.queue_tail == null);
+            assert(superblock.working.vsr_state.would_be_updated_by(context.vsr_state.?));
 
-            superblock.write_staging_encode_manifest();
-            superblock.write_staging_encode_free_set();
-            superblock.write_staging_encode_client_table();
+            superblock.staging.* = superblock.working.*;
+            superblock.staging.sequence = superblock.staging.sequence + 1;
+            superblock.staging.parent = superblock.staging.checksum;
+            superblock.staging.vsr_state.update(context.vsr_state.?);
 
-            superblock.writing.* = superblock.staging.*;
-            superblock.writing.set_checksum();
+            if (context.caller != .view_change) {
+                superblock.write_staging_encode_manifest();
+                superblock.write_staging_encode_free_set();
+                superblock.write_staging_encode_client_table();
+            }
+            superblock.staging.set_checksum();
 
-            assert(superblock.writing.sequence == superblock.working.sequence + 1);
-            assert(superblock.writing.parent == superblock.working.checksum);
-
-            superblock.staging.sequence = superblock.writing.sequence + 1;
-            superblock.staging.parent = superblock.writing.checksum;
-
-            assert(superblock.writing.manifest_checksum == superblock.staging.manifest_checksum);
-            assert(superblock.writing.free_set_checksum == superblock.staging.free_set_checksum);
-            assert(superblock.writing.client_table_checksum == superblock.staging.client_table_checksum);
-
-            assert(superblock.writing.manifest_size == superblock.staging.manifest_size);
-            assert(superblock.writing.free_set_size == superblock.staging.free_set_size);
-            assert(superblock.writing.client_table_size == superblock.staging.client_table_size);
-
-            context.copy = starting_copy_for_sequence(superblock.writing.sequence);
-            superblock.write_manifest(context);
+            context.copy = 0;
+            if (context.caller == .view_change) {
+                superblock.write_sector(context);
+            } else {
+                superblock.write_manifest(context);
+            }
         }
 
         fn write_staging_encode_manifest(superblock: *SuperBlock) void {
@@ -740,54 +784,25 @@ pub fn SuperBlockType(comptime Storage: type) type {
             staging.client_table_checksum = vsr.checksum(target[0..staging.client_table_size]);
         }
 
-        fn write_view_change(superblock: *SuperBlock, context: *Context) void {
-            assert(context.caller == .view_change);
-            assert(superblock.opened);
-            assert(superblock.queue_head == context);
-            assert(superblock.queue_tail == null);
-            assert(context.vsr_state.internally_consistent());
-            assert(meta.eql(superblock.working.vsr_state, superblock.staging.vsr_state));
-            assert(superblock.working.vsr_state.would_be_updated_by(context.vsr_state));
-
-            superblock.writing.* = superblock.working.*;
-
-            // We cannot increment the sequence number when writing only the superblock sector as
-            // this would write the sector to another copy set with different superblock trailers.
-            // Instead, we increment twice so that the sector remains in the same copy set.
-            superblock.writing.sequence += 2;
-            assert(superblock.writing.parent == superblock.working.parent);
-
-            superblock.writing.vsr_state.update(context.vsr_state);
-            superblock.staging.vsr_state.update(context.vsr_state);
-
-            superblock.writing.set_checksum();
-
-            superblock.staging.sequence = superblock.writing.sequence + 1;
-            superblock.staging.parent = superblock.writing.checksum;
-
-            context.copy = starting_copy_for_sequence(superblock.writing.sequence);
-            superblock.write_sector(context);
-        }
-
         fn write_manifest(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            const size = vsr.sector_ceil(superblock.writing.manifest_size);
+            const size = vsr.sector_ceil(superblock.staging.manifest_size);
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = offset_manifest(context.copy, superblock.writing.sequence);
+            const offset = Layout.offset_manifest(context.copy.?);
 
-            mem.set(u8, buffer[superblock.writing.manifest_size..], 0); // Zero sector padding.
+            mem.set(u8, buffer[superblock.staging.manifest_size..], 0); // Zero sector padding.
 
-            assert(superblock.writing.manifest_checksum == vsr.checksum(
-                superblock.manifest_buffer[0..superblock.writing.manifest_size],
+            assert(superblock.staging.manifest_checksum == vsr.checksum(
+                superblock.manifest_buffer[0..superblock.staging.manifest_size],
             ));
 
             log.debug("{s}: write_manifest: checksum={x} size={} offset={}", .{
                 @tagName(context.caller),
-                superblock.writing.manifest_checksum,
-                superblock.writing.manifest_size,
+                superblock.staging.manifest_checksum,
+                superblock.staging.manifest_size,
                 offset,
             });
 
@@ -815,22 +830,22 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn write_free_set(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            const size = vsr.sector_ceil(superblock.writing.free_set_size);
+            const size = vsr.sector_ceil(superblock.staging.free_set_size);
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = offset_free_set(context.copy, superblock.writing.sequence);
+            const offset = Layout.offset_free_set(context.copy.?);
 
-            mem.set(u8, buffer[superblock.writing.free_set_size..], 0); // Zero sector padding.
+            mem.set(u8, buffer[superblock.staging.free_set_size..], 0); // Zero sector padding.
 
-            assert(superblock.writing.free_set_checksum == vsr.checksum(
-                superblock.free_set_buffer[0..superblock.writing.free_set_size],
+            assert(superblock.staging.free_set_checksum == vsr.checksum(
+                superblock.free_set_buffer[0..superblock.staging.free_set_size],
             ));
 
             log.debug("{s}: write_free_set: checksum={x} size={} offset={}", .{
                 @tagName(context.caller),
-                superblock.writing.free_set_checksum,
-                superblock.writing.free_set_size,
+                superblock.staging.free_set_checksum,
+                superblock.staging.free_set_size,
                 offset,
             });
 
@@ -858,22 +873,22 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn write_client_table(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            const size = vsr.sector_ceil(superblock.writing.client_table_size);
+            const size = vsr.sector_ceil(superblock.staging.client_table_size);
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = offset_client_table(context.copy, superblock.writing.sequence);
+            const offset = Layout.offset_client_table(context.copy.?);
 
-            mem.set(u8, buffer[superblock.writing.client_table_size..], 0); // Zero sector padding.
+            mem.set(u8, buffer[superblock.staging.client_table_size..], 0); // Zero sector padding.
 
-            assert(superblock.writing.client_table_checksum == vsr.checksum(
-                superblock.client_table_buffer[0..superblock.writing.client_table_size],
+            assert(superblock.staging.client_table_checksum == vsr.checksum(
+                superblock.client_table_buffer[0..superblock.staging.client_table_size],
             ));
 
             log.debug("{s}: write_client_table: checksum={x} size={} offset={}", .{
                 @tagName(context.caller),
-                superblock.writing.client_table_checksum,
-                superblock.writing.client_table_size,
+                superblock.staging.client_table_checksum,
+                superblock.staging.client_table_size,
                 offset,
             });
 
@@ -901,45 +916,42 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn write_sector(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            // We either update the working superblock for a checkpoint (+1) or a view change (+2):
-            assert(superblock.writing.sequence == superblock.working.sequence + 1 or
-                superblock.writing.sequence == superblock.working.sequence + 2);
-
-            // The staging superblock should always be one ahead, with VSR state in sync:
-            assert(superblock.staging.sequence == superblock.writing.sequence + 1);
-            assert(superblock.staging.parent == superblock.writing.checksum);
-            assert(meta.eql(superblock.staging.vsr_state, superblock.writing.vsr_state));
+            // We update the working superblock for a checkpoint/format/view_change:
+            // open() does not update the working superblock, since it only writes to repair.
+            if (context.caller == .open) {
+                assert(superblock.staging.sequence == superblock.working.sequence);
+            } else {
+                assert(superblock.staging.sequence == superblock.working.sequence + 1);
+                assert(superblock.staging.parent == superblock.working.checksum);
+            }
 
             // The superblock cluster and replica should never change once formatted:
-            assert(superblock.writing.cluster == superblock.working.cluster);
-            assert(superblock.writing.cluster == superblock.staging.cluster);
-            assert(superblock.writing.replica == superblock.working.replica);
-            assert(superblock.writing.replica == superblock.staging.replica);
+            assert(superblock.staging.cluster == superblock.working.cluster);
+            assert(superblock.staging.replica == superblock.working.replica);
 
-            assert(superblock.writing.size >= data_file_size_min);
-            assert(superblock.writing.size <= superblock.writing.size_max);
+            assert(superblock.staging.size >= data_file_size_min);
+            assert(superblock.staging.size <= superblock.staging.size_max);
 
-            assert(context.copy < superblock_copies_max);
-            assert(context.copy >= starting_copy_for_sequence(superblock.writing.sequence));
-            assert(context.copy <= stopping_copy_for_sequence(superblock.writing.sequence));
-            superblock.writing.copy = context.copy;
+            assert(context.copy.? < config.superblock_copies);
+            superblock.staging.copy = context.copy.?;
 
             // Updating the copy number should not affect the checksum, which was previously set:
-            assert(superblock.writing.valid_checksum());
+            assert(superblock.staging.valid_checksum());
 
-            const buffer = mem.asBytes(superblock.writing);
-            const offset = superblock_size * context.copy;
+            const buffer = mem.asBytes(superblock.staging);
+            const offset = Layout.offset_sector(context.copy.?);
 
-            log.debug("{s}: write_sector: checksum={x} sequence={} copy={} size={} offset={}", .{
+            log.debug("{}: {s}: write_sector: checksum={x} sequence={} copy={} size={} offset={}", .{
+                superblock.staging.replica,
                 @tagName(context.caller),
-                superblock.writing.checksum,
-                superblock.writing.sequence,
-                context.copy,
+                superblock.staging.checksum,
+                superblock.staging.sequence,
+                context.copy.?,
                 buffer.len,
                 offset,
             });
 
-            superblock.assert_bounds(offset, buffer.len + superblock_trailer_size_max);
+            superblock.assert_bounds(offset, buffer.len);
 
             superblock.storage.write_sectors(
                 write_sector_callback,
@@ -953,25 +965,24 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn write_sector_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
             const superblock = context.superblock;
+            const copy = context.copy.?;
 
             assert(superblock.queue_head == context);
 
-            assert(context.copy < superblock_copies_max);
-            assert(context.copy >= starting_copy_for_sequence(superblock.writing.sequence));
-            assert(context.copy <= stopping_copy_for_sequence(superblock.writing.sequence));
-            assert(context.copy == superblock.writing.copy);
+            assert(copy < config.superblock_copies);
+            assert(copy == superblock.staging.copy);
 
-            if (context.copy == stopping_copy_for_sequence(superblock.writing.sequence)) {
-                if (context.caller == .format and superblock.writing.sequence < 2) {
-                    assert(superblock.writing.sequence != 0);
+            if (context.caller == .open) {
+                context.copy = null;
+                superblock.repair(context);
+                return;
+            }
 
-                    superblock.working.* = superblock.writing.*;
-                    superblock.write_staging(context);
-                } else {
-                    superblock.read_working(context);
-                }
+            if (copy + 1 == config.superblock_copies) {
+                context.copy = null;
+                superblock.read_working(context, .verify);
             } else {
-                context.copy += 1;
+                context.copy = copy + 1;
 
                 switch (context.caller) {
                     .open => unreachable,
@@ -981,34 +992,42 @@ pub fn SuperBlockType(comptime Storage: type) type {
             }
         }
 
-        fn read_working(superblock: *SuperBlock, context: *Context) void {
+        fn read_working(
+            superblock: *SuperBlock,
+            context: *Context,
+            threshold: Quorums.Threshold,
+        ) void {
             assert(superblock.queue_head == context);
+            assert(context.copy == null);
+            assert(context.read_threshold == null);
 
             // We do not submit reads in parallel, as while this would shave off 1ms, it would also
             // increase the risk that a single fault applies to more reads due to temporal locality.
             // This would make verification reads more flaky when we do experience a read fault.
             // See "An Analysis of Data Corruption in the Storage Stack".
 
-            context.copy = 0; // Read all copies across all copy sets.
+            context.copy = 0;
+            context.read_threshold = threshold;
             for (superblock.reading) |*copy| copy.* = undefined;
             superblock.read_sector(context);
         }
 
         fn read_sector(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
-            assert(context.copy < superblock_copies_max);
+            assert(context.copy.? < config.superblock_copies);
+            assert(context.read_threshold != null);
 
-            const buffer = mem.asBytes(&superblock.reading[context.copy]);
-            const offset = superblock_size * context.copy;
+            const buffer = mem.asBytes(&superblock.reading[context.copy.?]);
+            const offset = Layout.offset_sector(context.copy.?);
 
             log.debug("{s}: read_sector: copy={} size={} offset={}", .{
                 @tagName(context.caller),
-                context.copy,
+                context.copy.?,
                 buffer.len,
                 offset,
             });
 
-            superblock.assert_bounds(offset, buffer.len + superblock_trailer_size_max);
+            superblock.assert_bounds(offset, buffer.len);
 
             superblock.storage.read_sectors(
                 read_sector_callback,
@@ -1022,96 +1041,109 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_sector_callback(read: *Storage.Read) void {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
+            const threshold = context.read_threshold.?;
 
             assert(superblock.queue_head == context);
 
-            assert(context.copy < superblock_copies_max);
-            if (context.copy == superblock_copies_max - 1) {
-                const threshold = threshold_for_caller(context.caller);
-
-                if (superblock.quorums.working(superblock.reading, threshold)) |working| {
-                    switch (context.caller) {
-                        .format, .checkpoint, .view_change => {
-                            if (working.checksum != superblock.writing.checksum) {
-                                @panic("superblock failed verification after writing");
-                            }
-                            assert(working.equal(superblock.writing));
-                            assert(superblock.staging.sequence == working.sequence + 1);
-                            assert(superblock.staging.parent == working.checksum);
-                        },
-                        .open => {
-                            superblock.staging.* = working.*;
-                            superblock.staging.sequence = working.sequence + 1;
-                            superblock.staging.parent = working.checksum;
-                        },
-                    }
-
-                    if (context.caller == .format) {
-                        assert(working.sequence == 2);
-                        // TODO Assert working.size.
-                        assert(working.manifest_size == 0);
-                        assert(working.free_set_size == 8);
-                        assert(working.vsr_state.commit_min == 0);
-                        assert(working.vsr_state.commit_max == 0);
-                        assert(working.vsr_state.view_normal == 0);
-                        assert(working.vsr_state.view == 0);
-                    } else if (context.caller == .checkpoint) {
-                        superblock.free_set.checkpoint();
-                    }
-
-                    superblock.working.* = working.*;
-                    log.debug(
-                        "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
-                            "replica={} size={} commit_min={} commit_max={} view_normal={} view={}",
-                        .{
-                            @tagName(context.caller),
-                            superblock.working.checksum,
-                            superblock.working.sequence,
-                            superblock.working.cluster,
-                            superblock.working.replica,
-                            superblock.working.size,
-                            superblock.working.vsr_state.commit_min,
-                            superblock.working.vsr_state.commit_max,
-                            superblock.working.vsr_state.view_normal,
-                            superblock.working.vsr_state.view,
-                        },
-                    );
-
-                    if (context.caller == .open) {
-                        context.copy = starting_copy_for_sequence(superblock.working.sequence);
-                        superblock.read_manifest(context);
-                    } else {
-                        // TODO Consider calling TRIM() on Grid's free suffix after checkpointing.
-                        superblock.release(context);
-                    }
-                } else |err| switch (err) {
-                    error.NotFound => @panic("superblock not found"),
-                    error.QuorumLost => @panic("superblock quorum lost"),
-                    error.ParentNotFound => @panic("superblock parent not found"),
-                    error.ParentQuorumLost => @panic("superblock parent quorum lost"),
-                    error.VSRStateNotMonotonic => @panic("superblock vsr state not monotonic"),
-                    error.SequenceNotMonotonic => @panic("superblock sequence not monotonic"),
-                }
-            } else {
-                context.copy += 1;
+            assert(context.copy.? < config.superblock_copies);
+            if (context.copy.? + 1 != config.superblock_copies) {
+                context.copy = context.copy.? + 1;
                 superblock.read_sector(context);
+                return;
+            }
+
+            context.read_threshold = null;
+            context.copy = null;
+
+            if (superblock.quorums.working(superblock.reading, threshold)) |quorum| {
+                assert(quorum.valid);
+                assert(quorum.copies.count() >= threshold.count());
+
+                const working = quorum.sector;
+                if (threshold == .verify) {
+                    if (working.checksum != superblock.staging.checksum) {
+                        @panic("superblock failed verification after writing");
+                    }
+                    assert(working.equal(superblock.staging));
+                }
+
+                if (context.caller == .format) {
+                    assert(working.sequence == 1);
+                    assert(working.size == data_file_size_min);
+                    assert(working.manifest_size == 0);
+                    assert(working.free_set_size == 8);
+                    assert(working.client_table_size == 4);
+                    assert(working.vsr_state.commit_min_checksum ==
+                        vsr.Header.root_prepare(working.cluster).checksum);
+                    assert(working.vsr_state.commit_min == 0);
+                    assert(working.vsr_state.commit_max == 0);
+                    assert(working.vsr_state.view_normal == 0);
+                    assert(working.vsr_state.view == 0);
+                } else if (context.caller == .checkpoint) {
+                    superblock.free_set.checkpoint();
+                }
+
+                superblock.working.* = working.*;
+                superblock.staging.* = working.*;
+                log.debug(
+                    "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
+                        "replica={} size={} " ++
+                        "commit_min_checksum={} commit_min={} commit_max={} " ++
+                        "view_normal={} view={}",
+                    .{
+                        @tagName(context.caller),
+                        superblock.working.checksum,
+                        superblock.working.sequence,
+                        superblock.working.cluster,
+                        superblock.working.replica,
+                        superblock.working.size,
+                        superblock.working.vsr_state.commit_min_checksum,
+                        superblock.working.vsr_state.commit_min,
+                        superblock.working.vsr_state.commit_max,
+                        superblock.working.vsr_state.view_normal,
+                        superblock.working.vsr_state.view,
+                    },
+                );
+
+                if (context.caller == .open) {
+                    if (context.repairs) |_| {
+                        // We just verified that the repair completed.
+                        assert(threshold == .verify);
+                        superblock.release(context);
+                    } else {
+                        assert(threshold == .open);
+                        context.copy = 0;
+                        context.repairs = quorum.repairs();
+                        superblock.read_manifest(context);
+                    }
+                } else {
+                    // TODO Consider calling TRIM() on Grid's free suffix after checkpointing.
+                    superblock.release(context);
+                }
+            } else |err| switch (err) {
+                error.Fork => @panic("superblock forked"),
+                error.NotFound => @panic("superblock not found"),
+                error.QuorumLost => @panic("superblock quorum lost"),
+                error.ParentNotConnected => @panic("superblock parent not connected"),
+                error.ParentSkipped => @panic("superblock parent superseded"),
+                error.VSRStateNotMonotonic => @panic("superblock vsr state not monotonic"),
             }
         }
 
         fn read_manifest(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy < superblock_copies_max);
+            assert(context.copy.? < config.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.manifest_size);
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = offset_manifest(context.copy, superblock.working.sequence);
+            const offset = Layout.offset_manifest(context.copy.?);
 
             log.debug("{s}: read_manifest: copy={} size={} offset={}", .{
                 @tagName(context.caller),
-                context.copy,
+                context.copy.?,
                 buffer.len,
                 offset,
             });
@@ -1135,6 +1167,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_manifest_callback(read: *Storage.Read) void {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
+            const copy = context.copy.?;
 
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
@@ -1153,13 +1186,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 // TODO Repair any impaired copies before we continue.
                 // At present, we repair at the next checkpoint.
                 // We do not repair padding.
-                context.copy = starting_copy_for_sequence(superblock.working.sequence);
+                context.copy = 0;
                 superblock.read_free_set(context);
-            } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
+            } else if (copy + 1 == config.superblock_copies) {
                 @panic("superblock manifest lost");
             } else {
-                log.debug("open: read_manifest: corrupt copy={}", .{context.copy});
-                context.copy += 1;
+                log.debug("open: read_manifest: corrupt copy={}", .{copy});
+                context.copy = copy + 1;
                 superblock.read_manifest(context);
             }
         }
@@ -1167,17 +1200,17 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_free_set(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy < superblock_copies_max);
+            assert(context.copy.? < config.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.free_set_size);
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = offset_free_set(context.copy, superblock.working.sequence);
+            const offset = Layout.offset_free_set(context.copy.?);
 
             log.debug("{s}: read_free_set: copy={} size={} offset={}", .{
                 @tagName(context.caller),
-                context.copy,
+                context.copy.?,
                 buffer.len,
                 offset,
             });
@@ -1201,6 +1234,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_free_set_callback(read: *Storage.Read) void {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
+            const copy = context.copy.?;
 
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
@@ -1220,11 +1254,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 // TODO Repair any impaired copies before we continue.
                 superblock.read_client_table(context);
-            } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
+            } else if (copy + 1 == config.superblock_copies) {
                 @panic("superblock free set lost");
             } else {
-                log.debug("open: read_free_set: corrupt copy={}", .{context.copy});
-                context.copy += 1;
+                log.debug("open: read_free_set: corrupt copy={}", .{copy});
+                context.copy = copy + 1;
                 superblock.read_free_set(context);
             }
         }
@@ -1239,17 +1273,17 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_client_table(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy < superblock_copies_max);
+            assert(context.copy.? < config.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.client_table_size);
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = offset_client_table(context.copy, superblock.working.sequence);
+            const offset = Layout.offset_client_table(context.copy.?);
 
             log.debug("{s}: read_client_table: copy={} size={} offset={}", .{
                 @tagName(context.caller),
-                context.copy,
+                context.copy.?,
                 buffer.len,
                 offset,
             });
@@ -1273,6 +1307,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_client_table_callback(read: *Storage.Read) void {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
+            const copy = context.copy.?;
 
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
@@ -1288,14 +1323,30 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     config.clients_max,
                 });
 
-                // TODO Repair any impaired copies before we continue.
-                superblock.release(context);
-            } else if (context.copy == stopping_copy_for_sequence(superblock.working.sequence)) {
+                context.copy = null;
+                superblock.repair(context);
+            } else if (copy + 1 == config.superblock_copies) {
                 @panic("superblock client table lost");
             } else {
-                log.debug("open: read_client_table: corrupt copy={}", .{context.copy});
-                context.copy += 1;
+                log.debug("open: read_client_table: corrupt copy={}", .{copy});
+                context.copy = copy + 1;
                 superblock.read_client_table(context);
+            }
+        }
+
+        fn repair(superblock: *SuperBlock, context: *Context) void {
+            assert(context.caller == .open);
+            assert(context.copy == null);
+            assert(superblock.queue_head == context);
+
+            if (context.repairs.?.next()) |repair_copy| {
+                context.copy = repair_copy;
+                log.warn("repair: copy={}", .{repair_copy});
+
+                superblock.staging.* = superblock.working.*;
+                superblock.write_manifest(context);
+            } else {
+                superblock.release(context);
             }
         }
 
@@ -1321,11 +1372,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.queue_head = context;
                 log.debug("{s}: started", .{@tagName(context.caller)});
 
-                switch (context.caller) {
-                    .format => superblock.write_staging(context),
-                    .open => superblock.read_working(context),
-                    .checkpoint => superblock.write_staging(context),
-                    .view_change => superblock.write_view_change(context),
+                if (context.caller == .open) {
+                    superblock.read_working(context, .open);
+                } else {
+                    superblock.write_staging(context);
                 }
             }
         }
@@ -1335,20 +1385,24 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             log.debug("{s}: complete", .{@tagName(context.caller)});
 
-            if (context.caller == .open) {
-                assert(!superblock.opened);
-                superblock.opened = true;
+            switch (context.caller) {
+                .format => {},
+                .open => {
+                    assert(!superblock.opened);
+                    superblock.opened = true;
 
-                if (superblock.working.manifest_size > 0) {
-                    assert(superblock.manifest.count > 0);
-                }
-                // TODO Make the FreeSet encoding format not dependant on the word size.
-                if (superblock.working.free_set_size > @sizeOf(usize)) {
-                    assert(superblock.free_set.count_acquired() > 0);
-                }
-            } else if (context.caller == .view_change) {
-                assert(meta.eql(superblock.working.vsr_state, context.vsr_state));
-                assert(meta.eql(superblock.staging.vsr_state, context.vsr_state));
+                    if (superblock.working.manifest_size > 0) {
+                        assert(superblock.manifest.count > 0);
+                    }
+                    // TODO Make the FreeSet encoding format not dependant on the word size.
+                    if (superblock.working.free_set_size > @sizeOf(usize)) {
+                        assert(superblock.free_set.count_acquired() > 0);
+                    }
+                },
+                .checkpoint, .view_change => {
+                    assert(meta.eql(superblock.staging.vsr_state, context.vsr_state.?));
+                    assert(meta.eql(superblock.working.vsr_state, context.vsr_state.?));
+                },
             }
 
             const queue_tail = superblock.queue_tail;
@@ -1362,40 +1416,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn assert_bounds(superblock: *SuperBlock, offset: u64, size: u64) void {
             assert(offset >= superblock.storage_offset);
             assert(offset + size <= superblock.storage_offset + superblock.storage_size);
-        }
-
-        fn offset_manifest(copy: u8, sequence: u64) u64 {
-            assert(copy >= starting_copy_for_sequence(sequence));
-            assert(copy <= stopping_copy_for_sequence(sequence));
-
-            return superblock_size * copy + @sizeOf(SuperBlockSector);
-        }
-
-        fn offset_free_set(copy: u8, sequence: u64) u64 {
-            assert(copy >= starting_copy_for_sequence(sequence));
-            assert(copy <= stopping_copy_for_sequence(sequence));
-
-            return superblock_size * copy + @sizeOf(SuperBlockSector) +
-                superblock_trailer_manifest_size_max;
-        }
-
-        fn offset_client_table(copy: u8, sequence: u64) u64 {
-            assert(copy >= starting_copy_for_sequence(sequence));
-            assert(copy <= stopping_copy_for_sequence(sequence));
-
-            return superblock_size * copy + @sizeOf(SuperBlockSector) +
-                superblock_trailer_manifest_size_max +
-                superblock_trailer_free_set_size_max;
-        }
-
-        /// Returns the first copy index (inclusive) to be written for a sequence number.
-        fn starting_copy_for_sequence(sequence: u64) u8 {
-            return config.superblock_copies * @intCast(u8, sequence % 2);
-        }
-
-        /// Returns the last copy index (inclusive) to be written for a sequence number.
-        fn stopping_copy_for_sequence(sequence: u64) u8 {
-            return starting_copy_for_sequence(sequence) + config.superblock_copies - 1;
         }
 
         /// We use flexible quorums for even quorums with write quorum > read quorum, for example:
@@ -1428,217 +1448,25 @@ pub fn SuperBlockType(comptime Storage: type) type {
     };
 }
 
-const Quorums = struct {
-    const Quorum = struct {
-        sector: *const SuperBlockSector,
-        count: QuorumCount = QuorumCount.initEmpty(),
-        valid: bool = false,
-    };
-
-    const QuorumCount = std.StaticBitSet(superblock_copies_max);
-
-    array: [superblock_copies_max]Quorum = undefined,
-    count: u8 = 0,
-
-    pub const Error = error{
-        NotFound,
-        QuorumLost,
-        ParentNotFound,
-        ParentQuorumLost,
-        SequenceNotMonotonic,
-        VSRStateNotMonotonic,
-    };
-
-    /// Returns the working superblock according to the quorum with the highest sequence number.
-    /// Verifies that the highest quorum is connected, that the previous quorum was not lost.
-    /// i.e. Both the working and previous quorum must be valid and intact and connected.
-    /// Otherwise, we might regress to a previous working superblock.
-    pub fn working(
-        quorums: *Quorums,
-        copies: []SuperBlockSector,
-        threshold: u8,
-    ) Error!*const SuperBlockSector {
-        assert(copies.len == superblock_copies_max);
-        assert(threshold >= 2 and threshold <= 5);
-
-        quorums.array = undefined;
-        quorums.count = 0;
-
-        for (copies) |*copy, index| quorums.count_copy(copy, index, threshold);
-
-        std.sort.sort(Quorum, quorums.slice(), {}, sort_priority_descending);
-
-        for (quorums.slice()) |quorum| {
-            if (quorum.count.count() == config.superblock_copies) {
-                log.debug("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
-                    quorum.sector.checksum,
-                    quorum.sector.parent,
-                    quorum.sector.sequence,
-                    quorum.count.count(),
-                    quorum.valid,
-                });
-            } else {
-                log.err("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
-                    quorum.sector.checksum,
-                    quorum.sector.parent,
-                    quorum.sector.sequence,
-                    quorum.count.count(),
-                    quorum.valid,
-                });
-            }
-        }
-
-        // No working copies of any sequence number exist in the superblock storage zone at all.
-        if (quorums.slice().len == 0) return error.NotFound;
-
-        // At least one copy or quorum exists.
-        const b = quorums.slice()[0];
-
-        // Verify that the remaining quorums are correctly sorted:
-        for (quorums.slice()[1..]) |a| {
-            assert(sort_priority_descending({}, b, a));
-            assert(a.sector.magic == .superblock);
-            assert(a.sector.valid_checksum());
-        }
-
-        // Even the best copy with the most quorum still has inadequate quorum.
-        if (!b.valid) return error.QuorumLost;
-
-        // The superblock is only partially formatted, not all copies were written.
-        if (b.sector.sequence < 2) return error.NotFound;
-
-        // Verify that the parent copy exists:
-        for (quorums.slice()[1..]) |a| {
-            if (a.sector.cluster != b.sector.cluster) {
-                log.err("superblock copy={} has cluster={} instead of {}", .{
-                    a.sector.copy,
-                    a.sector.cluster,
-                    b.sector.cluster,
-                });
-            } else if (a.sector.replica != b.sector.replica) {
-                log.err("superblock copy={} has replica={} instead of {}", .{
-                    a.sector.copy,
-                    a.sector.replica,
-                    b.sector.replica,
-                });
-            } else if (a.sector.checksum == b.sector.parent) {
-                assert(a.sector.checksum != b.sector.checksum);
-                assert(a.sector.cluster == b.sector.cluster);
-                assert(a.sector.replica == b.sector.replica);
-
-                if (!a.valid) {
-                    return error.ParentQuorumLost;
-                } else if (a.sector.sequence >= b.sector.sequence) {
-                    return error.SequenceNotMonotonic;
-                } else if (a.sector.sequence % 2 == b.sector.sequence % 2) {
-                    // The parent must reside in the alternate copy to guarantee that we are able to
-                    // detect when the working quorum is lost.
-                    return error.SequenceNotMonotonic;
-                } else if (!a.sector.vsr_state.monotonic(b.sector.vsr_state)) {
-                    return error.VSRStateNotMonotonic;
-                } else {
-                    assert(b.sector.magic == .superblock);
-                    assert(b.sector.valid_checksum());
-
-                    return b.sector;
-                }
-            }
-        }
-
-        return error.ParentNotFound;
+pub const Layout = struct {
+    pub fn offset_sector(copy: u8) u64 {
+        assert(copy < config.superblock_copies);
+        return superblock_copy_size * @as(u64, copy);
     }
 
-    fn count_copy(
-        quorums: *Quorums,
-        copy: *const SuperBlockSector,
-        index: usize,
-        threshold: u8,
-    ) void {
-        assert(index < superblock_copies_max);
-        assert(threshold >= 2 and threshold <= 5);
-
-        if (!copy.valid_checksum()) {
-            log.debug("copy: {}/{}: invalid checksum", .{ index, superblock_copies_max });
-            return;
-        }
-
-        if (copy.magic != .superblock) {
-            log.debug("copy: {}/{}: not a superblock", .{ index, superblock_copies_max });
-            return;
-        }
-
-        if (copy.copy == index) {
-            log.debug("copy: {}/{}: checksum={x} parent={x} sequence={}", .{
-                index,
-                superblock_copies_max,
-                copy.checksum,
-                copy.parent,
-                copy.sequence,
-            });
-        } else {
-            // If our read was misdirected, we definitely still want to count the copy.
-            // We must just be careful to count it idempotently.
-            log.err(
-                "copy: {}/{}: checksum={x} parent={x} sequence={} misdirected from copy={}",
-                .{
-                    index,
-                    superblock_copies_max,
-                    copy.checksum,
-                    copy.parent,
-                    copy.sequence,
-                    copy.copy,
-                },
-            );
-        }
-
-        var quorum = quorums.find_or_insert_quorum_for_copy(copy);
-        assert(quorum.sector.checksum == copy.checksum);
-        assert(quorum.sector.equal(copy));
-
-        quorum.count.set(copy.copy);
-        assert(quorum.count.isSet(copy.copy));
-
-        // In the worst case, all copies may contain divergent forks of the same sequence.
-        // However, this should not happen for the same checksum.
-        assert(quorum.count.count() <= config.superblock_copies);
-
-        quorum.valid = quorum.count.count() >= threshold;
+    pub fn offset_manifest(copy: u8) u64 {
+        assert(copy < config.superblock_copies);
+        return offset_sector(copy) + @sizeOf(SuperBlockSector);
     }
 
-    fn find_or_insert_quorum_for_copy(quorums: *Quorums, copy: *const SuperBlockSector) *Quorum {
-        assert(copy.magic == .superblock);
-        assert(copy.valid_checksum());
-
-        for (quorums.array[0..quorums.count]) |*quorum| {
-            if (copy.checksum == quorum.sector.checksum) return quorum;
-        } else {
-            quorums.array[quorums.count] = Quorum{ .sector = copy };
-            quorums.count += 1;
-
-            return &quorums.array[quorums.count - 1];
-        }
+    pub fn offset_free_set(copy: u8) u64 {
+        assert(copy < config.superblock_copies);
+        return offset_manifest(copy) + superblock_trailer_manifest_size_max;
     }
 
-    fn slice(quorums: *Quorums) []Quorum {
-        return quorums.array[0..quorums.count];
-    }
-
-    fn sort_priority_descending(_: void, a: Quorum, b: Quorum) bool {
-        assert(a.sector.checksum != b.sector.checksum);
-        assert(a.sector.magic == .superblock);
-        assert(b.sector.magic == .superblock);
-
-        if (a.valid and !b.valid) return true;
-        if (b.valid and !a.valid) return false;
-
-        if (a.sector.sequence > b.sector.sequence) return true;
-        if (b.sector.sequence > a.sector.sequence) return false;
-
-        if (a.count.count() > b.count.count()) return true;
-        if (b.count.count() > a.count.count()) return false;
-
-        // The sort order must be stable and deterministic:
-        return a.sector.checksum > b.sector.checksum;
+    pub fn offset_client_table(copy: u8) u64 {
+        assert(copy < config.superblock_copies);
+        return offset_free_set(copy) + superblock_trailer_free_set_size_max;
     }
 };
 
@@ -1656,106 +1484,4 @@ test "SuperBlockSector" {
 
     a.replica += 1;
     try expect(!a.valid_checksum());
-}
-
-// TODO Add unit tests for Quorums.
-// TODO Test invariants and transitions across TestRunner functions.
-const TestStorage = @import("../test/storage.zig").Storage;
-const TestSuperBlock = SuperBlockType(TestStorage);
-
-const TestRunner = struct {
-    superblock: *TestSuperBlock,
-    context_format: TestSuperBlock.Context = undefined,
-    context_open: TestSuperBlock.Context = undefined,
-    context_checkpoint: TestSuperBlock.Context = undefined,
-    context_view_change: TestSuperBlock.Context = undefined,
-    pending: usize = 0,
-
-    fn format(runner: *TestRunner, options: TestSuperBlock.FormatOptions) void {
-        runner.pending += 1;
-        runner.superblock.format(format_callback, &runner.context_format, options);
-    }
-
-    fn format_callback(context: *TestSuperBlock.Context) void {
-        const runner = @fieldParentPtr(TestRunner, "context_format", context);
-        runner.pending -= 1;
-        runner.open();
-    }
-
-    fn open(runner: *TestRunner) void {
-        runner.pending += 1;
-        runner.superblock.open(open_callback, &runner.context_open);
-    }
-
-    fn open_callback(context: *TestSuperBlock.Context) void {
-        const runner = @fieldParentPtr(TestRunner, "context_open", context);
-        runner.pending -= 1;
-        runner.checkpoint();
-        runner.view_change();
-    }
-
-    fn view_change(runner: *TestRunner) void {
-        runner.pending += 1;
-        runner.superblock.view_change(
-            view_change_callback,
-            &runner.context_view_change,
-            .{
-                .commit_min = runner.superblock.working.vsr_state.commit_min + 1,
-                .commit_max = runner.superblock.working.vsr_state.commit_max + 2,
-                .view_normal = runner.superblock.working.vsr_state.view_normal + 3,
-                .view = runner.superblock.working.vsr_state.view + 4,
-            },
-        );
-    }
-
-    fn view_change_callback(context: *TestSuperBlock.Context) void {
-        const runner = @fieldParentPtr(TestRunner, "context_view_change", context);
-        runner.pending -= 1;
-        runner.checkpoint();
-    }
-
-    fn checkpoint(runner: *TestRunner) void {
-        runner.pending += 1;
-        runner.superblock.checkpoint(checkpoint_callback, &runner.context_checkpoint);
-    }
-
-    fn checkpoint_callback(context: *TestSuperBlock.Context) void {
-        const runner = @fieldParentPtr(TestRunner, "context_checkpoint", context);
-        runner.pending -= 1;
-    }
-};
-
-test "SuperBlock" {
-    const cluster = 32;
-    const replica = 4;
-    const size_max = data_file_size_min;
-
-    var storage = try TestStorage.init(std.testing.allocator, superblock_zone_size, .{
-        .seed = 0,
-        .read_latency_min = 1,
-        .read_latency_mean = 1,
-        .write_latency_min = 1,
-        .write_latency_mean = 1,
-        .read_fault_probability = 0,
-        .write_fault_probability = 0,
-    }, replica, .{
-        .first_offset = superblock_zone_size,
-        .period = 1,
-    });
-    defer storage.deinit(std.testing.allocator);
-
-    var message_pool = try MessagePool.init(std.testing.allocator, .replica);
-    defer message_pool.deinit(std.testing.allocator);
-
-    var superblock = try TestSuperBlock.init(std.testing.allocator, &storage, &message_pool);
-    defer superblock.deinit(std.testing.allocator);
-
-    var runner = TestRunner{ .superblock = &superblock };
-    runner.format(.{
-        .cluster = cluster,
-        .replica = replica,
-        .size_max = size_max,
-    });
-
-    while (runner.pending > 0) storage.tick();
 }

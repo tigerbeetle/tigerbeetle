@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
@@ -5,6 +6,7 @@ const mem = std.mem;
 const os = std.os;
 const log = std.log.scoped(.main);
 
+const build_options = @import("tigerbeetle_build_options");
 const config = @import("config.zig");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 
@@ -45,6 +47,7 @@ pub fn main() !void {
     switch (parse_args) {
         .format => |*args| try Command.format(allocator, args.cluster, args.replica, args.path),
         .start => |*args| try Command.start(&arena, args.addresses, args.memory, args.path),
+        .version => |*args| try Command.version(allocator, args.verbose),
     }
 }
 
@@ -173,4 +176,54 @@ const Command = struct {
             try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
         }
     }
+
+    pub fn version(allocator: mem.Allocator, verbose: bool) !void {
+        _ = allocator;
+
+        var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
+        const stdout = stdout_buffer.writer();
+        // TODO Pass an actual version number in on build, instead of just saying "experimental".
+        try stdout.writeAll("TigerBeetle version experimental\n");
+
+        if (verbose) {
+            try std.fmt.format(
+                stdout,
+                \\
+                \\git_commit="{s}"
+                \\
+            ,
+                .{build_options.git_commit orelse "?"},
+            );
+
+            try stdout.writeAll("\n");
+            inline for (.{ "zig_version", "mode" }) |declaration| {
+                try print_value(stdout, declaration, @field(builtin, declaration));
+            }
+
+            try stdout.writeAll("\n");
+            inline for (std.meta.declarations(config)) |declaration| {
+                if (!declaration.is_pub) continue;
+                try print_value(stdout, declaration.name, @field(config, declaration.name));
+            }
+        }
+        try stdout_buffer.flush();
+    }
 };
+
+fn print_value(
+    writer: anytype,
+    comptime field: []const u8,
+    comptime value: anytype,
+) !void {
+    if (@typeInfo(@TypeOf(value)) == .Pointer) {
+        try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
+            field,
+            std.fmt.fmtSliceEscapeLower(value),
+        });
+    } else {
+        try std.fmt.format(writer, "{s}={}\n", .{
+            field,
+            value,
+        });
+    }
+}

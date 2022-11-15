@@ -10,7 +10,8 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientTable = @import("superblock_client_table.zig").ClientTable;
-const format_journal = @import("./journal.zig").format_journal;
+const format_wal_headers = @import("./journal.zig").format_wal_headers;
+const format_wal_prepares = @import("./journal.zig").format_wal_prepares;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -148,8 +149,12 @@ pub fn ReplicaType(
         /// Invariants (not applicable during status=recovering):
         /// * `replica.op` exists in the Journal.
         /// * `replica.op ≥ replica.commit_min`.
-        /// * `replica.op ≤ replica.op_checkpoint_trigger`: don't wrap the WAL until we are sure
-        ///   that the overwritten entry will not be required for recovery.
+        /// * `replica.op - replica.commit_min    ≤ journal_slot_count`
+        /// * `replica.op - replica.op_checkpoint ≤ journal_slot_count`
+        ///   It is safe to overwrite `op_checkpoint` itself.
+        /// * `replica.op ≤ replica.op_checkpoint_trigger`:
+        ///   Don't wrap the WAL until we are sure that the overwritten entry will not be required
+        ///   for recovery.
         // TODO: When recovery protocol is removed, load the `op` from the WAL, and verify that it is ≥op_checkpoint.
         // Also verify that a corresponding header exists in the WAL.
         op: u64,
@@ -162,10 +167,10 @@ pub fn ReplicaType(
         /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
         ///
         /// Invariants (not applicable during status=recovering):
-        /// * `replica.commit_min` exists in the Journal.
+        /// * `replica.commit_min` exists in the Journal OR `replica.commit_min == op_checkpoint`.
         /// * `replica.commit_min ≤ replica.op`
         /// * `replica.commit_min ≥ replica.op_checkpoint`.
-        /// * never decreases
+        /// * never decreases while the replica is alive
         commit_min: u64,
 
         /// The op number of the latest committed operation (according to the cluster):
@@ -263,7 +268,17 @@ pub fn ReplicaType(
         /// Seeded with the replica's index number.
         prng: std.rand.DefaultPrng,
 
-        on_change_state: ?fn (replica: *Self) void = null,
+        /// Simulator hooks.
+        on_change_state: ?fn (replica: *const Self) void = null,
+        /// Called immediately after a compaction.
+        on_compact: ?fn (replica: *const Self) void = null,
+        /// Called immediately after a checkpoint.
+        /// Note: The replica may checkpoint without calling this function:
+        /// 1. Begin checkpoint.
+        /// 2. Write 2/4 SuperBlock copies.
+        /// 3. Crash.
+        /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
+        on_checkpoint: ?fn (replica: *const Self) void = null,
 
         /// Called when `commit_prepare` finishes committing.
         commit_callback: ?fn (*Self) void = null,
@@ -984,7 +999,11 @@ pub fn ReplicaType(
             // const threshold = self.quorum_replication;
             // TODO: When Block recover & state transfer are implemented, this can be removed.
             const threshold =
-                if (prepare.message.header.op == self.op_checkpoint_trigger()) self.replica_count else self.quorum_replication;
+                if (prepare.message.header.op == self.op_checkpoint_trigger() or
+                prepare.message.header.op == self.op_checkpoint + config.lsm_batch_multiple + 1)
+                self.replica_count
+            else
+                self.quorum_replication;
 
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
@@ -2560,6 +2579,9 @@ pub fn ReplicaType(
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
+            assert(op <= self.op_checkpoint_trigger());
+
+            if (self.on_compact) |on_compact| on_compact(self);
 
             if (op == self.op_checkpoint_trigger()) {
                 assert(op == self.op);
@@ -2573,7 +2595,6 @@ pub fn ReplicaType(
                 });
                 self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
-                assert(op < self.op_checkpoint_trigger());
                 self.commit_op_done();
             }
         }
@@ -2596,18 +2617,20 @@ pub fn ReplicaType(
             // They will only be compacted to disk in the next bar.
             // Therefore, only ops "A..D" are committed to disk.
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
+            const vsr_state_commit_min = self.op_checkpoint_next();
             const vsr_state_new = .{
-                .commit_min = self.op_checkpoint_next(),
+                .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
+                .commit_min = vsr_state_commit_min,
                 .commit_max = self.commit_max,
                 .view_normal = self.view_normal,
                 .view = self.view,
             };
-            assert(VSRState.monotonic(self.superblock.working.vsr_state, vsr_state_new));
+            assert(self.superblock.working.vsr_state.monotonic(vsr_state_new));
 
-            self.superblock.staging.vsr_state = vsr_state_new;
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
+                vsr_state_new,
             );
         }
 
@@ -2629,6 +2652,7 @@ pub fn ReplicaType(
                 self.op_checkpoint,
             });
 
+            if (self.on_checkpoint) |on_checkpoint| on_checkpoint(self);
             self.commit_op_done();
         }
 
@@ -2662,10 +2686,17 @@ pub fn ReplicaType(
             // this commit.
 
             assert(self.journal.has(prepare.header));
-            assert(self.journal.header_with_op(self.commit_min).?.checksum ==
-                prepare.header.parent);
+            if (self.op_checkpoint == self.commit_min) {
+                // op_checkpoint's slot may have been overwritten in the WAL — but we can
+                // always use the VSRState to anchor the hash chain.
+                assert(prepare.header.parent ==
+                    self.superblock.working.vsr_state.commit_min_checksum);
+            } else {
+                assert(prepare.header.parent ==
+                    self.journal.header_with_op(self.commit_min).?.checksum);
+            }
 
-            log.debug("{}: commit_op: executing view={} {} op={} checksum={} ({s})", .{
+            log.debug("{}: commit_op: executing view={} leader={} op={} checksum={} ({s})", .{
                 self.replica,
                 self.view,
                 self.leader_index(self.view) == self.replica,
@@ -3282,7 +3313,7 @@ pub fn ReplicaType(
             // Verify that the new request will fit in the WAL.
             // The message's op hasn't been assigned yet, but it will be `self.op + 1`.
             if (self.op == self.op_checkpoint_trigger()) {
-                log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
+                log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint_trigger={})", .{
                     self.replica,
                     self.op + 1,
                     self.op_checkpoint,
@@ -3852,8 +3883,6 @@ pub fn ReplicaType(
             assert(self.op_checkpoint <= self.commit_min);
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
-
-            assert(self.journal.header_with_op(self.commit_min) != null);
             assert(self.journal.header_with_op(self.op) != null);
 
             // The replica repairs backwards from `commit_max`. But if `commit_max` is too high
@@ -3926,6 +3955,8 @@ pub fn ReplicaType(
             }
 
             // Assert that all headers are now present and connected with a perfect hash chain:
+            // TODO(State Transfer): This may fail if the commit max is too far ahead and we
+            // couldn't repair it without jumping ahead on the WAL.
             assert(self.op >= self.commit_max);
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
@@ -4014,8 +4045,9 @@ pub fn ReplicaType(
                 if (header.op == 0 and self.op_checkpoint == 0) {
                     // Repairing the root op is allowed until the first checkpoint.
                 } else {
-                    // Otherwise don't repair checkpointed ops, since their slots now belong to
-                    // the next wrap of the WAL.
+                    // It is critical that we do not repair checkpointed ops; their slots now belong
+                    // to the next wrap of the log, and overwriting a new op with an old op is a
+                    // correctness violation.
                     log.debug("{}: repair_header: false (precedes self.op_checkpoint={})", .{
                         self.replica,
                         self.op_checkpoint,
@@ -4311,6 +4343,8 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
+            assert(self.op >= self.commit_min);
+            assert(self.op - self.commit_min + 1 <= config.journal_slot_count);
 
             // Request enough prepares to utilize our max IO depth:
             var budget = self.journal.writes.available();
@@ -4322,7 +4356,7 @@ pub fn ReplicaType(
             if (self.op < config.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
                 // Therefore, any faulty ops to the right of `replica.op` are corrupt reserved
-                // entries from the initial format.
+                // entries from the initial format, or corrupt prepares which were since truncated.
                 var op: usize = self.op + 1;
                 while (op < config.journal_slot_count) : (op += 1) {
                     const slot = self.journal.slot_for_op(op);
@@ -4330,23 +4364,56 @@ pub fn ReplicaType(
 
                     if (self.journal.faulty.bit(slot)) {
                         assert(self.journal.headers[op].command == .reserved);
+                        assert(self.journal.headers_redundant[op].command == .reserved);
                         self.journal.dirty.clear(slot);
                         self.journal.faulty.clear(slot);
-                        log.debug("{}: repair_prepares: op={} (op known, first cycle)", .{
+                        log.debug("{}: repair_prepares: remove slot={} " ++
+                            "(faulty, op known, first cycle)", .{
                             self.replica,
-                            op,
+                            slot.index,
                         });
                     }
                 }
             }
 
             var op = self.op + 1;
+            // To maximize durability, repair all prepares for which we have a header (not only
+            // uncommitted headers). This in turn enables the replica to help repair other replicas.
             const op_min = op -| config.journal_slot_count;
             while (op > op_min) {
                 op -= 1;
 
                 const slot = self.journal.slot_for_op(op);
                 if (self.journal.dirty.bit(slot)) {
+                    if (self.journal.slot_with_op(op) == null) {
+                        // If this op was between `commit_min` and `replica.op`, we would have
+                        // requested and repaired these headers.
+                        // If this op was between `op_checkpoint` and `commit_min`, we would have
+                        // a header (since we couldn't have committed otherwise).
+                        //
+                        // Therefore, this op must be either:
+                        // - less-than-or-equal-to `op_checkpoint` — we committed before
+                        //   checkpointing, but the entry in our WAL was found corrupt after
+                        //   recovering from a crash.
+                        // - or (indistinguishably) this might originally have been an op greater
+                        //   than replica.op, which was truncated, but is now corrupt.
+                        //
+                        // we don't try to repair this op because the slot belongs (or will soon
+                        // belong) to a newer op, from the new WAL wrap. Additionally, we may not
+                        // still have access to its surrounding commits to verify the hash chain.
+                        assert(op <= self.commit_min);
+                        assert(op <= self.op_checkpoint);
+                        assert(self.journal.faulty.bit(slot));
+
+                        log.debug("{}: repair_prepares: remove slot={} " ++
+                            "(faulty, precedes checkpoint)", .{
+                            self.replica,
+                            slot.index,
+                        });
+                        self.journal.remove_entry(slot);
+                        continue;
+                    }
+
                     // If this is an uncommitted op, and we are the leader in `view_change` status,
                     // then we will `request_prepare` from the cluster, set `nack_prepare_op`,
                     // and stop repairing any further prepares:
@@ -4941,51 +5008,67 @@ pub fn ReplicaType(
                         assert(!self.do_view_change_quorum);
                         assert(message.header.view == self.view);
                         assert(message.header.replica == self.replica);
+                        assert(message.header.replica != replica);
                     },
                     .view_change => {
                         assert(self.start_view_change_quorum);
                         assert(self.do_view_change_quorum);
                         assert(message.header.view == self.view);
                         assert(message.header.replica == self.replica);
+                        assert(message.header.replica != replica);
                     },
                     else => unreachable,
                 },
                 .recovery => {
                     assert(self.status == .recovering);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                     assert(message.header.context == self.recovery_nonce);
                 },
                 .recovery_response => {
                     assert(self.status == .normal);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .headers => {
                     assert(self.status == .normal or self.status == .view_change);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .ping, .pong => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .commit => {
                     assert(self.status == .normal);
                     assert(self.leader());
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
+                },
+                .request_start_view => {
+                    assert(message.header.view >= self.view);
+                    assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
+                    assert(self.leader_index(message.header.view) == replica);
                 },
                 .request_headers => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .request_prepare => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                 },
                 .nack_prepare => {
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
                     assert(self.leader_index(self.view) == replica);
                 },
                 else => {
@@ -5022,6 +5105,7 @@ pub fn ReplicaType(
             // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:
             assert(op >= self.commit_max);
             assert(op >= commit_max);
+            // TODO: This assertion may fail until recovery protocol is removed.
             assert(op <= self.op_checkpoint_trigger());
 
             // We expect that our commit numbers may also be greater even than `commit_max` because
@@ -5667,8 +5751,10 @@ pub fn ReplicaType(
 
         /// Returns true if all operations are present, correctly ordered and connected by hash
         /// chain, between `op_min` and `op_max` (both inclusive).
-        fn valid_hash_chain_between(self: *Self, op_min: u64, op_max: u64) bool {
+        fn valid_hash_chain_between(self: *const Self, op_min: u64, op_max: u64) bool {
             assert(op_min <= op_max);
+            // Headers with ops preceding the checkpoint may be unavailable due to a WAL wrap.
+            assert(op_min >= self.op_checkpoint);
 
             // If we use anything less than self.op then we may commit ops for a forked hash chain
             // that have since been reordered by a new leader.
@@ -5678,6 +5764,27 @@ pub fn ReplicaType(
             var op = op_max;
             while (op > op_min) {
                 op -= 1;
+
+                if (self.op_checkpoint == op) {
+                    // op_checkpoint's slot may have been overwritten in the WAL — but we can
+                    // always use the VSRState to anchor the hash chain.
+                    assert(op == op_min);
+                    assert(op == self.superblock.working.vsr_state.commit_min);
+                    if (self.superblock.working.vsr_state.commit_min_checksum == b.parent) {
+                        return true;
+                    } else {
+                        log.debug("{}: valid_hash_chain_between: break A: {} (checkpoint={})", .{
+                            self.replica,
+                            self.superblock.working.vsr_state.commit_min_checksum,
+                            self.op_checkpoint,
+                        });
+                        log.debug("{}: valid_hash_chain_between: break B: {}", .{
+                            self.replica,
+                            b,
+                        });
+                        return false;
+                    }
+                }
 
                 if (self.journal.header_with_op(op)) |a| {
                     assert(a.op + 1 == b.op);
@@ -5912,18 +6019,20 @@ fn ReplicaFormatType(comptime Storage: type) type {
             );
             errdefer allocator.free(wal_buffer);
 
-            // The logical offset *within the WAL*.
+            // The logical offset *within the Zone*.
+            // Even though the prepare zone follows the redundant header zone, write the prepares
+            // first. This allows the test Storage to check the invariant "never write the redundant
+            // header before the prepare".
             var wal_offset: u64 = 0;
-            while (wal_offset < config.journal_size_max) {
-                const size = format_journal(cluster, wal_offset, wal_buffer);
-                assert(size % config.sector_size == 0);
+            while (wal_offset < config.journal_size_prepares) {
+                const size = format_wal_prepares(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
                 for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
                     if (std.mem.eql(u8, std.mem.asBytes(header), &header_zeroes)) {
                         // This is the (empty) body of a reserved or root Prepare.
                     } else {
-                        // This is either a Prepare's header or a redundant header.
+                        // This is a Prepare's header.
                         assert(header.valid_checksum());
                         if (header.op == 0) {
                             assert(header.command == .prepare);
@@ -5939,16 +6048,45 @@ fn ReplicaFormatType(comptime Storage: type) type {
                     format_wal_sectors_callback,
                     &self.wal_write,
                     wal_buffer[0..size],
-                    .wal,
+                    .wal_prepares,
                     wal_offset,
                 );
                 self.formatting = true;
                 while (self.formatting) storage.tick();
                 wal_offset += size;
             }
+            // There are no prepares left to write.
+            assert(format_wal_prepares(cluster, wal_offset, wal_buffer) == 0);
 
-            // There is nothing left to write.
-            assert(format_journal(cluster, wal_offset, wal_buffer) == 0);
+            wal_offset = 0;
+            while (wal_offset < config.journal_size_headers) {
+                const size = format_wal_headers(cluster, wal_offset, wal_buffer);
+                assert(size > 0);
+
+                for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
+                    assert(header.valid_checksum());
+                    if (header.op == 0) {
+                        assert(header.command == .prepare);
+                        assert(header.operation == .root);
+                    } else {
+                        assert(header.command == .reserved);
+                        assert(header.operation == .reserved);
+                    }
+                }
+
+                storage.write_sectors(
+                    format_wal_sectors_callback,
+                    &self.wal_write,
+                    wal_buffer[0..size],
+                    .wal_headers,
+                    wal_offset,
+                );
+                self.formatting = true;
+                while (self.formatting) storage.tick();
+                wal_offset += size;
+            }
+            // There are no headers left to write.
+            assert(format_wal_headers(cluster, wal_offset, wal_buffer) == 0);
         }
 
         fn format_wal_sectors_callback(write: *Storage.Write) void {

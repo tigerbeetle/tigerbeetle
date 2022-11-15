@@ -888,11 +888,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         }
 
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
-            // Assert no outstanding compact_tick() work..
+            // Assert no outstanding compact_tick() work.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
             assert(tree.compaction_op > 0);
             assert(tree.compaction_op + 1 == tree.lookup_snapshot_max);
+            // Don't re-run the checkpoint we recovered from.
+            assert(!tree.grid.superblock.working.vsr_state.op_compacted(tree.compaction_op));
 
             // Assert that this is the last beat in the compaction bar.
             const compaction_beat = tree.compaction_op % config.lsm_batch_multiple;

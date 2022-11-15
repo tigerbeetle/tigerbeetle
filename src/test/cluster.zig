@@ -32,7 +32,9 @@ pub const ClusterOptions = struct {
     grid_size_max: usize,
 
     seed: u64,
-    on_change_state: fn (replica: *Replica) void,
+    on_change_state: fn (replica: *const Replica) void,
+    on_compact: fn (replica: *const Replica) void,
+    on_checkpoint: fn (replica: *const Replica) void,
 
     network_options: NetworkOptions,
     storage_options: Storage.Options,
@@ -122,21 +124,22 @@ pub const Cluster = struct {
         };
 
         var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
-        const faulty_areas = Storage.generate_faulty_areas(
+        const faulty_wal_areas = Storage.generate_faulty_wal_areas(
             prng,
             config.journal_size_max,
             options.replica_count,
             &buffer,
         );
-        assert(faulty_areas.len == options.replica_count);
+        assert(faulty_wal_areas.len == options.replica_count);
 
         for (cluster.storages) |*storage, replica_index| {
+            var storage_options = options.storage_options;
+            storage_options.replica_index = @intCast(u8, replica_index);
+            storage_options.faulty_wal_areas = faulty_wal_areas[replica_index];
             storage.* = try Storage.init(
                 allocator,
                 superblock_zone_size + config.journal_size_max + options.grid_size_max,
-                options.storage_options,
-                @intCast(u8, replica_index),
-                faulty_areas[replica_index],
+                storage_options,
             );
         }
         errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
@@ -280,41 +283,18 @@ pub const Cluster = struct {
         const replica_time = replica.time;
         replica.deinit(cluster.allocator);
 
-        // The message bus and network should be left alone, as messages
-        // may still be inflight to/from this replica. However, we should
-        // do a check to ensure that we aren't leaking any messages when
-        // deinitializing the replica above.
-        const packet_simulator = &cluster.network.packet_simulator;
-        // The same message may be used for multiple network packets, so simply counting how
-        // many packets are inflight from the replica is insufficient, we need to dedup them.
-        var messages_in_network_set = std.AutoHashMap(*Message, void).init(cluster.allocator);
-        defer messages_in_network_set.deinit();
-
-        var target: u8 = 0;
-        while (target < packet_simulator.options.node_count) : (target += 1) {
-            const path = .{ .source = replica_index, .target = target };
-            const queue = packet_simulator.path_queue(path);
-            var it = queue.iterator();
-            while (it.next()) |data| {
-                try messages_in_network_set.put(data.packet.message, {});
-            }
-        }
-
-        const messages_in_network = messages_in_network_set.count();
-
+        // Ensure that none of the replica's messages leaked when it was deinitialized.
         var messages_in_pool: usize = 0;
         const message_bus = cluster.network.get_message_bus(.{ .replica = replica_index });
         {
             var it = message_bus.pool.free_list;
             while (it) |message| : (it = message.next) messages_in_pool += 1;
         }
-
-        const total_messages = message_pool.messages_max_replica;
-        assert(messages_in_network + messages_in_pool == total_messages);
+        assert(messages_in_pool == message_pool.messages_max_replica);
 
         // Logically it would make more sense to run this during restart, not immediately following
-        // the crash. But having it here allows the replica's MessageBus to initialized and start
-        // queueing packets, or collecting packets that are dropped by the network.
+        // the crash. But having it here allows the replica's MessageBus to initialize and begin
+        // queueing packets.
         //
         // Pass the old replica's Time through to the new replica. It will continue to be tick
         // while the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
@@ -362,6 +342,8 @@ pub const Cluster = struct {
         assert(replica.status == .recovering);
 
         replica.on_change_state = cluster.options.on_change_state;
+        replica.on_compact = cluster.options.on_compact;
+        replica.on_checkpoint = cluster.options.on_checkpoint;
         cluster.network.link(replica.message_bus.process, &replica.message_bus);
     }
 };

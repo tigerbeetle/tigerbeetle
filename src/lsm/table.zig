@@ -8,7 +8,8 @@ const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
 const bloom_filter = @import("bloom_filter.zig");
 
-const div_ceil = @import("../util.zig").div_ceil;
+const util = @import("../util.zig");
+const div_ceil = util.div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
@@ -504,7 +505,7 @@ pub fn TableType(
                 const values_max = data_block_values(builder.data_block);
                 assert(values_max.len == data.value_count_max);
 
-                mem.copy(Value, values_max[builder.value..], values);
+                util.copy_disjoint(.inexact, Value, values_max[builder.value..], values);
                 builder.value += @intCast(u32, values.len);
 
                 for (values) |*value| {

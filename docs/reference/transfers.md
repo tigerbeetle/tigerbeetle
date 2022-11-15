@@ -263,6 +263,8 @@ Constraints:
 * Type is 64-bit unsigned integer (8 bytes)
 * Must be zero if `flags.pending` is *not* set
 * Must be non-zero if `flags.pending` *is* set
+* Must not overflow a 64-bit unsigned integer when summed with the transfer's timestamp
+  (`error.overflows_timeout`)
 
 ### `ledger`
 
@@ -315,7 +317,7 @@ transfer in the batch, to create a chain of transfers, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first transfer without this flag. The last
 transfer in a batch may therefore never have `flags.linked` set as
-this would leave a chain open-ended.
+this would leave a chain open-ended (see `linked_event_chain_open`).
 
 Multiple chains of individual transfers may coexist within a batch to
 succeed or fail independently. Transfers within a chain are executed

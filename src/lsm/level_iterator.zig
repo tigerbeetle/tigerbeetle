@@ -283,7 +283,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         /// - error.Empty when there are no values remaining to iterate.
         /// - error.Drained when the iterator isn't empty, but the values 
         ///   still need to be buffered into memory via tick().
-        pub fn peek(it: LevelIterator) error{Empty, Drained}!Key {
+        pub fn peek(it: LevelIterator) error{ Empty, Drained }!Key {
             if (it.values.head_ptr_const()) |value| return key_from_value(value);
 
             const scope = it.tables.head_ptr_const() orelse {

@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 
 const config = @import("../config.zig");
 
+const util = @import("../util.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
@@ -90,8 +91,6 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn deinit(it: *TableIterator, allocator: mem.Allocator) void {
-            assert(!it.read_pending);
-
             allocator.free(it.index_block);
             it.values.deinit(allocator);
             for (it.data_blocks.buffer) |block| allocator.free(block);
@@ -186,7 +185,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             // Copy the bytes read into a buffer owned by the iterator since the Grid
             // only guarantees the provided pointer to be valid in this callback.
-            mem.copy(u8, it.index_block, block);
+            util.copy_disjoint(.exact, u8, it.index_block, block);
 
             if (it.index_block_callback) |callback| {
                 it.index_block_callback = null;
@@ -218,7 +217,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             // Copy the bytes read into a buffer owned by the iterator since the Grid
             // only guarantees the provided pointer to be valid in this callback.
-            mem.copy(u8, it.data_blocks.next_tail().?, block);
+            util.copy_disjoint(.exact, u8, it.data_blocks.next_tail().?, block);
 
             it.data_blocks.advance_tail();
             it.data_block_index += 1;
@@ -264,7 +263,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         /// - error.Empty when there are no values remaining to iterate.
         /// - error.Drained when the iterator isn't empty, but some values 
         ///   still need to be buffered into memory via tick().
-        pub fn peek(it: TableIterator) error{Empty, Drained}!Table.Key {
+        pub fn peek(it: TableIterator) error{ Empty, Drained }!Table.Key {
             assert(!it.read_pending);
             assert(!it.read_table_index);
 

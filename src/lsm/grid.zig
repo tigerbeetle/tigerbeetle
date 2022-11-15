@@ -9,6 +9,7 @@ const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
+const util = @import("../util.zig");
 
 const log = std.log.scoped(.grid);
 
@@ -166,7 +167,6 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn tick(grid: *Grid) void {
-            
             // Resolve reads that were seen in the cache during start_read()
             // but deferred to be asynchronously resolved on the next tick.
             //
@@ -177,7 +177,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_cached_queue = .{};
             while (copy.pop()) |read| {
                 if (grid.cache.get(read.address)) |block| {
-                    read.callback(read, block);   
+                    read.callback(read, block);
                 } else {
                     grid.start_read(read);
                 }
@@ -320,7 +320,7 @@ pub fn GridType(comptime Storage: type) type {
                 grid,
                 completed_write.address,
             );
-            mem.copy(u8, cached_block, completed_write.block);
+            util.copy_disjoint(.exact, u8, cached_block, completed_write.block);
 
             grid.write_iops.release(iop);
 
@@ -438,8 +438,8 @@ pub fn GridType(comptime Storage: type) type {
             // read_block_callback(), but that would issue a new call to read_sectors().
             iop.reads.push(read);
             {
-                // Make a copy here to avoid an infinite loop from pending_reads being 
-                // re-added to read_queue after not matching the current read. 
+                // Make a copy here to avoid an infinite loop from pending_reads being
+                // re-added to read_queue after not matching the current read.
                 var copy = grid.read_queue;
                 grid.read_queue = .{};
                 while (copy.pop()) |pending_read| {
@@ -449,7 +449,7 @@ pub fn GridType(comptime Storage: type) type {
                     } else {
                         grid.read_queue.push(pending_read);
                     }
-                } 
+                }
             }
 
             grid.superblock.storage.read_sectors(
@@ -490,7 +490,7 @@ pub fn GridType(comptime Storage: type) type {
                 assert(header.operation == block_type.operation());
 
                 // NOTE: read callbacks resolved here could queue up reads into this very iop.
-                // This extends this while loop, but that's fine as it keeps the callbacks 
+                // This extends this while loop, but that's fine as it keeps the callbacks
                 // asynchronous to themselves (preventing something like a stack-overflow).
                 while (iop.reads.pop()) |read| {
                     assert(read.address == address);
@@ -530,7 +530,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_iops.release(iop);
 
             // Always iterate through the full list of pending reads instead of just one to ensure
-            // that those serviced from the cache don't prevent others waiting for an IOP from 
+            // that those serviced from the cache don't prevent others waiting for an IOP from
             // seeing the IOP that was just released.
             var copy = grid.read_queue;
             grid.read_queue = .{};

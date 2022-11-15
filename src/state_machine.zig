@@ -653,6 +653,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             if (sum_overflows(t.amount, cr.credits_pending + cr.credits_posted)) {
                 return .overflows_credits;
             }
+            if (sum_overflows(t.timestamp, t.timeout)) return .overflows_timeout;
 
             if (dr.debits_exceed_credits(t.amount)) return .exceeds_credits;
             if (cr.credits_exceed_debits(t.amount)) return .exceeds_debits;
@@ -1074,23 +1075,19 @@ const TestContext = struct {
             allocator,
             4096,
             .{
-                .seed = 0,
                 .read_latency_min = 0,
                 .read_latency_mean = 0,
                 .write_latency_min = 0,
                 .write_latency_mean = 0,
-                .read_fault_probability = 0,
-                .write_fault_probability = 0,
-            },
-            0,
-            .{
-                .first_offset = 0,
-                .period = 0,
             },
         );
         errdefer ctx.storage.deinit(allocator);
 
-        ctx.message_pool = .{ .free_list = null };
+        ctx.message_pool = .{
+            .free_list = null,
+            .messages_max = 0,
+        };
+        errdefer ctx.message_pool.deinit(allocator);
 
         ctx.superblock = try SuperBlock.init(allocator, &ctx.storage, &ctx.message_pool);
         errdefer ctx.superblock.deinit(allocator);
@@ -1837,7 +1834,7 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 100,
                 .credit_account_id = 200,
-                .timeout = 1,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 0,
                 .code = 0,
                 .amount = 0,
@@ -1850,7 +1847,7 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 100,
                 .credit_account_id = 200,
-                .timeout = 1,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 0,
                 .code = 0,
                 .flags = .{ .pending = true },
@@ -1864,7 +1861,7 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 100,
                 .credit_account_id = 200,
-                .timeout = 1,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 100,
                 .code = 0,
                 .flags = .{ .pending = true },
@@ -1878,7 +1875,7 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 100,
                 .credit_account_id = 200,
-                .timeout = 1,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 100,
                 .code = 1,
                 .flags = .{ .pending = true },
@@ -1892,7 +1889,7 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 100,
                 .credit_account_id = 200,
-                .timeout = 1,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 100,
                 .code = 1,
                 .flags = .{ .pending = true },
@@ -1906,7 +1903,7 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 200,
-                .timeout = 1,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 100,
                 .code = 1,
                 .flags = .{ .pending = true },
@@ -1920,9 +1917,11 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 2,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 100,
                 .code = 1,
                 .amount = 1,
+                .flags = .{ .pending = true },
                 .timestamp = timestamp,
             }),
         },
@@ -1932,9 +1931,11 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 3,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 100,
                 .code = 1,
                 .amount = 1,
+                .flags = .{ .pending = true },
                 .timestamp = timestamp,
             }),
         },
@@ -1944,7 +1945,7 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 3,
-                .timeout = 30000,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 1,
                 .code = 1,
                 .flags = .{ .pending = true },
@@ -1958,7 +1959,7 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 3,
-                .timeout = 30000,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 1,
                 .code = 1,
                 .flags = .{ .pending = true },
@@ -1972,8 +1973,10 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 3,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 1,
                 .code = 1,
+                .flags = .{ .pending = true },
                 .amount = math.maxInt(u64) - accounts[1 - 1].debits_posted + 1,
                 .timestamp = timestamp,
             }),
@@ -1984,8 +1987,10 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 3,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 1,
                 .code = 1,
+                .flags = .{ .pending = true },
                 .amount = math.maxInt(u64) - accounts[3 - 1].credits_posted + 1,
                 .timestamp = timestamp,
             }),
@@ -1996,8 +2001,10 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 3,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 1,
                 .code = 1,
+                .flags = .{ .pending = true },
                 .amount = math.maxInt(u64) -
                     accounts[1 - 1].debits_pending -
                     accounts[1 - 1].debits_posted + 1,
@@ -2010,11 +2017,29 @@ test "create/lookup/rollback transfers" {
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 3,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
                 .ledger = 1,
                 .code = 1,
+                .flags = .{ .pending = true },
                 .amount = math.maxInt(u64) -
                     accounts[3 - 1].credits_pending -
                     accounts[3 - 1].credits_posted + 1,
+                .timestamp = timestamp,
+            }),
+        },
+        .{
+            .result = .overflows_timeout,
+            .object = mem.zeroInit(Transfer, .{
+                .id = 1,
+                .debit_account_id = 4,
+                .credit_account_id = 5,
+                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
+                .ledger = 1,
+                .code = 1,
+                .flags = .{ .pending = true },
+                .amount = accounts[4 - 1].credits_posted -
+                    accounts[4 - 1].debits_pending -
+                    accounts[4 - 1].debits_posted + 1,
                 .timestamp = timestamp,
             }),
         },

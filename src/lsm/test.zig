@@ -27,7 +27,10 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const Environment = struct {
     const cluster = 32;
     const replica = 4;
-    const size_max = vsr.Zone.superblock.size().? + vsr.Zone.wal.size().? + (512 + 64) * 1024 * 1024;
+    const size_max = vsr.Zone.superblock.size().? +
+        vsr.Zone.wal_headers.size().? +
+        vsr.Zone.wal_prepares.size().? +
+        (512 + 64) * 1024 * 1024;
 
     const node_count = 1024;
     const cache_entries_max = 2 * 1024 * 1024;
@@ -196,8 +199,16 @@ const Environment = struct {
 
         log.debug("forest checkpointing completed!", .{});
 
+        var vsr_state = env.superblock.staging.vsr_state;
+        vsr_state.commit_min += 1;
+        vsr_state.commit_min_checkpoint += 1;
+
         env.state = .superblock_checkpointing;
-        env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context);
+        env.superblock.checkpoint(
+            superblock_checkpoint_callback,
+            &env.superblock_context,
+            vsr_state,
+        );
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
