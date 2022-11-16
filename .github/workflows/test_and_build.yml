@@ -96,13 +96,13 @@ jobs:
 
   # This is just a canary to make sure that the simulator compiles
   # (and passes for at least a single seed).
-  simulator:
-    name: 'Simulator canary'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - run: ./scripts/install_zig.sh
-      - run: zig/zig run -OReleaseSafe src/simulator.zig -- 123
+  # simulator:
+  #   name: 'Simulator canary'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - run: ./scripts/install_zig.sh
+  #     - run: zig/zig run -OReleaseSafe src/simulator.zig -- 123
 
   # Verify that these build without errors:
   build-tools:

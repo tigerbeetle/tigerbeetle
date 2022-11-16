@@ -2,9 +2,28 @@
 sidebar_position: 2
 ---
 
-# Single-node cluster from source
+# Single-node cluster with a single binary
 
-To build from source, clone the repo and run the install script.
+Install TigerBeetle by grabbing the latest release from
+GitHub. For example, on Linux run:
+
+```bash
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
+$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip 
+$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+```
+
+Or on macOS run:
+
+```bash
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
+$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip 
+$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+```
+
+Or to build from source, clone the repo and run the install script.
+
+You will need POSIX userland, curl or wget, tar, and xz.
 
 ```bash
 $ git clone https://github.com/tigerbeetledb/tigerbeetle.git

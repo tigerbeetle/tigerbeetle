@@ -37,39 +37,33 @@ Here are a few key pages you might be interested in:
   - [Transfers](https://docs.tigerbeetle.com/reference/transfers)
   - [Operations](https://docs.tigerbeetle.com/reference/operations)
 
-## QuickStart
+## Quickstart
 
 TigerBeetle is easy to run with or without Docker, depending on your
-preference.
+preference. First, we'll cover running the [Single
+Binary](#single-binary). And below that is how to run [with
+Docker](#with-docker).
 
-### With Docker
+### Single Binary
 
-First provision TigerBeetle's data directory.
-
-```bash
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
-    format --cluster=0 --replica=0 /data/0_0.tigerbeetle
-info(io): creating "0_0.tigerbeetle"...
-info(io): allocating 660.140625MiB...
-```
-
-Then run the server.
+Install TigerBeetle by grabbing the latest release from
+GitHub. For example, on Linux run:
 
 ```bash
-$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
-    start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
-info(io): opening "0_0.tigerbeetle"...
-info(main): 0: cluster=0: listening on 0.0.0.0:3000
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
+$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip 
+$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 ```
 
-Note: if you are on macOS, you will need to call the Docker run
-command with `--cap-add IPC_LOCK` or `--ulimit memlock=-1:-1`. See
-[here](https://docs.tigerbeetle.com/deployment/with-docker#error-systemresources-on-macos) for
-more information.
+Or on macOS run:
 
-### From Source
+```bash
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
+$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip 
+$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+```
 
-To build from source, clone the repo and run the install script.
+Or to build from source, clone the repo and run the install script.
 
 You will need POSIX userland, curl or wget, tar, and xz.
 
@@ -97,6 +91,33 @@ $ ./tigerbeetle start --addresses=3000 0_0.tigerbeetle
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 127.0.0.1:3000
 ```
+
+Now skip ahead to [Use Node as a CLI](#use-node-as-a-cli).
+
+### With Docker
+
+First provision TigerBeetle's data directory.
+
+```bash
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
+    format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+info(io): creating "0_0.tigerbeetle"...
+info(io): allocating 660.140625MiB...
+```
+
+Then run the server.
+
+```bash
+$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
+    start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+info(io): opening "0_0.tigerbeetle"...
+info(main): 0: cluster=0: listening on 0.0.0.0:3000
+```
+
+Note: if you are on macOS, you will need to call the Docker run
+command with `--cap-add IPC_LOCK` or `--ulimit memlock=-1:-1`. See
+[here](https://docs.tigerbeetle.com/deployment/with-docker#error-systemresources-on-macos) for
+more information.
 
 ### Use Node as a CLI
 
