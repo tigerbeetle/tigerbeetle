@@ -7,4 +7,4 @@ jobs:
   scheduled_release:
     runs-on: ubuntu-latest
     steps:
-      - run: hub release create -m "Weekly automated build. Do not use in production." "$(date +%Y-%m-%d)-weekly"
+      - run: hub release create --prerelease --message "Weekly automated build. Do not use in production." "$(date +%Y-%m-%d)-weekly"
