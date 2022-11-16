@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const CrossTarget = std.zig.CrossTarget;
 
 pub fn build(b: *std.build.Builder) void {
-
     const mode = b.standardReleaseOptions();
     const tb_client = b.step("tb_client", "Build tb_client shared libs");
 
@@ -22,12 +21,12 @@ pub fn build(b: *std.build.Builder) void {
         lib.setOutputDir(b.pathJoin(&.{ "src/TigerBeetle/native/", platform[1] }));
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
-        lib.bundle_compiler_rt = true;           
-        
+        lib.bundle_compiler_rt = true;
+
         const os_tag = cross_target.os_tag orelse builtin.target.os.tag;
         if (os_tag != .windows) {
             lib.linkLibC();
-        }           
+        }
 
         tb_client.dependOn(&lib.step);
     }
