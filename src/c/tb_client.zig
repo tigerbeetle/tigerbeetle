@@ -10,7 +10,9 @@ pub const tb_status_t = enum(c_int) {
     success = 0,
     unexpected,
     out_of_memory,
-    invalid_address,
+    address_invalid,
+    address_limit_exceeded,
+    packets_count_invalid,
     system_resources,
     network_subsystem,
 };
@@ -23,8 +25,25 @@ pub const tb_completion_t = fn (
     result_len: u32,
 ) callconv(.C) void;
 
+const config = @import("../config.zig");
+const Storage = @import("../storage.zig").Storage;
+const MessageBus = @import("../message_bus.zig").MessageBusClient;
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
+    .message_body_size_max = config.message_body_size_max,
+});
+
 const ContextType = @import("tb_client/context.zig").ContextType;
 const ContextImplementation = @import("tb_client/context.zig").ContextImplementation;
+
+const DefaultContext = blk: {
+    const Client = @import("../vsr/client.zig").Client(StateMachine, MessageBus);
+    break :blk ContextType(Client);
+};
+
+const TestingContext = blk: {
+    const EchoClient = @import("tb_client/echo_client.zig").EchoClient(StateMachine, MessageBus);
+    break :blk ContextType(EchoClient);
+};
 
 pub fn context_to_client(implementation: *ContextImplementation) tb_client_t {
     return @ptrCast(tb_client_t, implementation);
@@ -34,24 +53,10 @@ fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
     return @ptrCast(*ContextImplementation, @alignCast(@alignOf(ContextImplementation), tb_client));
 }
 
-const DefaultContext = blk: {
-    const config = @import("../config.zig");
-    const Storage = @import("../storage.zig").Storage;
-    const MessageBus = @import("../message_bus.zig").MessageBusClient;
-    const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
-        .message_body_size_max = config.message_body_size_max,
-    });
-    break :blk ContextType(StateMachine, MessageBus);
-};
-
-// const TestingContext = blk: {
-//     const MessageBus = @import("test_message_bus.zig").MessageBusClient;
-//     const StateMachine = @import("../state_machine.zig").StateMachine;
-//     break :blk ContextType(StateMachine, MessageBus);
-// };
-
 // Pick the most suitable allocator
-const global_allocator = if (builtin.link_libc)
+const global_allocator = if (builtin.is_test)
+    std.testing.allocator
+else if (builtin.link_libc)
     std.heap.c_allocator
 else if (builtin.target.os.tag == .windows)
     (struct {
@@ -66,26 +71,83 @@ pub export fn tb_client_init(
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
-    num_packets: u32,
+    packets_count: u32,
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
 ) tb_status_t {
-    var init_fn = DefaultContext.init;
-    // if (addresses_len == 0) {
-    //     init_fn = TestingContext.init;
-    // }
-
-    return (init_fn)(
-        global_allocator,
+    return init(
+        DefaultContext,
         out_client,
         out_packets,
         cluster_id,
         addresses_ptr,
         addresses_len,
-        num_packets,
+        packets_count,
         on_completion_ctx,
         on_completion_fn,
     );
+}
+
+pub export fn tb_client_init_echo(
+    out_client: *tb_client_t,
+    out_packets: *tb_packet_list_t,
+    cluster_id: u32,
+    addresses_ptr: [*:0]const u8,
+    addresses_len: u32,
+    packets_count: u32,
+    on_completion_ctx: usize,
+    on_completion_fn: tb_completion_t,
+) tb_status_t {
+    return init(
+        TestingContext,
+        out_client,
+        out_packets,
+        cluster_id,
+        addresses_ptr,
+        addresses_len,
+        packets_count,
+        on_completion_ctx,
+        on_completion_fn,
+    );
+}
+
+fn init(
+    comptime Context: type,
+    out_client: *tb_client_t,
+    out_packets: *tb_packet_list_t,
+    cluster_id: u32,
+    addresses_ptr: [*:0]const u8,
+    addresses_len: u32,
+    packets_count: u32,
+    on_completion_ctx: usize,
+    on_completion_fn: tb_completion_t,
+) tb_status_t {
+    const addresses = @ptrCast([*]const u8, addresses_ptr)[0..addresses_len];
+    const context = Context.init(
+        global_allocator,
+        cluster_id,
+        addresses,
+        packets_count,
+        on_completion_ctx,
+        on_completion_fn,
+    ) catch |err| switch (err) {
+        error.Unexpected => return .unexpected,
+        error.OutOfMemory => return .out_of_memory,
+        error.AddressInvalid => return .address_invalid,
+        error.AddressLimitExceeded => return .address_limit_exceeded,
+        error.PacketsCountInvalid => return .packets_count_invalid,
+        error.SystemResources => return .system_resources,
+        error.NetworkSubsystemFailed => return .network_subsystem,
+    };
+
+    out_client.* = context_to_client(&context.implementation);
+    var list = tb_packet_list_t{};
+    for (context.packets) |*packet| {
+        list.push(tb_packet_list_t.from(packet));
+    }
+
+    out_packets.* = list;
+    return .success;
 }
 
 pub export fn tb_client_submit(
