@@ -1,0 +1,12 @@
+{
+    "java.project.sourcePaths": [
+        "src/tigerbeetle-java/src/main/java",
+        "src/tigerbeetle-java/src/test/java",
+    ],
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.format.enabled": true,
+    "java.format.settings.url": "eclipse-formatter.xml",
+    "cSpell.words": [
+        "tigerbeetle"
+    ],
+}
