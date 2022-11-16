@@ -40,7 +40,7 @@
     "build": "npm run build_tsc && npm run build_lib",
     "build_tsc": "./node_modules/typescript/bin/tsc",
     "build_lib": "mkdir -p dist && zig/zig build-lib -mcpu=baseline -OReleaseSafe -dynamic -lc -isystem build/node-$(node --version)/include/node src/node.zig -fallow-shlib-undefined -femit-bin=dist/client.node",
-    "prepack": "npm run build_tsc && rm -rf src/zig-cache",
+    "prepack": "npm run build_tsc",
     "clean": "rm -rf build dist node_modules src/zig-cache zig"
   },
   "author": "TigerBeetle, Inc",
