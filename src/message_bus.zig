@@ -45,7 +45,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         io: *IO,
 
         cluster: u32,
-        configuration: []std.net.Address,
+        configuration: []const std.net.Address,
 
         process: switch (process_type) {
             .replica => struct {
@@ -85,7 +85,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         prng: std.rand.DefaultPrng,
 
         pub const Options = struct {
-            configuration: []std.net.Address,
+            configuration: []const std.net.Address,
             io: *IO,
         };
 

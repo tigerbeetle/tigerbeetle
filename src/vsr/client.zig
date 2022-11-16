@@ -12,16 +12,18 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 
 const log = std.log.scoped(.client);
 
-pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
+pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {
         const Self = @This();
+
+        pub const StateMachine = StateMachine_;
 
         pub const Error = error{
             TooManyOutstandingRequests,
         };
 
-        const Request = struct {
-            const Callback = fn (
+        pub const Request = struct {
+            pub const Callback = fn (
                 user_data: u128,
                 operation: StateMachine.Operation,
                 results: Error![]const u8,
