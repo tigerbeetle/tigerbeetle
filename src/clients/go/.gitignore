@@ -1,0 +1,7 @@
+zig/
+zig-cache/
+zig-out/
+
+tb
+zigcc*
+*.tigerbeetle
