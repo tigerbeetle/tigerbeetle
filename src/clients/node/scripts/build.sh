@@ -2,7 +2,7 @@
 
  set -e
 
-docker run -v "$(pwd)":/wrk -w /wrk --entrypoint bash node -c "
+docker run -v "$(pwd)/../../..":/wrk -w /wrk/src/clients/node --entrypoint bash node -c "
 npm config set cache /tmp --global
 npm install
 npm pack
