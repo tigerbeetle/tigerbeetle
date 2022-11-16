@@ -1,0 +1,13 @@
+zig/
+zig-cache/
+zig-out/
+
+tb
+zigcc*
+*.tigerbeetle
+
+pkg/native/aarch64-linux/
+pkg/native/aarch64-macos/
+pkg/native/x86_64-linux/
+pkg/native/x86_64-macos/
+pkg/native/x86_64-windows/
