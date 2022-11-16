@@ -36,7 +36,6 @@ jobs:
   version_check:
     needs: [shellcheck_scripts, test_distro_install]
     runs-on: ubuntu-latest
-    environment: main
     steps:
       - uses: actions/checkout@v3
       - run: npm install && ./scripts/version_check.sh
@@ -45,7 +44,6 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: [version_check]
     runs-on: ubuntu-latest
-    environment: main
     steps:
       - uses: actions/checkout@v3
       - run: echo "//registry.npmjs.org/:_authToken=${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}" > ~/.npmrc
