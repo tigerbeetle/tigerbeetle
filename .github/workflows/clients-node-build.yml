@@ -1,0 +1,50 @@
+name: "clients/node: Build"
+
+defaults:
+  run:
+    working-directory: ./src/clients/node
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '*'
+    # paths:
+    #   - src/clients/node/**
+  pull_request:
+    branches:
+      - 'main'
+
+jobs:
+  shellcheck_scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/shellcheck.sh
+
+  test_distro_install:
+    strategy:
+      matrix:
+        distro: [alpine, debian, ubuntu, fedora, rhelubi, amazonlinux]
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/test_install_on_${{ matrix.distro }}.sh
+
+  version_check:
+    needs: [shellcheck_scripts, test_distro_install]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: npm install && ./scripts/version_check.sh
+
+  publish:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [version_check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: echo "//registry.npmjs.org/:_authToken=${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}" > ~/.npmrc
+      - run: PACKAGE_JSON_VERSION=$(jq -r '.version' package.json) && npm show "tigerbeetle-node@${PACKAGE_JSON_VERSION}" --json 2>/dev/null && echo "Package tigerbeetle-node@${PACKAGE_JSON_VERSION} already exists - not publishing" || (npm install && npm publish)
