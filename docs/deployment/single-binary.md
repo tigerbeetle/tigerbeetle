@@ -5,7 +5,9 @@ sidebar_position: 2
 # Single-node cluster with a single binary
 
 Install TigerBeetle by grabbing the latest release from
-GitHub. For example, on Linux run:
+GitHub.
+
+## Prebuilt Linux binary
 
 ```bash
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
@@ -13,7 +15,7 @@ $ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 ```
 
-Or on macOS run:
+## Prebuilt macOS binary
 
 ```bash
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
@@ -21,12 +23,16 @@ $ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 ```
 
-Or to build from source, clone the repo and run the install script.
+## Building from source
+
+Or to build from source, clone the repo, checkout a release, and run
+the install script.
 
 You will need POSIX userland, curl or wget, tar, and xz.
 
 ```bash
 $ git clone https://github.com/tigerbeetledb/tigerbeetle.git
+$ git checkout 2022-11-16-weekly # Or latest tag
 $ cd tigerbeetle
 $ scripts/install.sh
 ```
@@ -34,6 +40,8 @@ $ scripts/install.sh
 Don't worry, this will only make changes within the `tigerbeetle`
 directory. No global changes. The result will place the compiled
 `tigerbeetle` binary into the current directory.
+
+## Running TigerBeetle
 
 Now create the TigerBeetle data file.
 
