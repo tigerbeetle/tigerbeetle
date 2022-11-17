@@ -13,6 +13,23 @@ GitHub.
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
 $ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip 
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+$ tigerbeetle version --verbose | head -n6
+TigerBeetle version experimental
+
+git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
+
+zig_version=0.9.1
+mode=Mode.ReleaseSafe
+```
+
+### Debugging panics
+
+If you run into panics, you can get more information by using the
+debug binary. To grab this binary, add `--debug` before the `.zip`
+extension:
+
+```bash
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly--debug.zip
 ```
 
 ## Prebuilt macOS binary
@@ -21,6 +38,23 @@ $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
 $ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip 
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+$ tigerbeetle version --verbose | head -n6
+TigerBeetle version experimental
+
+git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
+
+zig_version=0.9.1
+mode=Mode.ReleaseSafe
+```
+
+### Debugging panics
+
+If you run into panics, you can get more information by using the
+debug binary. To grab this binary, add `--debug` before the `.zip`
+extension:
+
+```bash
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly--debug.zip
 ```
 
 ## Building from source
@@ -40,6 +74,15 @@ $ scripts/install.sh
 Don't worry, this will only make changes within the `tigerbeetle`
 directory. No global changes. The result will place the compiled
 `tigerbeetle` binary into the current directory.
+
+### Debugging panics
+
+If you run into panics, you can get more information by using the
+debug binary:
+
+```
+$ DEBUG=true ./scripts/install.sh
+```
 
 ## Running TigerBeetle
 
@@ -62,15 +105,3 @@ info(main): 0: cluster=0: listening on 127.0.0.1:3000
 Now you can connect to the running server with any client. For a quick
 start, try [creating accounts and transfers in the Node
 CLI](../usage/node-cli).
-
-
-## Debugging panics
-
-If TigerBeetle panics and you can reproduce the panic, you can get a
-better stack trace by switching to a debug build.
-
-```bash
-$ DEBUG=true scripts/install.sh
-```
-
-And then running the server again.

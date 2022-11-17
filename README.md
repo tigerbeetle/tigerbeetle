@@ -55,6 +55,13 @@ GitHub.
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
 $ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip 
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+$ tigerbeetle version --verbose | head -n6
+TigerBeetle version experimental
+
+git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
+
+zig_version=0.9.1
+mode=Mode.ReleaseSafe
 ```
 
 #### Prebuilt macOS binary
@@ -63,6 +70,13 @@ $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
 $ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip 
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+$ tigerbeetle version --verbose | head -n6
+TigerBeetle version experimental
+
+git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
+
+zig_version=0.9.1
+mode=Mode.ReleaseSafe
 ```
 
 #### Building from source
