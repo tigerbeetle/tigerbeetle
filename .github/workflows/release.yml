@@ -8,9 +8,8 @@ jobs:
   build_and_upload_binaries:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
-
         debug: ["", "--debug"]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -27,7 +26,7 @@ jobs:
     # use Zig's cross-platform builds instead of relying on the
     # current platform and different Github Actions runners.
     - name: Create zip of release build
-      run: zip -9 tigerbeetle-$RUNNER_OS-x64-$GIT_TAG.zip tigerbeetle
+      run: zip -9 tigerbeetle-$RUNNER_OS-x64-$GIT_TAG${{ matrix.debug }}.zip tigerbeetle
 
     - name: Get Github ID for tag
       run: |
@@ -37,5 +36,5 @@ jobs:
         curl --fail \
           -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
           -H "Content-Type: application/zip" \
-          --data-binary @./tigerbeetle-$RUNNER_OS-x64-$GIT_TAG.zip \
-          "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-$RUNNER_OS-x64-$GIT_TAG.zip"
+          --data-binary @./tigerbeetle-$RUNNER_OS-x64-$GIT_TAG${{ matrix.debug }}.zip \
+          "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-$RUNNER_OS-x64-$GIT_TAG${{ matrix.debug }}.zip"
