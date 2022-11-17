@@ -1116,485 +1116,344 @@ const TestContext = struct {
         ctx.message_pool.deinit(allocator);
         ctx.* = undefined;
     }
-};
 
-test "create/lookup/rollback accounts" {
-    const Vector = struct { result: CreateAccountResult, object: Account };
+    fn ca(context: *TestContext, account_vector: AccountVector) !void {
+        const account = account_vector.object;
+        const result_actual = context.state_machine.create_account(&account);
+        try expectEqual(account_vector.result, result_actual);
 
-    const vectors = [_]Vector{
-        .{
-            .result = .ok,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 2,
-                .ledger = 3,
-                .code = 4,
-                .timestamp = 1,
-            }),
-        },
-        .{
-            .result = .reserved_flag,
-            .object = mem.zeroInit(Account, .{
-                .id = 0,
-                .user_data = 0,
-                .reserved = [_]u8{1} ** 48,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{
-                    .padding = 1,
-                    .debits_must_not_exceed_credits = true,
-                    .credits_must_not_exceed_debits = true,
-                },
-                .debits_pending = 1,
-                .debits_posted = 1,
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .reserved_field,
-            .object = mem.zeroInit(Account, .{
-                .id = 0,
-                .user_data = 0,
-                .reserved = [_]u8{1} ** 48,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{
-                    .padding = 0,
-                    .debits_must_not_exceed_credits = true,
-                    .credits_must_not_exceed_debits = true,
-                },
-                .debits_pending = 1,
-                .debits_posted = 1,
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .id_must_not_be_zero,
-            .object = mem.zeroInit(Account, .{
-                .id = 0,
-                .user_data = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{
-                    .padding = 0,
-                    .debits_must_not_exceed_credits = true,
-                    .credits_must_not_exceed_debits = true,
-                },
-                .debits_pending = 1,
-                .debits_posted = 1,
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .id_must_not_be_int_max,
-            .object = mem.zeroInit(Account, .{
-                .id = math.maxInt(u128),
-                .user_data = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{
-                    .padding = 0,
-                    .debits_must_not_exceed_credits = true,
-                    .credits_must_not_exceed_debits = true,
-                },
-                .debits_pending = 1,
-                .debits_posted = 1,
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .ledger_must_not_be_zero,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{
-                    .padding = 0,
-                    .debits_must_not_exceed_credits = true,
-                    .credits_must_not_exceed_debits = true,
-                },
-                .debits_pending = 1,
-                .debits_posted = 1,
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .code_must_not_be_zero,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 0,
-                .flags = .{
-                    .debits_must_not_exceed_credits = true,
-                    .credits_must_not_exceed_debits = true,
-                },
-                .debits_pending = 1,
-                .debits_posted = 1,
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .mutually_exclusive_flags,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 40,
-                .flags = .{
-                    .debits_must_not_exceed_credits = true,
-                    .credits_must_not_exceed_debits = true,
-                },
-                .debits_pending = math.maxInt(u64),
-                .debits_posted = math.maxInt(u64),
-                .credits_pending = math.maxInt(u64),
-                .credits_posted = math.maxInt(u64),
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .debits_pending_must_be_zero,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 40,
-                .flags = .{
-                    .debits_must_not_exceed_credits = true,
-                },
-                .debits_pending = 1,
-                .debits_posted = 1,
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .debits_posted_must_be_zero,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 40,
-                .flags = .{
-                    .debits_must_not_exceed_credits = true,
-                },
-                .debits_posted = 1,
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .credits_pending_must_be_zero,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 40,
-                .flags = .{
-                    .debits_must_not_exceed_credits = true,
-                },
-                .credits_pending = 1,
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .credits_posted_must_be_zero,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 40,
-                .flags = .{
-                    .debits_must_not_exceed_credits = true,
-                },
-                .credits_posted = 1,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_flags,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 40,
-                .flags = .{
-                    .credits_must_not_exceed_debits = true,
-                },
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_user_data,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 20,
-                .ledger = 30,
-                .code = 40,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_ledger,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 2,
-                .ledger = 30,
-                .code = 40,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_code,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 2,
-                .ledger = 3,
-                .code = 40,
-                .timestamp = 2,
-            }),
-        },
-        .{
-            .result = .exists,
-            .object = mem.zeroInit(Account, .{
-                .id = 1,
-                .user_data = 2,
-                .ledger = 3,
-                .code = 4,
-                .timestamp = 2,
-            }),
-        },
-    };
-
-    var context: TestContext = undefined;
-    try context.init(testing.allocator);
-    defer context.deinit(testing.allocator);
-
-    const state_machine = &context.state_machine;
-
-    for (vectors) |*vector, i| {
-        const result = state_machine.create_account(&vector.object);
-        expectEqual(vector.result, result) catch |err| {
-            print_test_vector(i, vector.result, result, vector.object, err);
-            return err;
-        };
-
-        if (vector.result == .ok) {
-            try expectEqual(vector.object, state_machine.get_account(vector.object.id).?.*);
+        if (account_vector.result == .ok) {
+            try expectEqual(account, context.state_machine.get_account(account.id).?.*);
         }
     }
 
-    state_machine.create_account_rollback(&vectors[0].object);
-    try expect(state_machine.get_account(vectors[0].object.id) == null);
+    fn put_account(context: *TestContext, account: Account) !void {
+        context.state_machine.forest.grooves.accounts.put(&account);
+        try expectEqual(account, context.state_machine.get_account(account.id).?.*);
+    }
+
+    fn create_transfer(context: *TestContext, transfer_vector: TransferVector) !void {
+        const transfer = transfer_vector.object;
+        const result_actual = context.state_machine.create_transfer(&transfer);
+        try expectEqual(transfer_vector.result, result_actual);
+    }
+
+    fn create_objects(
+        context: *TestContext,
+        comptime Object: type,
+        vectors: []const Vector(Object),
+    ) !void {
+        const operation = switch (Object) {
+            Account => .create_accounts,
+            Transfer => .create_transfers,
+            else => unreachable,
+        };
+
+        var objects = std.BoundedArray(Object, 32).init(0) catch unreachable;
+        for (vectors) |vector| {
+            objects.appendAssumeCapacity(vector.object);
+        }
+
+        const request = mem.sliceAsBytes(objects.slice());
+        const reply = try testing.allocator.alignedAlloc(u8, 16, 4096);
+        defer testing.allocator.free(reply);
+
+        _ = context.state_machine.prepare(operation, request);
+        const results_size = context.state_machine.commit(0, 1, operation, request, reply);
+        const results = mem.bytesAsSlice(StateMachine.Result(operation), reply[0..results_size]);
+
+        var results_index: usize = 0;
+        for (vectors) |vector, i| {
+            if (vector.result != .ok) {
+                try std.testing.expectEqual(results[results_index].index, @intCast(u32, i));
+                try std.testing.expectEqual(results[results_index].result, vector.result);
+                results_index += 1;
+            }
+        }
+        assert(results_index == results.len);
+
+        if (Object == Account) {
+            for (objects.slice()) |vector, i| {
+                if (vectors[i].result != .ok) continue;
+                try expectEqual(vector, context.state_machine.get_account(vector.id).?.*);
+            }
+        } else {
+            // The prior branch doesn't apply to Transfers because post/void tranfers' zero-fields
+            // are overwritten.
+        }
+    }
+};
+
+const N = false;
+const Y = true;
+
+// Account.id, Transfer.id
+const id0: u128 = 0;
+const id1: u128 = 1;
+const id2: u128 = 2;
+const id3: u128 = 3;
+const id4: u128 = 4;
+const id5: u128 = 5;
+const id6: u128 = 6;
+const id7: u128 = 7;
+const idZ: u128 = math.maxInt(u128);
+
+// Account.user_data, Transfer.user_data
+const ud0: u128 = id0;
+const ud1: u128 = id1;
+const ud2: u128 = id2;
+
+// Transfer.amount, Account.{debits,credits}_{pending,posted}
+const a0: u64 = 0;
+const a1: u64 = 1;
+const aZ: u64 = math.maxInt(u64);
+
+// Account.reserved
+const ar0 = [_]u8{0} ** 48;
+const ar1 = [_]u8{1} ** 48;
+
+// Account.flags.padding
+const afp0: u13 = 0;
+const afp1: u13 = 1;
+
+// Transfer.reserved
+const tr0: u128 = 0;
+const tr1: u128 = 1;
+
+// Transfer.timeout
+const to0: u64 = 0;
+
+// Transfer.flags.padding
+const p0: u12 = 0;
+const p1: u12 = 1;
+
+fn A(
+    id: u128,
+    user_data: u128,
+    reserved: [48]u8,
+    ledger: u32,
+    code: u16,
+    flags_linked: bool,
+    flags_debits_must_not_exceed_credits: bool,
+    flags_credits_must_not_exceed_debits: bool,
+    flags_padding: u13,
+    debits_pending: u64,
+    debits_posted: u64,
+    credits_pending: u64,
+    credits_posted: u64,
+    timestamp: u64,
+    result: CreateAccountResult,
+) AccountVector {
+    return .{
+        .object = Account{
+            .id = id,
+            .user_data = user_data,
+            .reserved = reserved,
+            .ledger = ledger,
+            .code = code,
+            .flags = .{
+                .linked = flags_linked,
+                .debits_must_not_exceed_credits = flags_debits_must_not_exceed_credits,
+                .credits_must_not_exceed_debits = flags_credits_must_not_exceed_debits,
+                .padding = flags_padding,
+            },
+            .debits_pending = debits_pending,
+            .debits_posted = debits_posted,
+            .credits_pending = credits_pending,
+            .credits_posted = credits_posted,
+            .timestamp = timestamp,
+        },
+        .result = result,
+    };
+}
+
+fn T(
+    id: u128,
+    debit_account_id: u128,
+    credit_account_id: u128,
+    user_data: u128,
+    reserved: u128,
+    pending_id: u128,
+    timeout: u64,
+    ledger: u32,
+    code: u16,
+    flags_linked: bool,
+    flags_pending: bool,
+    flags_post_pending_transfer: bool,
+    flags_void_pending_transfer: bool,
+    flags_padding: u12,
+    amount: u64,
+    timestamp: u64,
+    result: CreateTransferResult,
+) TransferVector {
+    return .{
+        .object = .{
+            .id = id,
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
+            .user_data = user_data,
+            .reserved = reserved,
+            .pending_id = pending_id,
+            .timeout = timeout,
+            .ledger = ledger,
+            .code = code,
+            .flags = .{
+                .linked = flags_linked,
+                .pending = flags_pending,
+                .post_pending_transfer = flags_post_pending_transfer,
+                .void_pending_transfer = flags_void_pending_transfer,
+                .padding = flags_padding,
+            },
+            .amount = amount,
+            .timestamp = timestamp,
+        },
+        .result = result,
+    };
+}
+
+fn Vector(comptime Object: type) type {
+    assert(Object == Account or Object == Transfer);
+    return struct {
+        object: Object,
+        result: switch (Object) {
+            Account => CreateAccountResult,
+            Transfer => CreateTransferResult,
+            else => unreachable,
+        },
+    };
+}
+
+const AccountVector = Vector(Account);
+const TransferVector = Vector(Transfer);
+
+test "create/lookup/rollback accounts" {
+    var c: TestContext = undefined;
+    try c.init(testing.allocator);
+    defer c.deinit(testing.allocator);
+
+    const account_vectors = [_]AccountVector{
+        A(id1, ud2, ar0, 3, 4, N, N, N, afp0, a0, a0, a0, a0, 1, .ok),
+        A(id0, ud0, ar1, 0, 0, N, Y, Y, afp1, a1, a1, a1, a1, 2, .reserved_flag),
+        A(id0, ud0, ar1, 0, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .reserved_field),
+        A(id0, ud0, ar0, 0, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .id_must_not_be_zero),
+        A(idZ, ud0, ar0, 0, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .id_must_not_be_int_max),
+        A(id1, ud1, ar0, 0, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .ledger_must_not_be_zero),
+        A(id1, ud1, ar0, 9, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .code_must_not_be_zero),
+        A(id1, ud1, ar0, 9, 9, N, Y, Y, afp0, aZ, aZ, aZ, aZ, 2, .mutually_exclusive_flags),
+        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a1, a1, a1, a1, 2, .debits_pending_must_be_zero),
+        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a0, a1, a1, a1, 2, .debits_posted_must_be_zero),
+        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a0, a0, a1, a1, 2, .credits_pending_must_be_zero),
+        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a0, a0, a0, a1, 2, .credits_posted_must_be_zero),
+        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a0, a0, a0, a0, 2, .exists_with_different_flags),
+        A(id1, ud1, ar0, 9, 9, N, N, Y, afp0, a0, a0, a0, a0, 2, .exists_with_different_flags),
+        A(id1, ud1, ar0, 9, 9, N, N, N, afp0, a0, a0, a0, a0, 2, .exists_with_different_user_data),
+        A(id1, ud2, ar0, 9, 9, N, N, N, afp0, a0, a0, a0, a0, 2, .exists_with_different_ledger),
+        A(id1, ud2, ar0, 3, 9, N, N, N, afp0, a0, a0, a0, a0, 2, .exists_with_different_code),
+        A(id1, ud2, ar0, 3, 4, N, N, N, afp0, a0, a0, a0, a0, 2, .exists),
+    };
+
+    for (account_vectors[0..]) |account_vector| {
+        try c.ca(account_vector);
+    }
+
+    c.state_machine.create_account_rollback(&account_vectors[0].object);
+    try expect(c.state_machine.get_account(id1) == null);
+    try expect(c.state_machine.get_account(id2) == null);
 }
 
 test "linked accounts" {
-    var accounts = [_]Account{
-        // An individual event (successful):
-        mem.zeroInit(Account, .{ .id = 7, .code = 1, .ledger = 1 }),
-
-        // A chain of 4 events (the last event in the chain closes the chain with linked=false):
-        // Commit/rollback.
-        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        // Commit/rollback.
-        mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        // Fail with .exists.
-        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        // Fail without committing.
-        mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1 }),
-
-        // An individual event (successful):
-        // This should not see any effect from the failed chain above.
-        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1 }),
-
-        // A chain of 2 events (the first event fails the chain):
-        mem.zeroInit(Account, .{ .id = 1, .code = 2, .ledger = 1, .flags = .{ .linked = true } }),
-        mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1 }),
-
-        // An individual event (successful):
-        mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1 }),
-
-        // A chain of 2 events (the last event fails the chain):
-        mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 2 }),
-
-        // A chain of 2 events (successful):
-        mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        mem.zeroInit(Account, .{ .id = 4, .code = 1, .ledger = 1 }),
-    };
-
     var context: TestContext = undefined;
     try context.init(testing.allocator);
     defer context.deinit(testing.allocator);
 
-    const state_machine = &context.state_machine;
+    try context.create_objects(Account, &.{
+        // An individual event (successful):
+        A(id7, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
 
-    const input = mem.asBytes(&accounts);
+        // A chain of 4 events (the last event in the chain closes the chain with linked=false):
+        // Commit/rollback.
+        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        // Commit/rollback.
+        A(id2, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        // Fail with .exists.
+        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .exists),
+        // Fail without committing.
+        A(id3, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
 
-    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
-    defer testing.allocator.free(output);
+        // An individual event (successful):
+        // This does not see any effect from the failed chain above.
+        A(id1, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
 
-    _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 1, .create_accounts, input, output);
-    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
+        // A chain of 2 events (the first event fails the chain):
+        A(id1, ud0, ar0, 1, 2, Y, N, N, afp0, a0, a0, a0, a0, 0, .exists_with_different_flags),
+        A(id2, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
 
-    try expectEqualSlices(
-        CreateAccountsResult,
-        &[_]CreateAccountsResult{
-            .{ .index = 1, .result = .linked_event_failed },
-            .{ .index = 2, .result = .linked_event_failed },
-            .{ .index = 3, .result = .exists },
-            .{ .index = 4, .result = .linked_event_failed },
-            .{ .index = 6, .result = .exists_with_different_flags },
-            .{ .index = 7, .result = .linked_event_failed },
-            .{ .index = 9, .result = .linked_event_failed },
-            .{ .index = 10, .result = .exists_with_different_ledger },
-        },
-        results,
-    );
+        // An individual event (successful):
+        A(id2, ud1, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
 
-    try expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
-    try expectEqual(accounts[5], state_machine.get_account(accounts[5].id).?.*);
-    try expectEqual(accounts[8], state_machine.get_account(accounts[8].id).?.*);
-    try expectEqual(accounts[11], state_machine.get_account(accounts[11].id).?.*);
-    try expectEqual(accounts[12], state_machine.get_account(accounts[12].id).?.*);
+        // A chain of 2 events (the last event fails the chain):
+        A(id3, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        A(id1, ud0, ar0, 2, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .exists_with_different_ledger),
+
+        // A chain of 2 events (successful):
+        A(id3, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+        A(id4, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+    });
 
     // TODO How can we test that events were in fact rolled back in LIFO order?
     // All our rollback handlers appear to be commutative.
 }
 
 test "linked_event_chain_open" {
-    var accounts = [_]Account{
-        // A chain of 3 events (the last event in the chain closes the chain with linked=false):
-        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1 }),
-
-        // An open chain of 2 events:
-        mem.zeroInit(Account, .{ .id = 4, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        mem.zeroInit(Account, .{ .id = 5, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-    };
-
     var context: TestContext = undefined;
     try context.init(testing.allocator);
     defer context.deinit(testing.allocator);
 
-    const state_machine = &context.state_machine;
+    try context.create_objects(Account, &.{
+        // A chain of 3 events (the last event in the chain closes the chain with linked=false):
+        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+        A(id2, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+        A(id3, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
 
-    const input = mem.asBytes(&accounts);
+        // An open chain of 2 events:
+        A(id4, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        A(id5, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_chain_open),
+    });
 
-    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
-    defer testing.allocator.free(output);
-
-    _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 1, .create_accounts, input, output);
-    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
-
-    try expectEqualSlices(
-        CreateAccountsResult,
-        &[_]CreateAccountsResult{
-            .{ .index = 3, .result = .linked_event_failed },
-            .{ .index = 4, .result = .linked_event_chain_open },
-        },
-        results,
-    );
-
-    try expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
-    try expectEqual(accounts[1], state_machine.get_account(accounts[1].id).?.*);
-    try expectEqual(accounts[2], state_machine.get_account(accounts[2].id).?.*);
-
-    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[3].id));
-    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[4].id));
+    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id4));
+    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id5));
 }
 
 test "linked_event_chain_open for an already failed batch" {
-    var accounts = [_]Account{
-        // An individual event (successful):
-        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1 }),
-
-        // An open chain of 3 events (the second one fails):
-        mem.zeroInit(Account, .{ .id = 2, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-        mem.zeroInit(Account, .{ .id = 3, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-    };
-
     var context: TestContext = undefined;
     try context.init(testing.allocator);
     defer context.deinit(testing.allocator);
 
-    const state_machine = &context.state_machine;
+    try context.create_objects(Account, &.{
+        // An individual event (successful):
+        A(id1, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
 
-    const input = mem.asBytes(&accounts);
+        // An open chain of 3 events (the second one fails):
+        A(id2, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .exists_with_different_flags),
+        A(id3, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_chain_open),
+    });
 
-    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
-    defer testing.allocator.free(output);
-
-    _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 1, .create_accounts, input, output);
-    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
-
-    try expectEqualSlices(
-        CreateAccountsResult,
-        &[_]CreateAccountsResult{
-            .{ .index = 1, .result = .linked_event_failed },
-            .{ .index = 2, .result = .exists_with_different_flags },
-            .{ .index = 3, .result = .linked_event_chain_open },
-        },
-        results,
-    );
-
-    try expectEqual(accounts[0], state_machine.get_account(accounts[0].id).?.*);
-
-    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[1].id));
-    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[3].id));
+    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id2));
+    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id3));
 }
 
 test "linked_event_chain_open for a batch of 1" {
-    var accounts = [_]Account{
-        // Just one event with linked = true
-        mem.zeroInit(Account, .{ .id = 1, .code = 1, .ledger = 1, .flags = .{ .linked = true } }),
-    };
-
     var context: TestContext = undefined;
     try context.init(testing.allocator);
     defer context.deinit(testing.allocator);
 
-    const state_machine = &context.state_machine;
+    try context.create_objects(Account, &.{
+        // Just one event with linked = true
+        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_chain_open),
+    });
 
-    const input = mem.asBytes(&accounts);
-
-    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
-    defer testing.allocator.free(output);
-
-    _ = state_machine.prepare(.create_accounts, input);
-    const size = state_machine.commit(0, 1, .create_accounts, input, output);
-    const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
-
-    try expectEqualSlices(
-        CreateAccountsResult,
-        &[_]CreateAccountsResult{
-            .{ .index = 0, .result = .linked_event_chain_open },
-        },
-        results,
-    );
-
-    try expectEqual(@as(?*const Account, null), state_machine.get_account(accounts[0].id));
+    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id1));
 }
 
 // The goal is to ensure that:
@@ -1602,1339 +1461,233 @@ test "linked_event_chain_open for a batch of 1" {
 // 2. enums tested in the order that they are defined, for easier auditing of coverage, and that
 // 3. state machine logic cannot be reordered in any way, breaking determinism.
 test "create/lookup/rollback transfers" {
-    var accounts = [_]Account{
-        mem.zeroInit(Account, .{
-            .id = 1,
-            .ledger = 1,
-            .code = 1,
-            .debits_pending = 100,
-            .debits_posted = 200,
-        }),
-        mem.zeroInit(Account, .{ .id = 2, .ledger = 2, .code = 2 }),
-        mem.zeroInit(Account, .{
-            .id = 3,
-            .ledger = 1,
-            .code = 1,
-            .credits_pending = 110,
-            .credits_posted = 210,
-        }),
-        mem.zeroInit(Account, .{
-            .id = 4,
-            .ledger = 1,
-            .code = 1,
-            .flags = .{ .debits_must_not_exceed_credits = true },
-            .debits_pending = 20,
-            .debits_posted = math.maxInt(u64) - 500 - 200,
-            .credits_pending = 0,
-            .credits_posted = math.maxInt(u64) - 500,
-        }),
-        mem.zeroInit(Account, .{
-            .id = 5,
-            .ledger = 1,
-            .code = 1,
-            .flags = .{ .credits_must_not_exceed_debits = true },
-            .debits_pending = 0,
-            .debits_posted = math.maxInt(u64) - 1000,
-            .credits_pending = 10,
-            .credits_posted = math.maxInt(u64) - 1000 - 100,
-        }),
+    var c: TestContext = undefined;
+    try c.init(testing.allocator);
+    defer c.deinit(testing.allocator);
+
+    const A1 = A(id1, ud0, ar0, 1, 1, N, N, N, afp0, 100, 200, a0, a0, 0, .ok).object;
+    const A2 = A(id2, ud0, ar0, 2, 2, N, N, N, afp0, a0, a0, a0, a0, 0, .ok).object;
+    const A3 = A(id3, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, 110, 210, 0, .ok).object;
+    const A4 = A(id4, ud0, ar0, 1, 1, N, Y, N, afp0, 20, aZ - 500 - 200, a0, aZ - 500, 0, .ok).object;
+    const A5 = A(id5, ud0, ar0, 1, 1, N, N, Y, afp0, a0, aZ - 1000, 10, aZ - 1000 - 100, 0, .ok).object;
+    for ([_]Account{ A1, A2, A3, A4, A5 }) |account| try c.put_account(account);
+
+    const t: u64 = c.state_machine.prepare_timestamp + 1;
+    const toZ: u64 = (std.math.maxInt(u64) - t) + 1;
+
+    const vectors = [_]TransferVector{
+        T(id0, id0, id0, ud0, tr1, id1, to0, 0, 0, N, Y, N, N, p1, 0, t, .reserved_flag),
+        T(id0, id0, id0, ud0, tr1, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .reserved_field),
+        T(id0, id0, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .id_must_not_be_zero),
+        T(idZ, id0, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .id_must_not_be_int_max),
+        T(id1, id0, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .debit_account_id_must_not_be_zero),
+        T(id1, idZ, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .debit_account_id_must_not_be_int_max),
+        T(id1, 100, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .credit_account_id_must_not_be_zero),
+        T(id1, 100, idZ, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .credit_account_id_must_not_be_int_max),
+        T(id1, 100, 100, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .accounts_must_be_different),
+        T(id1, 100, 200, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .pending_id_must_be_zero),
+        T(id1, 100, 200, ud0, tr0, id0, to0, 0, 0, N, Y, N, N, p0, 0, t, .pending_transfer_must_timeout),
+        T(id1, 100, 200, ud0, tr0, id0, toZ, 0, 0, N, N, N, N, p0, 0, t, .timeout_reserved_for_pending_transfer),
+        T(id1, 100, 200, ud0, tr0, id0, toZ, 0, 0, N, Y, N, N, p0, 0, t, .ledger_must_not_be_zero),
+        T(id1, 100, 200, ud0, tr0, id0, toZ, 9, 0, N, Y, N, N, p0, 0, t, .code_must_not_be_zero),
+        T(id1, 100, 200, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 0, t, .amount_must_not_be_zero),
+        T(id1, 100, 200, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 9, t, .debit_account_not_found),
+        T(id1, id1, 200, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 9, t, .credit_account_not_found),
+        T(id1, id1, id2, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 1, t, .accounts_must_have_the_same_ledger),
+        T(id1, id1, id3, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 1, t, .transfer_must_have_the_same_ledger_as_accounts),
+        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A1.debits_pending + 1, t, .overflows_debits_pending),
+        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A3.credits_pending + 1, t, .overflows_credits_pending),
+        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A1.debits_posted + 1, t, .overflows_debits_posted),
+        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A3.credits_posted + 1, t, .overflows_credits_posted),
+        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A1.debits_pending - A1.debits_posted + 1, t, .overflows_debits),
+        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A3.credits_pending - A3.credits_posted + 1, t, .overflows_credits),
+        T(id1, id4, id5, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, A4.credits_posted - A4.debits_pending - A4.debits_posted + 1, t, .overflows_timeout),
+        T(id1, id4, id5, ud0, tr0, id0, to0, 1, 1, N, N, N, N, p0, A4.credits_posted - A4.debits_pending - A4.debits_posted + 1, t, .exceeds_credits),
+        T(id1, id4, id5, ud0, tr0, id0, to0, 1, 1, N, N, N, N, p0, A5.debits_posted - A5.credits_pending - A5.credits_posted + 1, t, .exceeds_debits),
+        T(id1, id1, id3, ud0, tr0, id0, 1e4, 1, 1, N, Y, N, N, p0, 123, t, .ok),
+
+        // Ensure that idempotence is only checked after validation.
+        T(id1, id1, id3, ud0, tr0, id0, 1e4, 2, 1, N, Y, N, N, p0, 123, t + 1, .transfer_must_have_the_same_ledger_as_accounts),
+        T(id1, id1, id3, ud1, tr0, id0, to0, 1, 2, N, N, N, N, p0, aZ, t + 1, .exists_with_different_flags),
+        T(id1, id3, id1, ud1, tr0, id0, 1e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_debit_account_id),
+        T(id1, id1, id4, ud1, tr0, id0, 1e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_credit_account_id),
+        T(id1, id1, id3, ud1, tr0, id0, 1e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_user_data),
+        T(id1, id1, id3, ud0, tr0, id0, 2e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_timeout),
+        T(id1, id1, id3, ud0, tr0, id0, 1e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_code),
+        T(id1, id1, id3, ud0, tr0, id0, 1e4, 1, 1, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_amount),
+        T(id1, id1, id3, ud0, tr0, id0, 1e4, 1, 1, N, Y, N, N, p0, 123, t + 1, .exists),
+        T(id2, id3, id1, ud0, tr0, id0, to0, 1, 2, N, N, N, N, p0, 7, t + 1, .ok),
+        T(id3, id1, id3, ud0, tr0, id0, to0, 1, 2, N, N, N, N, p0, 3, t + 2, .ok),
     };
 
-    var context: TestContext = undefined;
-    try context.init(testing.allocator);
-    defer context.deinit(testing.allocator);
-
-    const state_machine = &context.state_machine;
-
-    const input = mem.asBytes(&accounts);
-
-    const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
-    defer testing.allocator.free(output);
-
-    _ = state_machine.prepare(.create_accounts, input);
-
-    for (accounts) |account| {
-        state_machine.forest.grooves.accounts.put(&account);
-        try expectEqual(account, state_machine.get_account(account.id).?.*);
-    }
-
-    const Vector = struct { result: CreateTransferResult, object: Transfer };
-
-    const timestamp: u64 = state_machine.prepare_timestamp + 1;
-    const vectors = [_]Vector{
-        .{
-            .result = .reserved_flag,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .reserved = 1,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true, .padding = 1 },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .reserved_field,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .reserved = 1,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .id_must_not_be_zero,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .id_must_not_be_int_max,
-            .object = mem.zeroInit(Transfer, .{
-                .id = math.maxInt(u128),
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .debit_account_id_must_not_be_zero,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .debit_account_id_must_not_be_int_max,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = math.maxInt(u128),
-                .credit_account_id = 0,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .credit_account_id_must_not_be_zero,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 0,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .credit_account_id_must_not_be_int_max,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = math.maxInt(u128),
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .accounts_must_be_different,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 100,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .pending_id_must_be_zero,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 200,
-                .pending_id = 1,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .pending_transfer_must_timeout,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 200,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .timeout_reserved_for_pending_transfer,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 200,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 0,
-                .code = 0,
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .ledger_must_not_be_zero,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 200,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .code_must_not_be_zero,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 200,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 100,
-                .code = 0,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .amount_must_not_be_zero,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 200,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 100,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = 0,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .debit_account_not_found,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 100,
-                .credit_account_id = 200,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 100,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = 100,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .credit_account_not_found,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 200,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 100,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = 100,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .accounts_must_have_the_same_ledger,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 100,
-                .code = 1,
-                .amount = 1,
-                .flags = .{ .pending = true },
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .transfer_must_have_the_same_ledger_as_accounts,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 100,
-                .code = 1,
-                .amount = 1,
-                .flags = .{ .pending = true },
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .overflows_debits_pending,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64) - accounts[1 - 1].debits_pending + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .overflows_credits_pending,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64) - accounts[3 - 1].credits_pending + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .overflows_debits_posted,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64) - accounts[1 - 1].debits_posted + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .overflows_credits_posted,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64) - accounts[3 - 1].credits_posted + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .overflows_debits,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64) -
-                    accounts[1 - 1].debits_pending -
-                    accounts[1 - 1].debits_posted + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .overflows_credits,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64) -
-                    accounts[3 - 1].credits_pending -
-                    accounts[3 - 1].credits_posted + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .overflows_timeout,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 4,
-                .credit_account_id = 5,
-                .timeout = (std.math.maxInt(u64) - timestamp) + 1,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = accounts[4 - 1].credits_posted -
-                    accounts[4 - 1].debits_pending -
-                    accounts[4 - 1].debits_posted + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .exceeds_credits,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 4,
-                .credit_account_id = 5,
-                .ledger = 1,
-                .code = 1,
-                .amount = accounts[4 - 1].credits_posted -
-                    accounts[4 - 1].debits_pending -
-                    accounts[4 - 1].debits_posted + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .exceeds_debits,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 4,
-                .credit_account_id = 5,
-                .ledger = 1,
-                .code = 1,
-                .amount = accounts[5 - 1].debits_posted -
-                    accounts[5 - 1].credits_pending -
-                    accounts[5 - 1].credits_posted + 1,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .ok,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = 10000,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = 123,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            // Ensure that idempotence is only checked after validation.
-            .result = .transfer_must_have_the_same_ledger_as_accounts,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = 10000,
-                .ledger = 2,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = 123,
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_flags,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .user_data = 1,
-                .ledger = 1,
-                .code = 2,
-                .flags = .{ .pending = false },
-                .amount = math.maxInt(u64),
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_debit_account_id,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 3,
-                .credit_account_id = 1,
-                .user_data = 1,
-                .timeout = 10000,
-                .ledger = 1,
-                .code = 2,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64),
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_credit_account_id,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 4,
-                .user_data = 1,
-                .timeout = 10000,
-                .ledger = 1,
-                .code = 2,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64),
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_user_data,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .user_data = 1,
-                .timeout = 10000,
-                .ledger = 1,
-                .code = 2,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64),
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_timeout,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = 10001,
-                .ledger = 1,
-                .code = 2,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64),
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_code,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = 10000,
-                .ledger = 1,
-                .code = 2,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64),
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .exists_with_different_amount,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = 10000,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = math.maxInt(u64),
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .exists,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .timeout = 10000,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .pending = true },
-                .amount = 123,
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .ok,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 2,
-                .debit_account_id = 3,
-                .credit_account_id = 1,
-                .ledger = 1,
-                .code = 2,
-                .amount = 7,
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .ok,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 3,
-                .debit_account_id = 1,
-                .credit_account_id = 3,
-                .ledger = 1,
-                .code = 2,
-                .amount = 3,
-                .timestamp = timestamp + 3,
-            }),
-        },
-    };
-
-    for (vectors) |vector, i| {
-        const result = state_machine.create_transfer(&vector.object);
-        expectEqual(vector.result, result) catch |err| {
-            print_test_vector(i, vector.result, result, vector.object, err);
-            return err;
-        };
+    for (vectors) |vector| {
+        try c.create_transfer(vector);
         if (vector.result == .ok) {
-            try expectEqual(vector.object, state_machine.get_transfer(vector.object.id).?.*);
+            try expectEqual(vector.object, c.state_machine.get_transfer(vector.object.id).?.*);
         }
     }
 
     // Transfer 3:
-    try test_account_balances(state_machine, 1, 100 + 123, 200 + 3, 0, 7);
-    try test_account_balances(state_machine, 3, 0, 7, 110 + 123, 210 + 3);
-    state_machine.create_transfer_rollback(state_machine.get_transfer(3).?);
-    try test_account_balances(state_machine, 1, 100 + 123, 200, 0, 7);
-    try test_account_balances(state_machine, 3, 0, 7, 110 + 123, 210);
-    try expect(state_machine.get_transfer(3) == null);
+    try test_account_balances(&c.state_machine, id1, 100 + 123, 200 + 3, 0, 7);
+    try test_account_balances(&c.state_machine, id3, 0, 7, 110 + 123, 210 + 3);
+    c.state_machine.create_transfer_rollback(c.state_machine.get_transfer(id3).?);
+    try test_account_balances(&c.state_machine, id1, 100 + 123, 200, 0, 7);
+    try test_account_balances(&c.state_machine, id3, 0, 7, 110 + 123, 210);
+    try expect(c.state_machine.get_transfer(id3) == null);
 
     // Transfer 2:
-    try test_account_balances(state_machine, 1, 100 + 123, 200, 0, 7);
-    try test_account_balances(state_machine, 3, 0, 7, 110 + 123, 210);
-    state_machine.create_transfer_rollback(state_machine.get_transfer(2).?);
-    try test_account_balances(state_machine, 1, 100 + 123, 200, 0, 0);
-    try test_account_balances(state_machine, 3, 0, 0, 110 + 123, 210);
-    try expect(state_machine.get_transfer(2) == null);
+    try test_account_balances(&c.state_machine, id1, 100 + 123, 200, 0, 7);
+    try test_account_balances(&c.state_machine, id3, 0, 7, 110 + 123, 210);
+    c.state_machine.create_transfer_rollback(c.state_machine.get_transfer(id2).?);
+    try test_account_balances(&c.state_machine, id1, 100 + 123, 200, 0, 0);
+    try test_account_balances(&c.state_machine, id3, 0, 0, 110 + 123, 210);
+    try expect(c.state_machine.get_transfer(id2) == null);
 
     // Transfer 1:
-    try test_account_balances(state_machine, 1, 100 + 123, 200, 0, 0);
-    try test_account_balances(state_machine, 3, 0, 0, 110 + 123, 210);
-    state_machine.create_transfer_rollback(state_machine.get_transfer(1).?);
-    try test_account_balances(state_machine, 1, 100, 200, 0, 0);
-    try test_account_balances(state_machine, 3, 0, 0, 110, 210);
-    try expect(state_machine.get_transfer(1) == null);
+    try test_account_balances(&c.state_machine, id1, 100 + 123, 200, 0, 0);
+    try test_account_balances(&c.state_machine, id3, 0, 0, 110 + 123, 210);
+    c.state_machine.create_transfer_rollback(c.state_machine.get_transfer(id1).?);
+    try test_account_balances(&c.state_machine, id1, 100, 200, 0, 0);
+    try test_account_balances(&c.state_machine, id3, 0, 0, 110, 210);
+    try expect(c.state_machine.get_transfer(id1) == null);
 }
 
 test "create/lookup/rollback 2-phase transfers" {
-    var accounts = [_]Account{
-        mem.zeroInit(Account, .{ .id = 1, .ledger = 1, .code = 1 }),
-        mem.zeroInit(Account, .{ .id = 2, .ledger = 1, .code = 1 }),
+    var c: TestContext = undefined;
+    try c.init(testing.allocator);
+    defer c.deinit(testing.allocator);
+
+    const A1 = A(id1, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok).object;
+    const A2 = A(id2, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok).object;
+    for ([_]Account{ A1, A2 }) |account| try c.put_account(account);
+
+    const transfers_pending = [_]TransferVector{
+        T(id1, id1, id2, ud0, tr0, id0, to0, 1, 1, N, N, N, N, p0, 15, 0, .ok),
+        T(id2, id1, id2, ud0, tr0, id0, 1e3, 1, 1, N, Y, N, N, p0, 15, 0, .ok),
+        T(id3, id1, id2, ud0, tr0, id0, 5e0, 1, 1, N, Y, N, N, p0, 15, 0, .ok),
+        T(id4, id1, id2, ud0, tr0, id0, 1e0, 1, 1, N, Y, N, N, p0, 15, 0, .ok),
+        T(id5, id1, id2, 789, tr0, id0, 6e0, 1, 1, N, Y, N, N, p0, 7, 0, .ok),
     };
 
-    var transfers = [_]Transfer{
-        mem.zeroInit(Transfer, .{
-            .id = 1,
-            .debit_account_id = 1,
-            .credit_account_id = 2,
-            .ledger = 1,
-            .code = 1,
-            .amount = 15,
-        }),
-        mem.zeroInit(Transfer, .{
-            .id = 2,
-            .debit_account_id = 1,
-            .credit_account_id = 2,
-            .timeout = 1000,
-            .ledger = 1,
-            .code = 1,
-            .flags = .{ .pending = true },
-            .amount = 15,
-        }),
-        mem.zeroInit(Transfer, .{
-            .id = 3,
-            .debit_account_id = 1,
-            .credit_account_id = 2,
-            .timeout = 5,
-            .ledger = 1,
-            .code = 1,
-            .flags = .{ .pending = true },
-            .amount = 15,
-        }),
-        mem.zeroInit(Transfer, .{
-            .id = 4,
-            .debit_account_id = 1,
-            .credit_account_id = 2,
-            .timeout = 1,
-            .ledger = 1,
-            .code = 1,
-            .flags = .{ .pending = true },
-            .amount = 15,
-        }),
-        mem.zeroInit(Transfer, .{
-            .id = 5,
-            .debit_account_id = 1,
-            .credit_account_id = 2,
-            .user_data = 73,
-            .timeout = 6,
-            .ledger = 1,
-            .code = 1,
-            .flags = .{ .pending = true },
-            .amount = 7,
-        }),
-    };
-
-    var context: TestContext = undefined;
-    try context.init(testing.allocator);
-    defer context.deinit(testing.allocator);
-
-    const state_machine = &context.state_machine;
-
-    // Create accounts:
-    const accounts_input = mem.asBytes(&accounts);
-
-    const accounts_output = try testing.allocator.alignedAlloc(u8, 16, 4096);
-    defer testing.allocator.free(accounts_output);
-
-    const accounts_timestamp = state_machine.prepare(.create_accounts, accounts_input);
-    {
-        const size = state_machine.commit(0, 1, .create_accounts, accounts_input, accounts_output);
-        const errors = mem.bytesAsSlice(CreateAccountsResult, accounts_output[0..size]);
-        try expectEqual(@as(usize, 0), errors.len);
-    }
-    for (accounts) |account| {
-        try expectEqual(account, state_machine.get_account(account.id).?.*);
-    }
-
-    // Create pending transfers:
-    const transfers_input = mem.asBytes(&transfers);
-
-    const transfers_output = try testing.allocator.alignedAlloc(u8, 16, 4096);
-    defer testing.allocator.free(transfers_output);
-
-    const transfers_timestamp = state_machine.prepare(.create_transfers, transfers_input);
-    try testing.expect(transfers_timestamp > accounts_timestamp);
-    {
-        const size = state_machine.commit(0, 2, .create_transfers, transfers_input, transfers_output);
-        const errors = mem.bytesAsSlice(CreateTransfersResult, transfers_output[0..size]);
-        try expectEqual(@as(usize, 0), errors.len);
-    }
-    for (transfers) |transfer| {
-        try expectEqual(transfer, state_machine.get_transfer(transfer.id).?.*);
-    }
+    try c.create_objects(Transfer, transfers_pending[0..]);
 
     // Test balances before posting:
-    try test_account_balances(state_machine, 1, 52, 15, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 52, 15);
+    try test_account_balances(&c.state_machine, id1, 52, 15, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 52, 15);
 
-    // Post pending transfers:
-    const Vector = struct { result: CreateTransferResult, object: Transfer };
-    const timestamp: u64 = (state_machine.commit_timestamp + 1);
+    const t: u64 = c.state_machine.commit_timestamp;
+    const transfer_resolutions = [_]TransferVector{
+        T(101, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 13, t + 1, .ok),
+        T(101, 1e1, 2e1, ud2, tr0, id0, 5e1, 6, 7, N, Y, Y, Y, p0, 16, t + 2, .cannot_post_and_void_pending_transfer),
+        T(101, 1e1, 2e1, ud2, tr0, id0, 5e1, 6, 7, N, Y, N, Y, p0, 16, t + 2, .pending_transfer_cannot_post_or_void_another),
+        T(101, 1e1, 2e1, ud2, tr0, id0, 5e1, 6, 7, N, N, N, Y, p0, 16, t + 2, .timeout_reserved_for_pending_transfer),
+        T(101, 1e1, 2e1, ud2, tr0, id0, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_id_must_not_be_zero),
+        T(101, 1e1, 2e1, ud2, tr0, idZ, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_id_must_not_be_int_max),
+        T(101, 1e1, 2e1, ud2, tr0, 101, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_id_must_be_different),
+        T(101, 1e1, 2e1, ud2, tr0, 102, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_not_found),
+        T(101, 1e1, 2e1, ud2, tr0, id1, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_not_pending),
+        T(101, 1e1, 2e1, ud2, tr0, id2, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_has_different_debit_account_id),
+        T(101, id1, 2e1, ud2, tr0, id2, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_has_different_credit_account_id),
+        T(101, id1, id2, ud2, tr0, id2, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_has_different_ledger),
+        T(101, id1, id2, ud2, tr0, id2, to0, 1, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_has_different_code),
+        T(101, id1, id2, ud2, tr0, id2, to0, 1, 1, N, N, N, Y, p0, 16, t + 2, .exceeds_pending_transfer_amount),
+        T(101, id1, id2, ud2, tr0, id2, to0, 1, 1, N, N, N, Y, p0, 14, t + 2, .pending_transfer_has_different_amount),
+        T(101, id1, id2, ud2, tr0, id2, to0, 1, 1, N, N, N, Y, p0, 15, t + 2, .exists_with_different_flags),
+        T(101, id1, id2, ud2, tr0, id3, to0, 1, 1, N, N, Y, N, p0, 14, t + 2, .exists_with_different_pending_id),
+        T(101, id1, id2, ud2, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 14, t + 2, .exists_with_different_user_data),
+        T(101, id1, id2, ud0, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 14, t + 2, .exists_with_different_user_data),
+        T(101, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 14, t + 2, .exists_with_different_amount),
+        T(101, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 0, t + 2, .exists_with_different_amount),
+        T(101, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 13, t + 2, .exists),
+        T(102, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 13, t + 2, .pending_transfer_already_posted),
 
-    const vectors = [_]Vector{
-        .{
-            .result = .ok,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 1000,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{ .post_pending_transfer = true },
-                .amount = 13,
-                .timestamp = timestamp,
-            }),
-        },
-        .{
-            .result = .cannot_post_and_void_pending_transfer,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = 0,
-                .timeout = 50,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .pending = true,
-                    .post_pending_transfer = true,
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_cannot_post_or_void_another,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = 0,
-                .timeout = 50,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .pending = true,
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .timeout_reserved_for_pending_transfer,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .timeout = 50,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_id_must_not_be_zero,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = 0,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_id_must_not_be_int_max,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = math.maxInt(u128),
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_id_must_be_different,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = 101,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_not_found,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = 102,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_not_pending,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = 1,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_has_different_debit_account_id,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 10,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = 2,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_has_different_credit_account_id,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 20,
-                .user_data = 30,
-                .pending_id = 2,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_has_different_ledger,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 30,
-                .pending_id = 2,
-                .ledger = 60,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_has_different_code,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 30,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 70,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .exceeds_pending_transfer_amount,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 7000,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 80,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_has_different_amount,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 7000,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 1,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .exists_with_different_flags,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .user_data = 7000,
-                .pending_id = 3,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 15,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .exists_with_different_pending_id,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 7000,
-                .pending_id = 3,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .amount = 14,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .exists_with_different_user_data,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 7000,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .amount = 14,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .exists_with_different_user_data,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 0,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .amount = 14,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .exists_with_different_amount,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 1000,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .amount = 14,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .exists_with_different_amount,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 1000,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .amount = 0,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .exists,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 101,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 1000,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .amount = 13,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_already_posted,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 102,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 1000,
-                .pending_id = 2,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .amount = 13,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .ok,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 103,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .user_data = 0,
-                .pending_id = 3,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .void_pending_transfer = true },
-                .amount = 15,
-                .timestamp = timestamp + 1,
-            }),
-        },
-        .{
-            .result = .pending_transfer_already_voided,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 102,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 1000,
-                .pending_id = 3,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .post_pending_transfer = true,
-                },
-                .amount = 13,
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .pending_transfer_expired,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 102,
-                .debit_account_id = 1,
-                .credit_account_id = 2,
-                .user_data = 4000,
-                .pending_id = 4,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{
-                    .void_pending_transfer = true,
-                },
-                .amount = 15,
-                .timestamp = timestamp + 2,
-            }),
-        },
-        .{
-            .result = .ok,
-            .object = mem.zeroInit(Transfer, .{
-                .id = 105,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .user_data = 0,
-                .pending_id = 5,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{ .post_pending_transfer = true },
-                .amount = 0,
-                .timestamp = timestamp + 2,
-            }),
-        },
+        T(103, id1, id2, ud1, tr0, id3, to0, 1, 1, N, N, N, Y, p0, 15, t + 2, .ok),
+        T(102, id1, id2, ud1, tr0, id3, to0, 1, 1, N, N, Y, N, p0, 13, t + 3, .pending_transfer_already_voided),
+        T(102, id1, id2, ud1, tr0, id4, to0, 1, 1, N, N, N, Y, p0, 15, t + 3, .pending_transfer_expired),
+        T(105, id0, id0, ud0, tr0, id5, to0, 0, 0, N, N, Y, N, p0, 0, t + 3, .ok),
     };
 
-    for (vectors) |vector, i| {
-        const result = state_machine.create_transfer(&vector.object);
-        expectEqual(vector.result, result) catch |err| {
-            print_test_vector(i, vector.result, result, vector.object, err);
+    for (transfer_resolutions) |vector, i| {
+        try c.create_transfer(vector);
+        if (vector.result != .ok) continue;
+
+        // Test that posted values inherit from the pending or posting transfer:
+        const pending = c.state_machine.get_transfer(vector.object.pending_id).?.*;
+        const posted = c.state_machine.get_transfer(vector.object.id).?.*;
+
+        const user_data = if (vector.object.user_data == 0)
+            pending.user_data
+        else
+            vector.object.user_data;
+
+        const amount = if (vector.object.amount == 0)
+            pending.amount
+        else
+            vector.object.amount;
+
+        const expected = Transfer{
+            .id = vector.object.id,
+            .debit_account_id = pending.debit_account_id,
+            .credit_account_id = pending.credit_account_id,
+            .user_data = user_data,
+            .reserved = 0,
+            .pending_id = pending.id,
+            .timeout = 0,
+            .ledger = pending.ledger,
+            .code = pending.code,
+            .flags = vector.object.flags,
+            .amount = amount,
+            .timestamp = vector.object.timestamp,
+        };
+        expectEqual(expected, posted) catch |err| {
+            print_test_vector(i, expected, posted, vector.object, err);
             return err;
         };
-
-        if (vector.result == .ok) {
-            // Test that posted values inherit from the pending or posting transfer:
-            const pending = state_machine.get_transfer(vector.object.pending_id).?.*;
-            const posted = state_machine.get_transfer(vector.object.id).?.*;
-
-            const user_data = if (vector.object.user_data == 0)
-                pending.user_data
-            else
-                vector.object.user_data;
-
-            const amount = if (vector.object.amount == 0)
-                pending.amount
-            else
-                vector.object.amount;
-
-            const expected = Transfer{
-                .id = vector.object.id,
-                .debit_account_id = pending.debit_account_id,
-                .credit_account_id = pending.credit_account_id,
-                .user_data = user_data,
-                .reserved = 0,
-                .pending_id = pending.id,
-                .timeout = 0,
-                .ledger = pending.ledger,
-                .code = pending.code,
-                .flags = vector.object.flags,
-                .amount = amount,
-                .timestamp = vector.object.timestamp,
-            };
-            expectEqual(expected, posted) catch |err| {
-                print_test_vector(
-                    i,
-                    expected,
-                    posted,
-                    vector.object,
-                    err,
-                );
-                return err;
-            };
-        }
     }
 
     // Balances after posting:
-    try test_account_balances(state_machine, 1, 15, 35, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 15, 35);
+    try test_account_balances(&c.state_machine, id1, 15, 35, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 15, 35);
 
     // Rollback posting transfer (different amount):
-    assert(vectors[0].result == .ok);
-    try test_transfer_rollback(state_machine, &vectors[0].object);
-    try test_account_balances(state_machine, 1, 30, 22, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 30, 22);
+    assert(transfer_resolutions[0].result == .ok);
+    try test_transfer_rollback(&c.state_machine, &transfer_resolutions[0].object);
+    try test_account_balances(&c.state_machine, id1, 30, 22, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 30, 22);
 
     // Rollback voiding transfer:
-    assert(vectors[23].result == .ok);
-    try test_transfer_rollback(state_machine, &vectors[23].object);
-    try test_account_balances(state_machine, 1, 45, 22, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 45, 22);
+    assert(transfer_resolutions[23].result == .ok);
+    try test_transfer_rollback(&c.state_machine, &transfer_resolutions[23].object);
+    try test_account_balances(&c.state_machine, id1, 45, 22, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 45, 22);
 
     // Rollback posting transfer (zero amount):
-    assert(vectors[26].result == .ok);
-    try test_transfer_rollback(state_machine, &vectors[26].object);
-    try test_account_balances(state_machine, 1, 52, 15, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 52, 15);
+    assert(transfer_resolutions[26].result == .ok);
+    try test_transfer_rollback(&c.state_machine, &transfer_resolutions[26].object);
+    try test_account_balances(&c.state_machine, id1, 52, 15, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 52, 15);
 
     // Rollback all pending transfers:
-    try test_transfer_rollback(state_machine, &transfers[1]);
-    try test_account_balances(state_machine, 1, 37, 15, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 37, 15);
+    try test_transfer_rollback(&c.state_machine, &transfers_pending[1].object);
+    try test_account_balances(&c.state_machine, id1, 37, 15, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 37, 15);
 
-    try test_transfer_rollback(state_machine, &transfers[2]);
-    try test_account_balances(state_machine, 1, 22, 15, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 22, 15);
+    try test_transfer_rollback(&c.state_machine, &transfers_pending[2].object);
+    try test_account_balances(&c.state_machine, id1, 22, 15, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 22, 15);
 
-    try test_transfer_rollback(state_machine, &transfers[3]);
-    try test_account_balances(state_machine, 1, 7, 15, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 7, 15);
+    try test_transfer_rollback(&c.state_machine, &transfers_pending[3].object);
+    try test_account_balances(&c.state_machine, id1, 7, 15, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 7, 15);
 
-    try test_transfer_rollback(state_machine, &transfers[4]);
-    try test_account_balances(state_machine, 1, 0, 15, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 0, 15);
+    try test_transfer_rollback(&c.state_machine, &transfers_pending[4].object);
+    try test_account_balances(&c.state_machine, id1, 0, 15, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 0, 15);
 
     // Rollback transfer:
-    try test_transfer_rollback(state_machine, &transfers[0]);
-    try test_account_balances(state_machine, 1, 0, 0, 0, 0);
-    try test_account_balances(state_machine, 2, 0, 0, 0, 0);
+    try test_transfer_rollback(&c.state_machine, &transfers_pending[0].object);
+    try test_account_balances(&c.state_machine, id1, 0, 0, 0, 0);
+    try test_account_balances(&c.state_machine, id2, 0, 0, 0, 0);
 }
 
 fn print_test_vector(
