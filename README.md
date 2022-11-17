@@ -257,7 +257,7 @@ For further reading:
 
 * [Running a 3-node cluster locally with docker-compose](https://docs.tigerbeetle.com/deployment/with-docker-compose)
 * [Run a single-node cluster with Docker](https://docs.tigerbeetle.com/deployment/with-docker)
-* [Run a single-node cluster from source](https://docs.tigerbeetle.com/deployment/from-source)
+* [Run a single-node cluster from source](https://docs.tigerbeetle.com/deployment/single-binary)
 
 ## Clients
 
