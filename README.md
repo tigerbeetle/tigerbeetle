@@ -37,10 +37,85 @@ Here are a few key pages you might be interested in:
   - [Transfers](https://docs.tigerbeetle.com/reference/transfers)
   - [Operations](https://docs.tigerbeetle.com/reference/operations)
 
-## QuickStart
+## Quickstart
 
 TigerBeetle is easy to run with or without Docker, depending on your
-preference.
+preference. First, we'll cover running the [Single
+Binary](#single-binary). And below that is how to run [with
+Docker](#with-docker).
+
+### Single Binary
+
+Install TigerBeetle by grabbing the latest release from
+GitHub.
+
+#### Prebuilt Linux binary
+
+```bash
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
+$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip 
+$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+$ tigerbeetle version --verbose | head -n6
+TigerBeetle version experimental
+
+git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
+
+zig_version=0.9.1
+mode=Mode.ReleaseSafe
+```
+
+#### Prebuilt macOS binary
+
+```bash
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
+$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip 
+$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+$ tigerbeetle version --verbose | head -n6
+TigerBeetle version experimental
+
+git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
+
+zig_version=0.9.1
+mode=Mode.ReleaseSafe
+```
+
+#### Building from source
+
+Or to build from source, clone the repo, checkout a release, and run
+the install script.
+
+You will need POSIX userland, curl or wget, tar, and xz.
+
+```bash
+$ git clone https://github.com/tigerbeetledb/tigerbeetle.git
+$ git checkout 2022-11-16-weekly # Or latest tag
+$ cd tigerbeetle
+$ scripts/install.sh
+```
+
+Don't worry, this will only make changes within the `tigerbeetle`
+directory. No global changes. The result will place the compiled
+`tigerbeetle` binary into the current directory.
+
+#### Running TigerBeetle
+
+Then create the TigerBeetle data file.
+
+```bash
+$ ./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
+info(io): creating "0_0.tigerbeetle"...
+info(io): allocating 660.140625MiB...
+```
+
+And start the server.
+
+```bash
+$ ./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+info(io): opening "0_0.tigerbeetle"...
+info(main): 0: cluster=0: listening on 127.0.0.1:3000
+```
+
+Now skip ahead to [Use Node as a CLI](#use-node-as-a-cli).
 
 ### With Docker
 
@@ -66,37 +141,6 @@ Note: if you are on macOS, you will need to call the Docker run
 command with `--cap-add IPC_LOCK` or `--ulimit memlock=-1:-1`. See
 [here](https://docs.tigerbeetle.com/deployment/with-docker#error-systemresources-on-macos) for
 more information.
-
-### From Source
-
-To build from source, clone the repo and run the install script.
-
-You will need POSIX userland, curl or wget, tar, and xz.
-
-```bash
-$ git clone https://github.com/tigerbeetledb/tigerbeetle.git
-$ cd tigerbeetle
-$ scripts/install.sh
-```
-
-Don't worry, this will only make changes within the `tigerbeetle`
-directory. No global changes.
-
-Then create the TigerBeetle data file.
-
-```bash
-$ ./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
-info(io): creating "0_0.tigerbeetle"...
-info(io): allocating 660.140625MiB...
-```
-
-And start the server.
-
-```bash
-$ ./tigerbeetle start --addresses=3000 0_0.tigerbeetle
-info(io): opening "0_0.tigerbeetle"...
-info(main): 0: cluster=0: listening on 127.0.0.1:3000
-```
 
 ### Use Node as a CLI
 
@@ -213,7 +257,7 @@ For further reading:
 
 * [Running a 3-node cluster locally with docker-compose](https://docs.tigerbeetle.com/deployment/with-docker-compose)
 * [Run a single-node cluster with Docker](https://docs.tigerbeetle.com/deployment/with-docker)
-* [Run a single-node cluster from source](https://docs.tigerbeetle.com/deployment/from-source)
+* [Run a single-node cluster from source](https://docs.tigerbeetle.com/deployment/single-binary)
 
 ## Clients
 
