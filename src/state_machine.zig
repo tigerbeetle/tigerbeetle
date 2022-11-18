@@ -571,7 +571,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
             if (self.get_account(a.id)) |e| return create_account_exists(a, e);
 
-            self.forest.grooves.accounts.put(a);
+            self.forest.grooves.accounts.put_no_clobber(a);
 
             self.commit_timestamp = a.timestamp;
             return .ok;
