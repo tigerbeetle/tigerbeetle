@@ -261,9 +261,9 @@ For further reading:
 
 ## Clients
 
-* For Node.js: [tigerbeetle-node](https://github.com/tigerbeetledb/tigerbeetle-node)
-* For Golang: [tigerbeetle-go](https://github.com/tigerbeetledb/tigerbeetle-go)
-* For Java: [tigerbeetle-java](https://github.com/tigerbeetledb/tigerbeetle-java)
+* For Node.js: [tigerbeetle-node](./src/clients/node)
+* For Golang: [tigerbeetle-go](./src/clients/go)
+* For Java: [tigerbeetle-java](./src/clients/java)
 
 ## Community
 
