@@ -48,6 +48,10 @@ pub fn main() !void {
             // Every transfer must be written to the WAL.
             write_bytes_per_second += transfers_per_second * @sizeOf(Transfer);
 
+            // TODO We have to read credit/debit account/balance to validate each transfer.
+            //      It's hard to estimate the average case given caching and bloom filters,
+            //      and the (very unlikely) worst case is so enormous that it dwarfs all other calculations.
+
             const field_names = [_][]const u8{
                 "id",
                 "debit_account_id",
@@ -112,19 +116,6 @@ pub fn main() !void {
                         table_count_remaining = table_count_remaining -| tables_per_level;
                         tables_per_level *= lsm_growth_factor;
                     }
-                }
-
-                if (std.meta.eql(field_name, "balance")) {
-                    // We have to read credit/debit account/balance to validate each transfer.
-                    read_bytes_per_second +=
-                        transfers_per_second *
-                        // We must lookup: credit account id, debit account id, credit account, debit account, credit balance, debit balance
-                        6 *
-                        // In the worst case we have to check every level.
-                        // TODO We're using the balance level_count as a bound on the account level_count - we should model the number of accounts instead.
-                        level_count *
-                        // For each lookup we must read: index block, filter block, data block
-                        3 * config.block_size;
                 }
 
                 if (std.meta.eql(field_name, "timestamp")) {
