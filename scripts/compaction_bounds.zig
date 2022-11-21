@@ -128,15 +128,16 @@ pub fn main() !void {
                     const level_n_compactions_per_second = try std.math.divCeil(usize, transfers_per_second, values_per_disk_table);
 
                     read_bytes_per_second +=
-                        level_0_compactions_per_second * (
-                    // Read all tables on level 0
-                        (tables_on_level_0 * values_per_disk_table * @sizeOf(Value)));
+                        level_0_compactions_per_second *
+                        // Read all tables on level 0
+                        tables_on_level_0 *
+                        values_per_disk_table * @sizeOf(Value);
                     read_bytes_per_second +=
                         (level_count -| 1) *
                         level_n_compactions_per_second *
                         // Read 1 table from level a and config.lsm_growth_factor tables from level b.
-                        (1 + config.lsm_growth_factor) * values_per_disk_table *
-                        @sizeOf(Value);
+                        (1 + config.lsm_growth_factor) *
+                        values_per_disk_table * @sizeOf(Value);
 
                     write_bytes_per_second +=
                         level_0_compactions_per_second * (
