@@ -12,6 +12,9 @@ const div_ceil = @import("../util.zig").div_ceil;
 
 /// This is logically a range of addresses within the FreeSet, but its actual fields are block
 /// indexes for ease of calculation.
+///
+/// A reservation covers a range of both free and acquired blocks — when it is first created,
+/// it is guaranteed to cover exactly as many free blocks as were requested by `reserve()`.
 pub const Reservation = struct {
     block_base: usize,
     block_count: usize,
@@ -183,6 +186,7 @@ pub const FreeSet = struct {
             set.index.bit_length,
         ) orelse return null;
 
+        // The reservation may cover (and ignore) already-acquired blocks due to fragmentation.
         var block = std.math.max(shard_start * shard_size, set.reservation_blocks);
         var reserved: usize = 0;
         while (reserved < reserve_count) : (reserved += 1) {
@@ -221,7 +225,8 @@ pub const FreeSet = struct {
     }
 
     /// Marks a free block from the reservation as allocated, and returns the address.
-    /// The reservation must not have been forfeited — that is, they must have been no calls to
+    /// The reservation must not have been forfeited yet.
+    /// The reservation must belong to the current cycle of reservations.
     ///
     /// Invariants:
     ///
