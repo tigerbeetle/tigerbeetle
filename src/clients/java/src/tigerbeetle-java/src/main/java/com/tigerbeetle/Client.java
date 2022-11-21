@@ -5,8 +5,6 @@ import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
-import static com.tigerbeetle.AssertionError.assertTrue;
 
 public final class Client implements AutoCloseable {
     static {
@@ -18,11 +16,7 @@ public final class Client implements AutoCloseable {
     private final int clusterID;
     private final int maxConcurrency;
     private final Semaphore maxConcurrencySemaphore;
-
-    private final ReentrantLock packetsLock;
-    private volatile long clientHandle;
-    private volatile long packetsHead;
-    private volatile long packetsTail;
+    private volatile long contextHandle;
 
     /**
      * Initializes an instance of TigerBeetle client. This class is thread-safe and for optimal
@@ -46,7 +40,11 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException if {@code maxConcurrency} is zero or negative.
      */
     public Client(final int clusterID, final String[] replicaAddresses, final int maxConcurrency) {
-        this(clusterID, maxConcurrency);
+        if (clusterID < 0)
+            throw new IllegalArgumentException("ClusterID must be positive");
+
+        if (maxConcurrency <= 0)
+            throw new IllegalArgumentException("Invalid maxConcurrency");
 
         Objects.requireNonNull(replicaAddresses, "Replica addresses cannot be null");
 
@@ -61,13 +59,26 @@ public final class Client implements AutoCloseable {
 
         int status = clientInit(clusterID, joiner.toString(), maxConcurrency);
 
-        if (status == InitializationException.Status.INVALID_ADDRESS)
-            throw new IllegalArgumentException("Replica addresses format is invalid.");
+        switch (status) {
+            case InitializationException.Status.SUCCESS:
+                this.clusterID = clusterID;
+                this.maxConcurrency = maxConcurrency;
+                this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
+                break;
 
-        if (status != 0)
-            throw new InitializationException(status);
+            case InitializationException.Status.ADDRESS_INVALID:
+                throw new IllegalArgumentException("Replica addresses format is invalid");
+
+            case InitializationException.Status.ADDRESS_LIMIT_EXCEEDED:
+                throw new IllegalArgumentException("Replica addresses limit exceeded");
+
+            case InitializationException.Status.PACKETS_COUNT_INVALID:
+                throw new IllegalArgumentException("Invalid maxConcurrency");
+
+            default:
+                throw new InitializationException(status);
+        }
     }
-
 
     /**
      * Initializes an instance of TigerBeetle client. This class is thread-safe and for optimal
@@ -93,22 +104,12 @@ public final class Client implements AutoCloseable {
     }
 
     Client(final int clusterID, final int maxConcurrency) {
-        if (clusterID < 0)
-            throw new IllegalArgumentException("ClusterID must be positive");
-
-        // Cap the maximum amount of packets
         if (maxConcurrency <= 0)
             throw new IllegalArgumentException("Invalid maxConcurrency");
 
-        if (maxConcurrency > 4096) {
-            this.maxConcurrency = 4096;
-        } else {
-            this.maxConcurrency = maxConcurrency;
-        }
-
         this.clusterID = clusterID;
+        this.maxConcurrency = maxConcurrency;
         this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
-        this.packetsLock = new ReentrantLock(false);
     }
 
     /**
@@ -219,7 +220,6 @@ public final class Client implements AutoCloseable {
         return request.getFuture();
     }
 
-
     /**
      * Looks up a batch of transfers.
      *
@@ -255,11 +255,11 @@ public final class Client implements AutoCloseable {
     }
 
     void submit(final Request<?> request) {
-        final long packet = acquirePacket();
-        submit(clientHandle, request, packet);
+        acquirePermit();
+        submit(contextHandle, request);
     }
 
-    private long acquirePacket() {
+    private void acquirePermit() {
 
         // Assure that only the max number of concurrent requests can acquire a packet
         // It forces other threads to wait until a packet became available
@@ -269,7 +269,7 @@ public final class Client implements AutoCloseable {
         boolean acquired = false;
         do {
 
-            if (clientHandle == 0)
+            if (contextHandle == 0)
                 throw new IllegalStateException("Client is closed");
 
             try {
@@ -282,33 +282,9 @@ public final class Client implements AutoCloseable {
             }
 
         } while (!acquired);
-
-        packetsLock.lock();
-        try {
-            return popPacket(packetsHead, packetsTail);
-        } finally {
-            packetsLock.unlock();
-        }
     }
 
-    void returnPacket(final long packet) {
-
-        // It is not expected to return a packet with a disconnected client,
-        // since we wait for all pending requests before zeroing the handle.
-        // This condition allows running tests without initializing the client
-
-        if (clientHandle != 0) {
-
-            assertTrue(packet != 0L, "Packet cannot be null.");
-
-            packetsLock.lock();
-            try {
-                pushPacket(packetsHead, packetsTail, packet);
-            } finally {
-                packetsLock.unlock();
-            }
-        }
-
+    void releasePermit() {
         // Releasing the packet to be used by another thread
         maxConcurrencySemaphore.release();
     }
@@ -323,37 +299,25 @@ public final class Client implements AutoCloseable {
     @Override
     public void close() throws Exception {
 
-        if (clientHandle != 0) {
+        if (contextHandle != 0) {
 
             // Acquire all permits, forcing to wait for any processing thread to release
-            // Note that "acquireUninterruptibly(maxConcurrency)" atomically acquires the permits
+            // Note that "acquireUninterruptibly(maxConcurrency)" atomically acquires the
+            // permits
             // all at once, causing this operation to take longer.
             for (int i = 0; i < maxConcurrency; i++) {
                 this.maxConcurrencySemaphore.acquireUninterruptibly();
             }
 
             // Deinit and signalize that this client is closed by setting the handles to 0
-            packetsLock.lock();
-            try {
-
-                clientDeinit(clientHandle);
-
-                clientHandle = 0;
-                packetsHead = 0;
-                packetsTail = 0;
-            } finally {
-                packetsLock.unlock();
-            }
+            clientDeinit(contextHandle);
+            contextHandle = 0;
         }
     }
 
-    private native void submit(long clientHandle, Request<?> request, long packet);
+    private native void submit(long contextHandle, Request<?> request);
 
     private native int clientInit(int clusterID, String addresses, int maxConcurrency);
 
-    private native void clientDeinit(long clientHandle);
-
-    private native long popPacket(long packetHead, long packetTail);
-
-    private native void pushPacket(long packetHead, long packetTail, long packet);
+    private native void clientDeinit(long contextHandle);
 }
