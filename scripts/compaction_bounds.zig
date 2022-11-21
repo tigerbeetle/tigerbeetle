@@ -28,6 +28,9 @@ pub fn main() !void {
         // Change the disk tables to match the size of the immutable table.
         .small_disk_tables,
         .small_level_0_and_small_disk_tables,
+        // Change the growth factor to 4.
+        .slower_growth,
+        .slower_growth_and_small_level_0,
     };
     inline for (cases) |case| {
         std.debug.print("{}:\n", .{case});
@@ -76,21 +79,27 @@ pub fn main() !void {
                     // Secondary index.
                     IndexCompositeKeyType(@TypeOf(@field(@as(Transfer, undefined), field_name)));
 
+                const lsm_growth_factor = switch (case) {
+                    .current, .small_level_0, .large_immutable_table, .small_disk_tables, .small_level_0_and_small_disk_tables => config.lsm_growth_factor,
+                    .slower_growth, .slower_growth_and_small_level_0 => @divTrunc(config.lsm_growth_factor, 2),
+                    else => unreachable,
+                };
+
                 const values_per_immutable_table = switch (case) {
-                    .current, .small_level_0, .small_disk_tables, .small_level_0_and_small_disk_tables => transfers_per_batch * config.lsm_batch_multiple,
+                    .current, .small_level_0, .small_disk_tables, .small_level_0_and_small_disk_tables, .slower_growth, .slower_growth_and_small_level_0 => transfers_per_batch * config.lsm_batch_multiple,
                     .large_immutable_table => @divTrunc(config.lsm_table_size_max, @sizeOf(Value)),
                     else => unreachable,
                 };
                 const values_per_disk_table = switch (case) {
-                    .current, .small_level_0, .large_immutable_table => @divTrunc(config.lsm_table_size_max, @sizeOf(Value)),
+                    .current, .small_level_0, .large_immutable_table, .slower_growth, .slower_growth_and_small_level_0 => @divTrunc(config.lsm_table_size_max, @sizeOf(Value)),
                     .small_disk_tables, .small_level_0_and_small_disk_tables => transfers_per_batch * config.lsm_batch_multiple,
                     else => unreachable,
                 };
                 const table_count = try std.math.divCeil(usize, existing_transfer_count, values_per_disk_table);
 
                 const tables_on_level_0 = switch (case) {
-                    .current, .large_immutable_table, .small_disk_tables => config.lsm_growth_factor,
-                    .small_level_0, .small_level_0_and_small_disk_tables => 1,
+                    .current, .large_immutable_table, .small_disk_tables, .slower_growth => lsm_growth_factor,
+                    .small_level_0, .small_level_0_and_small_disk_tables, .slower_growth_and_small_level_0 => 1,
                     else => unreachable,
                 };
 
@@ -101,7 +110,7 @@ pub fn main() !void {
                     while (table_count_remaining > 0) {
                         level_count += 1;
                         table_count_remaining = table_count_remaining -| tables_per_level;
-                        tables_per_level *= config.lsm_growth_factor;
+                        tables_per_level *= lsm_growth_factor;
                     }
                 }
 
@@ -135,8 +144,8 @@ pub fn main() !void {
                     read_bytes_per_second +=
                         (level_count -| 1) *
                         level_n_compactions_per_second *
-                        // Read 1 table from level a and config.lsm_growth_factor tables from level b.
-                        (1 + config.lsm_growth_factor) *
+                        // Read 1 table from level a and lsm_growth_factor tables from level b.
+                        (1 + lsm_growth_factor) *
                         values_per_disk_table * @sizeOf(Value);
 
                     write_bytes_per_second +=
@@ -148,8 +157,8 @@ pub fn main() !void {
                     write_bytes_per_second +=
                         (level_count -| 1) *
                         level_n_compactions_per_second *
-                        // Rewrite 1 table from level a and config.lsm_growth_factor tables from level b.
-                        (1 + config.lsm_growth_factor) * values_per_disk_table *
+                        // Rewrite 1 table from level a and lsm_growth_factor tables from level b.
+                        (1 + lsm_growth_factor) * values_per_disk_table *
                         @sizeOf(Value);
                 }
 
