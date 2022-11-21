@@ -53,11 +53,11 @@ pub const table_count_max = table_count_max_for_tree(config.lsm_growth_factor, c
 
 /// The upper-bound count of input tables to a single tree's compaction.
 ///
-/// +1: from level A
-/// +1: from level B, with one edge overlapping the lsm_growth_factor tables.
-///     (This is not +2 because input table selection is least-overlap. If the input table overlaps
-///     on both edges, there must be another table with less overlap to select).
-pub const compaction_tables_input_max = 1 + config.lsm_growth_factor + 1;
+/// - +1 from level A.
+/// - +lsm_growth_factor from level B. The A-input table cannot overlap with an extra B-input table
+///   because input table selection is least-overlap. If the input table overlaps on one or both
+///   edges, there must be another table with less overlap to select.
+pub const compaction_tables_input_max = 1 + config.lsm_growth_factor;
 
 /// The upper-bound count of output tables from a single tree's compaction.
 /// In the "worst" case, no keys are overwritten/merged, and no tombstones are dropped.
@@ -527,7 +527,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 // causing the storage state of the replica to diverge from the cluster.
                 // See also: lookup_snapshot_max_for_checkpoint().
 
-                if (tree.compaction_op + 1 == tree.lookup_snapshot_max) {
+                if (op + 1 == tree.lookup_snapshot_max) {
                     // This is the last op of the skipped compaction bar.
                     // Prepare the immutable table for the next bar — since this state is
                     // in-memory, it cannot be skipped.
