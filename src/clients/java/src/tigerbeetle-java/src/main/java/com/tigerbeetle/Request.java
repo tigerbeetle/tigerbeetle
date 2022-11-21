@@ -132,8 +132,6 @@ abstract class Request<TResponse extends Batch> {
             }
         }
 
-        client.returnPacket(packet);
-
         if (exception != null) {
             setException(exception);
         } else {
@@ -149,6 +147,10 @@ abstract class Request<TResponse extends Batch> {
         }
     }
 
+    void releasePermit() {
+        // Releasing the packet to be used by another thread
+        client.releasePermit();
+    }
 
     /**
      * Copies the message buffer memory to managed memory.
