@@ -118,7 +118,7 @@ pub fn main() !void {
                         3 * config.block_size;
                 }
 
-                if (!std.meta.eql(field_name, "timestamp")) {
+                if (std.meta.eql(field_name, "timestamp")) {
                     // The object tree does not need to be compacted so just count write bandwidth per value.
                     write_bytes_per_second += transfers_per_second * @sizeOf(Value);
                 } else {
