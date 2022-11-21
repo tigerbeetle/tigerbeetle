@@ -25,7 +25,6 @@ pub fn build(b: *std.build.Builder) void {
         lib.setBuildMode(mode);
 
         if (cross_target.os_tag.? == .windows) {
-
             // The linker cannot resolve these dependencies from tb_client
             // So we have to insert them manually here, or we are going to receive a "lld-link: error: undefined symbol"
             lib.linkSystemLibrary("ws2_32");
