@@ -105,6 +105,19 @@ pub fn main() !void {
                     }
                 }
 
+                if (std.meta.eql(field_name, "balance")) {
+                    // We have to read credit/debit account/balance to validate each transfer.
+                    read_bytes_per_second +=
+                        transfers_per_second *
+                        // We must lookup: credit account id, debit account id, credit account, debit account, credit balance, debit balance
+                        6 *
+                        // In the worst case we have to check every level.
+                        // TODO We're using the balance level_count as a bound on the account level_count - we should model the number of accounts instead.
+                        level_count *
+                        // For each lookup we must read: index block, filter block, data block
+                        3 * config.block_size;
+                }
+
                 if (!std.meta.eql(field_name, "timestamp")) {
                     // The object tree does not need to be compacted so just count write bandwidth per value.
                     write_bytes_per_second += transfers_per_second * @sizeOf(Value);
