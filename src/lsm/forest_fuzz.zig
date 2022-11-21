@@ -201,7 +201,7 @@ const Environment = struct {
         env.change_state(.forest_checkpointing, .superblock_checkpointing);
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
             .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
-            .commit_min = env.checkpoint_op.? + 1,
+            .commit_min = env.checkpoint_op.?,
             .commit_max = env.checkpoint_op.? + 1,
             .view_normal = 0,
             .view = 0,

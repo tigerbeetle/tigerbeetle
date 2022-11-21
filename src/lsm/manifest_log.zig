@@ -84,10 +84,13 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         /// The maximum number of table updates to the manifest by a half-measure of table
         /// compaction (not including manifest log compaction).
         ///
-        /// Input tables are removed from the manifest.
-        /// Output tables are removed from the manifest.
+        /// Input tables are updated in the manifest (snapshot_max is reduced).
+        /// Input tables are removed from the manifest (if not held by a persistent snapshot).
+        /// Output tables are inserted into the manifest.
+        // TODO If insert-then-remove can update in-memory, then we can only count input tables once.
         pub const compaction_appends_max = tree.compactions_max *
-            (tree.compaction_tables_input_max +
+            (tree.compaction_tables_input_max + // Update snapshot_max.
+            tree.compaction_tables_input_max + // Remove.
             tree.compaction_tables_output_max);
 
         const blocks_count_appends = util.div_ceil(compaction_appends_max, Block.entry_count_max);
