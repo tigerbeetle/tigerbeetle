@@ -5,22 +5,24 @@ const CrossTarget = std.zig.CrossTarget;
 pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
-    // Zig cross-target x java os-arch names
+    // Zig cross-targets
     const platforms = .{
-        .{ "x86_64-linux-gnu", "linux-x86_64" },
-        .{ "x86_64-macos", "macos-x86_64" },
-        .{ "aarch64-linux-gnu", "linux-aarch_64" },
-        .{ "aarch64-macos", "macos-aarch64" },
-        .{ "x86_64-windows", "win-x86_64" },
+        "x86_64-linux-gnu",
+        "x86_64-linux-musl",
+        "x86_64-macos",
+        "aarch64-linux-gnu",
+        "aarch64-linux-musl",
+        "aarch64-macos",
+        "x86_64-windows",
     };
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
         const lib = b.addSharedLibrary("tb_jniclient", "src/client.zig", .unversioned);
         lib.addPackagePath("jui", "lib/jui/src/jui.zig");
         lib.addPackagePath("tigerbeetle", "tb_client.zig");
-        lib.setOutputDir("../tigerbeetle-java/src/main/resources/lib/" ++ platform[1]);
+        lib.setOutputDir("../tigerbeetle-java/src/main/resources/lib/" ++ platform);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
 
@@ -39,8 +41,8 @@ pub fn build(b: *std.build.Builder) void {
         // - From Windows it fails on libc "invalid object"
         // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
         // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
-        b.cache_root = "zig-cache/" ++ platform[1];
-        b.global_cache_root = "zig-cache/global-" ++ platform[1];
+        b.cache_root = "zig-cache/" ++ platform;
+        b.global_cache_root = "zig-cache/global-" ++ platform;
 
         lib.install();
     }
