@@ -248,9 +248,6 @@ pub const block_size = 64 * 1024;
 
 pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size);
 
-// TODO Document and tune these LSM options:
-pub const lsm_trees = 30;
-
 /// The number of levels in an LSM tree.
 /// A higher number of levels increases read amplification, as well as total storage capacity.
 pub const lsm_levels = 7;
@@ -262,9 +259,6 @@ pub const lsm_levels = 7;
 /// amplification can be optimized more easily (with filters and caching), we target a growth
 /// factor of 8 for lower write amplification rather than the more typical growth factor of 10.
 pub const lsm_growth_factor = 8;
-
-/// The maximum key size for an LSM tree in bytes.
-pub const lsm_key_size_max = 32;
 
 /// The maximum cumulative size of a table — computed as the sum of the size of the index block,
 /// filter blocks, and data blocks.
