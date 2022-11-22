@@ -7,6 +7,7 @@ const mem = std.mem;
 const os = std.os;
 
 const log = std.log.scoped(.tree);
+const tracer = @import("../tracer.zig");
 
 const config = @import("../config.zig");
 const div_ceil = @import("../util.zig").div_ceil;
@@ -144,6 +145,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         checkpoint_callback: ?fn (*Tree) void,
         open_callback: ?fn (*Tree) void,
 
+        tracer_slot: ?tracer.SpanStart = null,
+
         pub const Options = struct {
             /// The maximum number of keys that may be committed per batch.
             ///
@@ -188,13 +191,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             var manifest = try Manifest.init(allocator, node_pool, grid, tree_hash);
             errdefer manifest.deinit(allocator);
 
-            var compaction_table_immutable = try CompactionTableImmutable.init(allocator);
+            var compaction_table_immutable = try CompactionTableImmutable.init(allocator, tree_name);
             errdefer compaction_table_immutable.deinit(allocator);
 
             var compaction_table: [@divFloor(config.lsm_levels, 2)]CompactionTable = undefined;
             for (compaction_table) |*compaction, i| {
                 errdefer for (compaction_table[0..i]) |*c| c.deinit(allocator);
-                compaction.* = try CompactionTable.init(allocator);
+                compaction.* = try CompactionTable.init(allocator, tree_name);
             }
             errdefer for (compaction_table) |*c| c.deinit(allocator);
 
@@ -221,6 +224,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            assert(tree.tracer_slot == null);
+
             tree.compaction_table_immutable.deinit(allocator);
             for (tree.compaction_table) |*compaction| compaction.deinit(allocator);
 
@@ -547,6 +552,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         fn compact_start(tree: *Tree, callback: fn (*Tree) void) void {
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
+
+            tracer.start(
+                &tree.tracer_slot,
+                .{ .tree = .{ .tree_name = tree_name } },
+                .{ .tree_compaction_beat = .{ .tree_name = tree_name } },
+            );
 
             tree.compaction_callback = callback;
 
@@ -916,6 +927,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         fn compact_finish(tree: *Tree) void {
             assert(tree.compaction_io_pending == 0);
             assert(tree.table_mutable.can_commit_batch(tree.options.commit_entries_max));
+
+            tracer.end(
+                &tree.tracer_slot,
+                .{ .tree = .{ .tree_name = tree_name } },
+                .{ .tree_compaction_beat = .{ .tree_name = tree_name } },
+            );
 
             // Invoke the compact() callback after the manifest compacts at the end of the beat.
             const callback = tree.compaction_callback.?;
