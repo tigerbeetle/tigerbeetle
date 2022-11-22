@@ -2,7 +2,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
+
 const log = std.log.scoped(.state_machine);
+const tracer = @import("tracer.zig");
 
 const tb = @import("tigerbeetle.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
@@ -114,6 +116,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         compact_callback: ?fn (*StateMachine) void = null,
         checkpoint_callback: ?fn (*StateMachine) void = null,
 
+        tracer_slot: ?tracer.SpanStart,
+
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
             var forest = try Forest.init(
                 allocator,
@@ -127,10 +131,13 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
                 .forest = forest,
+                .tracer_slot = null,
             };
         }
 
         pub fn deinit(self: *StateMachine, allocator: mem.Allocator) void {
+            assert(self.tracer_slot == null);
+
             self.forest.deinit(allocator);
         }
 
@@ -218,6 +225,12 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 return;
             }
 
+            tracer.start(
+                &self.tracer_slot,
+                .main,
+                .state_machine_prefetch,
+            );
+
             self.prefetch_input = input;
             self.prefetch_callback = callback;
 
@@ -248,6 +261,13 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             const callback = self.prefetch_callback.?;
             self.prefetch_input = null;
             self.prefetch_callback = null;
+
+            tracer.end(
+                &self.tracer_slot,
+                .main,
+                .state_machine_prefetch,
+            );
+
             callback(self);
         }
 
@@ -367,6 +387,12 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             _ = client;
             assert(op != 0);
 
+            tracer.start(
+                &self.tracer_slot,
+                .main,
+                .state_machine_commit,
+            );
+
             const result = switch (operation) {
                 .root => unreachable,
                 .register => 0,
@@ -377,12 +403,24 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 else => unreachable,
             };
 
+            tracer.end(
+                &self.tracer_slot,
+                .main,
+                .state_machine_commit,
+            );
+
             return result;
         }
 
         pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
+
+            tracer.start(
+                &self.tracer_slot,
+                .main,
+                .state_machine_compact,
+            );
 
             self.compact_callback = callback;
             self.forest.compact(compact_finish, op);
@@ -392,6 +430,13 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             const self = @fieldParentPtr(StateMachine, "forest", forest);
             const callback = self.compact_callback.?;
             self.compact_callback = null;
+
+            tracer.end(
+                &self.tracer_slot,
+                .main,
+                .state_machine_compact,
+            );
+
             callback(self);
         }
 

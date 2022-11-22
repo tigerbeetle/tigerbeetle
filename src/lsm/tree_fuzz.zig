@@ -6,7 +6,9 @@ const assert = std.debug.assert;
 const config = @import("../config.zig");
 const fuzz = @import("../test/fuzz.zig");
 const vsr = @import("../vsr.zig");
+
 const log = std.log.scoped(.lsm_tree_fuzz);
+const tracer = @import("../tracer.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
@@ -27,7 +29,7 @@ const Table = @import("table.zig").TableType(
     Key.tombstone,
     Key.tombstone_from_key,
 );
-const Tree = @import("tree.zig").TreeType(Table, Storage, @typeName(Table) ++ "_test");
+const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
@@ -440,6 +442,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
 }
 
 pub fn main() !void {
+    try tracer.init(allocator);
+    defer tracer.deinit(allocator);
+
     const fuzz_args = try fuzz.parse_fuzz_args(allocator);
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();

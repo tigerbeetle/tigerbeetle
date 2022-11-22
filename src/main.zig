@@ -9,6 +9,7 @@ const log = std.log.scoped(.main);
 const build_options = @import("tigerbeetle_build_options");
 const config = @import("config.zig");
 pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
+const tracer = @import("tracer.zig");
 
 const cli = @import("cli.zig");
 const fatal = cli.fatal;
@@ -120,6 +121,9 @@ const Command = struct {
         _ = memory; // TODO
 
         const allocator = arena.allocator();
+
+        try tracer.init(allocator);
+        defer tracer.deinit(allocator);
 
         var command: Command = undefined;
         try command.init(allocator, path, false);

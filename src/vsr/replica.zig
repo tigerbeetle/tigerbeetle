@@ -21,6 +21,7 @@ const Version = vsr.Version;
 const VSRState = vsr.VSRState;
 
 const log = std.log.scoped(.replica);
+const tracer = @import("../tracer.zig");
 
 pub const Status = enum {
     normal,
@@ -286,6 +287,9 @@ pub fn ReplicaType(
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
 
+        tracer_slot_commit: ?tracer.SpanStart = null,
+        tracer_slot_checkpoint: ?tracer.SpanStart = null,
+
         const OpenOptions = struct {
             replica_count: u8,
             storage: *Storage,
@@ -544,6 +548,9 @@ pub fn ReplicaType(
         /// Free all memory and unref all messages held by the replica
         /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time
         pub fn deinit(self: *Self, allocator: Allocator) void {
+            assert(self.tracer_slot_checkpoint == null);
+            assert(self.tracer_slot_commit == null);
+
             self.static_allocator.transition_from_static_to_deinit();
 
             self.journal.deinit(allocator);
@@ -748,6 +755,9 @@ pub fn ReplicaType(
 
             // Any message handlers that loopback must take responsibility for the flush.
             assert(self.loopback_queue == null);
+
+            // We have to regularly flush the tracer to get output from short benchmarks.
+            tracer.flush();
         }
 
         fn on_ping(self: *Self, message: *const Message) void {
@@ -2515,6 +2525,12 @@ pub fn ReplicaType(
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
+            tracer.start(
+                &self.tracer_slot_commit,
+                .main,
+                .{ .commit = .{ .op = prepare.header.op } },
+            );
+
             self.commit_prepare = prepare.ref();
             self.commit_callback = callback;
             self.state_machine.prefetch(
@@ -2593,6 +2609,11 @@ pub fn ReplicaType(
                     self.op_checkpoint,
                     self.op_checkpoint_next(),
                 });
+                tracer.start(
+                    &self.tracer_slot_checkpoint,
+                    .main,
+                    .checkpoint,
+                );
                 self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
                 self.commit_op_done();
@@ -2651,6 +2672,11 @@ pub fn ReplicaType(
                 self.op,
                 self.op_checkpoint,
             });
+            tracer.end(
+                &self.tracer_slot_checkpoint,
+                .main,
+                .checkpoint,
+            );
 
             if (self.on_checkpoint) |on_checkpoint| on_checkpoint(self);
             self.commit_op_done();
@@ -2662,9 +2688,18 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_trigger());
 
+            const op = self.commit_prepare.?.header.op;
+
             self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
             self.commit_callback = null;
+
+            tracer.end(
+                &self.tracer_slot_commit,
+                .main,
+                .{ .commit = .{ .op = op } },
+            );
+
             callback(self);
         }
 
