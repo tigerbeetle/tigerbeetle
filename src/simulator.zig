@@ -44,10 +44,6 @@ var state_checker: *StateChecker = undefined;
 var storage_checker: *StorageChecker = undefined;
 
 pub fn main() !void {
-    comptime {
-        assert(config.deployment_environment == .simulation);
-    }
-
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
     log_buffer.unbuffered_writer = std.io.getStdErr().writer();
 
