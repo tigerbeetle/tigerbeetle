@@ -17,6 +17,7 @@ pub const tb_status_t = enum(c_int) {
     network_subsystem,
 };
 
+pub const tb_operation_t = StateMachine.Operation;
 pub const tb_completion_t = fn (
     context: usize,
     client: tb_client_t,
