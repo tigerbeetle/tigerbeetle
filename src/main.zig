@@ -30,13 +30,8 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
 
-pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
+pub const log_level: std.log.Level = config.log_level;
 pub usingnamespace config.root_declarations;
-
-comptime {
-    assert(config.deployment_environment == .production or
-        config.deployment_environment == .development);
-}
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

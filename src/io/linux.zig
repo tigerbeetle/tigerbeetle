@@ -922,7 +922,7 @@ pub const IO = struct {
             direct_io_supported = try fs_supports_direct_io(dir_fd);
             if (direct_io_supported) {
                 flags |= os.O.DIRECT;
-            } else if (config.deployment_environment == .development) {
+            } else if (!config.direct_io_required) {
                 log.warn("file system does not support Direct I/O", .{});
             } else {
                 // We require Direct I/O for safety to handle fsync failure correctly, and therefore
