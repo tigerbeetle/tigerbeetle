@@ -1,6 +1,5 @@
 const std = @import("std");
 const tb = @import("../tigerbeetle.zig");
-const build_options = @import("build_options");
 
 fn c_type_name(comptime ty: type) []const u8 {
     switch (@typeInfo(ty)) {
@@ -210,8 +209,5 @@ pub fn main() !void {
     }
 
     try buffer.writer().print("#endif // TB_CLIENT_C\n", .{});
-    const header_contents = buffer.items;
-
-    const output_dir = build_options.output_dir;
-    try std.fs.cwd().writeFile(output_dir ++ "/tb_client.h", header_contents);
+    try std.fs.cwd().writeFile("src/c/tb_client.h", bfufer.items);
 }
