@@ -379,11 +379,6 @@ comptime {
 
     // The LSM tree uses half-measures to balance compaction.
     assert(lsm_batch_multiple % 2 == 0);
-
-    // SetAssociativeCache requires a power-of-two cardinality.
-    assert(std.math.isPowerOfTwo(cache_accounts_max));
-    assert(std.math.isPowerOfTwo(cache_transfers_max));
-    assert(std.math.isPowerOfTwo(cache_transfers_posted_max));
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.
