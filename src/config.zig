@@ -64,7 +64,7 @@ pub const cache_transfers_max = switch (deployment_environment) {
 
 /// The maximum number of two-phase transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_transfers_pending_max = cache_transfers_max;
+pub const cache_transfers_posted_max = cache_transfers_max;
 
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
@@ -383,7 +383,7 @@ comptime {
     // SetAssociativeCache requires a power-of-two cardinality.
     assert(std.math.isPowerOfTwo(cache_accounts_max));
     assert(std.math.isPowerOfTwo(cache_transfers_max));
-    assert(std.math.isPowerOfTwo(cache_transfers_pending_max));
+    assert(std.math.isPowerOfTwo(cache_transfers_posted_max));
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.
