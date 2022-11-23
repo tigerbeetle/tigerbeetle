@@ -172,9 +172,9 @@ pub fn GridType(comptime Storage: type) type {
             // Resolve reads that were seen in the cache during start_read()
             // but deferred to be asynchronously resolved on the next tick.
             //
-            // Drain directly from the queue so that new cache reads (added upon completion of old 
-            // cache reads) that can be serviced immediately aren't deferred until the next tick 
-            // (which may be milliseconds later due to IO.run_for_ns). This is necessary to ensure 
+            // Drain directly from the queue so that new cache reads (added upon completion of old
+            // cache reads) that can be serviced immediately aren't deferred until the next tick
+            // (which may be milliseconds later due to IO.run_for_ns). This is necessary to ensure
             // that groove prefetch completes promptly.
             //
             // Even still, we cap the reads processed to prevent going over
