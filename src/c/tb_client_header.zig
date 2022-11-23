@@ -52,7 +52,7 @@ fn resolve_c_type(comptime Type: type) []const u8 {
                     return prefix ++ c_name ++ "*";
                 }
             }
-            
+
             return resolve_c_type(info.child) ++ "*";
         },
         .Void, .Opaque => return "void",
