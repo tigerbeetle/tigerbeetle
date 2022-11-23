@@ -136,7 +136,7 @@ const Command = struct {
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = config.cache_accounts_max,
                 .cache_entries_transfers = config.cache_transfers_max,
-                .cache_entries_posted = config.cache_transfers_pending_max,
+                .cache_entries_posted = config.cache_transfers_posted_max,
             },
             .message_bus_options = .{
                 .configuration = addresses,
