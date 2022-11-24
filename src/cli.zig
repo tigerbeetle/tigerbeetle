@@ -214,7 +214,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                         config.cache_transfers_max,
                     ),
                     .cache_transfers_posted = parse_size_to_count(
-                        tigerbeetle.Transfer,
+                        u256, // TODO(#264): Use actual type here, once exposed.
                         cache_transfers_posted,
                         config.cache_transfers_posted_max,
                     ),
