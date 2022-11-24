@@ -16,6 +16,7 @@ test {
 
     _ = @import("io.zig");
 
+    _ = @import("cli.zig");
     _ = @import("ewah.zig");
     _ = @import("util.zig");
 

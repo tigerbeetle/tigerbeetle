@@ -316,6 +316,7 @@ pub const superblock_trailer_manifest_size_max = blk: {
 
     // Use a multiple of sector * reference so that the size is exactly divisible without padding:
     // For example, this 2.5 MiB manifest trailer == 65536 references == 65536 * 511 or 34m tables.
+    // TODO Size this relative to the expected number of tables & fragmentation.
     break :blk 16 * config.sector_size * SuperBlockManifest.BlockReferenceSize;
 };
 

@@ -1,6 +1,5 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const tigerbeetle = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
 
 const Environment = enum {
@@ -64,7 +63,7 @@ pub const cache_transfers_max = switch (deployment_environment) {
 
 /// The maximum number of two-phase transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_transfers_pending_max = cache_transfers_max;
+pub const cache_transfers_posted_max = cache_transfers_max;
 
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
@@ -263,6 +262,8 @@ pub const lsm_growth_factor = 8;
 /// The maximum key size for an LSM tree in bytes.
 pub const lsm_key_size_max = 32;
 
+/// The maximum cumulative size of a table — computed as the sum of the size of the index block,
+/// filter blocks, and data blocks.
 pub const lsm_table_size_max = 64 * 1024 * 1024;
 
 /// Size of nodes used by the LSM tree manifest implementation.
@@ -381,7 +382,7 @@ comptime {
     // SetAssociativeCache requires a power-of-two cardinality.
     assert(std.math.isPowerOfTwo(cache_accounts_max));
     assert(std.math.isPowerOfTwo(cache_transfers_max));
-    assert(std.math.isPowerOfTwo(cache_transfers_pending_max));
+    assert(std.math.isPowerOfTwo(cache_transfers_posted_max));
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.

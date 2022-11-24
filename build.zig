@@ -197,6 +197,26 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const fuzz_vsr_superblock_free_set = b.addExecutable(
+            "fuzz_vsr_superblock_free_set",
+            "src/vsr/superblock_free_set_fuzz.zig",
+        );
+        fuzz_vsr_superblock_free_set.setMainPkgPath("src");
+        fuzz_vsr_superblock_free_set.setTarget(target);
+        fuzz_vsr_superblock_free_set.setBuildMode(mode);
+        fuzz_vsr_superblock_free_set.omit_frame_pointer = false;
+
+        const run_cmd = fuzz_vsr_superblock_free_set.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step(
+            "fuzz_vsr_superblock_free_set",
+            "Fuzz the SuperBlock FreeSet. Args: [--seed <seed>]",
+        );
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
         const fuzz_vsr_superblock_quorums = b.addExecutable(
             "fuzz_vsr_superblock_quorums",
             "src/vsr/superblock_quorums_fuzz.zig",

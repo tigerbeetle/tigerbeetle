@@ -3,18 +3,21 @@
 //! At each replica compact and checkpoint, check that storage is byte-for-byte identical across
 //! replicas.
 //!
-//! Areas checked at compaction (half-measure):
+//! Areas verified at compaction (half-measure):
 //! - Acquired Grid blocks (ignores skipped recovery compactions)
+//!  TODO Because ManifestLog acquires blocks potentially several beats prior to actually writing
+//!  the block, this check will need to be removed or use a different strategy.
 //!
-//! Areas checked at checkpoint:
-//! - WAL headers
+//! Areas verified at checkpoint:
 //! - WAL prepares
 //! - SuperBlock Manifest, FreeSet, ClientTable
 //! - Acquired Grid blocks
 //!
-//! Areas not checked:
-//! - SuperBlock sectors
-//! - Non-allocated Grid blocks
+//! Areas not verified:
+//! - SuperBlock sectors, which hold replica-specific state.
+//! - WAL headers, which may differ because the WAL writes deliberately corrupt redundant headers
+//!   to faulty slots to ensure recovery is consistent.
+//! - Non-allocated Grid blocks, which may differ due to state transfer.
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage_checker);
@@ -46,10 +49,8 @@ const Checkpoint = struct {
     checksum_superblock_manifest: u128,
     checksum_superblock_free_set: u128,
     checksum_superblock_client_table: u128,
-    checksum_wal_headers: u128,
     checksum_wal_prepares: u128,
     checksum_grid: u128,
-    vsr_state: SuperBlockSector.VSRState,
 };
 
 pub const StorageChecker = struct {
@@ -85,6 +86,7 @@ pub const StorageChecker = struct {
         // Until then our grid's checksum is too far ahead.
         if (replica.superblock.working.vsr_state.op_compacted(replica.commit_min)) return;
 
+        // TODO(Beat Compaction) Remove when deterministic beat compaction is implemented.
         const half_measure_beat_count = @divExact(config.lsm_batch_multiple, 2);
         if ((replica.commit_min + 1) % half_measure_beat_count != 0) return;
 
@@ -124,10 +126,8 @@ pub const StorageChecker = struct {
             .checksum_superblock_manifest = 0,
             .checksum_superblock_free_set = 0,
             .checksum_superblock_client_table = 0,
-            .checksum_wal_headers = checksum_wal_headers(storage),
             .checksum_wal_prepares = checksum_wal_prepares(storage),
             .checksum_grid = checksum_grid(replica),
-            .vsr_state = working.vsr_state,
         };
 
         inline for (.{
@@ -177,21 +177,15 @@ pub const StorageChecker = struct {
         if (fail) return error.StorageMismatch;
     }
 
-    fn checksum_wal_headers(storage: *const Storage) u128 {
-        return vsr.checksum(std.mem.sliceAsBytes(storage.wal_headers()));
-    }
-
     fn checksum_wal_prepares(storage: *const Storage) u128 {
-        const wal_prepares = storage.wal_prepares();
         var checksum: u128 = 0;
-        for (storage.wal_headers()) |h, i| {
-            assert(h.command == .prepare or h.command == .reserved);
-            assert(h.size <= config.message_size_max);
-            assert(h.checksum == wal_prepares[i].header.checksum);
+        for (storage.wal_prepares()) |*prepare| {
+            assert(prepare.header.valid_checksum());
+            assert(prepare.header.command == .prepare);
 
             // Only checksum the actual message header+body. Any leftover space is nondeterministic,
             // because the current prepare may have overwritten a longer message.
-            checksum ^= vsr.checksum(std.mem.asBytes(&wal_prepares[i])[0..h.size]);
+            checksum ^= vsr.checksum(std.mem.asBytes(prepare)[0..prepare.header.size]);
         }
         return checksum;
     }
@@ -201,7 +195,9 @@ pub const StorageChecker = struct {
         var acquired = replica.superblock.free_set.blocks.iterator(.{ .kind = .unset });
         var checksum: u128 = 0;
         while (acquired.next()) |address_index| {
-            checksum ^= vsr.checksum(storage.grid_block(address_index + 1));
+            const block = storage.grid_block(address_index + 1);
+            const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            checksum ^= vsr.checksum(block[0..block_header.size]);
         }
         return checksum;
     }

@@ -772,18 +772,22 @@ pub const Storage = struct {
         return mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]);
     }
 
-    pub fn grid_block(storage: *const Storage, address: u64) []const u8 {
+    pub fn grid_block(
+        storage: *const Storage,
+        address: u64,
+    ) *align(config.sector_size) const [config.block_size]u8 {
         assert(address > 0);
 
         const block_offset = vsr.Zone.grid.offset((address - 1) * config.block_size);
-        const block_header = mem.bytesAsSlice(
+        const block_header = mem.bytesToValue(
             vsr.Header,
             storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
-        )[0];
+        );
+        assert(storage.memory_written.isSet(@divExact(block_offset, config.sector_size)));
         assert(block_header.valid_checksum());
         assert(block_header.size <= config.block_size);
 
-        return storage.memory[block_offset..][0..block_header.size];
+        return storage.memory[block_offset..][0..config.block_size];
     }
 };
 

@@ -120,7 +120,9 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64) !void {
         // Trailers are only updated on-disk by checkpoint(), never view_change().
         // Trailers must not be mutated while a checkpoint() is in progress.
         if (!env.pending.contains(.checkpoint) and random.boolean()) {
-            _ = env.superblock.free_set.acquire().?;
+            const range = env.superblock.free_set.reserve(1).?;
+            _ = env.superblock.free_set.acquire(range).?;
+            env.superblock.free_set.forfeit(range);
         }
     }
 }
@@ -167,7 +169,6 @@ const Environment = struct {
         assert(!env.pending_verify);
         assert(env.pending.contains(.view_change) == env.superblock.view_change_in_progress());
 
-        // TODO(Zig): Change this to const once std.PriorityQueue's type signature is fixed.
         const write = env.superblock.storage.writes.peek();
         env.superblock.storage.tick();
 
@@ -181,12 +182,17 @@ const Environment = struct {
     fn verify(env: *Environment) !void {
         assert(!env.pending_verify);
 
-        // Reset `superblock_verify` so that it can be reused.
-        env.superblock_verify.opened = false;
-        var free_set_iterator = env.superblock_verify.free_set.blocks.iterator(.{ .kind = .unset });
-        while (free_set_iterator.next()) |block_bit| {
-            const block_address = block_bit + 1;
-            env.superblock_verify.free_set.release(block_address);
+        {
+            // Reset `superblock_verify` so that it can be reused.
+            env.superblock_verify.opened = false;
+            var free_set_iterator = env.superblock_verify.free_set.blocks.iterator(.{
+                .kind = .unset,
+            });
+            while (free_set_iterator.next()) |block_bit| {
+                const block_address = block_bit + 1;
+                env.superblock_verify.free_set.release(block_address);
+            }
+            env.superblock_verify.free_set.checkpoint();
         }
 
         // Duplicate the `superblock`'s storage so it is not modified by `superblock_verify`'s

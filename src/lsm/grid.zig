@@ -4,6 +4,7 @@ const mem = std.mem;
 
 const config = @import("../config.zig");
 const vsr = @import("../vsr.zig");
+const free_set = @import("../vsr/superblock_free_set.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
@@ -91,6 +92,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub const BlockPtr = *align(config.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+        pub const Reservation = free_set.Reservation;
 
         pub const Write = struct {
             callback: fn (*Grid.Write) void,
@@ -170,27 +172,43 @@ pub fn GridType(comptime Storage: type) type {
             // Resolve reads that were seen in the cache during start_read()
             // but deferred to be asynchronously resolved on the next tick.
             //
-            // Make a copy to avoid a potential infinite loop here.
-            // If any new reads are added to the read_cached_queue they will be started on
-            // the next tick.
-            var copy = grid.read_cached_queue;
-            grid.read_cached_queue = .{};
-            while (copy.pop()) |read| {
+            // Drain directly from the queue so that new cache reads (added upon completion of old
+            // cache reads) that can be serviced immediately aren't deferred until the next tick
+            // (which may be milliseconds later due to IO.run_for_ns). This is necessary to ensure
+            // that groove prefetch completes promptly.
+            //
+            // Even still, we cap the reads processed to prevent going over
+            // any implicit time slice expected of Grid.tick(). This limit is fairly arbitrary.
+            var retry_max: u32 = 100_000;
+            while (grid.read_cached_queue.pop()) |read| {
                 if (grid.cache.get(read.address)) |block| {
                     read.callback(read, block);
                 } else {
                     grid.start_read(read);
                 }
+
+                retry_max -= 1;
+                if (retry_max == 0) break;
             }
         }
 
-        pub fn acquire(grid: *Grid) u64 {
-            // We will reject incoming data before it reaches the point
-            // where storage is full, so this assertion is safe.
-            return grid.superblock.free_set.acquire().?;
+        /// Returning null indicates that there are not enough free blocks to fill the reservation.
+        pub fn reserve(grid: *Grid, blocks_count: usize) ?Reservation {
+            return grid.superblock.free_set.reserve(blocks_count);
         }
 
-        /// This function should be used to release addresses, instead of release_at_checkpoint()
+        /// Forfeit a reservation.
+        pub fn forfeit(grid: *Grid, reservation: Reservation) void {
+            return grid.superblock.free_set.forfeit(reservation);
+        }
+
+        /// Returns a just-allocated block.
+        /// The caller is responsible for not acquiring more blocks than they reserved.
+        pub fn acquire(grid: *Grid, reservation: Reservation) u64 {
+            return grid.superblock.free_set.acquire(reservation).?;
+        }
+
+        /// This function should be used to release addresses, instead of release()
         /// on the free set directly, as this also demotes the address within the block cache.
         /// This reduces conflict misses in the block cache, by freeing ways soon after they are
         /// released.
@@ -199,12 +217,12 @@ pub fn GridType(comptime Storage: type) type {
         /// checkpoint.
         ///
         /// Asserts that the address is not currently being read from or written to.
-        pub fn release_at_checkpoint(grid: *Grid, address: u64) void {
+        pub fn release(grid: *Grid, address: u64) void {
             grid.assert_not_writing(address, null);
             grid.assert_not_reading(address, null);
 
             grid.cache.demote(address);
-            grid.superblock.free_set.release_at_checkpoint(address);
+            grid.superblock.free_set.release(address);
         }
 
         /// Assert that the address is not currently being written to.
