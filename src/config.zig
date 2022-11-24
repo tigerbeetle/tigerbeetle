@@ -1,6 +1,5 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const tigerbeetle = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
 
 const Environment = enum {
