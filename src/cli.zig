@@ -146,18 +146,25 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         try args_allocated.append(arg);
 
         if (mem.startsWith(u8, arg, "--cluster")) {
+            if (command != .format) fatal("--cluster: supported only by 'format' command", .{});
             cluster = parse_flag("--cluster", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
+            if (command != .format) fatal("--replica: supported only by 'format' command", .{});
             replica = parse_flag("--replica", arg);
         } else if (mem.startsWith(u8, arg, "--addresses")) {
+            if (command != .start) fatal("--addresses: supported only by 'start' command", .{});
             addresses = parse_flag("--addresses", arg);
         } else if (mem.startsWith(u8, arg, "--cache-accounts")) {
+            if (command != .start) fatal("--cache-accounts: supported only by 'start' command", .{});
             cache_accounts = parse_flag("--cache-accounts", arg);
         } else if (mem.startsWith(u8, arg, "--cache-transfers")) {
+            if (command != .start) fatal("--cache-transfers: supported only by 'start' command", .{});
             cache_transfers = parse_flag("--cache-transfers", arg);
         } else if (mem.startsWith(u8, arg, "--cache-transfers-posted")) {
+            if (command != .start) fatal("--cache-transfers-posted: supported only by 'start' command", .{});
             cache_transfers_posted = parse_flag("--cache-transfers-posted", arg);
         } else if (mem.eql(u8, arg, "--verbose")) {
+            if (command != .version) fatal("--verbose: supported only by 'version' command", .{});
             verbose = true;
         } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
@@ -165,6 +172,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         } else if (mem.startsWith(u8, arg, "-")) {
             fatal("unexpected argument: '{s}'", .{arg});
         } else if (path == null) {
+            if (!(command == .format or command == .start)) fatal("unexpected path", .{});
             path = arg;
         } else {
             fatal("unexpected argument: '{s}' (must start with '--')", .{arg});
@@ -173,37 +181,11 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
     switch (command) {
         .version => {
-            if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
-            if (cache_accounts != null) {
-                fatal("--cache-accounts: supported only by 'start' command", .{});
-            }
-            if (cache_transfers != null) {
-                fatal("--cache-transfers: supported only by 'start' command", .{});
-            }
-            if (cache_transfers_posted != null) {
-                fatal("--cache-transfers-posted: supported only by 'start' command", .{});
-            }
-            if (cluster != null) fatal("--cluster: supported only by 'format' command", .{});
-            if (replica != null) fatal("--replica: supported only by 'format' command", .{});
-            if (path != null) fatal("unexpected path", .{});
-
             return Command{
                 .version = .{ .verbose = verbose orelse false },
             };
         },
         .format => {
-            if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
-            if (cache_accounts != null) {
-                fatal("--cache-accounts: supported only by 'start' command", .{});
-            }
-            if (cache_transfers != null) {
-                fatal("--cache-transfers: supported only by 'start' command", .{});
-            }
-            if (cache_transfers_posted != null) {
-                fatal("--cache-transfers-posted: supported only by 'start' command", .{});
-            }
-            if (verbose != null) fatal("--verbose: supported only by 'version' command", .{});
-
             return Command{
                 .format = .{
                     .args_allocated = args_allocated,
@@ -214,10 +196,6 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
             };
         },
         .start => {
-            if (cluster != null) fatal("--cluster: supported only by 'format' command", .{});
-            if (replica != null) fatal("--replica: supported only by 'format' command", .{});
-            if (verbose != null) fatal("--verbose: supported only by 'version' command", .{});
-
             return Command{
                 .start = .{
                     .args_allocated = args_allocated,
