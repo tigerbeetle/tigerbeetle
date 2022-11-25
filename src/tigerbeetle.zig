@@ -134,7 +134,6 @@ pub const CreateTransferResult = enum(u32) {
     accounts_must_be_different,
 
     pending_id_must_be_zero,
-    pending_transfer_must_timeout,
 
     ledger_must_not_be_zero,
     code_must_not_be_zero,
