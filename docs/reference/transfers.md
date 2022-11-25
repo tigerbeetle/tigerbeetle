@@ -27,7 +27,7 @@ Fields used by each mode of transfer:
 | `user_data`                   | optional     | optional | optional     | optional     |
 | `reserved`                    | none         | none     | none         | none         |
 | `pending_id`                  | none         | none     | required     | required     |
-| `timeout`                     | none         | required | none         | none         |
+| `timeout`                     | none         | optional | none         | none         |
 | `ledger`                      | required     | required | optional     | optional     |
 | `code`                        | required     | required | optional     | optional     |
 | `flags.linked`                | optional     | optional | optional     | optional     |
@@ -64,9 +64,8 @@ occur:
 * If a corresponding [`void_pending_transfer`](#void-pending-transfer) is
   committed, the pending transfer's reserved funds are restored to
   their original accounts.
-* If the pending transfer's timeout expires, the pending transfer's
-  reserved funds are restored to their original accounts. (When `flags.pending`
-  is set, the [`timeout`](#timeout) field must be non-zero.)
+* If the pending transfer has a timeout and the timeout expires, the pending
+  transfer's reserved funds are restored to their original accounts.
 
 A pending transfer resolves at most once.
 Attempting to resolve a pending transfer more than once will return the applicable error result:
@@ -251,7 +250,7 @@ Constraints:
 
 This is the interval (in nanoseconds) after a
 [`pending`](#flagspending) transfer's [arrival at the cluster](#timestamp)
-that it may be posted or voided.
+that it may be posted or voided. Zero denotes absence of timeout.
 
 If the timeout expires and the pending transfer has not already been
 posted or voided, the pending transfer is voided automatically.
@@ -262,7 +261,6 @@ Constraints:
 
 * Type is 64-bit unsigned integer (8 bytes)
 * Must be zero if `flags.pending` is *not* set
-* Must be non-zero if `flags.pending` *is* set
 * Must not overflow a 64-bit unsigned integer when summed with the transfer's timestamp
   (`error.overflows_timeout`)
 

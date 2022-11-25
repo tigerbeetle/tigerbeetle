@@ -662,10 +662,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             if (t.credit_account_id == t.debit_account_id) return .accounts_must_be_different;
 
             if (t.pending_id != 0) return .pending_id_must_be_zero;
-            if (t.flags.pending) {
-                // Otherwise, reserved amounts may never be released.
-                if (t.timeout == 0) return .pending_transfer_must_timeout;
-            } else {
+            if (!t.flags.pending) {
                 if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
             }
 
@@ -824,8 +821,9 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             }
 
             assert(p.timestamp < t.timestamp);
-            assert(p.timeout > 0);
-            if (p.timestamp + p.timeout <= t.timestamp) return .pending_transfer_expired;
+            if (p.timeout > 0) {
+                if (p.timestamp + p.timeout <= t.timestamp) return .pending_transfer_expired;
+            }
 
             self.forest.grooves.transfers.put_no_clobber(&Transfer{
                 .id = t.id,
@@ -1629,7 +1627,6 @@ test "create_transfers/lookup_transfers" {
         \\ transfer T1 A8 -0  _  _ T1   _ L0 C0 _ PEN _ _  _    0 credit_account_id_must_not_be_int_max
         \\ transfer T1 A8 A8  _  _ T1   _ L0 C0 _ PEN _ _  _    0 accounts_must_be_different
         \\ transfer T1 A8 A9  _  _ T1   _ L0 C0 _ PEN _ _  _    0 pending_id_must_be_zero
-        \\ transfer T1 A8 A9  _  _  _   _ L0 C0 _ PEN _ _  _    0 pending_transfer_must_timeout
         \\ transfer T1 A8 A9  _  _  _  -0 L0 C0 _   _ _ _  _    0 timeout_reserved_for_pending_transfer
         \\ transfer T1 A8 A9  _  _  _  -0 L0 C0 _ PEN _ _  _    0 ledger_must_not_be_zero
         \\ transfer T1 A8 A9  _  _  _  -0 L9 C0 _ PEN _ _  _    0 code_must_not_be_zero
@@ -1687,11 +1684,12 @@ test "create/lookup 2-phase transfers" {
         \\ transfer   T3 A1 A2  _ _   _   50 L1 C1 _ PEN   _   _ _ 15 ok
         \\ transfer   T4 A1 A2  _ _   _    1 L1 C1 _ PEN   _   _ _ 15 ok
         \\ transfer   T5 A1 A2 U9 _   _   50 L1 C1 _ PEN   _   _ _  7 ok
+        \\ transfer   T6 A1 A2  _ _   _    0 L1 C1 _ PEN   _   _ _  1 ok
         \\ commit create_transfers
 
         // Check balances before resolving.
-        \\ lookup_account A1 52 15  0  0
-        \\ lookup_account A2  0  0 52 15
+        \\ lookup_account A1 53 15  0  0
+        \\ lookup_account A2  0  0 53 15
         \\ commit lookup_accounts
 
         // Second phase.
@@ -1722,11 +1720,12 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T102 A1 A2 U1 _  T3    _ L1 C1 _   _ POS   _ _ 13 pending_transfer_already_voided
         \\ transfer T102 A1 A2 U1 _  T4    _ L1 C1 _   _   _ VOI _ 15 pending_transfer_expired
         \\ transfer T105 A0 A0 U0 _  T5    _ L0 C0 _   _ POS   _ _  _ ok
+        \\ transfer T106 A0 A0 U0 _  T6    _ L1 C1 _   _ POS   _ _  0 ok
         \\ commit create_transfers
 
         // Check balances after resolving.
-        \\ lookup_account A1 15 35  0  0
-        \\ lookup_account A2  0  0 15 35
+        \\ lookup_account A1 15 36  0  0
+        \\ lookup_account A2  0  0 15 36
         \\ commit lookup_accounts
     );
 }

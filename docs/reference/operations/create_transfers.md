@@ -86,10 +86,6 @@ Either:
 - [`Transfer.flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer) must be set, or
 - [`Transfer.pending_id`](../transfers.md#pending_id) must be zero.
 
-### `pending_transfer_must_timeout`
-The transfer was not created.
-[Transfer.timeout](../transfers.md#timeout) is zero, but must nonzero for pending transfers.
-
 ### `ledger_must_not_be_zero`
 The transfer was not created.
 [`Transfer.ledger`](../transfers.md#ledger) is zero, but must be nonzero.
