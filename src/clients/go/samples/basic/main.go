@@ -52,7 +52,7 @@ func main() {
 	BATCH_SIZE := 8191
 	batch := make([]tb_types.Transfer, BATCH_SIZE)
 	for i := 0; i < SAMPLES; i += BATCH_SIZE {
-		for j := 0; (j < BATCH_SIZE) && (i + j < SAMPLES); j++ {
+		for j := 0; (j < BATCH_SIZE) && (i+j < SAMPLES); j++ {
 			batch[j] = tb_types.Transfer{
 				ID:              uint128(fmt.Sprintf("%d", i+j+1)),
 				DebitAccountID:  uint128("1"),
@@ -70,8 +70,8 @@ func main() {
 		}
 
 		for _, err := range res {
-			id := int(err.Index) + i;
-			if (id < SAMPLES) {
+			id := int(err.Index) + i
+			if id < SAMPLES {
 				log.Printf("Error creating transfer %d: %s", id, err.Code)
 			}
 			return
