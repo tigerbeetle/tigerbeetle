@@ -18,32 +18,46 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
 
     private final CompletableFuture<TResponse> future;
 
-    AsyncRequest(final Client client, final byte operation, final Batch batch) {
-        super(client, operation, batch);
+    AsyncRequest(final NativeClient nativeClient, final Operations operation, final Batch batch) {
+        super(nativeClient, operation, batch);
 
         future = new CompletableFuture<TResponse>();
     }
 
-    public static AsyncRequest<CreateAccountResultBatch> createAccounts(final Client client,
-            final AccountBatch batch) {
-        return new AsyncRequest<CreateAccountResultBatch>(client,
+    public static AsyncRequest<CreateAccountResultBatch> createAccounts(
+            final NativeClient nativeClient, final AccountBatch batch) {
+        return new AsyncRequest<CreateAccountResultBatch>(nativeClient,
                 Request.Operations.CREATE_ACCOUNTS, batch);
     }
 
-    public static AsyncRequest<AccountBatch> lookupAccounts(final Client client,
+    public static AsyncRequest<AccountBatch> lookupAccounts(final NativeClient nativeClient,
             final IdBatch batch) {
-        return new AsyncRequest<AccountBatch>(client, Request.Operations.LOOKUP_ACCOUNTS, batch);
+        return new AsyncRequest<AccountBatch>(nativeClient, Request.Operations.LOOKUP_ACCOUNTS,
+                batch);
     }
 
-    public static AsyncRequest<CreateTransferResultBatch> createTransfers(final Client client,
-            final TransferBatch batch) {
-        return new AsyncRequest<CreateTransferResultBatch>(client,
+    public static AsyncRequest<CreateTransferResultBatch> createTransfers(
+            final NativeClient nativeClient, final TransferBatch batch) {
+        return new AsyncRequest<CreateTransferResultBatch>(nativeClient,
                 Request.Operations.CREATE_TRANSFERS, batch);
     }
 
-    public static AsyncRequest<TransferBatch> lookupTransfers(final Client client,
+    public static AsyncRequest<TransferBatch> lookupTransfers(final NativeClient nativeClient,
             final IdBatch batch) {
-        return new AsyncRequest<TransferBatch>(client, Request.Operations.LOOKUP_TRANSFERS, batch);
+        return new AsyncRequest<TransferBatch>(nativeClient, Request.Operations.LOOKUP_TRANSFERS,
+                batch);
+    }
+
+    public static AsyncRequest<AccountBatch> echo(final NativeClient nativeClient,
+            final AccountBatch batch) {
+        return new AsyncRequest<AccountBatch>(nativeClient, Request.Operations.ECHO_ACCOUNTS,
+                batch);
+    }
+
+    public static AsyncRequest<TransferBatch> echo(final NativeClient nativeClient,
+            final TransferBatch batch) {
+        return new AsyncRequest<TransferBatch>(nativeClient, Request.Operations.ECHO_TRANSFERS,
+                batch);
     }
 
     public CompletableFuture<TResponse> getFuture() {
