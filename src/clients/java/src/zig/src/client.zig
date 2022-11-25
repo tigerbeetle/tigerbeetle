@@ -132,6 +132,7 @@ const ReflectionHelper = struct {
 
     pub fn operation(env: *jui.JNIEnv, this_obj: jui.jobject) u8 {
         assert(this_obj != null);
+        assert(request_class != null);
         assert(request_operation_method_id != null);
 
         const value = env.callNonVirtualMethod(
@@ -151,6 +152,7 @@ const ReflectionHelper = struct {
 
     pub fn end_request(env: *jui.JNIEnv, this_obj: jui.jobject, result: ?[]const u8, packet: *tb.tb_packet_t) void {
         assert(this_obj != null);
+        assert(request_class != null);
         assert(request_end_request_method_id != null);
 
         var buffer_obj: jui.jobject = if (result) |value| blk: {
@@ -191,6 +193,7 @@ const ReflectionHelper = struct {
 
     pub fn release_permit(env: *jui.JNIEnv, this_obj: jui.jobject) void {
         assert(this_obj != null);
+        assert(request_class != null);
         assert(request_release_permit_method_id != null);
 
         env.callNonVirtualMethod(
