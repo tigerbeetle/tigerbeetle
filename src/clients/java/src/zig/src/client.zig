@@ -134,8 +134,14 @@ const ReflectionHelper = struct {
         assert(this_obj != null);
         assert(request_operation_method_id != null);
 
-        const value = env.callNonVirtualMethod(.byte, this_obj, request_class, request_operation_method_id, null,) catch |err| {
-            log.err("Method getOperation failed {}", .{ err });
+        const value = env.callNonVirtualMethod(
+            .byte,
+            this_obj,
+            request_class,
+            request_operation_method_id,
+            null,
+        ) catch |err| {
+            log.err("Method getOperation failed {}", .{err});
             @panic("JNI: Method getOperation failed");
         };
 
@@ -276,7 +282,7 @@ const NativeClient = struct {
         };
         const addresses_len = @intCast(usize, env.getStringUTFLength(addresses_obj));
         var addresses_chars = std.meta.assumeSentinel(addresses_return.chars[0..addresses_len], 0);
-        defer env.releaseStringUTFChars(addresses_obj, addresses_chars);
+        defer env.releaseStringUTFChars(addresses_obj, addresses_return.chars);
 
         var context = global_allocator.create(JNIContext) catch {
             ReflectionHelper.throwInitializationException(env, tb.tb_status_t.out_of_memory);
