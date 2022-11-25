@@ -33,7 +33,7 @@ func Test_HexStringToUint128_LittleEndian(t *testing.T) {
 		t.Errorf("Expected %s to be a valid hex string, got: %s", test, err)
 	}
 
-	expected := [16]byte{86,52,18,0,0,0,0,0,0,0,0,0,0,0,0,0}
+	expected := [16]byte{86, 52, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
 	if res.Bytes() != expected {
 		t.Errorf("Expected %s to produce bytes %v, got bytes %v", test, expected, res.Bytes())
