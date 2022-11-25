@@ -835,7 +835,19 @@ pub fn ReplicaType(
             const prepare_timestamp = self.state_machine.prepare(
                 message.header.operation.cast(StateMachine),
                 message.body(),
-            );
+            ) catch |err| switch (err) {
+                error.NonZeroTimestamp => {
+                    log.err(
+                        "{}: on_request: dropping (non zero timestamp) client={} operation={}",
+                        .{
+                            self.replica,
+                            message.header.client,
+                            message.header.operation.cast(StateMachine),
+                        },
+                    );
+                    return;
+                },
+            };
 
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.parent = latest_entry.checksum;

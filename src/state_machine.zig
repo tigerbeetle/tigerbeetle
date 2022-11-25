@@ -170,13 +170,15 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             callback(self);
         }
 
-        /// Returns the header's timestamp.
-        pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) u64 {
+        /// Assigns timestamps to input events, returns the header's timestamp.
+        ///
+        /// Client is supposed to set timestamps to zero, return a error if that's not the case.
+        pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) !u64 {
             switch (operation) {
                 .root => unreachable,
                 .register => {},
-                .create_accounts => self.prepare_timestamps(.create_accounts, input),
-                .create_transfers => self.prepare_timestamps(.create_transfers, input),
+                .create_accounts => try self.prepare_timestamps(.create_accounts, input),
+                .create_transfers => try self.prepare_timestamps(.create_transfers, input),
                 .lookup_accounts => {},
                 .lookup_transfers => {},
                 else => unreachable,
@@ -188,18 +190,20 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             self: *StateMachine,
             comptime operation: Operation,
             input: []u8,
-        ) void {
-            var sum_reserved_timestamps: usize = 0;
+        ) !void {
+            var input_timestamp_or: u64 = 0;
+            var prepare_timestamp = self.prepare_timestamp;
             var events = mem.bytesAsSlice(Event(operation), input);
             for (events) |*event| {
-                sum_reserved_timestamps += event.timestamp;
-                self.prepare_timestamp += 1;
-                event.timestamp = self.prepare_timestamp;
+                input_timestamp_or |= event.timestamp;
+                prepare_timestamp += 1;
+                event.timestamp = prepare_timestamp;
             }
             // The client is responsible for ensuring that timestamps are reserved:
             // Use a single branch condition to detect non-zero reserved timestamps.
-            // Summing then branching once is faster than branching every iteration of the loop.
-            assert(sum_reserved_timestamps == 0);
+            // 'or'-ing then branching once is faster than branching every iteration of the loop.
+            if (input_timestamp_or != 0) return error.NonZeroTimestamp;
+            self.prepare_timestamp = prepare_timestamp;
         }
 
         pub fn prefetch(
@@ -1450,7 +1454,7 @@ test "linked accounts" {
     const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(output);
 
-    _ = state_machine.prepare(.create_accounts, input);
+    _ = state_machine.prepare(.create_accounts, input) catch unreachable;
     const size = state_machine.commit(0, 1, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
@@ -1502,7 +1506,7 @@ test "linked_event_chain_open" {
     const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(output);
 
-    _ = state_machine.prepare(.create_accounts, input);
+    _ = state_machine.prepare(.create_accounts, input) catch unreachable;
     const size = state_machine.commit(0, 1, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
@@ -1545,7 +1549,7 @@ test "linked_event_chain_open for an already failed batch" {
     const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(output);
 
-    _ = state_machine.prepare(.create_accounts, input);
+    _ = state_machine.prepare(.create_accounts, input) catch unreachable;
     const size = state_machine.commit(0, 1, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
@@ -1582,7 +1586,7 @@ test "linked_event_chain_open for a batch of 1" {
     const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(output);
 
-    _ = state_machine.prepare(.create_accounts, input);
+    _ = state_machine.prepare(.create_accounts, input) catch unreachable;
     const size = state_machine.commit(0, 1, .create_accounts, input, output);
     const results = mem.bytesAsSlice(CreateAccountsResult, output[0..size]);
 
@@ -1651,7 +1655,7 @@ test "create/lookup/rollback transfers" {
     const output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(output);
 
-    _ = state_machine.prepare(.create_accounts, input);
+    _ = state_machine.prepare(.create_accounts, input) catch unreachable;
 
     for (accounts) |account| {
         state_machine.forest.grooves.accounts.put(&account);
@@ -2347,7 +2351,7 @@ test "create/lookup/rollback 2-phase transfers" {
     const accounts_output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(accounts_output);
 
-    const accounts_timestamp = state_machine.prepare(.create_accounts, accounts_input);
+    const accounts_timestamp = state_machine.prepare(.create_accounts, accounts_input) catch unreachable;
     {
         const size = state_machine.commit(0, 1, .create_accounts, accounts_input, accounts_output);
         const errors = mem.bytesAsSlice(CreateAccountsResult, accounts_output[0..size]);
@@ -2363,7 +2367,7 @@ test "create/lookup/rollback 2-phase transfers" {
     const transfers_output = try testing.allocator.alignedAlloc(u8, 16, 4096);
     defer testing.allocator.free(transfers_output);
 
-    const transfers_timestamp = state_machine.prepare(.create_transfers, transfers_input);
+    const transfers_timestamp = state_machine.prepare(.create_transfers, transfers_input) catch unreachable;
     try testing.expect(transfers_timestamp > accounts_timestamp);
     {
         const size = state_machine.commit(0, 2, .create_transfers, transfers_input, transfers_output);
