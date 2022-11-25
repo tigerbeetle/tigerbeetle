@@ -785,7 +785,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 .ledger = p.ledger,
                 .code = p.code,
                 .pending_id = t.pending_id,
-                .timeout = t.timeout,
+                .timeout = 0,
                 .timestamp = t.timestamp,
                 .flags = t.flags,
                 .amount = amount,
