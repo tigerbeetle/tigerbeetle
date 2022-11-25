@@ -36,33 +36,18 @@ const ReflectionHelper = struct {
 
         // Asserting we are not initialized yet:
         assert(initialization_exception_class == null);
+        assert(initialization_exception_ctor_id == null);
+        assert(request_class == null);
         assert(request_buffer_field_id == null);
         assert(request_buffer_len_field_id == null);
         assert(request_operation_method_id == null);
         assert(request_end_request_method_id == null);
+        assert(request_release_permit_method_id == null);
 
-        initialization_exception_class = blk: {
-            var class_obj = try env.findClass("com/tigerbeetle/InitializationException");
-            assert(class_obj != null);
-            defer env.deleteReference(.local, class_obj);
-
-            break :blk env.newReference(.global, class_obj) catch {
-                @panic("JNI: Error creating a global reference");
-            };
-        };
-
+        initialization_exception_class = find_class(env, "com/tigerbeetle/InitializationException");
         initialization_exception_ctor_id = try env.getMethodId(initialization_exception_class, "<init>", "(I)V");
 
-        request_class = blk: {
-            var class_obj = try env.findClass("com/tigerbeetle/Request");
-            assert(class_obj != null);
-            defer env.deleteReference(.local, class_obj);
-
-            break :blk env.newReference(.global, class_obj) catch {
-                @panic("JNI: Error creating a global reference");
-            };
-        };
-
+        request_class = find_class(env, "com/tigerbeetle/Request");
         request_buffer_field_id = try env.getFieldId(request_class, "buffer", "Ljava/nio/ByteBuffer;");
         request_buffer_len_field_id = try env.getFieldId(request_class, "bufferLen", "J");
         request_operation_method_id = try env.getMethodId(request_class, "getOperation", "()B");
@@ -80,11 +65,26 @@ const ReflectionHelper = struct {
         assert(request_release_permit_method_id != null);
     }
 
+    inline fn find_class(env: *jui.JNIEnv, comptime class_name: [:0]const u8) jui.jclass {
+        var class_obj = env.findClass(class_name) catch |err| {
+            log.err("Unexpected error loading " ++ class_name ++ " {}", .{err});
+            @panic("JNI: Unexpected error loading " ++ class_name);
+        } orelse {
+            @panic("JNI: Class " ++ class_name ++ " not found");
+        };
+        defer env.deleteReference(.local, class_obj);
+
+        return env.newReference(.global, class_obj) catch {
+            @panic("JNI: Unexpected error creating a global reference for " ++ class_name);
+        };
+    }
+
     pub fn unload(env: *jui.JNIEnv) void {
         env.deleteReference(.global, initialization_exception_class);
         env.deleteReference(.global, request_class);
 
         initialization_exception_class = null;
+        initialization_exception_ctor_id = null;
         request_class = null;
         request_buffer_field_id = null;
         request_buffer_len_field_id = null;
@@ -103,14 +103,14 @@ const ReflectionHelper = struct {
             &[_]jui.jvalue{jui.jvalue.toJValue(@bitCast(jui.jint, @enumToInt(status)))},
         ) catch {
             // It's unexpected here: we did not initialize correctly or the JVM is out of memory.
-            @panic("JNI: Cannot create a new exception.");
+            @panic("JNI: Unexpected error creating a new exception.");
         };
 
         assert(exception != null);
         defer env.deleteReference(.local, exception);
 
         env.throw(exception) catch {
-            @panic("JNI: Cannot throw an exception.");
+            @panic("JNI: Unexpected error throwing an exception.");
         };
         assert(env.hasPendingException());
     }
@@ -140,9 +140,10 @@ const ReflectionHelper = struct {
             request_class,
             request_operation_method_id,
             null,
-        ) catch |err| {
-            log.err("Method getOperation failed {}", .{err});
-            @panic("JNI: Method getOperation failed");
+        ) catch {
+            // The "getOperation" method isn't expected to throw any exception,
+            env.describeException();
+            @panic("JNI: Unexpected error calling getOperation method");
         };
 
         return @bitCast(u8, value);
@@ -160,8 +161,8 @@ const ReflectionHelper = struct {
                 // Cannot allocate a ByteBuffer, it's likely the JVM has run out of resources
                 // Printing the buffer size here just to help diagnosing how much memory was required
                 env.describeException();
-                log.err("Error allocating a new direct ByteBuffer len={}", .{value.len});
-                @panic("JNI: Error allocating a new direct ByteBuffer");
+                log.err("Unexpected error allocating a new direct ByteBuffer len={}", .{value.len});
+                @panic("JNI: Unexpected error allocating a new direct ByteBuffer");
             };
 
             assert(local_ref != null);
@@ -184,7 +185,7 @@ const ReflectionHelper = struct {
             // The "endRequest" method isn't expected to throw any exception,
             // We can't rethrow here, since this function is called from the native callback.
             env.describeException();
-            @panic("JNI: Error calling endRequest method");
+            @panic("JNI: Unexpected error calling endRequest method");
         };
     }
 
@@ -202,7 +203,7 @@ const ReflectionHelper = struct {
             // The "releasePermit" method isn't expected to throw any exception,
             // We can't rethrow here, since this function is called from the native callback.
             env.describeException();
-            @panic("JNI: Error calling releasePermit method");
+            @panic("JNI: Unexpected error calling releasePermit method");
         };
     }
 };
@@ -304,8 +305,8 @@ const NativeClient = struct {
 
         if (status == .success) {
             var jvm = env.getJavaVM() catch |err| {
-                log.err("JNI failure {}", .{err});
-                @panic("JNI failure.");
+                log.err("Unexpected JNI failure retrieving the JVM {}", .{err});
+                @panic("JNI: Unexpected JNI failure retrieving the JVM");
             };
 
             context.* = .{
@@ -337,7 +338,7 @@ const NativeClient = struct {
         // Holds a global reference to prevent GC during the callback.
         var global_ref = env.newReference(.global, request_obj) catch {
             // NewGlobalRef fails only when the JVM runs out of memory.
-            @panic("JNI: Error creating a global reference");
+            @panic("JNI: Unexpected error creating a global reference");
         };
 
         assert(global_ref != null);
@@ -377,8 +378,8 @@ const NativeClient = struct {
 
         var context = @intToPtr(*JNIContext, context_ptr);
         var env = context.jvm.attachCurrentThreadAsDaemon() catch |err| {
-            log.err("Error {s} attaching the native thread as daemon", .{@errorName(err)});
-            @panic("JNI: Error attaching the native thread as daemon");
+            log.err("Unexpected error attaching the native thread as daemon {s}", .{err});
+            @panic("JNI: Unexpected error attaching the native thread as daemon");
         };
 
         // Retrieves the request instance, and drops the GC reference.
