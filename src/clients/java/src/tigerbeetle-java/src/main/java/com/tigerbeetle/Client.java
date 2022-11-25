@@ -3,20 +3,13 @@ package com.tigerbeetle;
 import java.util.Objects;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 
 public final class Client implements AutoCloseable {
-    static {
-        JNILoader.loadFromJar();
-    }
 
     private static final int DEFAULT_MAX_CONCURRENCY = 32;
 
     private final int clusterID;
-    private final int maxConcurrency;
-    private final Semaphore maxConcurrencySemaphore;
-    private volatile long contextHandle;
+    private final NativeClient nativeClient;
 
     /**
      * Initializes an instance of TigerBeetle client. This class is thread-safe and for optimal
@@ -57,27 +50,8 @@ public final class Client implements AutoCloseable {
             joiner.add(address);
         }
 
-        int status = clientInit(clusterID, joiner.toString(), maxConcurrency);
-
-        switch (status) {
-            case InitializationException.Status.SUCCESS:
-                this.clusterID = clusterID;
-                this.maxConcurrency = maxConcurrency;
-                this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
-                break;
-
-            case InitializationException.Status.ADDRESS_INVALID:
-                throw new IllegalArgumentException("Replica addresses format is invalid");
-
-            case InitializationException.Status.ADDRESS_LIMIT_EXCEEDED:
-                throw new IllegalArgumentException("Replica addresses limit exceeded");
-
-            case InitializationException.Status.PACKETS_COUNT_INVALID:
-                throw new IllegalArgumentException("Invalid maxConcurrency");
-
-            default:
-                throw new InitializationException(status);
-        }
+        this.clusterID = clusterID;
+        this.nativeClient = NativeClient.init(clusterID, joiner.toString(), maxConcurrency);
     }
 
     /**
@@ -103,13 +77,13 @@ public final class Client implements AutoCloseable {
         this(clusterID, replicaAddresses, DEFAULT_MAX_CONCURRENCY);
     }
 
-    Client(final int clusterID, final int maxConcurrency) {
-        if (maxConcurrency <= 0)
-            throw new IllegalArgumentException("Invalid maxConcurrency");
-
-        this.clusterID = clusterID;
-        this.maxConcurrency = maxConcurrency;
-        this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
+    /**
+     * Gets the cluster ID
+     *
+     * @return clusterID
+     */
+    public int getClusterID() {
+        return clusterID;
     }
 
     /**
@@ -127,7 +101,7 @@ public final class Client implements AutoCloseable {
      */
     public CreateAccountResultBatch createAccounts(final AccountBatch batch)
             throws RequestException {
-        final var request = BlockingRequest.createAccounts(this, batch);
+        final var request = BlockingRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -145,7 +119,7 @@ public final class Client implements AutoCloseable {
      */
     public CompletableFuture<CreateAccountResultBatch> createAccountsAsync(
             final AccountBatch batch) {
-        final var request = AsyncRequest.createAccounts(this, batch);
+        final var request = AsyncRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
     }
@@ -162,7 +136,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public AccountBatch lookupAccounts(final IdBatch batch) throws RequestException {
-        final var request = BlockingRequest.lookupAccounts(this, batch);
+        final var request = BlockingRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -178,7 +152,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<AccountBatch> lookupAccountsAsync(final IdBatch batch) {
-        final var request = AsyncRequest.lookupAccounts(this, batch);
+        final var request = AsyncRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
     }
@@ -198,7 +172,7 @@ public final class Client implements AutoCloseable {
      */
     public CreateTransferResultBatch createTransfers(final TransferBatch batch)
             throws RequestException {
-        final var request = BlockingRequest.createTransfers(this, batch);
+        final var request = BlockingRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -215,7 +189,7 @@ public final class Client implements AutoCloseable {
      */
     public CompletableFuture<CreateTransferResultBatch> createTransfersAsync(
             final TransferBatch batch) {
-        final var request = AsyncRequest.createTransfers(this, batch);
+        final var request = AsyncRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
     }
@@ -233,7 +207,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public TransferBatch lookupTransfers(final IdBatch batch) throws RequestException {
-        final var request = BlockingRequest.lookupTransfers(this, batch);
+        final var request = BlockingRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -249,44 +223,9 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<TransferBatch> lookupTransfersAsync(final IdBatch batch) {
-        final var request = AsyncRequest.lookupTransfers(this, batch);
+        final var request = AsyncRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
-    }
-
-    void submit(final Request<?> request) {
-        acquirePermit();
-        submit(contextHandle, request);
-    }
-
-    private void acquirePermit() {
-
-        // Assure that only the max number of concurrent requests can acquire a packet
-        // It forces other threads to wait until a packet became available
-        // We also assure that the clientHandle will be zeroed only after all permits
-        // have been released
-        final int TIMEOUT = 5;
-        boolean acquired = false;
-        do {
-
-            if (contextHandle == 0)
-                throw new IllegalStateException("Client is closed");
-
-            try {
-                acquired = maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException interruptedException) {
-
-                // This exception should never exposed by the API to be handled by the user
-                throw new AssertionError(interruptedException,
-                        "Unexpected thread interruption on acquiring a packet.");
-            }
-
-        } while (!acquired);
-    }
-
-    void releasePermit() {
-        // Releasing the packet to be used by another thread
-        maxConcurrencySemaphore.release();
     }
 
     /**
@@ -298,26 +237,6 @@ public final class Client implements AutoCloseable {
      */
     @Override
     public void close() throws Exception {
-
-        if (contextHandle != 0) {
-
-            // Acquire all permits, forcing to wait for any processing thread to release
-            // Note that "acquireUninterruptibly(maxConcurrency)" atomically acquires the
-            // permits
-            // all at once, causing this operation to take longer.
-            for (int i = 0; i < maxConcurrency; i++) {
-                this.maxConcurrencySemaphore.acquireUninterruptibly();
-            }
-
-            // Deinit and signalize that this client is closed by setting the handles to 0
-            clientDeinit(contextHandle);
-            contextHandle = 0;
-        }
+        nativeClient.close();
     }
-
-    private native void submit(long contextHandle, Request<?> request);
-
-    private native int clientInit(int clusterID, String addresses, int maxConcurrency);
-
-    private native void clientDeinit(long contextHandle);
 }
