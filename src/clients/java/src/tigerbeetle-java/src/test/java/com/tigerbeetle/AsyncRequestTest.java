@@ -14,13 +14,14 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.Test;
+import com.tigerbeetle.Request.Operations;
 
 public class AsyncRequestTest {
 
     @Test
     public void testCreateAccountsRequestConstructor() {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new AccountBatch(1);
         batch.add();
 
@@ -31,7 +32,7 @@ public class AsyncRequestTest {
     @Test
     public void testCreateTransfersRequestConstructor() {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -42,7 +43,7 @@ public class AsyncRequestTest {
     @Test
     public void testLookupAccountsRequestConstructor() {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new IdBatch(1);
         batch.add();
 
@@ -53,7 +54,7 @@ public class AsyncRequestTest {
     @Test
     public void testLookupTransfersRequestConstructor() {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new IdBatch(1);
         batch.add();
 
@@ -74,7 +75,7 @@ public class AsyncRequestTest {
     @Test(expected = NullPointerException.class)
     public void testConstructorWithBatchNull() {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         AsyncRequest.createAccounts(client, null);
         assert false;
     }
@@ -82,7 +83,7 @@ public class AsyncRequestTest {
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroCapacityBatch() {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new AccountBatch(0);
 
         AsyncRequest.createAccounts(client, batch);
@@ -92,7 +93,7 @@ public class AsyncRequestTest {
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroItemsBatch() {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new AccountBatch(1);
 
         AsyncRequest.createAccounts(client, batch);
@@ -102,15 +103,16 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithInvalidOperation() throws Throwable {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new TransferBatch(1);
         batch.add();
 
 
         var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResultBatch.Struct.SIZE);
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
-                AsyncRequest.createTransfers(client, batch), Request.Operations.LOOKUP_ACCOUNTS,
-                dummyBuffer, 1, RequestException.Status.OK, 250);
+                AsyncRequest.createTransfers(client, batch),
+                Request.Operations.LOOKUP_ACCOUNTS.value, dummyBuffer, 1,
+                RequestException.Status.OK, 250);
 
         CompletableFuture<CreateTransferResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -128,16 +130,18 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithUnknownOperation() throws Throwable {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new TransferBatch(1);
         batch.add();
 
         final byte UNKNOWN = 99;
 
         var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResultBatch.Struct.SIZE);
-        var callback = new CallbackSimulator<CreateTransferResultBatch>(
-                new AsyncRequest<CreateTransferResultBatch>(client, UNKNOWN, batch), UNKNOWN,
-                dummyBuffer, 1, RequestException.Status.OK, 250);
+        var callback =
+                new CallbackSimulator<CreateTransferResultBatch>(
+                        new AsyncRequest<CreateTransferResultBatch>(client,
+                                Operations.CREATE_TRANSFERS, batch),
+                        UNKNOWN, dummyBuffer, 1, RequestException.Status.OK, 250);
 
         CompletableFuture<CreateTransferResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -156,13 +160,14 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithNullBuffer() throws Throwable {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new TransferBatch(1);
         batch.add();
 
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
-                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
-                null, 1, RequestException.Status.OK, 250);
+                AsyncRequest.createTransfers(client, batch),
+                Request.Operations.CREATE_TRANSFERS.value, null, 1, RequestException.Status.OK,
+                250);
 
         CompletableFuture<CreateTransferResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -180,7 +185,7 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithInvalidBufferSize() throws Throwable {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -188,8 +193,9 @@ public class AsyncRequestTest {
         var invalidBuffer =
                 ByteBuffer.allocateDirect((CreateTransferResultBatch.Struct.SIZE * 2) - 1);
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
-                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
-                invalidBuffer, 1, RequestException.Status.OK, 250);
+                AsyncRequest.createTransfers(client, batch),
+                Request.Operations.CREATE_TRANSFERS.value, invalidBuffer, 1,
+                RequestException.Status.OK, 250);
 
         CompletableFuture<CreateTransferResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -207,7 +213,7 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithInvalidPacket() throws Throwable {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -215,8 +221,9 @@ public class AsyncRequestTest {
         final long NULL = 0; // Packet is a long representing a pointer, cannot be null
 
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
-                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
-                dummyBuffer, NULL, RequestException.Status.OK, 250);
+                AsyncRequest.createTransfers(client, batch),
+                Request.Operations.CREATE_TRANSFERS.value, dummyBuffer, NULL,
+                RequestException.Status.OK, 250);
 
         CompletableFuture<CreateTransferResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -234,14 +241,15 @@ public class AsyncRequestTest {
     @Test
     public void testEndRequestWithRequestException() {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new TransferBatch(1);
         batch.add();
 
         var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResultBatch.Struct.SIZE);
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
-                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
-                dummyBuffer, 1, RequestException.Status.TOO_MUCH_DATA, 250);
+                AsyncRequest.createTransfers(client, batch),
+                Request.Operations.CREATE_TRANSFERS.value, dummyBuffer, 1,
+                RequestException.Status.TOO_MUCH_DATA, 250);
 
         CompletableFuture<CreateTransferResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -261,7 +269,7 @@ public class AsyncRequestTest {
 
     @Test(expected = AssertionError.class)
     public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests() throws Throwable {
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
 
         // A batch with only 1 item
         var batch = new AccountBatch(1);
@@ -272,8 +280,9 @@ public class AsyncRequestTest {
                 .order(ByteOrder.LITTLE_ENDIAN);
 
         var callback = new CallbackSimulator<CreateAccountResultBatch>(
-                AsyncRequest.createAccounts(client, batch), Request.Operations.CREATE_ACCOUNTS,
-                incorrectReply.position(0), 1, RequestException.Status.OK, 250);
+                AsyncRequest.createAccounts(client, batch),
+                Request.Operations.CREATE_ACCOUNTS.value, incorrectReply.position(0), 1,
+                RequestException.Status.OK, 250);
 
         CompletableFuture<CreateAccountResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -290,7 +299,7 @@ public class AsyncRequestTest {
 
     @Test
     public void testCreateAccountEndRequest() throws ExecutionException, InterruptedException {
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new AccountBatch(2);
         batch.add();
         batch.add();
@@ -304,8 +313,9 @@ public class AsyncRequestTest {
         dummyReplyBuffer.putInt(CreateAccountResult.Exists.ordinal());
 
         var callback = new CallbackSimulator<CreateAccountResultBatch>(
-                AsyncRequest.createAccounts(client, batch), Request.Operations.CREATE_ACCOUNTS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 250);
+                AsyncRequest.createAccounts(client, batch),
+                Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0), 1,
+                RequestException.Status.OK, 250);
 
         CompletableFuture<CreateAccountResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -325,7 +335,7 @@ public class AsyncRequestTest {
 
     @Test
     public void testCreateTransferEndRequest() throws InterruptedException, ExecutionException {
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new TransferBatch(2);
         batch.add();
         batch.add();
@@ -339,8 +349,9 @@ public class AsyncRequestTest {
         dummyReplyBuffer.putInt(CreateTransferResult.Exists.ordinal());
 
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
-                AsyncRequest.createTransfers(client, batch), Request.Operations.CREATE_TRANSFERS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 250);
+                AsyncRequest.createTransfers(client, batch),
+                Request.Operations.CREATE_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
+                RequestException.Status.OK, 250);
 
         CompletableFuture<CreateTransferResultBatch> future = callback.request.getFuture();
         callback.start();
@@ -360,7 +371,7 @@ public class AsyncRequestTest {
 
     @Test
     public void testLookupAccountEndRequest() throws InterruptedException, ExecutionException {
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -371,9 +382,10 @@ public class AsyncRequestTest {
         dummyReplyBuffer.putLong(100).putLong(1000);
         dummyReplyBuffer.position(AccountBatch.Struct.SIZE).putLong(200).putLong(2000);
 
-        var callback = new CallbackSimulator<AccountBatch>(
-                AsyncRequest.lookupAccounts(client, batch), Request.Operations.LOOKUP_ACCOUNTS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 250);
+        var callback =
+                new CallbackSimulator<AccountBatch>(AsyncRequest.lookupAccounts(client, batch),
+                        Request.Operations.LOOKUP_ACCOUNTS.value, dummyReplyBuffer.position(0), 1,
+                        RequestException.Status.OK, 250);
 
         CompletableFuture<AccountBatch> future = callback.request.getFuture();
         callback.start();
@@ -393,7 +405,7 @@ public class AsyncRequestTest {
 
     @Test
     public void testLookupTransferEndRequest() throws InterruptedException, ExecutionException {
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -404,9 +416,10 @@ public class AsyncRequestTest {
         dummyReplyBuffer.putLong(100).putLong(1000);
         dummyReplyBuffer.position(TransferBatch.Struct.SIZE).putLong(200).putLong(2000);
 
-        var callback = new CallbackSimulator<TransferBatch>(
-                AsyncRequest.lookupTransfers(client, batch), Request.Operations.LOOKUP_TRANSFERS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 250);
+        var callback =
+                new CallbackSimulator<TransferBatch>(AsyncRequest.lookupTransfers(client, batch),
+                        Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
+                        RequestException.Status.OK, 250);
 
         CompletableFuture<TransferBatch> future = callback.request.getFuture();
         callback.start();
@@ -427,7 +440,7 @@ public class AsyncRequestTest {
     @Test
     public void testSuccessFuture() throws InterruptedException, ExecutionException {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -438,9 +451,10 @@ public class AsyncRequestTest {
         dummyReplyBuffer.putLong(100).putLong(1000);
         dummyReplyBuffer.position(TransferBatch.Struct.SIZE).putLong(200).putLong(2000);
 
-        var callback = new CallbackSimulator<TransferBatch>(
-                AsyncRequest.lookupTransfers(client, batch), Request.Operations.LOOKUP_TRANSFERS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 500);
+        var callback =
+                new CallbackSimulator<TransferBatch>(AsyncRequest.lookupTransfers(client, batch),
+                        Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
+                        RequestException.Status.OK, 500);
 
         Future<TransferBatch> future = callback.request.getFuture();
         callback.start();
@@ -470,7 +484,7 @@ public class AsyncRequestTest {
     @Test
     public void testSuccessFutureWithTimeout() throws InterruptedException, ExecutionException {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -481,9 +495,10 @@ public class AsyncRequestTest {
         dummyReplyBuffer.putLong(100).putLong(1000);
         dummyReplyBuffer.position(TransferBatch.Struct.SIZE).putLong(200).putLong(2000);
 
-        var callback = new CallbackSimulator<TransferBatch>(
-                AsyncRequest.lookupTransfers(client, batch), Request.Operations.LOOKUP_TRANSFERS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.OK, 500);
+        var callback =
+                new CallbackSimulator<TransferBatch>(AsyncRequest.lookupTransfers(client, batch),
+                        Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
+                        RequestException.Status.OK, 500);
 
         Future<TransferBatch> future = callback.request.getFuture();
         callback.start();
@@ -510,16 +525,17 @@ public class AsyncRequestTest {
     @Test
     public void testFailedFuture() throws InterruptedException {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new IdBatch(1);
         batch.add();
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(0);
 
-        var callback = new CallbackSimulator<TransferBatch>(
-                AsyncRequest.lookupTransfers(client, batch), Request.Operations.LOOKUP_TRANSFERS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.TOO_MUCH_DATA, 250);
+        var callback =
+                new CallbackSimulator<TransferBatch>(AsyncRequest.lookupTransfers(client, batch),
+                        Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
+                        RequestException.Status.TOO_MUCH_DATA, 250);
 
         Future<TransferBatch> future = callback.request.getFuture();
         callback.start();
@@ -540,16 +556,17 @@ public class AsyncRequestTest {
     @Test
     public void testFailedFutureWithTimeout() throws InterruptedException, TimeoutException {
 
-        var client = new Client(0, 1);
+        var client = NativeClient.initEcho(0, "3000", 1);
         var batch = new IdBatch(1);
         batch.add();
 
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocateDirect(0);
 
-        var callback = new CallbackSimulator<AccountBatch>(
-                AsyncRequest.lookupAccounts(client, batch), Request.Operations.LOOKUP_ACCOUNTS,
-                dummyReplyBuffer.position(0), 1, RequestException.Status.INVALID_DATA_SIZE, 100);
+        var callback =
+                new CallbackSimulator<AccountBatch>(AsyncRequest.lookupAccounts(client, batch),
+                        Request.Operations.LOOKUP_ACCOUNTS.value, dummyReplyBuffer.position(0), 1,
+                        RequestException.Status.INVALID_DATA_SIZE, 100);
 
         Future<AccountBatch> future = callback.request.getFuture();
         callback.start();

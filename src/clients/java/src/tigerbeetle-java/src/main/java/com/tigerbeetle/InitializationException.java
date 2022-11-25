@@ -38,15 +38,21 @@ public final class InitializationException extends RuntimeException {
             case Status.OUT_OF_MEMORY:
                 return "Internal client ran out of memory";
 
+            case Status.ADDRESS_INVALID:
+                return "Replica addresses format is invalid";
+
+            case Status.ADDRESS_LIMIT_EXCEEDED:
+                return "Replica addresses limit exceeded";
+
+            case Status.PACKETS_COUNT_INVALID:
+                return "Invalid maxConcurrency";
+
             case Status.SYSTEM_RESOURCES:
                 return "Internal client ran out of system resources";
 
             case Status.NETWORK_SUBSYSTEM:
                 return "Internal client had unexpected networking issues";
 
-            case Status.ADDRESS_INVALID:
-            case Status.ADDRESS_LIMIT_EXCEEDED:
-            case Status.PACKETS_COUNT_INVALID:
             default:
                 return "Error status " + status;
         }
