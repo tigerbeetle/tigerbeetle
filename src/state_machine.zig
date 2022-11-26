@@ -1117,42 +1117,37 @@ const TestContext = struct {
         ctx.* = undefined;
     }
 
-    fn ca(context: *TestContext, account_vector: AccountVector) !void {
-        const account = account_vector.object;
+    fn create_account(context: *TestContext, account: Account, result: CreateAccountResult) !void {
         const result_actual = context.state_machine.create_account(&account);
-        try expectEqual(account_vector.result, result_actual);
+        try expectEqual(result, result_actual);
 
-        if (account_vector.result == .ok) {
+        if (result == .ok) {
             try expectEqual(account, context.state_machine.get_account(account.id).?.*);
         }
     }
 
-    fn put_account(context: *TestContext, account: Account) !void {
-        context.state_machine.forest.grooves.accounts.put(&account);
-        try expectEqual(account, context.state_machine.get_account(account.id).?.*);
-    }
-
-    fn create_transfer(context: *TestContext, transfer_vector: TransferVector) !void {
-        const transfer = transfer_vector.object;
+    fn create_transfer(
+        context: *TestContext,
+        transfer: Transfer,
+        result: CreateTransferResult,
+    ) !void {
         const result_actual = context.state_machine.create_transfer(&transfer);
-        try expectEqual(transfer_vector.result, result_actual);
+        try expectEqual(result, result_actual);
     }
 
     fn create_objects(
         context: *TestContext,
-        comptime Object: type,
-        vectors: []const Vector(Object),
+        comptime Vector: type,
+        vectors: []const Vector,
     ) !void {
-        const operation = switch (Object) {
-            Account => .create_accounts,
-            Transfer => .create_transfers,
+        const operation = switch (Vector) {
+            TestAccount => .create_accounts,
+            TestTransfer => .create_transfers,
             else => unreachable,
         };
 
-        var objects = std.BoundedArray(Object, 32).init(0) catch unreachable;
-        for (vectors) |vector| {
-            objects.appendAssumeCapacity(vector.object);
-        }
+        var objects = std.BoundedArray(Vector.Object, 32).init(0) catch unreachable;
+        for (vectors) |vector| objects.appendAssumeCapacity(vector.object(0));
 
         const request = mem.sliceAsBytes(objects.slice());
         const reply = try testing.allocator.alignedAlloc(u8, 16, 4096);
@@ -1172,7 +1167,7 @@ const TestContext = struct {
         }
         assert(results_index == results.len);
 
-        if (Object == Account) {
+        if (Vector == TestAccount) {
             for (objects.slice()) |vector, i| {
                 if (vectors[i].result != .ok) continue;
                 try expectEqual(vector, context.state_machine.get_account(vector.id).?.*);
@@ -1184,276 +1179,330 @@ const TestContext = struct {
     }
 };
 
-const N = false;
-const Y = true;
+const TestAction = union(enum) {
+    // Create an account and check the result.
+    account: TestAccount,
 
-// Account.id, Transfer.id
-const id0: u128 = 0;
-const id1: u128 = 1;
-const id2: u128 = 2;
-const id3: u128 = 3;
-const id4: u128 = 4;
-const id5: u128 = 5;
-const id6: u128 = 6;
-const id7: u128 = 7;
-const idZ: u128 = math.maxInt(u128);
+    accounts_batch_start: void,
+    accounts_batch_end: void,
+    accounts: TestAccount,
 
-// Account.user_data, Transfer.user_data
-const ud0: u128 = id0;
-const ud1: u128 = id1;
-const ud2: u128 = id2;
+    account_exists: struct {
+        id: u128,
+        exists: bool,
+    },
+    // Create a transfer and check the result.
+    transfer: TestTransfer,
+    // Check an account's balance.
+    balance: struct {
+        account: u128,
+        debits_pending: u64,
+        debits_posted: u64,
+        credits_pending: u64,
+        credits_posted: u64,
+    },
+    // Set the account's balance.
+    balance_set: struct {
+        account: u128,
+        debits_pending: u64,
+        debits_posted: u64,
+        credits_pending: u64,
+        credits_posted: u64,
+    },
+    rollback_account: u128,
+    rollback_transfer: u128,
+};
 
-// Transfer.amount, Account.{debits,credits}_{pending,posted}
-const a0: u64 = 0;
-const a1: u64 = 1;
-const aZ: u64 = math.maxInt(u64);
-
-// Account.reserved
-const ar0 = [_]u8{0} ** 48;
-const ar1 = [_]u8{1} ** 48;
-
-// Account.flags.padding
-const afp0: u13 = 0;
-const afp1: u13 = 1;
-
-// Transfer.reserved
-const tr0: u128 = 0;
-const tr1: u128 = 1;
-
-// Transfer.timeout
-const to0: u64 = 0;
-
-// Transfer.flags.padding
-const p0: u12 = 0;
-const p1: u12 = 1;
-
-fn A(
+const TestAccount = struct {
     id: u128,
-    user_data: u128,
-    reserved: [48]u8,
+    user_data: u128 = 0,
+    reserved: enum { @"0", @"1" } = .@"0",
     ledger: u32,
     code: u16,
-    flags_linked: bool,
-    flags_debits_must_not_exceed_credits: bool,
-    flags_credits_must_not_exceed_debits: bool,
-    flags_padding: u13,
-    debits_pending: u64,
-    debits_posted: u64,
-    credits_pending: u64,
-    credits_posted: u64,
-    timestamp: u64,
+    flags_linked: ?enum { LNK } = null,
+    flags_debits_must_not_exceed_credits: ?enum { @"D<C" } = null,
+    flags_credits_must_not_exceed_debits: ?enum { @"C<D" } = null,
+    flags_padding: u13 = 0,
+    debits_pending: u64 = 0,
+    debits_posted: u64 = 0,
+    credits_pending: u64 = 0,
+    credits_posted: u64 = 0,
     result: CreateAccountResult,
-) AccountVector {
-    return .{
-        .object = Account{
-            .id = id,
-            .user_data = user_data,
-            .reserved = reserved,
-            .ledger = ledger,
-            .code = code,
-            .flags = .{
-                .linked = flags_linked,
-                .debits_must_not_exceed_credits = flags_debits_must_not_exceed_credits,
-                .credits_must_not_exceed_debits = flags_credits_must_not_exceed_debits,
-                .padding = flags_padding,
-            },
-            .debits_pending = debits_pending,
-            .debits_posted = debits_posted,
-            .credits_pending = credits_pending,
-            .credits_posted = credits_posted,
-            .timestamp = timestamp,
-        },
-        .result = result,
-    };
-}
 
-fn T(
+    const Object = Account;
+
+    fn object(a: TestAccount, timestamp: u64) Object {
+        return .{
+            .id = a.id,
+            .user_data = a.user_data,
+            .reserved = switch (a.reserved) {
+                .@"0" => [_]u8{0} ** 48,
+                .@"1" => [_]u8{1} ** 48,
+            },
+            .ledger = a.ledger,
+            .code = a.code,
+            .flags = .{
+                .linked = a.flags_linked != null,
+                .debits_must_not_exceed_credits = a.flags_debits_must_not_exceed_credits != null,
+                .credits_must_not_exceed_debits = a.flags_credits_must_not_exceed_debits != null,
+                .padding = a.flags_padding,
+            },
+            .debits_pending = a.debits_pending,
+            .debits_posted = a.debits_posted,
+            .credits_pending = a.credits_pending,
+            .credits_posted = a.credits_posted,
+            .timestamp = timestamp,
+        };
+    }
+};
+
+const TestTransfer = struct {
     id: u128,
     debit_account_id: u128,
     credit_account_id: u128,
-    user_data: u128,
-    reserved: u128,
-    pending_id: u128,
-    timeout: u64,
+    user_data: u128 = 0,
+    reserved: u128 = 0,
+    pending_id: u128 = 0,
+    timeout: u64 = 0,
     ledger: u32,
     code: u16,
-    flags_linked: bool,
-    flags_pending: bool,
-    flags_post_pending_transfer: bool,
-    flags_void_pending_transfer: bool,
-    flags_padding: u12,
-    amount: u64,
-    timestamp: u64,
+    flags_linked: ?enum { LNK } = null,
+    flags_pending: ?enum { PEN } = null,
+    flags_post_pending_transfer: ?enum { POS } = null,
+    flags_void_pending_transfer: ?enum { VOI } = null,
+    flags_padding: u12 = 0,
+    amount: u64 = 0,
     result: CreateTransferResult,
-) TransferVector {
-    return .{
-        .object = .{
-            .id = id,
-            .debit_account_id = debit_account_id,
-            .credit_account_id = credit_account_id,
-            .user_data = user_data,
-            .reserved = reserved,
-            .pending_id = pending_id,
-            .timeout = timeout,
-            .ledger = ledger,
-            .code = code,
+
+    const Object = Transfer;
+
+    fn object(t: TestTransfer, timestamp: u64) Object {
+        return .{
+            .id = t.id,
+            .debit_account_id = t.debit_account_id,
+            .credit_account_id = t.credit_account_id,
+            .user_data = t.user_data,
+            .reserved = t.reserved,
+            .pending_id = t.pending_id,
+            .timeout = t.timeout,
+            .ledger = t.ledger,
+            .code = t.code,
             .flags = .{
-                .linked = flags_linked,
-                .pending = flags_pending,
-                .post_pending_transfer = flags_post_pending_transfer,
-                .void_pending_transfer = flags_void_pending_transfer,
-                .padding = flags_padding,
+                .linked = t.flags_linked != null,
+                .pending = t.flags_pending != null,
+                .post_pending_transfer = t.flags_post_pending_transfer != null,
+                .void_pending_transfer = t.flags_void_pending_transfer != null,
+                .padding = t.flags_padding,
             },
-            .amount = amount,
+            .amount = t.amount,
             .timestamp = timestamp,
-        },
-        .result = result,
-    };
-}
+        };
+    }
+};
 
-fn Vector(comptime Object: type) type {
-    assert(Object == Account or Object == Transfer);
-    return struct {
-        object: Object,
-        result: switch (Object) {
-            Account => CreateAccountResult,
-            Transfer => CreateTransferResult,
-            else => unreachable,
-        },
-    };
-}
+fn check(comptime test_table: []const u8) !void {
+    const table = @import("test/table.zig").table;
+    const allocator = std.testing.allocator;
 
-const AccountVector = Vector(Account);
-const TransferVector = Vector(Transfer);
+    var context: TestContext = undefined;
+    try context.init(allocator);
+    defer context.deinit(allocator);
+
+    const test_actions = try table(allocator, TestAction, test_table);
+    defer test_actions.deinit();
+
+    var accounts = std.AutoHashMap(u128, Account).init(allocator);
+    defer accounts.deinit();
+
+    var transfers = std.AutoHashMap(u128, Transfer).init(allocator);
+    defer transfers.deinit();
+
+    var batch_accounts: ?std.ArrayList(TestAccount) = null;
+    defer if (batch_accounts) |a| a.deinit();
+
+    const timestamp_base = context.state_machine.commit_timestamp + 1;
+    for (test_actions.items) |test_action, i| {
+        switch (test_action) {
+            .account => |a| {
+                assert(batch_accounts == null);
+
+                const account = a.object(timestamp_base + i);
+                if (a.result == .ok) try accounts.putNoClobber(a.id, account);
+                try context.create_account(account, a.result);
+            },
+            .accounts_batch_start => {
+                assert(batch_accounts == null);
+                batch_accounts = std.ArrayList(TestAccount).init(allocator);
+            },
+            .accounts => |a| try batch_accounts.?.append(a),
+            .accounts_batch_end => {
+                try context.create_objects(TestAccount, batch_accounts.?.items);
+                batch_accounts.?.deinit();
+                batch_accounts = null;
+            },
+            .account_exists => |a| {
+                const account = context.state_machine.get_account(a.id);
+                if (a.exists) {
+                    try expectEqual(a.id, account.?.id);
+                } else {
+                    try expectEqual(@as(?*const Account, null), account);
+                }
+            },
+            .transfer => |t| {
+                const transfer = t.object(timestamp_base + i);
+                if (t.result == .ok) try transfers.putNoClobber(t.id, transfer);
+                try context.create_transfer(transfer, t.result);
+            },
+            .balance => |b| {
+                const account = context.state_machine.get_account(b.account).?.*;
+                try expectEqual(b.debits_pending, account.debits_pending);
+                try expectEqual(b.debits_posted, account.debits_posted);
+                try expectEqual(b.credits_pending, account.credits_pending);
+                try expectEqual(b.credits_posted, account.credits_posted);
+            },
+            .balance_set => |b| {
+                var account = context.state_machine.get_account(b.account).?.*;
+                account.debits_pending = b.debits_pending;
+                account.debits_posted = b.debits_posted;
+                account.credits_pending = b.credits_pending;
+                account.credits_posted = b.credits_posted;
+                context.state_machine.forest.grooves.accounts.put(&account);
+            },
+            .rollback_account => |id| {
+                const account = accounts.get(id).?;
+                context.state_machine.create_account_rollback(&account);
+            },
+            .rollback_transfer => |id| {
+                const transfer = transfers.get(id).?;
+                assert(context.state_machine.get_transfer(transfer.id) != null);
+
+                context.state_machine.create_transfer_rollback(&transfer);
+                try expect(context.state_machine.get_transfer(transfer.id) == null);
+                if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
+                    try expect(context.state_machine.get_posted(transfer.pending_id) == null);
+                }
+            },
+        }
+    }
+}
 
 test "create/lookup/rollback accounts" {
-    var c: TestContext = undefined;
-    try c.init(testing.allocator);
-    defer c.deinit(testing.allocator);
-
-    const account_vectors = [_]AccountVector{
-        A(id1, ud2, ar0, 3, 4, N, N, N, afp0, a0, a0, a0, a0, 1, .ok),
-        A(id0, ud0, ar1, 0, 0, N, Y, Y, afp1, a1, a1, a1, a1, 2, .reserved_flag),
-        A(id0, ud0, ar1, 0, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .reserved_field),
-        A(id0, ud0, ar0, 0, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .id_must_not_be_zero),
-        A(idZ, ud0, ar0, 0, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .id_must_not_be_int_max),
-        A(id1, ud1, ar0, 0, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .ledger_must_not_be_zero),
-        A(id1, ud1, ar0, 9, 0, N, Y, Y, afp0, a1, a1, a1, a1, 2, .code_must_not_be_zero),
-        A(id1, ud1, ar0, 9, 9, N, Y, Y, afp0, aZ, aZ, aZ, aZ, 2, .mutually_exclusive_flags),
-        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a1, a1, a1, a1, 2, .debits_pending_must_be_zero),
-        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a0, a1, a1, a1, 2, .debits_posted_must_be_zero),
-        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a0, a0, a1, a1, 2, .credits_pending_must_be_zero),
-        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a0, a0, a0, a1, 2, .credits_posted_must_be_zero),
-        A(id1, ud1, ar0, 9, 9, N, Y, N, afp0, a0, a0, a0, a0, 2, .exists_with_different_flags),
-        A(id1, ud1, ar0, 9, 9, N, N, Y, afp0, a0, a0, a0, a0, 2, .exists_with_different_flags),
-        A(id1, ud1, ar0, 9, 9, N, N, N, afp0, a0, a0, a0, a0, 2, .exists_with_different_user_data),
-        A(id1, ud2, ar0, 9, 9, N, N, N, afp0, a0, a0, a0, a0, 2, .exists_with_different_ledger),
-        A(id1, ud2, ar0, 3, 9, N, N, N, afp0, a0, a0, a0, a0, 2, .exists_with_different_code),
-        A(id1, ud2, ar0, 3, 4, N, N, N, afp0, a0, a0, a0, a0, 2, .exists),
-    };
-
-    for (account_vectors[0..]) |account_vector| {
-        try c.ca(account_vector);
-    }
-
-    c.state_machine.create_account_rollback(&account_vectors[0].object);
-    try expect(c.state_machine.get_account(id1) == null);
-    try expect(c.state_machine.get_account(id2) == null);
+    try check(
+        \\ account A1 U2 _ L3 C4 _   _   _  _  0  0  0  0 ok
+        \\ account A0  _ 1 L0 C0 _ D<C C<D P1  1  1  1  1 reserved_flag
+        \\ account A0  _ 1 L0 C0 _ D<C C<D  _  1  1  1  1 reserved_field
+        \\ account A0  _ _ L0 C0 _ D<C C<D  _  1  1  1  1 id_must_not_be_zero
+        \\ account -0  _ _ L0 C0 _ D<C C<D  _  1  1  1  1 id_must_not_be_int_max
+        \\ account A1 U1 _ L0 C0 _ D<C C<D  _  1  1  1  1 ledger_must_not_be_zero
+        \\ account A1 U1 _ L9 C0 _ D<C C<D  _  1  1  1  1 code_must_not_be_zero
+        \\ account A1 U1 _ L9 C9 _ D<C C<D  _ -0 -0 -0 -0 mutually_exclusive_flags
+        \\ account A1 U1 _ L9 C9 _ D<C   _  _  1  1  1  1 debits_pending_must_be_zero
+        \\ account A1 U1 _ L9 C9 _ D<C   _  _  0  1  1  1 debits_posted_must_be_zero
+        \\ account A1 U1 _ L9 C9 _ D<C   _  _  0  0  1  1 credits_pending_must_be_zero
+        \\ account A1 U1 _ L9 C9 _ D<C   _  _  0  0  0  1 credits_posted_must_be_zero
+        \\ account A1 U1 _ L9 C9 _ D<C   _  _  0  0  0  0 exists_with_different_flags
+        \\ account A1 U1 _ L9 C9 _   _ C<D  _  0  0  0  0 exists_with_different_flags
+        \\ account A1 U1 _ L9 C9 _   _   _  _  0  0  0  0 exists_with_different_user_data
+        \\ account A1 U2 _ L9 C9 _   _   _  _  0  0  0  0 exists_with_different_ledger
+        \\ account A1 U2 _ L3 C9 _   _   _  _  0  0  0  0 exists_with_different_code
+        \\ account A1 U2 _ L3 C4 _   _   _  _  0  0  0  0 exists
+        \\
+        \\ account_exists A1 true
+        \\ account_exists A2 false
+        \\
+        \\ rollback_account A1
+        \\ account_exists A1 false
+        \\ account_exists A2 false
+    );
 }
 
 test "linked accounts" {
-    var context: TestContext = undefined;
-    try context.init(testing.allocator);
-    defer context.deinit(testing.allocator);
-
-    try context.create_objects(Account, &.{
-        // An individual event (successful):
-        A(id7, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+    try check(
+    // An individual event (successful):
+        \\ accounts_batch_start
+        \\   accounts A7 _ _ L1 C1   _ _ _ _ 0 0 0 0 ok
 
         // A chain of 4 events (the last event in the chain closes the chain with linked=false):
         // Commit/rollback.
-        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        \\   accounts A1 _ _ L1 C1 LNK _ _ _ 0 0 0 0 linked_event_failed
         // Commit/rollback.
-        A(id2, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        \\   accounts A2 _ _ L1 C1 LNK _ _ _ 0 0 0 0 linked_event_failed
         // Fail with .exists.
-        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .exists),
+        \\   accounts A1 _ _ L1 C1 LNK _ _ _ 0 0 0 0 exists
         // Fail without committing.
-        A(id3, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        \\   accounts A3 _ _ L1 C1   _ _ _ _ 0 0 0 0 linked_event_failed
 
         // An individual event (successful):
         // This does not see any effect from the failed chain above.
-        A(id1, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+        \\   accounts A1 _ _ L1 C1   _ _ _ _ 0 0 0 0 ok
 
         // A chain of 2 events (the first event fails the chain):
-        A(id1, ud0, ar0, 1, 2, Y, N, N, afp0, a0, a0, a0, a0, 0, .exists_with_different_flags),
-        A(id2, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
+        \\   accounts A1 _ _ L1 C2 LNK _ _ _ 0 0 0 0 exists_with_different_flags
+        \\   accounts A2 _ _ L1 C1   _ _ _ _ 0 0 0 0 linked_event_failed
 
         // An individual event (successful):
-        A(id2, ud1, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+        \\   accounts A2 _ _ L1 C1   _ _ _ _ 0 0 0 0 ok
 
         // A chain of 2 events (the last event fails the chain):
-        A(id3, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
-        A(id1, ud0, ar0, 2, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .exists_with_different_ledger),
+        \\   accounts A3 _ _ L1 C1 LNK _ _ _ 0 0 0 0 linked_event_failed
+        \\   accounts A1 _ _ L2 C1   _ _ _ _ 0 0 0 0 exists_with_different_ledger
 
         // A chain of 2 events (successful):
-        A(id3, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .ok),
-        A(id4, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
-    });
+        \\   accounts A3 _ _ L1 C1 LNK _ _ _ 0 0 0 0 ok
+        \\   accounts A4 _ _ L1 C1   _ _ _ _ 0 0 0 0 ok
+        \\ accounts_batch_end
+    );
 
     // TODO How can we test that events were in fact rolled back in LIFO order?
     // All our rollback handlers appear to be commutative.
 }
 
 test "linked_event_chain_open" {
-    var context: TestContext = undefined;
-    try context.init(testing.allocator);
-    defer context.deinit(testing.allocator);
-
-    try context.create_objects(Account, &.{
+    try check(
+        \\ accounts_batch_start
         // A chain of 3 events (the last event in the chain closes the chain with linked=false):
-        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .ok),
-        A(id2, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .ok),
-        A(id3, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+        \\   accounts A1 _ _ L1 C1 LNK _ _ _ 0 0 0 0 ok
+        \\   accounts A2 _ _ L1 C1 LNK _ _ _ 0 0 0 0 ok
+        \\   accounts A3 _ _ L1 C1   _ _ _ _ 0 0 0 0 ok
 
         // An open chain of 2 events:
-        A(id4, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
-        A(id5, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_chain_open),
-    });
-
-    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id4));
-    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id5));
+        \\   accounts A4 _ _ L1 C1 LNK _ _ _ 0 0 0 0 linked_event_failed
+        \\   accounts A5 _ _ L1 C1 LNK _ _ _ 0 0 0 0 linked_event_chain_open
+        \\ accounts_batch_end
+        \\
+        \\ account_exists A1 true
+        \\ account_exists A2 true
+        \\ account_exists A3 true
+        \\ account_exists A4 false
+        \\ account_exists A5 false
+    );
 }
 
 test "linked_event_chain_open for an already failed batch" {
-    var context: TestContext = undefined;
-    try context.init(testing.allocator);
-    defer context.deinit(testing.allocator);
-
-    try context.create_objects(Account, &.{
+    try check(
+        \\ accounts_batch_start
         // An individual event (successful):
-        A(id1, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok),
+        \\   accounts A1 _ _ L1 C1   _ _ _ _ 0 0 0 0 ok
 
         // An open chain of 3 events (the second one fails):
-        A(id2, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_failed),
-        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .exists_with_different_flags),
-        A(id3, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_chain_open),
-    });
-
-    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id2));
-    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id3));
+        \\   accounts A2 _ _ L1 C1 LNK _ _ _ 0 0 0 0 linked_event_failed
+        \\   accounts A1 _ _ L1 C1 LNK _ _ _ 0 0 0 0 exists_with_different_flags
+        \\   accounts A3 _ _ L1 C1 LNK _ _ _ 0 0 0 0 linked_event_chain_open
+        \\ accounts_batch_end
+        \\
+        \\ account_exists A1 true
+        \\ account_exists A2 false
+        \\ account_exists A3 false
+    );
 }
 
 test "linked_event_chain_open for a batch of 1" {
-    var context: TestContext = undefined;
-    try context.init(testing.allocator);
-    defer context.deinit(testing.allocator);
-
-    try context.create_objects(Account, &.{
-        // Just one event with linked = true
-        A(id1, ud0, ar0, 1, 1, Y, N, N, afp0, a0, a0, a0, a0, 0, .linked_event_chain_open),
-    });
-
-    try expectEqual(@as(?*const Account, null), context.state_machine.get_account(id1));
+    try check(
+        \\ accounts_batch_start
+        \\   accounts A1 _ _ L1 C1 LNK _ _ _ 0 0 0 0 linked_event_chain_open
+        \\ accounts_batch_end
+        \\ account_exists A1 false
+    );
 }
 
 // The goal is to ensure that:
@@ -1461,275 +1510,161 @@ test "linked_event_chain_open for a batch of 1" {
 // 2. enums tested in the order that they are defined, for easier auditing of coverage, and that
 // 3. state machine logic cannot be reordered in any way, breaking determinism.
 test "create/lookup/rollback transfers" {
-    var c: TestContext = undefined;
-    try c.init(testing.allocator);
-    defer c.deinit(testing.allocator);
+    try check(
+        \\ account  A1 _ _ L1 C1 _   _   _ _ 0 0 0 0 ok
+        \\ account  A2 _ _ L2 C2 _   _   _ _ 0 0 0 0 ok
+        \\ account  A3 _ _ L1 C1 _   _   _ _ 0 0 0 0 ok
+        \\ account  A4 _ _ L1 C1 _ D<C   _ _ 0 0 0 0 ok
+        \\ account  A5 _ _ L1 C1 _   _ C<D _ 0 0 0 0 ok
 
-    const A1 = A(id1, ud0, ar0, 1, 1, N, N, N, afp0, 100, 200, a0, a0, 0, .ok).object;
-    const A2 = A(id2, ud0, ar0, 2, 2, N, N, N, afp0, a0, a0, a0, a0, 0, .ok).object;
-    const A3 = A(id3, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, 110, 210, 0, .ok).object;
-    const A4 = A(id4, ud0, ar0, 1, 1, N, Y, N, afp0, 20, aZ - 500 - 200, a0, aZ - 500, 0, .ok).object;
-    const A5 = A(id5, ud0, ar0, 1, 1, N, N, Y, afp0, a0, aZ - 1000, 10, aZ - 1000 - 100, 0, .ok).object;
-    for ([_]Account{ A1, A2, A3, A4, A5 }) |account| try c.put_account(account);
+        // Set up initial balances.
+        \\ balance_set A1  100   200    0     0
+        \\ balance_set A2    0     0    0     0
+        \\ balance_set A3    0     0  110   210
+        \\ balance_set A4   20  -700    0  -500
+        \\ balance_set A5    0 -1000   10 -1100
 
-    const t: u64 = c.state_machine.prepare_timestamp + 1;
-    const toZ: u64 = (std.math.maxInt(u64) - t) + 1;
-
-    const vectors = [_]TransferVector{
-        T(id0, id0, id0, ud0, tr1, id1, to0, 0, 0, N, Y, N, N, p1, 0, t, .reserved_flag),
-        T(id0, id0, id0, ud0, tr1, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .reserved_field),
-        T(id0, id0, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .id_must_not_be_zero),
-        T(idZ, id0, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .id_must_not_be_int_max),
-        T(id1, id0, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .debit_account_id_must_not_be_zero),
-        T(id1, idZ, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .debit_account_id_must_not_be_int_max),
-        T(id1, 100, id0, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .credit_account_id_must_not_be_zero),
-        T(id1, 100, idZ, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .credit_account_id_must_not_be_int_max),
-        T(id1, 100, 100, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .accounts_must_be_different),
-        T(id1, 100, 200, ud0, tr0, id1, to0, 0, 0, N, Y, N, N, p0, 0, t, .pending_id_must_be_zero),
-        T(id1, 100, 200, ud0, tr0, id0, to0, 0, 0, N, Y, N, N, p0, 0, t, .pending_transfer_must_timeout),
-        T(id1, 100, 200, ud0, tr0, id0, toZ, 0, 0, N, N, N, N, p0, 0, t, .timeout_reserved_for_pending_transfer),
-        T(id1, 100, 200, ud0, tr0, id0, toZ, 0, 0, N, Y, N, N, p0, 0, t, .ledger_must_not_be_zero),
-        T(id1, 100, 200, ud0, tr0, id0, toZ, 9, 0, N, Y, N, N, p0, 0, t, .code_must_not_be_zero),
-        T(id1, 100, 200, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 0, t, .amount_must_not_be_zero),
-        T(id1, 100, 200, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 9, t, .debit_account_not_found),
-        T(id1, id1, 200, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 9, t, .credit_account_not_found),
-        T(id1, id1, id2, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 1, t, .accounts_must_have_the_same_ledger),
-        T(id1, id1, id3, ud0, tr0, id0, toZ, 9, 1, N, Y, N, N, p0, 1, t, .transfer_must_have_the_same_ledger_as_accounts),
-        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A1.debits_pending + 1, t, .overflows_debits_pending),
-        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A3.credits_pending + 1, t, .overflows_credits_pending),
-        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A1.debits_posted + 1, t, .overflows_debits_posted),
-        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A3.credits_posted + 1, t, .overflows_credits_posted),
-        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A1.debits_pending - A1.debits_posted + 1, t, .overflows_debits),
-        T(id1, id1, id3, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, aZ - A3.credits_pending - A3.credits_posted + 1, t, .overflows_credits),
-        T(id1, id4, id5, ud0, tr0, id0, toZ, 1, 1, N, Y, N, N, p0, A4.credits_posted - A4.debits_pending - A4.debits_posted + 1, t, .overflows_timeout),
-        T(id1, id4, id5, ud0, tr0, id0, to0, 1, 1, N, N, N, N, p0, A4.credits_posted - A4.debits_pending - A4.debits_posted + 1, t, .exceeds_credits),
-        T(id1, id4, id5, ud0, tr0, id0, to0, 1, 1, N, N, N, N, p0, A5.debits_posted - A5.credits_pending - A5.credits_posted + 1, t, .exceeds_debits),
-        T(id1, id1, id3, ud0, tr0, id0, 1e4, 1, 1, N, Y, N, N, p0, 123, t, .ok),
+        // Transfer.
+        \\ transfer T0 A0 A0  _ R1 T1   _ L0 C0 _ PEN _ _ P1    0 reserved_flag
+        \\ transfer T0 A0 A0  _ R1 T1   _ L0 C0 _ PEN _ _  _    0 reserved_field
+        \\ transfer T0 A0 A0  _  _ T1   _ L0 C0 _ PEN _ _  _    0 id_must_not_be_zero
+        \\ transfer -0 A0 A0  _  _ T1   _ L0 C0 _ PEN _ _  _    0 id_must_not_be_int_max
+        \\ transfer T1 A0 A0  _  _ T1   _ L0 C0 _ PEN _ _  _    0 debit_account_id_must_not_be_zero
+        \\ transfer T1 -0 A0  _  _ T1   _ L0 C0 _ PEN _ _  _    0 debit_account_id_must_not_be_int_max
+        \\ transfer T1 A8 A0  _  _ T1   _ L0 C0 _ PEN _ _  _    0 credit_account_id_must_not_be_zero
+        \\ transfer T1 A8 -0  _  _ T1   _ L0 C0 _ PEN _ _  _    0 credit_account_id_must_not_be_int_max
+        \\ transfer T1 A8 A8  _  _ T1   _ L0 C0 _ PEN _ _  _    0 accounts_must_be_different
+        \\ transfer T1 A8 A9  _  _ T1   _ L0 C0 _ PEN _ _  _    0 pending_id_must_be_zero
+        \\ transfer T1 A8 A9  _  _  _   _ L0 C0 _ PEN _ _  _    0 pending_transfer_must_timeout
+        \\ transfer T1 A8 A9  _  _  _  -0 L0 C0 _   _ _ _  _    0 timeout_reserved_for_pending_transfer
+        \\ transfer T1 A8 A9  _  _  _  -0 L0 C0 _ PEN _ _  _    0 ledger_must_not_be_zero
+        \\ transfer T1 A8 A9  _  _  _  -0 L9 C0 _ PEN _ _  _    0 code_must_not_be_zero
+        \\ transfer T1 A8 A9  _  _  _  -0 L9 C1 _ PEN _ _  _    0 amount_must_not_be_zero
+        \\ transfer T1 A8 A9  _  _  _  -0 L9 C1 _ PEN _ _  _    9 debit_account_not_found
+        \\ transfer T1 A1 A9  _  _  _  -0 L9 C1 _ PEN _ _  _    9 credit_account_not_found
+        \\ transfer T1 A1 A2  _  _  _  -0 L9 C1 _ PEN _ _  _    1 accounts_must_have_the_same_ledger
+        \\ transfer T1 A1 A3  _  _  _  -0 L9 C1 _ PEN _ _  _    1 transfer_must_have_the_same_ledger_as_accounts
+        \\ transfer T1 A1 A3  _  _  _  -0 L1 C1 _ PEN _ _  _  -99 overflows_debits_pending  // amount = max - A1.debits_pending + 1
+        \\ transfer T1 A1 A3  _  _  _  -0 L1 C1 _ PEN _ _  _ -109 overflows_credits_pending // amount = max - A3.credits_pending + 1
+        \\ transfer T1 A1 A3  _  _  _  -0 L1 C1 _ PEN _ _  _ -199 overflows_debits_posted   // amount = max - A1.debits_posted + 1
+        \\ transfer T1 A1 A3  _  _  _  -0 L1 C1 _ PEN _ _  _ -209 overflows_credits_posted  // amount = max - A3.credits_posted + 1
+        \\ transfer T1 A1 A3  _  _  _  -0 L1 C1 _ PEN _ _  _ -299 overflows_debits          // amount = max - A1.debits_pending - A1.debits_posted + 1
+        \\ transfer T1 A1 A3  _  _  _  -0 L1 C1 _ PEN _ _  _ -319 overflows_credits         // amount = max - A3.credits_pending - A3.credits_posted + 1
+        \\ transfer T1 A4 A5  _  _  _  -0 L1 C1 _ PEN _ _  _  199 overflows_timeout         // amount = A4.credits_posted - A4.debits_pending - A4.debits_posted + 1
+        \\ transfer T1 A4 A5  _  _  _   _ L1 C1 _   _ _ _  _  199 exceeds_credits           // amount = A4.credits_posted - A4.debits_pending - A4.debits_posted + 1
+        \\ transfer T1 A4 A5  _  _  _   _ L1 C1 _   _ _ _  _   91 exceeds_debits            // amount = A5.debits_posted - A5.credits_pending - A5.credits_posted + 1
+        \\ transfer T1 A1 A3  _  _  _ 999 L1 C1 _ PEN _ _  _  123 ok
 
         // Ensure that idempotence is only checked after validation.
-        T(id1, id1, id3, ud0, tr0, id0, 1e4, 2, 1, N, Y, N, N, p0, 123, t + 1, .transfer_must_have_the_same_ledger_as_accounts),
-        T(id1, id1, id3, ud1, tr0, id0, to0, 1, 2, N, N, N, N, p0, aZ, t + 1, .exists_with_different_flags),
-        T(id1, id3, id1, ud1, tr0, id0, 1e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_debit_account_id),
-        T(id1, id1, id4, ud1, tr0, id0, 1e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_credit_account_id),
-        T(id1, id1, id3, ud1, tr0, id0, 1e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_user_data),
-        T(id1, id1, id3, ud0, tr0, id0, 2e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_timeout),
-        T(id1, id1, id3, ud0, tr0, id0, 1e4, 1, 2, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_code),
-        T(id1, id1, id3, ud0, tr0, id0, 1e4, 1, 1, N, Y, N, N, p0, aZ, t + 1, .exists_with_different_amount),
-        T(id1, id1, id3, ud0, tr0, id0, 1e4, 1, 1, N, Y, N, N, p0, 123, t + 1, .exists),
-        T(id2, id3, id1, ud0, tr0, id0, to0, 1, 2, N, N, N, N, p0, 7, t + 1, .ok),
-        T(id3, id1, id3, ud0, tr0, id0, to0, 1, 2, N, N, N, N, p0, 3, t + 2, .ok),
-    };
-
-    for (vectors) |vector| {
-        try c.create_transfer(vector);
-        if (vector.result == .ok) {
-            try expectEqual(vector.object, c.state_machine.get_transfer(vector.object.id).?.*);
-        }
-    }
-
-    // Transfer 3:
-    try test_account_balances(&c.state_machine, id1, 100 + 123, 200 + 3, 0, 7);
-    try test_account_balances(&c.state_machine, id3, 0, 7, 110 + 123, 210 + 3);
-    c.state_machine.create_transfer_rollback(c.state_machine.get_transfer(id3).?);
-    try test_account_balances(&c.state_machine, id1, 100 + 123, 200, 0, 7);
-    try test_account_balances(&c.state_machine, id3, 0, 7, 110 + 123, 210);
-    try expect(c.state_machine.get_transfer(id3) == null);
-
-    // Transfer 2:
-    try test_account_balances(&c.state_machine, id1, 100 + 123, 200, 0, 7);
-    try test_account_balances(&c.state_machine, id3, 0, 7, 110 + 123, 210);
-    c.state_machine.create_transfer_rollback(c.state_machine.get_transfer(id2).?);
-    try test_account_balances(&c.state_machine, id1, 100 + 123, 200, 0, 0);
-    try test_account_balances(&c.state_machine, id3, 0, 0, 110 + 123, 210);
-    try expect(c.state_machine.get_transfer(id2) == null);
-
-    // Transfer 1:
-    try test_account_balances(&c.state_machine, id1, 100 + 123, 200, 0, 0);
-    try test_account_balances(&c.state_machine, id3, 0, 0, 110 + 123, 210);
-    c.state_machine.create_transfer_rollback(c.state_machine.get_transfer(id1).?);
-    try test_account_balances(&c.state_machine, id1, 100, 200, 0, 0);
-    try test_account_balances(&c.state_machine, id3, 0, 0, 110, 210);
-    try expect(c.state_machine.get_transfer(id1) == null);
+        \\ transfer  T1  A1  A3  _  _  _ 999 L2 C1 _ PEN _ _  _  123 transfer_must_have_the_same_ledger_as_accounts
+        \\ transfer  T1  A1  A3 U1  _  _   _ L1 C2 _   _ _ _  _   -0 exists_with_different_flags
+        \\ transfer  T1  A3  A1 U1  _  _ 999 L1 C2 _ PEN _ _  _   -0 exists_with_different_debit_account_id
+        \\ transfer  T1  A1  A4 U1  _  _ 999 L1 C2 _ PEN _ _  _   -0 exists_with_different_credit_account_id
+        \\ transfer  T1  A1  A3 U1  _  _ 999 L1 C2 _ PEN _ _  _   -0 exists_with_different_user_data
+        \\ transfer  T1  A1  A3  _  _  _ 998 L1 C2 _ PEN _ _  _   -0 exists_with_different_timeout
+        \\ transfer  T1  A1  A3  _  _  _ 999 L1 C2 _ PEN _ _  _   -0 exists_with_different_code
+        \\ transfer  T1  A1  A3  _  _  _ 999 L1 C1 _ PEN _ _  _   -0 exists_with_different_amount
+        \\ transfer  T1  A1  A3  _  _  _ 999 L1 C1 _ PEN _ _  _  123 exists
+        \\ transfer  T2  A3  A1  _  _  _   _ L1 C2 _   _ _ _  _    7 ok
+        \\ transfer  T3  A1  A3  _  _  _   _ L1 C2 _   _ _ _  _    3 ok
+        \\
+        \\ balance A1 223 203   0   7
+        \\ balance A3   0   7 233 213
+        \\
+        \\ rollback_transfer T3
+        \\ balance A1 223 200   0   7
+        \\ balance A3   0   7 233 210
+        \\
+        \\ rollback_transfer T2
+        \\ balance A1 223 200   0   0
+        \\ balance A3   0   0 233 210
+        \\
+        \\ rollback_transfer T1
+        \\ balance A1 100 200   0   0
+        \\ balance A3   0   0 110 210
+    );
 }
 
 test "create/lookup/rollback 2-phase transfers" {
-    var c: TestContext = undefined;
-    try c.init(testing.allocator);
-    defer c.deinit(testing.allocator);
+    try check(
+        \\ account  A1 _ _ L1 C1   _  _  _  _ 0 0 0 0 ok
+        \\ account  A2 _ _ L1 C1   _  _  _  _ 0 0 0 0 ok
 
-    const A1 = A(id1, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok).object;
-    const A2 = A(id2, ud0, ar0, 1, 1, N, N, N, afp0, a0, a0, a0, a0, 0, .ok).object;
-    for ([_]Account{ A1, A2 }) |account| try c.put_account(account);
+        // First phase.
+        \\ transfer   T1 A1 A2  _ _   _    _ L1 C1 _   _   _   _ _ 15 ok // Not pending!
+        \\ transfer   T2 A1 A2  _ _   _ 1000 L1 C1 _ PEN   _   _ _ 15 ok
+        \\ transfer   T3 A1 A2  _ _   _   50 L1 C1 _ PEN   _   _ _ 15 ok
+        \\ transfer   T4 A1 A2  _ _   _    1 L1 C1 _ PEN   _   _ _ 15 ok
+        \\ transfer   T5 A1 A2 U9 _   _   50 L1 C1 _ PEN   _   _ _  7 ok
 
-    const transfers_pending = [_]TransferVector{
-        T(id1, id1, id2, ud0, tr0, id0, to0, 1, 1, N, N, N, N, p0, 15, 0, .ok),
-        T(id2, id1, id2, ud0, tr0, id0, 1e3, 1, 1, N, Y, N, N, p0, 15, 0, .ok),
-        T(id3, id1, id2, ud0, tr0, id0, 5e0, 1, 1, N, Y, N, N, p0, 15, 0, .ok),
-        T(id4, id1, id2, ud0, tr0, id0, 1e0, 1, 1, N, Y, N, N, p0, 15, 0, .ok),
-        T(id5, id1, id2, 789, tr0, id0, 6e0, 1, 1, N, Y, N, N, p0, 7, 0, .ok),
-    };
+        // Check balances before resolving.
+        \\ balance  A1 52 15  0  0
+        \\ balance  A2  0  0 52 15
 
-    try c.create_objects(Transfer, transfers_pending[0..]);
+        // Second phase.
+        \\ transfer T101 A1 A2 U1 _  T2    _ L1 C1 _   _ POS   _ _ 13 ok
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI _ 16 cannot_post_and_void_pending_transfer
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN   _ VOI _ 16 pending_transfer_cannot_post_or_void_another
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI _ 16 timeout_reserved_for_pending_transfer
+        \\ transfer T101 A8 A9 U2 _  T0    _ L6 C7 _   _   _ VOI _ 16 pending_id_must_not_be_zero
+        \\ transfer T101 A8 A9 U2 _  -0    _ L6 C7 _   _   _ VOI _ 16 pending_id_must_not_be_int_max
+        \\ transfer T101 A8 A9 U2 _ 101    _ L6 C7 _   _   _ VOI _ 16 pending_id_must_be_different
+        \\ transfer T101 A8 A9 U2 _ 102    _ L6 C7 _   _   _ VOI _ 16 pending_transfer_not_found
+        \\ transfer T101 A8 A9 U2 _  T1    _ L6 C7 _   _   _ VOI _ 16 pending_transfer_not_pending
+        \\ transfer T101 A8 A9 U2 _  T2    _ L6 C7 _   _   _ VOI _ 16 pending_transfer_has_different_debit_account_id
+        \\ transfer T101 A1 A9 U2 _  T2    _ L6 C7 _   _   _ VOI _ 16 pending_transfer_has_different_credit_account_id
+        \\ transfer T101 A1 A2 U2 _  T2    _ L6 C7 _   _   _ VOI _ 16 pending_transfer_has_different_ledger
+        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C7 _   _   _ VOI _ 16 pending_transfer_has_different_code
+        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C1 _   _   _ VOI _ 16 exceeds_pending_transfer_amount
+        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C1 _   _   _ VOI _ 14 pending_transfer_has_different_amount
+        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C1 _   _   _ VOI _ 15 exists_with_different_flags
+        \\ transfer T101 A1 A2 U2 _  T3    _ L1 C1 _   _ POS   _ _ 14 exists_with_different_pending_id
+        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C1 _   _ POS   _ _ 14 exists_with_different_user_data
+        \\ transfer T101 A1 A2 U0 _  T2    _ L1 C1 _   _ POS   _ _ 14 exists_with_different_user_data
+        \\ transfer T101 A1 A2 U1 _  T2    _ L1 C1 _   _ POS   _ _ 14 exists_with_different_amount
+        \\ transfer T101 A1 A2 U1 _  T2    _ L1 C1 _   _ POS   _ _  _ exists_with_different_amount
+        \\ transfer T101 A1 A2 U1 _  T2    _ L1 C1 _   _ POS   _ _ 13 exists
+        \\ transfer T102 A1 A2 U1 _  T2    _ L1 C1 _   _ POS   _ _ 13 pending_transfer_already_posted
+        \\ transfer T103 A1 A2 U1 _  T3    _ L1 C1 _   _   _ VOI _ 15 ok
+        \\ transfer T102 A1 A2 U1 _  T3    _ L1 C1 _   _ POS   _ _ 13 pending_transfer_already_voided
+        \\ transfer T102 A1 A2 U1 _  T4    _ L1 C1 _   _   _ VOI _ 15 pending_transfer_expired
+        \\ transfer T105 A0 A0 U0 _  T5    _ L0 C0 _   _ POS   _ _  _ ok
 
-    // Test balances before posting:
-    try test_account_balances(&c.state_machine, id1, 52, 15, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 52, 15);
+        // Check balances after resolving.
+        \\ balance  A1 15 35  0  0
+        \\ balance  A2  0  0 15 35
+        \\ rollback_transfer 101 // Rollback posting transfer (different amount).
+        \\ balance A1 30 22  0  0
+        \\ balance A2  0  0 30 22
+        \\ rollback_transfer 103 // Rollback voiding transfer.
+        \\ balance A1 45 22  0  0
+        \\ balance A2  0  0 45 22
+        \\ rollback_transfer 105 // Rollback posting transfer (zero amount).
+        \\ balance A1 52 15  0  0
+        \\ balance A2  0  0 52 15
 
-    const t: u64 = c.state_machine.commit_timestamp;
-    const transfer_resolutions = [_]TransferVector{
-        T(101, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 13, t + 1, .ok),
-        T(101, 1e1, 2e1, ud2, tr0, id0, 5e1, 6, 7, N, Y, Y, Y, p0, 16, t + 2, .cannot_post_and_void_pending_transfer),
-        T(101, 1e1, 2e1, ud2, tr0, id0, 5e1, 6, 7, N, Y, N, Y, p0, 16, t + 2, .pending_transfer_cannot_post_or_void_another),
-        T(101, 1e1, 2e1, ud2, tr0, id0, 5e1, 6, 7, N, N, N, Y, p0, 16, t + 2, .timeout_reserved_for_pending_transfer),
-        T(101, 1e1, 2e1, ud2, tr0, id0, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_id_must_not_be_zero),
-        T(101, 1e1, 2e1, ud2, tr0, idZ, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_id_must_not_be_int_max),
-        T(101, 1e1, 2e1, ud2, tr0, 101, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_id_must_be_different),
-        T(101, 1e1, 2e1, ud2, tr0, 102, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_not_found),
-        T(101, 1e1, 2e1, ud2, tr0, id1, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_not_pending),
-        T(101, 1e1, 2e1, ud2, tr0, id2, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_has_different_debit_account_id),
-        T(101, id1, 2e1, ud2, tr0, id2, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_has_different_credit_account_id),
-        T(101, id1, id2, ud2, tr0, id2, to0, 6, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_has_different_ledger),
-        T(101, id1, id2, ud2, tr0, id2, to0, 1, 7, N, N, N, Y, p0, 16, t + 2, .pending_transfer_has_different_code),
-        T(101, id1, id2, ud2, tr0, id2, to0, 1, 1, N, N, N, Y, p0, 16, t + 2, .exceeds_pending_transfer_amount),
-        T(101, id1, id2, ud2, tr0, id2, to0, 1, 1, N, N, N, Y, p0, 14, t + 2, .pending_transfer_has_different_amount),
-        T(101, id1, id2, ud2, tr0, id2, to0, 1, 1, N, N, N, Y, p0, 15, t + 2, .exists_with_different_flags),
-        T(101, id1, id2, ud2, tr0, id3, to0, 1, 1, N, N, Y, N, p0, 14, t + 2, .exists_with_different_pending_id),
-        T(101, id1, id2, ud2, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 14, t + 2, .exists_with_different_user_data),
-        T(101, id1, id2, ud0, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 14, t + 2, .exists_with_different_user_data),
-        T(101, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 14, t + 2, .exists_with_different_amount),
-        T(101, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 0, t + 2, .exists_with_different_amount),
-        T(101, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 13, t + 2, .exists),
-        T(102, id1, id2, ud1, tr0, id2, to0, 1, 1, N, N, Y, N, p0, 13, t + 2, .pending_transfer_already_posted),
+        // Rollback all pending transfers.
+        \\ rollback_transfer 2
+        \\ balance A1 37 15  0  0
+        \\ balance A2  0  0 37 15
+        \\
+        \\ rollback_transfer 3
+        \\ balance A1 22 15  0  0
+        \\ balance A2  0  0 22 15
+        \\
+        \\ rollback_transfer 4
+        \\ balance A1  7 15  0  0
+        \\ balance A2  0  0  7 15
+        \\
+        \\ rollback_transfer 5
+        \\ balance A1  0 15  0  0
+        \\ balance A2  0  0  0 15
 
-        T(103, id1, id2, ud1, tr0, id3, to0, 1, 1, N, N, N, Y, p0, 15, t + 2, .ok),
-        T(102, id1, id2, ud1, tr0, id3, to0, 1, 1, N, N, Y, N, p0, 13, t + 3, .pending_transfer_already_voided),
-        T(102, id1, id2, ud1, tr0, id4, to0, 1, 1, N, N, N, Y, p0, 15, t + 3, .pending_transfer_expired),
-        T(105, id0, id0, ud0, tr0, id5, to0, 0, 0, N, N, Y, N, p0, 0, t + 3, .ok),
-    };
-
-    for (transfer_resolutions) |vector, i| {
-        try c.create_transfer(vector);
-        if (vector.result != .ok) continue;
-
-        // Test that posted values inherit from the pending or posting transfer:
-        const pending = c.state_machine.get_transfer(vector.object.pending_id).?.*;
-        const posted = c.state_machine.get_transfer(vector.object.id).?.*;
-
-        const user_data = if (vector.object.user_data == 0)
-            pending.user_data
-        else
-            vector.object.user_data;
-
-        const amount = if (vector.object.amount == 0)
-            pending.amount
-        else
-            vector.object.amount;
-
-        const expected = Transfer{
-            .id = vector.object.id,
-            .debit_account_id = pending.debit_account_id,
-            .credit_account_id = pending.credit_account_id,
-            .user_data = user_data,
-            .reserved = 0,
-            .pending_id = pending.id,
-            .timeout = 0,
-            .ledger = pending.ledger,
-            .code = pending.code,
-            .flags = vector.object.flags,
-            .amount = amount,
-            .timestamp = vector.object.timestamp,
-        };
-        expectEqual(expected, posted) catch |err| {
-            print_test_vector(i, expected, posted, vector.object, err);
-            return err;
-        };
-    }
-
-    // Balances after posting:
-    try test_account_balances(&c.state_machine, id1, 15, 35, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 15, 35);
-
-    // Rollback posting transfer (different amount):
-    assert(transfer_resolutions[0].result == .ok);
-    try test_transfer_rollback(&c.state_machine, &transfer_resolutions[0].object);
-    try test_account_balances(&c.state_machine, id1, 30, 22, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 30, 22);
-
-    // Rollback voiding transfer:
-    assert(transfer_resolutions[23].result == .ok);
-    try test_transfer_rollback(&c.state_machine, &transfer_resolutions[23].object);
-    try test_account_balances(&c.state_machine, id1, 45, 22, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 45, 22);
-
-    // Rollback posting transfer (zero amount):
-    assert(transfer_resolutions[26].result == .ok);
-    try test_transfer_rollback(&c.state_machine, &transfer_resolutions[26].object);
-    try test_account_balances(&c.state_machine, id1, 52, 15, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 52, 15);
-
-    // Rollback all pending transfers:
-    try test_transfer_rollback(&c.state_machine, &transfers_pending[1].object);
-    try test_account_balances(&c.state_machine, id1, 37, 15, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 37, 15);
-
-    try test_transfer_rollback(&c.state_machine, &transfers_pending[2].object);
-    try test_account_balances(&c.state_machine, id1, 22, 15, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 22, 15);
-
-    try test_transfer_rollback(&c.state_machine, &transfers_pending[3].object);
-    try test_account_balances(&c.state_machine, id1, 7, 15, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 7, 15);
-
-    try test_transfer_rollback(&c.state_machine, &transfers_pending[4].object);
-    try test_account_balances(&c.state_machine, id1, 0, 15, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 0, 15);
-
-    // Rollback transfer:
-    try test_transfer_rollback(&c.state_machine, &transfers_pending[0].object);
-    try test_account_balances(&c.state_machine, id1, 0, 0, 0, 0);
-    try test_account_balances(&c.state_machine, id2, 0, 0, 0, 0);
-}
-
-fn print_test_vector(
-    i: usize,
-    result_expect: anytype,
-    result_actual: anytype,
-    vector_object: anytype,
-    err: anyerror,
-) void {
-    std.debug.print("\nindex={}\n\nexpect: {}\n\nactual: {}\n\nobject: {}\n\nerr={}", .{
-        i,
-        result_expect,
-        result_actual,
-        vector_object,
-        err,
-    });
-}
-
-fn test_account_balances(
-    state_machine: *TestContext.StateMachine,
-    account_id: u128,
-    debits_pending: u64,
-    debits_posted: u64,
-    credits_pending: u64,
-    credits_posted: u64,
-) !void {
-    const account = state_machine.get_account(account_id).?.*;
-    try expectEqual(debits_pending, account.debits_pending);
-    try expectEqual(debits_posted, account.debits_posted);
-    try expectEqual(credits_pending, account.credits_pending);
-    try expectEqual(credits_posted, account.credits_posted);
-}
-
-fn test_transfer_rollback(state_machine: *TestContext.StateMachine, transfer: *const Transfer) !void {
-    assert(state_machine.get_transfer(transfer.id) != null);
-
-    state_machine.create_transfer_rollback(transfer);
-
-    try expect(state_machine.get_transfer(transfer.id) == null);
-    if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
-        try expect(state_machine.get_posted(transfer.pending_id) == null);
-    }
+        // Rollback first transfer.
+        \\ rollback_transfer 1
+        \\ balance A1  0  0  0  0
+        \\ balance A2  0  0  0  0
+    );
 }
 
 test "zeroed_32_bytes" {
