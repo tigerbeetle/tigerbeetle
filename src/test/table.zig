@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 /// Negative values for unsigned integers are interpreted as `maxInt(Int) - ...`.
 // TODO(Zig): Change this to a a purely comptime function (no allocator) returning a slice
 // once Zig's "runtime value cannot be passed to comptime arg" bugs are fixed.
-pub fn table(
+pub fn parse(
     allocator: std.mem.Allocator,
     comptime Row: type,
     comptime table_string: []const u8,
@@ -18,7 +18,7 @@ pub fn table(
         if (row_string.len == 0) continue;
 
         var columns = std.mem.tokenize(u8, row_string, " ");
-        try rows.append(parse(Row, &columns));
+        try rows.append(parse_data(Row, &columns));
 
         // Ignore trailing line comment.
         if (columns.next()) |last| assert(std.mem.eql(u8, last, "//"));
@@ -26,9 +26,9 @@ pub fn table(
     return rows;
 }
 
-fn parse(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
+fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
     return switch (@typeInfo(Data)) {
-        .Optional => |info| parse(info.child, tokens),
+        .Optional => |info| parse_data(info.child, tokens),
         .Enum => field(Data, tokens.next().?),
         .Void => assert(tokens.next() == null),
         .Bool => {
@@ -60,10 +60,10 @@ fn parse(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
                     if (take(tokens, "_")) {
                         @field(data, value_field.name) = value_field.default_value.?;
                     } else {
-                        @field(data, value_field.name) = parse(value_field.field_type, tokens);
+                        @field(data, value_field.name) = parse_data(value_field.field_type, tokens);
                     }
                 } else {
-                    @field(data, value_field.name) = parse(value_field.field_type, tokens);
+                    @field(data, value_field.name) = parse_data(value_field.field_type, tokens);
                 }
             }
             return data;
@@ -75,7 +75,7 @@ fn parse(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
                     return @unionInit(
                         Data,
                         variant_field.name,
-                        parse(variant_field.field_type, tokens),
+                        parse_data(variant_field.field_type, tokens),
                     );
                 }
             }
@@ -105,7 +105,7 @@ fn field(comptime Enum: type, name: []const u8) Enum {
 }
 
 test "comment" {
-    const rows = try table(std.testing.allocator, struct {
+    const rows = try parse(std.testing.allocator, struct {
         a: u8,
     },
         \\
@@ -119,7 +119,7 @@ test "comment" {
 }
 
 test "int" {
-    const rows = try table(std.testing.allocator, struct { i: usize },
+    const rows = try parse(std.testing.allocator, struct { i: usize },
         \\ 1
         \\ 2
         \\ -3
@@ -139,7 +139,7 @@ test "int" {
 }
 
 test "bool" {
-    const rows = try table(std.testing.allocator, struct { i: bool },
+    const rows = try parse(std.testing.allocator, struct { i: bool },
         \\ 0
         \\ 1
         \\ false
@@ -163,7 +163,7 @@ test "bool" {
 }
 
 test "struct" {
-    const rows = try table(std.testing.allocator, struct {
+    const rows = try parse(std.testing.allocator, struct {
         c1: enum { a, b, c, d },
         c2: u8,
         c3: u16 = 30,
@@ -185,7 +185,7 @@ test "struct" {
 }
 
 test "struct (nested)" {
-    const rows = try table(std.testing.allocator, struct {
+    const rows = try parse(std.testing.allocator, struct {
         a: u32,
         b: struct {
             b1: u8,
@@ -204,7 +204,7 @@ test "struct (nested)" {
 }
 
 test "union" {
-    const rows = try table(std.testing.allocator, union(enum) {
+    const rows = try parse(std.testing.allocator, union(enum) {
         a: struct { b: u8, c: i8 },
         d: u8,
         e: void,

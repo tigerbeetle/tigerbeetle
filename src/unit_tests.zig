@@ -31,4 +31,5 @@ test {
     _ = @import("test/accounting/auditor.zig");
     _ = @import("test/accounting/workload.zig");
     _ = @import("test/storage.zig");
+    _ = @import("test/table.zig");
 }
