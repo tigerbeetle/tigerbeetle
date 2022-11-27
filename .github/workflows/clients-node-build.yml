@@ -47,4 +47,4 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: echo "//registry.npmjs.org/:_authToken=${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}" > ~/.npmrc
-      - run: PACKAGE_JSON_VERSION=$(jq -r '.version' package.json) && npm show "tigerbeetle-node@${PACKAGE_JSON_VERSION}" --json 2>/dev/null && echo "Package tigerbeetle-node@${PACKAGE_JSON_VERSION} already exists - not publishing" || (npm install && npm publish)
+      - run: PACKAGE_JSON_VERSION=$(jq -r '.version' package.json) && npm show "tigerbeetle-node@${PACKAGE_JSON_VERSION}" --json 2>/dev/null && echo "Package tigerbeetle-node@${PACKAGE_JSON_VERSION} already exists - not publishing" || (npm install && sha256sum dist/client.node > dist/.client.node.sha256 && npm publish)
