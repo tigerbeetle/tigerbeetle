@@ -46,7 +46,18 @@ pub fn main() !void {
 
     switch (parse_args) {
         .format => |*args| try Command.format(allocator, args.cluster, args.replica, args.path),
-        .start => |*args| try Command.start(&arena, args.addresses, args.memory, args.path),
+        .start => |*args| try Command.start(
+            &arena,
+            args.addresses,
+            .{
+                // TODO Tune lsm_forest_node_count better.
+                .lsm_forest_node_count = 4096,
+                .cache_entries_accounts = args.cache_accounts,
+                .cache_entries_transfers = args.cache_transfers,
+                .cache_entries_posted = args.cache_transfers_posted,
+            },
+            args.path,
+        ),
         .version => |*args| try Command.version(allocator, args.verbose),
     }
 }
@@ -114,11 +125,9 @@ const Command = struct {
     pub fn start(
         arena: *std.heap.ArenaAllocator,
         addresses: []std.net.Address,
-        memory: u64,
+        options: StateMachine.Options,
         path: [:0]const u8,
     ) !void {
-        _ = memory; // TODO
-
         const allocator = arena.allocator();
 
         var command: Command = undefined;
@@ -131,13 +140,7 @@ const Command = struct {
             .storage = &command.storage,
             .message_pool = &command.message_pool,
             .time = .{},
-            .state_machine_options = .{
-                // TODO Tune lsm_forest_node_count better.
-                .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = config.cache_accounts_max,
-                .cache_entries_transfers = config.cache_transfers_max,
-                .cache_entries_posted = config.cache_transfers_posted_max,
-            },
+            .state_machine_options = options,
             .message_bus_options = .{
                 .configuration = addresses,
                 .io = &command.io,

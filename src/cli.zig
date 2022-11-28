@@ -1,16 +1,18 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
+const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
 const os = std.os;
 
 const config = @import("config.zig");
+const tigerbeetle = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
 const IO = @import("io.zig").IO;
 
-// TODO Document --memory
+// TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted
 const usage = fmt.comptimePrint(
     \\Usage:
     \\
@@ -84,7 +86,9 @@ pub const Command = union(enum) {
     start: struct {
         args_allocated: std.ArrayList([:0]const u8),
         addresses: []net.Address,
-        memory: u64,
+        cache_accounts: u32,
+        cache_transfers: u32,
+        cache_transfers_posted: u32,
         path: [:0]const u8,
     },
     version: struct {
@@ -110,7 +114,9 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var cluster: ?[]const u8 = null;
     var replica: ?[]const u8 = null;
     var addresses: ?[]const u8 = null;
-    var memory: ?[]const u8 = null;
+    var cache_accounts: ?[]const u8 = null;
+    var cache_transfers: ?[]const u8 = null;
+    var cache_transfers_posted: ?[]const u8 = null;
     var verbose: ?bool = null;
 
     var args = try std.process.argsWithAllocator(allocator);
@@ -140,14 +146,25 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         try args_allocated.append(arg);
 
         if (mem.startsWith(u8, arg, "--cluster")) {
+            if (command != .format) fatal("--cluster: supported only by 'format' command", .{});
             cluster = parse_flag("--cluster", arg);
         } else if (mem.startsWith(u8, arg, "--replica")) {
+            if (command != .format) fatal("--replica: supported only by 'format' command", .{});
             replica = parse_flag("--replica", arg);
         } else if (mem.startsWith(u8, arg, "--addresses")) {
+            if (command != .start) fatal("--addresses: supported only by 'start' command", .{});
             addresses = parse_flag("--addresses", arg);
-        } else if (mem.startsWith(u8, arg, "--memory")) {
-            memory = parse_flag("--memory", arg);
+        } else if (mem.startsWith(u8, arg, "--cache-accounts")) {
+            if (command != .start) fatal("--cache-accounts: supported only by 'start' command", .{});
+            cache_accounts = parse_flag("--cache-accounts", arg);
+        } else if (mem.startsWith(u8, arg, "--cache-transfers")) {
+            if (command != .start) fatal("--cache-transfers: supported only by 'start' command", .{});
+            cache_transfers = parse_flag("--cache-transfers", arg);
+        } else if (mem.startsWith(u8, arg, "--cache-transfers-posted")) {
+            if (command != .start) fatal("--cache-transfers-posted: supported only by 'start' command", .{});
+            cache_transfers_posted = parse_flag("--cache-transfers-posted", arg);
         } else if (mem.eql(u8, arg, "--verbose")) {
+            if (command != .version) fatal("--verbose: supported only by 'version' command", .{});
             verbose = true;
         } else if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
@@ -155,6 +172,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         } else if (mem.startsWith(u8, arg, "-")) {
             fatal("unexpected argument: '{s}'", .{arg});
         } else if (path == null) {
+            if (!(command == .format or command == .start)) fatal("unexpected path", .{});
             path = arg;
         } else {
             fatal("unexpected argument: '{s}' (must start with '--')", .{arg});
@@ -163,21 +181,11 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
     switch (command) {
         .version => {
-            if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
-            if (memory != null) fatal("--memory: supported only by 'start' command", .{});
-            if (cluster != null) fatal("--cluster: supported only by 'format' command", .{});
-            if (replica != null) fatal("--replica: supported only by 'format' command", .{});
-            if (path != null) fatal("unexpected path", .{});
-
             return Command{
                 .version = .{ .verbose = verbose orelse false },
             };
         },
         .format => {
-            if (addresses != null) fatal("--addresses: supported only by 'start' command", .{});
-            if (memory != null) fatal("--memory: supported only by 'start' command", .{});
-            if (verbose != null) fatal("--verbose: supported only by 'version' command", .{});
-
             return Command{
                 .format = .{
                     .args_allocated = args_allocated,
@@ -188,10 +196,6 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
             };
         },
         .start => {
-            if (cluster != null) fatal("--cluster: supported only by 'format' command", .{});
-            if (replica != null) fatal("--replica: supported only by 'format' command", .{});
-            if (verbose != null) fatal("--verbose: supported only by 'version' command", .{});
-
             return Command{
                 .start = .{
                     .args_allocated = args_allocated,
@@ -199,7 +203,21 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                         allocator,
                         addresses orelse fatal("required: --addresses", .{}),
                     ),
-                    .memory = if (memory) |m| parse_size(m) else config.memory_size_max_default,
+                    .cache_accounts = parse_size_to_count(
+                        tigerbeetle.Account,
+                        cache_accounts,
+                        config.cache_accounts_max,
+                    ),
+                    .cache_transfers = parse_size_to_count(
+                        tigerbeetle.Transfer,
+                        cache_transfers,
+                        config.cache_transfers_max,
+                    ),
+                    .cache_transfers_posted = parse_size_to_count(
+                        u256, // TODO(#264): Use actual type here, once exposed.
+                        cache_transfers_posted,
+                        config.cache_transfers_posted_max,
+                    ),
                     .path = path orelse fatal("required: <path>", .{}),
                 },
             };
@@ -321,6 +339,30 @@ test "parse_size" {
     try expectEqual(@as(u64, 10 * kib), parse_size("  10  kib "));
     try expectEqual(@as(u64, 100 * kib), parse_size("  100  KB "));
     try expectEqual(@as(u64, 1000 * kib), parse_size("  1000  kb "));
+}
+
+/// Given a limit like `10GiB`, return the maximum power-of-two count of `T`s
+/// that can fit in the limit.
+fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime default: u32) u32 {
+    var result: u32 = default;
+    if (string_opt) |string| {
+        const byte_size = parse_size(string);
+        const count_u64 = math.floorPowerOfTwo(u64, @divFloor(byte_size, @sizeOf(T)));
+        const count = math.cast(u32, count_u64) catch |err| switch (err) {
+            error.Overflow => fatal("size value is too large: '{s}'", .{string}),
+        };
+        if (count < 2048) fatal("size value is too small: '{s}'", .{string});
+        assert(count * @sizeOf(T) <= byte_size);
+
+        result = count;
+    }
+
+    // SetAssociativeCache requires a power-of-two cardinality and a minimal
+    // size.
+    assert(result >= 2048);
+    assert(math.isPowerOfTwo(result));
+
+    return result;
 }
 
 fn parse_replica(raw_replica: []const u8) u8 {

@@ -9,7 +9,7 @@
   <name>TigerBeetle Java client</name>
   <url>https://www.tigerbeetle.com</url>
   <scm>
-    <url>https://github.com/tigerbeetledb/tigerbeetle-java</url>
+    <url>https://github.com/tigerbeetledb/tigerbeetle</url>
   </scm>
 
   <licenses>
@@ -269,7 +269,7 @@
     <repository>
       <id>github</id>
       <name>TigerBeetle Java client</name>
-      <url>https://maven.pkg.github.com/tigerbeetledb/tigerbeetle-java</url>
+      <url>https://maven.pkg.github.com/tigerbeetledb/tigerbeetle</url>
     </repository>
   </distributionManagement>
 </project>
