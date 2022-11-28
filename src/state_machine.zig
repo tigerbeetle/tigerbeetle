@@ -1736,7 +1736,7 @@ test "create_transfers/lookup_transfers: failed transfer does not exist" {
     );
 }
 
-test "create_transfers/lookup_transfers: failed linked-chains are undone" {
+test "create_transfers: failed linked-chains are undone" {
     try check(
         \\ account A1 _ _ L1 C1   _  _  _  _ 0 0 0 0 ok
         \\ account A2 _ _ L1 C1   _  _  _  _ 0 0 0 0 ok
@@ -1758,6 +1758,30 @@ test "create_transfers/lookup_transfers: failed linked-chains are undone" {
         \\ lookup_transfer T2 false
         \\ lookup_transfer T3 false
         \\ lookup_transfer T4 false
+        \\ commit lookup_transfers
+    );
+}
+
+test "create_transfers: failed linked-chains are undone within a commit" {
+    try check(
+        \\ account A1 _ _ L1 C1 _ D<C _ _ 0 0 0 0 ok
+        \\ account A2 _ _ L1 C1 _   _ _ _ 0 0 0 0 ok
+        \\ commit create_accounts
+        \\
+        \\ setup A1 0 0 0 20
+        \\
+        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 LNK _ _ _ _ 15 linked_event_failed
+        \\ transfer T2 A1 A2  _ _   _ _ L0 C1   _ _ _ _ _  5 ledger_must_not_be_zero
+        \\ transfer T3 A1 A2  _ _   _ _ L1 C1   _ _ _ _ _ 15 ok
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 0 15 0 20
+        \\ lookup_account A2 0  0 0 15
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 false
+        \\ lookup_transfer T2 false
+        \\ lookup_transfer T3 true
         \\ commit lookup_transfers
     );
 }
