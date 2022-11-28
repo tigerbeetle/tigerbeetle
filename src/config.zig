@@ -1,6 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const root = @import("root");
 const vsr = @import("vsr.zig");
+const tracer = @import("tracer.zig");
 
 const build_options = @import("tigerbeetle_build_options");
 
@@ -12,7 +14,7 @@ const Environment = enum {
 
 /// Whether development or production:
 pub const deployment_environment: Environment =
-    if (@hasDecl(@import("root"), "deployment_environment")) @import("root").deployment_environment else .development;
+    if (@hasDecl(root, "deployment_environment")) root.deployment_environment else .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=3):
 pub const log_level = 2;
@@ -334,7 +336,13 @@ pub const journal_size_prepares = journal_slot_count * message_size_max;
 
 // Which backend to use for ./tracer.zig.
 // Default is `.none`.
-pub const tracer_backend = build_options.tracer_backend;
+pub const tracer_backend = if (@hasDecl(root, "tracer_backend"))
+    // TODO(jamii)
+    // This branch is a hack used to work around the absence of tigerbeetle_build_options.
+    // This should be removed once the node client is built using `zig build`.
+    root.tracer_backend
+else
+    build_options.tracer_backend;
 
 // TODO Move these into a separate `config_valid.zig` which we import here:
 comptime {
@@ -392,3 +400,14 @@ comptime {
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.
+
+/// Declarations which must be imported in the root file (eg main.zig) to take effect:
+///
+///     pub usingnamespace config.root_declarations;
+///
+pub const root_declarations = struct {
+    pub const log = if (tracer_backend == .tracy)
+        tracer.log_fn
+    else
+        std.log.defaultLog;
+};

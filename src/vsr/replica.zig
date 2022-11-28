@@ -2524,6 +2524,7 @@ pub fn ReplicaType(
                 &self.tracer_slot_commit,
                 .main,
                 .{ .commit = .{ .op = prepare.header.op } },
+                @src(),
             );
 
             self.commit_prepare = prepare.ref();
@@ -2608,6 +2609,7 @@ pub fn ReplicaType(
                     &self.tracer_slot_checkpoint,
                     .main,
                     .checkpoint,
+                    @src(),
                 );
                 self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
