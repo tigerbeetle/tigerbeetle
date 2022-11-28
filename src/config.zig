@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const root = @import("root");
@@ -11,7 +12,7 @@ pub const Config = struct {
     process: ConfigProcess,
 };
 
-/// Configurations which are tunable per-replica.
+/// Configurations which are tunable per-replica (or per-client).
 /// - Replica configs need not equal each other.
 /// - Client configs need not equal each other.
 /// - Client configs need not equal replica configs.
@@ -77,21 +78,11 @@ pub const ConfigCluster = struct {
     lsm_value_to_key_layout_ratio_min: comptime_int = 16,
 };
 
-const config = switch (deployment_environment) {
-    .production => config_default_production,
-    .development => config_default_development,
-    .simulation => config_test_min,
-};
-
-const Environment = enum {
-    development,
-    production,
-    simulation,
-};
-
-/// Whether development or production:
-const deployment_environment: Environment =
-    if (@hasDecl(root, "deployment_environment")) root.deployment_environment else .development;
+// TODO Pull from build.zig options.
+const config = if (@hasDecl(root, "tigerbeetle_config"))
+    root.tigerbeetle_config
+else
+    config_default_development;
 
 /// The maximum log level.
 /// One of: .err, .warn, .info, .debug
@@ -407,7 +398,6 @@ pub const tracer_backend = if (@hasDecl(root, "tracer_backend"))
 else
     build_options.tracer_backend;
 
-// TODO Move these into a separate `config_valid.zig` which we import here:
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
     _ = std.net.Address.parseIp4(address, 0) catch unreachable;

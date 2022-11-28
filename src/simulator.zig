@@ -35,7 +35,7 @@ const log_simulator = std.log.scoped(.simulator);
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
 /// Modifies compile-time constants on "config.zig".
-pub const deployment_environment = .simulation;
+pub const tigerbeetle_config = config.config_test_min;
 
 const cluster_id = 0;
 
