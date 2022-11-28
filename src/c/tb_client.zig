@@ -55,6 +55,7 @@ fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
 }
 
 // Pick the most suitable allocator
+const invalid_allocator = @compileError("tb_client must be built with libc");
 const global_allocator = if (builtin.is_test)
     std.testing.allocator
 else if (builtin.link_libc)
@@ -64,7 +65,7 @@ else if (builtin.target.os.tag == .windows)
         var gpa = std.heap.HeapAllocator.init();
     }).gpa.allocator()
 else
-    @compileError("tb_client must be built with libc");
+    invalid_allocator;
 
 pub export fn tb_client_init(
     out_client: *tb_client_t,
