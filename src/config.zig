@@ -450,9 +450,9 @@ comptime {
     assert(lsm_batch_multiple % 2 == 0);
 
     // SetAssociativeCache requires a power-of-two cardinality.
-    assert(std.math.isPowerOfTwo(cache_accounts_max));
-    assert(std.math.isPowerOfTwo(cache_transfers_max));
-    assert(std.math.isPowerOfTwo(cache_transfers_posted_max));
+    assert(cache_accounts_max == 0 or std.math.isPowerOfTwo(cache_accounts_max));
+    assert(cache_transfers_max == 0 or std.math.isPowerOfTwo(cache_transfers_max));
+    assert(cache_transfers_posted_max == 0 or std.math.isPowerOfTwo(cache_transfers_posted_max));
 }
 
 /// Declarations which must be imported in the root file (eg main.zig) to take effect:
