@@ -351,7 +351,7 @@ fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime defau
         const count = math.cast(u32, count_u64) catch |err| switch (err) {
             error.Overflow => fatal("size value is too large: '{s}'", .{string}),
         };
-        if (count < 2048) fatal("size value is too small: '{s}'", .{string});
+        if (count > 0 and count < 2048) fatal("size value is too small: '{s}'", .{string});
         assert(count * @sizeOf(T) <= byte_size);
 
         result = count;

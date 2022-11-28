@@ -90,12 +90,12 @@ const Environment = struct {
         1024 * 1024 * 1024;
 
     const node_count = 1024;
-    // This is the smallest size that set_associative_cache will allow us.
-    const cache_entries_max = 2048;
     const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
     const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
     const tree_options = Tree.Options{
         .commit_entries_max = commit_entries_max,
+        // This is the smallest size that set_associative_cache will allow us.
+        .cache_entries_max = 2048,
     };
 
     const puts_since_compact_max = commit_entries_max;
@@ -125,7 +125,6 @@ const Environment = struct {
     superblock_context: SuperBlock.Context = undefined,
     grid: Grid,
     node_pool: NodePool,
-    cache: Tree.TableMutable.ValuesCache,
     tree: Tree,
     // We need @fieldParentPtr() of tree, so we can't use an optional Tree.
     tree_exists: bool,
@@ -151,9 +150,6 @@ const Environment = struct {
         env.node_pool = try NodePool.init(allocator, node_count);
         errdefer env.node_pool.deinit(allocator);
 
-        env.cache = try Tree.TableMutable.ValuesCache.init(allocator, cache_entries_max);
-        errdefer env.cache.deinit(allocator);
-
         // Tree must be initialized with an open superblock.
         env.tree = undefined;
         env.tree_exists = false;
@@ -168,7 +164,6 @@ const Environment = struct {
             env.tree.deinit(allocator);
             env.tree_exists = false;
         }
-        env.cache.deinit(allocator);
         env.node_pool.deinit(allocator);
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
@@ -223,7 +218,7 @@ const Environment = struct {
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
         env.change_state(.init, .superblock_open);
-        env.tree = Tree.init(allocator, &env.node_pool, &env.grid, &env.cache, tree_options) catch unreachable;
+        env.tree = Tree.init(allocator, &env.node_pool, &env.grid, tree_options) catch unreachable;
         env.tree_exists = true;
         env.tree.open(tree_open_callback);
     }
@@ -363,7 +358,7 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
         8
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
-        Environment.cache_entries_max;
+        Environment.tree_options.cache_entries_max;
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
