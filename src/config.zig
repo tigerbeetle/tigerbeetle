@@ -467,7 +467,7 @@ pub const root_declarations = struct {
 };
 
 /// A good default config for production.
-const config_default_production = Config{
+pub const config_default_production = Config{
     .process = .{
         .direct_io = true,
         .direct_io_required = true,
@@ -483,7 +483,7 @@ const config_default_production = Config{
 
 /// A good default config for local development.
 /// For production, use config_default_production instead.
-const config_default_development = Config{
+pub const config_default_development = Config{
     .process = .{
         .direct_io = true,
         .direct_io_required = false,
@@ -499,23 +499,22 @@ const config_default_development = Config{
 
 /// Minimal test configuration — small WAL, small grid block size, etc.
 /// Not suitable for production, but good for testing code that would be otherwise hard to reach.
-const config_test_min = Config{
+pub const config_test_min = Config{
     .process = .{
         .direct_io = false,
         .direct_io_required = false,
-        // TODO Minimize these as much as possible.
-        .cache_accounts_max = 8 * 1024,
-        .cache_transfers_max = 64 * 1024,
-        .cache_transfers_posted_max = 64 * 1024,
+        .cache_accounts_max = 2048,
+        .cache_transfers_max = 2048,
+        .cache_transfers_posted_max = 2048,
         .verify = true,
     },
     .cluster = .{
-        .clients_max = 2,
+        .clients_max = 4,
         .journal_slot_count = journal_slot_count_min,
         .message_size_max = message_size_max_min(2),
 
-        // TODO Minimize this as much as possible.
-        .block_size = 32 * 1024,
-        .lsm_table_size_max = 128 * 1024,
+        .block_size = sector_size,
+        .lsm_growth_factor = 4,
+        .lsm_table_size_max = 64 * 1024,
     },
 };

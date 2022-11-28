@@ -140,12 +140,12 @@ fn generate_events(
 
     var event_distribution = fuzz.random_enum_distribution(random, EventType);
     // Don't remove too often, so that there are plenty of tables accumulating.
-    event_distribution.remove /= config.lsm_levels;
+    event_distribution.remove /= @intToFloat(f64, config.lsm_levels);
     // Don't compact or checkpoint too often, to approximate a real workload.
     // Additionally, checkpoint is slow because of the verification, so run it less
     // frequently.
-    event_distribution.compact /= config.lsm_levels * config.lsm_batch_multiple;
-    event_distribution.checkpoint /= config.lsm_levels * config.journal_slot_count;
+    event_distribution.compact /= @intToFloat(f64, config.lsm_levels * config.lsm_batch_multiple);
+    event_distribution.checkpoint /= @intToFloat(f64, config.lsm_levels * config.journal_slot_count);
 
     log.info("event_distribution = {d:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
