@@ -1284,9 +1284,6 @@ fn check(comptime test_table: []const u8) !void {
     try context.init(allocator);
     defer context.deinit(allocator);
 
-    const test_actions = try parse_table(allocator, TestAction, test_table);
-    defer test_actions.deinit();
-
     var accounts = std.AutoHashMap(u128, Account).init(allocator);
     defer accounts.deinit();
 
@@ -1300,7 +1297,8 @@ fn check(comptime test_table: []const u8) !void {
     defer reply.deinit();
 
     var operation: ?TestContext.StateMachine.Operation = null;
-    for (test_actions.items) |test_action| {
+    const test_actions = try parse_table(TestAction, test_table);
+    for (test_actions.constSlice()) |test_action| {
         switch (test_action) {
             .setup => |b| {
                 assert(operation == null);

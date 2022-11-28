@@ -1,24 +1,19 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-/// Negative values for unsigned integers are interpreted as `maxInt(Int) - ...`.
-// TODO(Zig): Change this to a a purely comptime function (no allocator) returning a slice
+/// Parse a "table" of data with the specified schema.
+/// See test cases for example usage.
+// TODO(Zig): Change this to a a purely comptime function returning a slice
 // once Zig's "runtime value cannot be passed to comptime arg" bugs are fixed.
-pub fn parse(
-    allocator: std.mem.Allocator,
-    comptime Row: type,
-    comptime table_string: []const u8,
-) !std.ArrayList(Row) {
-    var rows = std.ArrayList(Row).init(allocator);
-    errdefer rows.deinit();
-
+pub fn parse(comptime Row: type, comptime table_string: []const u8) !std.BoundedArray(Row, 128) {
+    var rows = std.BoundedArray(Row, 128).init(0) catch unreachable;
     var row_strings = std.mem.tokenize(u8, table_string, "\n");
     while (row_strings.next()) |row_string| {
         // Ignore blank line.
         if (row_string.len == 0) continue;
 
         var columns = std.mem.tokenize(u8, row_string, " ");
-        try rows.append(parse_data(Row, &columns));
+        rows.appendAssumeCapacity(parse_data(Row, &columns));
 
         // Ignore trailing line comment.
         if (columns.next()) |last| assert(std.mem.eql(u8, last, "//"));
@@ -33,10 +28,10 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
         .Void => assert(tokens.next() == null),
         .Bool => {
             const token = tokens.next().?;
-            inline for (.{ "0", "false", "F", "N" }) |t| {
+            inline for (.{ "0", "false", "F" }) |t| {
                 if (std.mem.eql(u8, token, t)) return false;
             }
-            inline for (.{ "1", "true", "T", "Y" }) |t| {
+            inline for (.{ "1", "true", "T" }) |t| {
                 if (std.mem.eql(u8, token, t)) return true;
             }
             std.debug.panic("Unknown boolean: {s}", .{token});
@@ -105,65 +100,72 @@ fn field(comptime Enum: type, name: []const u8) Enum {
 }
 
 test "comment" {
-    const rows = try parse(std.testing.allocator, struct {
+    const rows = try parse(struct {
         a: u8,
     },
         \\
         \\ 1 // Comment
         \\
     );
-    defer rows.deinit();
 
-    try std.testing.expectEqual(rows.items.len, 1);
-    try std.testing.expectEqual(rows.items[0], .{ .a = 1 });
+    try std.testing.expectEqual(rows.len, 1);
+    try std.testing.expectEqual(rows.get(0), .{ .a = 1 });
 }
 
-test "int" {
-    const rows = try parse(std.testing.allocator, struct { i: usize },
-        \\ 1
-        \\ 2
-        \\ -3
-        \\ A4
-        \\ a5
-        \\ -0
+test "enum" {
+    const rows = try parse(enum { a, b, c },
+        \\ c
+        \\ b
+        \\ a
     );
-    defer rows.deinit();
 
-    try std.testing.expectEqual(rows.items.len, 6);
-    try std.testing.expectEqual(rows.items[0], .{ .i = 1 });
-    try std.testing.expectEqual(rows.items[1], .{ .i = 2 });
-    try std.testing.expectEqual(rows.items[2], .{ .i = std.math.maxInt(usize) - 3 });
-    try std.testing.expectEqual(rows.items[3], .{ .i = 4 });
-    try std.testing.expectEqual(rows.items[4], .{ .i = 5 });
-    try std.testing.expectEqual(rows.items[5], .{ .i = std.math.maxInt(usize) });
+    try std.testing.expectEqual(rows.len, 3);
+    try std.testing.expectEqual(rows.get(0), .c);
+    try std.testing.expectEqual(rows.get(1), .b);
+    try std.testing.expectEqual(rows.get(2), .a);
 }
 
 test "bool" {
-    const rows = try parse(std.testing.allocator, struct { i: bool },
+    const rows = try parse(struct { i: bool },
         \\ 0
         \\ 1
         \\ false
         \\ true
         \\ F
         \\ T
-        \\ N
-        \\ Y
     );
-    defer rows.deinit();
 
-    try std.testing.expectEqual(rows.items.len, 8);
-    try std.testing.expectEqual(rows.items[0], .{ .i = false });
-    try std.testing.expectEqual(rows.items[1], .{ .i = true });
-    try std.testing.expectEqual(rows.items[2], .{ .i = false });
-    try std.testing.expectEqual(rows.items[3], .{ .i = true });
-    try std.testing.expectEqual(rows.items[4], .{ .i = false });
-    try std.testing.expectEqual(rows.items[5], .{ .i = true });
-    try std.testing.expectEqual(rows.items[6], .{ .i = false });
-    try std.testing.expectEqual(rows.items[7], .{ .i = true });
+    try std.testing.expectEqual(rows.len, 6);
+    try std.testing.expectEqual(rows.get(0), .{ .i = false });
+    try std.testing.expectEqual(rows.get(1), .{ .i = true });
+    try std.testing.expectEqual(rows.get(2), .{ .i = false });
+    try std.testing.expectEqual(rows.get(3), .{ .i = true });
+    try std.testing.expectEqual(rows.get(4), .{ .i = false });
+    try std.testing.expectEqual(rows.get(5), .{ .i = true });
+}
+
+test "int" {
+    const rows = try parse(struct { i: usize },
+        \\ 1
+        \\ 2
+        \\ A3
+        \\ a4
+        // For unsigned integers, `-n` is interpreted as `maxInt(Int) - n`.
+        \\ -5
+        \\ -0
+    );
+
+    try std.testing.expectEqual(rows.len, 6);
+    try std.testing.expectEqual(rows.get(0), .{ .i = 1 });
+    try std.testing.expectEqual(rows.get(1), .{ .i = 2 });
+    try std.testing.expectEqual(rows.get(2), .{ .i = 3 });
+    try std.testing.expectEqual(rows.get(3), .{ .i = 4 });
+    try std.testing.expectEqual(rows.get(4), .{ .i = std.math.maxInt(usize) - 5 });
+    try std.testing.expectEqual(rows.get(5), .{ .i = std.math.maxInt(usize) });
 }
 
 test "struct" {
-    const rows = try parse(std.testing.allocator, struct {
+    const rows = try parse(struct {
         c1: enum { a, b, c, d },
         c2: u8,
         c3: u16 = 30,
@@ -172,20 +174,19 @@ test "struct" {
     },
         \\ a 1 10 1000 1
         \\ b 2 20    _ T
-        \\ c 3  _    _ Y
+        \\ c 3  _    _ F
         \\ d 4  _    _ _
     );
-    defer rows.deinit();
 
-    try std.testing.expectEqual(rows.items.len, 4);
-    try std.testing.expectEqual(rows.items[0], .{ .c1 = .a, .c2 = 1, .c3 = 10, .c4 = 1000, .c5 = true });
-    try std.testing.expectEqual(rows.items[1], .{ .c1 = .b, .c2 = 2, .c3 = 20, .c4 = null, .c5 = true });
-    try std.testing.expectEqual(rows.items[2], .{ .c1 = .c, .c2 = 3, .c3 = 30, .c4 = null, .c5 = true });
-    try std.testing.expectEqual(rows.items[3], .{ .c1 = .d, .c2 = 4, .c3 = 30, .c4 = null, .c5 = false });
+    try std.testing.expectEqual(rows.len, 4);
+    try std.testing.expectEqual(rows.get(0), .{ .c1 = .a, .c2 = 1, .c3 = 10, .c4 = 1000, .c5 = true });
+    try std.testing.expectEqual(rows.get(1), .{ .c1 = .b, .c2 = 2, .c3 = 20, .c4 = null, .c5 = true });
+    try std.testing.expectEqual(rows.get(2), .{ .c1 = .c, .c2 = 3, .c3 = 30, .c4 = null, .c5 = false });
+    try std.testing.expectEqual(rows.get(3), .{ .c1 = .d, .c2 = 4, .c3 = 30, .c4 = null, .c5 = false });
 }
 
 test "struct (nested)" {
-    const rows = try parse(std.testing.allocator, struct {
+    const rows = try parse(struct {
         a: u32,
         b: struct {
             b1: u8,
@@ -196,15 +197,14 @@ test "struct (nested)" {
         \\ 1 2 3 4
         \\ 5 6 7 8
     );
-    defer rows.deinit();
 
-    try std.testing.expectEqual(rows.items.len, 2);
-    try std.testing.expectEqual(rows.items[0], .{ .a = 1, .b = .{ .b1 = 2, .b2 = 3 }, .c = 4 });
-    try std.testing.expectEqual(rows.items[1], .{ .a = 5, .b = .{ .b1 = 6, .b2 = 7 }, .c = 8 });
+    try std.testing.expectEqual(rows.len, 2);
+    try std.testing.expectEqual(rows.get(0), .{ .a = 1, .b = .{ .b1 = 2, .b2 = 3 }, .c = 4 });
+    try std.testing.expectEqual(rows.get(1), .{ .a = 5, .b = .{ .b1 = 6, .b2 = 7 }, .c = 8 });
 }
 
 test "union" {
-    const rows = try parse(std.testing.allocator, union(enum) {
+    const rows = try parse(union(enum) {
         a: struct { b: u8, c: i8 },
         d: u8,
         e: void,
@@ -213,10 +213,9 @@ test "union" {
         \\d 3
         \\e
     );
-    defer rows.deinit();
 
-    try std.testing.expectEqual(rows.items.len, 3);
-    try std.testing.expectEqual(rows.items[0], .{ .a = .{ .b = 1, .c = -2 } });
-    try std.testing.expectEqual(rows.items[1], .{ .d = 3 });
-    try std.testing.expectEqual(rows.items[2], .{ .e = {} });
+    try std.testing.expectEqual(rows.len, 3);
+    try std.testing.expectEqual(rows.get(0), .{ .a = .{ .b = 1, .c = -2 } });
+    try std.testing.expectEqual(rows.get(1), .{ .d = 3 });
+    try std.testing.expectEqual(rows.get(2), .{ .e = {} });
 }
