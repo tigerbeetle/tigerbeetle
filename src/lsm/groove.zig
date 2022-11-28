@@ -120,7 +120,7 @@ comptime {
 fn IndexTreeType(
     comptime Storage: type,
     comptime Field: type,
-    comptime tree_name: []const u8,
+    comptime tree_name: [:0]const u8,
 ) type {
     const Key = CompositeKey(IndexCompositeKeyType(Field));
     const Table = TableType(

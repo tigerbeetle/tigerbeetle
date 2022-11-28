@@ -4,11 +4,10 @@ const assert = std.debug.assert;
 const fmt = std.fmt;
 const mem = std.mem;
 const os = std.os;
-const log = std.log.scoped(.main);
+const log_main = std.log.scoped(.main);
 
 const build_options = @import("tigerbeetle_build_options");
 const config = @import("config.zig");
-pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
 const tracer = @import("tracer.zig");
 
 const cli = @import("cli.zig");
@@ -30,6 +29,9 @@ const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
+
+pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
+pub usingnamespace config.root_declarations;
 
 comptime {
     assert(config.deployment_environment == .production or
@@ -129,7 +131,12 @@ const Command = struct {
         options: StateMachine.Options,
         path: [:0]const u8,
     ) !void {
-        const allocator = arena.allocator();
+        var tracer_allocator = if (config.tracer_backend == .tracy)
+            tracer.TracerAllocator.init(arena.allocator())
+        else
+            arena;
+
+        const allocator = tracer_allocator.allocator();
 
         try tracer.init(allocator);
         defer tracer.deinit(allocator);
@@ -166,13 +173,13 @@ const Command = struct {
                 node_maybe = node.next;
             }
         }
-        log.info("{}: Allocated {} bytes in {} regions during replica init", .{
+        log_main.info("{}: Allocated {} bytes in {} regions during replica init", .{
             replica.replica,
             allocation_size,
             allocation_count,
         });
 
-        log.info("{}: cluster={}: listening on {}", .{
+        log_main.info("{}: cluster={}: listening on {}", .{
             replica.replica,
             replica.cluster,
             addresses[replica.replica],
