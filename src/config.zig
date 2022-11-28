@@ -2,6 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
 
+const build_options = @import("tigerbeetle_build_options");
+
 const Environment = enum {
     development,
     production,
@@ -329,6 +331,10 @@ pub const verify = true;
 // TODO Move these to a separate "internal computed constants" file.
 pub const journal_size_headers = journal_slot_count * @sizeOf(vsr.Header);
 pub const journal_size_prepares = journal_slot_count * message_size_max;
+
+// Which backend to use for ./tracer.zig.
+// Default is `.none`.
+pub const tracer_backend = build_options.tracer_backend;
 
 // TODO Move these into a separate `config_valid.zig` which we import here:
 comptime {

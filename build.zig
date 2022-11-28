@@ -1,25 +1,41 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const TracerBackend = enum {
+    none,
+    // Writes to a file (./tracer.json) which can be uploaded to https://ui.perfetto.dev/
+    perfetto,
+};
+
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
+    const options = b.addOptions();
+
+    // The "tigerbeetle version" command includes the build-time commit hash.
+    if (git_commit(allocator)) |commit| {
+        options.addOption(?[]const u8, "git_commit", commit[0..]);
+    } else {
+        options.addOption(?[]const u8, "git_commit", null);
+    }
+
+    const tracer_backend = b.option(
+        TracerBackend,
+        "tracer-backend",
+        "Which backend to use for tracing. One of: none, perfetto.",
+    ) orelse TracerBackend.none;
+    options.addOption(TracerBackend, "tracer_backend", tracer_backend);
+
     {
         const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
         tigerbeetle.setTarget(target);
         tigerbeetle.setBuildMode(mode);
         tigerbeetle.install();
-
-        // The "tigerbeetle version" command includes the build-time commit hash.
-        const options = b.addOptions();
-        if (git_commit(allocator)) |commit| {
-            options.addOption(?[]const u8, "git_commit", commit[0..]);
-        } else {
-            options.addOption(?[]const u8, "git_commit", null);
-        }
+        // Ensure that we get stack traces even in release builds.
+        tigerbeetle.omit_frame_pointer = false;
         tigerbeetle.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = tigerbeetle.run();
@@ -49,6 +65,7 @@ pub fn build(b: *std.build.Builder) void {
         const unit_tests = b.addTest("src/unit_tests.zig");
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
+        unit_tests.addOptions("tigerbeetle_build_options", options);
 
         // for src/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
@@ -79,8 +96,7 @@ pub fn build(b: *std.build.Builder) void {
     {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
-        // Ensure that we get stack traces even in release builds.
-        simulator.omit_frame_pointer = false;
+        simulator.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = simulator.run();
 
@@ -100,6 +116,7 @@ pub fn build(b: *std.build.Builder) void {
         vopr.setTarget(target);
         // Ensure that we get stack traces even in release builds.
         vopr.omit_frame_pointer = false;
+        vopr.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = vopr.run();
 
@@ -121,6 +138,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_forest.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_forest.omit_frame_pointer = false;
+        fuzz_lsm_forest.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = fuzz_lsm_forest.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -138,6 +156,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_manifest_log.setTarget(target);
         fuzz_lsm_manifest_log.setBuildMode(mode);
         fuzz_lsm_manifest_log.omit_frame_pointer = false;
+        fuzz_lsm_manifest_log.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = fuzz_lsm_manifest_log.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -153,6 +172,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_tree.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_tree.omit_frame_pointer = false;
+        fuzz_lsm_tree.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = fuzz_lsm_tree.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -171,6 +191,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_segmented_array.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_segmented_array.omit_frame_pointer = false;
+        fuzz_lsm_segmented_array.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = fuzz_lsm_segmented_array.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -188,6 +209,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock.setTarget(target);
         fuzz_vsr_superblock.setBuildMode(mode);
         fuzz_vsr_superblock.omit_frame_pointer = false;
+        fuzz_vsr_superblock.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = fuzz_vsr_superblock.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -205,6 +227,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock_free_set.setTarget(target);
         fuzz_vsr_superblock_free_set.setBuildMode(mode);
         fuzz_vsr_superblock_free_set.omit_frame_pointer = false;
+        fuzz_vsr_superblock_free_set.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = fuzz_vsr_superblock_free_set.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -225,6 +248,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock_quorums.setTarget(target);
         fuzz_vsr_superblock_quorums.setBuildMode(mode);
         fuzz_vsr_superblock_quorums.omit_frame_pointer = false;
+        fuzz_vsr_superblock_quorums.addOptions("tigerbeetle_build_options", options);
 
         const run_cmd = fuzz_vsr_superblock_quorums.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -257,6 +281,7 @@ pub fn build(b: *std.build.Builder) void {
         exe.setTarget(target);
         exe.setBuildMode(.ReleaseSafe);
         exe.setMainPkgPath("src");
+        exe.addOptions("tigerbeetle_build_options", options);
 
         const build_step = b.step("build_" ++ benchmark.name, "Build " ++ benchmark.description ++ " benchmark");
         build_step.dependOn(&exe.step);
