@@ -36,6 +36,8 @@ const math = std.math;
 const assert = std.debug.assert;
 
 const log = std.log.scoped(.compaction);
+const tracer = @import("../tracer.zig");
+
 const config = @import("../config.zig");
 
 const GridType = @import("grid.zig").GridType;
@@ -120,6 +122,8 @@ pub fn CompactionType(
             done,
         };
 
+        tree_name: []const u8,
+
         grid: *Grid,
         grid_reservation: Grid.Reservation,
         range: Manifest.CompactionRange,
@@ -155,7 +159,9 @@ pub fn CompactionType(
 
         tables_output_count: usize = 0,
 
-        pub fn init(allocator: mem.Allocator) !Compaction {
+        tracer_slot: ?tracer.SpanStart = null,
+
+        pub fn init(allocator: mem.Allocator, tree_name: []const u8) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
             errdefer iterator_a.deinit(allocator);
 
@@ -166,6 +172,8 @@ pub fn CompactionType(
             errdefer table_builder.deinit(allocator);
 
             return Compaction{
+                .tree_name = tree_name,
+
                 // Assigned by start()
                 .grid = undefined,
                 .grid_reservation = undefined,
@@ -216,6 +224,7 @@ pub fn CompactionType(
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done and compaction.merge_iterator == null);
+            assert(compaction.tracer_slot == null);
 
             assert(op_min % @divExact(config.lsm_batch_multiple, 2) == 0);
             assert(range.table_count > 0);
@@ -230,6 +239,8 @@ pub fn CompactionType(
             assert(drop_tombstones or level_b < config.lsm_levels - 1);
 
             compaction.* = .{
+                .tree_name = compaction.tree_name,
+
                 .grid = grid,
                 // Reserve enough blocks to write our output tables in the worst case, where:
                 // - no tombstones are dropped,
@@ -337,6 +348,15 @@ pub fn CompactionType(
 
             compaction.callback = callback;
 
+            tracer.start(
+                &compaction.tracer_slot,
+                .{ .tree = .{ .tree_name = compaction.tree_name } },
+                .{ .tree_compaction_tick = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.level_b,
+                } },
+            );
+
             // Generate fake IO to make sure io_pending doesn't reach zero multiple times from
             // IO being completed inline down below.
             // The fake IO is immediately resolved and triggers the cpu_merge_start if all
@@ -405,6 +425,16 @@ pub fn CompactionType(
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done);
 
+            var tracer_slot: ?tracer.SpanStart = null;
+            tracer.start(
+                &tracer_slot,
+                .{ .tree = .{ .tree_name = compaction.tree_name } },
+                .{ .tree_compaction_merge = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.level_b,
+                } },
+            );
+
             // Create the merge iterator only when we can peek() from the read iterators.
             // This happens after IO for the first reads complete.
             if (compaction.merge_iterator == null) {
@@ -421,6 +451,23 @@ pub fn CompactionType(
             } else {
                 compaction.cpu_merge_finish();
             }
+
+            tracer.end(
+                &tracer_slot,
+                .{ .tree = .{ .tree_name = compaction.tree_name } },
+                .{ .tree_compaction_merge = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.level_b,
+                } },
+            );
+            tracer.end(
+                &compaction.tracer_slot,
+                .{ .tree = .{ .tree_name = compaction.tree_name } },
+                .{ .tree_compaction_tick = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.level_b,
+                } },
+            );
 
             // TODO Implement pacing here by deciding if we should do another compact_tick()
             // instead of invoking the callback, using compaction.range.table_count as the heuristic.
@@ -560,6 +607,7 @@ pub fn CompactionType(
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(compaction.merge_done);
+            assert(compaction.tracer_slot == null);
 
             // TODO(Beat Pacing) This should really be where the compaction callback is invoked,
             // but currently that can occur multiple times per beat.
