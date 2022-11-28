@@ -1112,7 +1112,7 @@ const TestContext = struct {
         // because the test never compacts.
         .message_body_size_max = message_body_size_max,
     });
-    const message_body_size_max = 256 * @sizeOf(Account);
+    const message_body_size_max = 32 * @sizeOf(Account);
 
     storage: Storage,
     message_pool: MessagePool,

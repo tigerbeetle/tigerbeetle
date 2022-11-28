@@ -31,7 +31,7 @@ const log_state_transitions_only = builtin.mode != .Debug;
 
 const log_simulator = std.log.scoped(.simulator);
 
-/// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
+/// You can fine tune your log levels even further (debug/info/warn/err):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
 /// Modifies compile-time constants on "config.zig".
