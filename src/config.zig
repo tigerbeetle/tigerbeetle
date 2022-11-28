@@ -122,6 +122,19 @@ pub const address = config.process.address;
 /// The default maximum amount of memory to use.
 pub const memory_size_max_default = config.process.memory_size_max_default;
 
+/// At a high level, priority for object caching is (in descending order):
+///
+/// 1. Accounts.
+///   - 2 lookups per created transfer
+///   - high temporal locality
+///   - positive expected result
+/// 2. Posted transfers.
+///   - high temporal locality
+///   - positive expected result
+/// 3. Transfers. Generally don't cache these because of:
+///   - low temporal locality
+///   - negative expected result
+///
 /// The maximum number of accounts to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const cache_accounts_max = config.process.cache_accounts_max;
@@ -471,9 +484,9 @@ pub const config_default_production = Config{
     .process = .{
         .direct_io = true,
         .direct_io_required = true,
-        .cache_accounts_max = 64 * 1024,
-        .cache_transfers_max = 1024 * 1024,
-        .cache_transfers_posted_max = 1024 * 1024,
+        .cache_accounts_max = 1024 * 1024,
+        .cache_transfers_max = 0,
+        .cache_transfers_posted_max = 256 * 1024,
         .verify = false,
     },
     .cluster = .{
@@ -487,9 +500,9 @@ pub const config_default_development = Config{
     .process = .{
         .direct_io = true,
         .direct_io_required = false,
-        .cache_accounts_max = 8 * 1024,
-        .cache_transfers_max = 64 * 1024,
-        .cache_transfers_posted_max = 64 * 1024,
+        .cache_accounts_max = 1024 * 1024,
+        .cache_transfers_max = 0,
+        .cache_transfers_posted_max = 256 * 1024,
         .verify = true,
     },
     .cluster = .{
@@ -504,7 +517,7 @@ pub const config_test_min = Config{
         .direct_io = false,
         .direct_io_required = false,
         .cache_accounts_max = 2048,
-        .cache_transfers_max = 2048,
+        .cache_transfers_max = 0,
         .cache_transfers_posted_max = 2048,
         .verify = true,
     },
