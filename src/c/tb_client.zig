@@ -54,7 +54,7 @@ fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
     return @ptrCast(*ContextImplementation, @alignCast(@alignOf(ContextImplementation), tb_client));
 }
 
-// Pick the most suitable allocator 
+// Pick the most suitable allocator
 const global_allocator: ?std.mem.Allocator = if (builtin.is_test)
     std.testing.allocator
 else if (builtin.link_libc)
