@@ -21,20 +21,16 @@ func _() {
 	_ = x[AccountCreditsPendingMustBeZero-11]
 	_ = x[AccountCreditsPostedMustBeZero-12]
 	_ = x[AccountMutuallyExclusiveFlags-13]
-	_ = x[AccountOverflowsDebits-14]
-	_ = x[AccountOverflowsCredits-15]
-	_ = x[AccountExceedsCredits-16]
-	_ = x[AccountExceedsDebits-17]
-	_ = x[AccountExistsWithDifferentFlags-18]
-	_ = x[AccountExistsWithDifferentUserData-19]
-	_ = x[AccountExistsWithDifferentLedger-20]
-	_ = x[AccountExistsWithDifferentCode-21]
-	_ = x[AccountExists-22]
+	_ = x[AccountExistsWithDifferentFlags-14]
+	_ = x[AccountExistsWithDifferentUserData-15]
+	_ = x[AccountExistsWithDifferentLedger-16]
+	_ = x[AccountExistsWithDifferentCode-17]
+	_ = x[AccountExists-18]
 }
 
-const _CreateAccountResult_name = "LinkedEventFailedLinkedEventChainOpenReservedFlagReservedFieldIdMustNotBeZeroIdMustNotBeIntMaxLedgerMustNotBeZeroCodeMustNotBeZeroDebitsPendingMustBeZeroDebitsPostedMustBeZeroCreditsPendingMustBeZeroCreditsPostedMustBeZeroMutuallyExclusiveFlagsOverflowsDebitsOverflowsCreditsExceedsCreditsExceedsDebitsExistsWithDifferentFlagsExistsWithDifferentUserDataExistsWithDifferentLedgerExistsWithDifferentCodeExists"
+const _CreateAccountResult_name = "LinkedEventFailedLinkedEventChainOpenReservedFlagReservedFieldIdMustNotBeZeroIdMustNotBeIntMaxLedgerMustNotBeZeroCodeMustNotBeZeroDebitsPendingMustBeZeroDebitsPostedMustBeZeroCreditsPendingMustBeZeroCreditsPostedMustBeZeroMutuallyExclusiveFlagsExistsWithDifferentFlagsExistsWithDifferentUserDataExistsWithDifferentLedgerExistsWithDifferentCodeExists"
 
-var _CreateAccountResult_index = [...]uint16{0, 17, 37, 49, 62, 77, 94, 113, 130, 153, 175, 199, 222, 244, 259, 275, 289, 302, 326, 353, 378, 401, 407}
+var _CreateAccountResult_index = [...]uint16{0, 17, 37, 49, 62, 77, 94, 113, 130, 153, 175, 199, 222, 244, 268, 295, 320, 343, 349}
 
 func (i CreateAccountResult) String() string {
 	i -= 1

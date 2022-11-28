@@ -139,15 +139,11 @@ const (
 	AccountCreditsPendingMustBeZero    CreateAccountResult = 11
 	AccountCreditsPostedMustBeZero     CreateAccountResult = 12
 	AccountMutuallyExclusiveFlags      CreateAccountResult = 13
-	AccountOverflowsDebits             CreateAccountResult = 14
-	AccountOverflowsCredits            CreateAccountResult = 15
-	AccountExceedsCredits              CreateAccountResult = 16
-	AccountExceedsDebits               CreateAccountResult = 17
-	AccountExistsWithDifferentFlags    CreateAccountResult = 18
-	AccountExistsWithDifferentUserData CreateAccountResult = 19
-	AccountExistsWithDifferentLedger   CreateAccountResult = 20
-	AccountExistsWithDifferentCode     CreateAccountResult = 21
-	AccountExists                      CreateAccountResult = 22
+	AccountExistsWithDifferentFlags    CreateAccountResult = 14
+	AccountExistsWithDifferentUserData CreateAccountResult = 15
+	AccountExistsWithDifferentLedger   CreateAccountResult = 16
+	AccountExistsWithDifferentCode     CreateAccountResult = 17
+	AccountExists                      CreateAccountResult = 18
 )
 
 type Transfer struct {
@@ -240,23 +236,24 @@ const (
 	TransferOverflowsCreditsPosted                     CreateTransferResult = 33
 	TransferOverflowsDebits                            CreateTransferResult = 34
 	TransferOverflowsCredits                           CreateTransferResult = 35
-	TransferExceedsCredits                             CreateTransferResult = 36
-	TransferExceedsDebits                              CreateTransferResult = 37
-	TransferCannotPostAndVoidPendingTransfer           CreateTransferResult = 38
-	TransferPendingTransferCannotPostOrVoidAnother     CreateTransferResult = 39
-	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 40
-	TransferPendingIdMustNotBeZero                     CreateTransferResult = 41
-	TransferPendingIdMustNotBeIntMax                   CreateTransferResult = 42
-	TransferPendingIdMustBeDifferent                   CreateTransferResult = 43
-	TransferPendingTransferNotFound                    CreateTransferResult = 44
-	TransferPendingTransferNotPending                  CreateTransferResult = 45
-	TransferPendingTransferHasDifferentDebitAccountId  CreateTransferResult = 46
-	TransferPendingTransferHasDifferentCreditAccountId CreateTransferResult = 47
-	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 48
-	TransferPendingTransferHasDifferentCode            CreateTransferResult = 49
-	TransferExceedsPendingTransferAmount               CreateTransferResult = 50
-	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 51
-	TransferPendingTransferAlreadyPosted               CreateTransferResult = 52
-	TransferPendingTransferAlreadyVoided               CreateTransferResult = 53
-	TransferPendingTransferExpired                     CreateTransferResult = 54
+	TransferOverflowsTimeout                           CreateTransferResult = 36
+	TransferExceedsCredits                             CreateTransferResult = 37
+	TransferExceedsDebits                              CreateTransferResult = 38
+	TransferCannotPostAndVoidPendingTransfer           CreateTransferResult = 39
+	TransferPendingTransferCannotPostOrVoidAnother     CreateTransferResult = 40
+	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 41
+	TransferPendingIdMustNotBeZero                     CreateTransferResult = 42
+	TransferPendingIdMustNotBeIntMax                   CreateTransferResult = 43
+	TransferPendingIdMustBeDifferent                   CreateTransferResult = 44
+	TransferPendingTransferNotFound                    CreateTransferResult = 45
+	TransferPendingTransferNotPending                  CreateTransferResult = 46
+	TransferPendingTransferHasDifferentDebitAccountId  CreateTransferResult = 47
+	TransferPendingTransferHasDifferentCreditAccountId CreateTransferResult = 48
+	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 49
+	TransferPendingTransferHasDifferentCode            CreateTransferResult = 50
+	TransferExceedsPendingTransferAmount               CreateTransferResult = 51
+	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 52
+	TransferPendingTransferAlreadyPosted               CreateTransferResult = 53
+	TransferPendingTransferAlreadyVoided               CreateTransferResult = 54
+	TransferPendingTransferExpired                     CreateTransferResult = 55
 )
