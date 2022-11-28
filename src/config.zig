@@ -81,6 +81,8 @@ pub const ConfigCluster = struct {
 // TODO Pull from build.zig options.
 const config = if (@hasDecl(root, "tigerbeetle_config"))
     root.tigerbeetle_config
+else if (builtin.is_test)
+    config_test_min
 else
     config_default_development;
 
@@ -508,9 +510,9 @@ const config_test_min = Config{
         .verify = true,
     },
     .cluster = .{
-        .clients_max = clients_max_min,
+        .clients_max = 2,
         .journal_slot_count = journal_slot_count_min,
-        .message_size_max = message_size_max_min(clients_max_min),
+        .message_size_max = message_size_max_min(2),
 
         // TODO Minimize this as much as possible.
         .block_size = 32 * 1024,
