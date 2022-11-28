@@ -91,7 +91,7 @@ jobs:
     - if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       uses: whelk-io/maven-settings-xml-action@v4
       with:
-        repositories: '[{ "id": "github", "url": "https://maven.pkg.github.com/tigerbeetledb/tigerbeetle-java", "snapshots": { "enabled": "false" } }]'
+        repositories: '[{ "id": "github", "url": "https://maven.pkg.github.com/tigerbeetledb/tigerbeetle", "snapshots": { "enabled": "true" } }]'
         servers: '[{ "id": "github", "username": "${{github.actor}}", "password": "${{ github.token }}" }]'
     - name: Download tigerbeetle-java package
       if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
