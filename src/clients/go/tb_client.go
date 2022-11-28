@@ -95,8 +95,13 @@ func NewClient(
 			return nil, errors.ErrUnexpected{}
 		case C.TB_STATUS_OUT_OF_MEMORY:
 			return nil, errors.ErrOutOfMemory{}
-		case C.TB_STATUS_INVALID_ADDRESS:
+		case C.TB_STATUS_ADDRESS_INVALID:
 			return nil, errors.ErrInvalidAddress{}
+		case C.TB_STATUS_ADDRESS_LIMIT_EXCEEDED:
+			return nil, errors.ErrAddressLimitExceeded{}
+		case C.TB_STATUS_PACKETS_COUNT_INVALID:
+			// We limit the concurrency above so this means we're out-of-sync with tb_client.
+			panic("tb_client_init(): invalid client concurrency")
 		case C.TB_STATUS_SYSTEM_RESOURCES:
 			return nil, errors.ErrSystemResources{}
 		case C.TB_STATUS_NETWORK_SUBSYSTEM:
