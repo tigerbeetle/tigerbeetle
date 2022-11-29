@@ -502,6 +502,8 @@ pub fn CompactionType(
             // Finalize the data block if it's full or if it contains pending values when there's
             // no more left to merge.
             if (compaction.table_builder.data_block_full() or
+                compaction.table_builder.filter_block_full() or
+                compaction.table_builder.index_block_full() or
                 (merge_iterator.empty() and !compaction.table_builder.data_block_empty()))
             {
                 compaction.table_builder.data_block_finish(.{
@@ -518,6 +520,7 @@ pub fn CompactionType(
             // Finalize the filter block if it's full or if it contains pending data blocks
             // when there's no more merged values to fill them.
             if (compaction.table_builder.filter_block_full() or
+                compaction.table_builder.index_block_full() or
                 (merge_iterator.empty() and !compaction.table_builder.filter_block_empty()))
             {
                 compaction.table_builder.filter_block_finish(.{
