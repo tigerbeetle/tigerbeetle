@@ -81,7 +81,7 @@ pub fn build(b: *std.build.Builder) void {
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
         test_step.dependOn(&tb_client_header_generate.step);
-    }   
+    }
 
     {
         const tb_client = b.addStaticLibrary("tb_client", "src/c/tb_client.zig");
