@@ -24,6 +24,10 @@ pub fn build(b: *std.build.Builder) void {
         options.addOption(?[]const u8, "git_commit", null);
     }
 
+    const config = .{
+        .base = b.option(ConfigBase, "config", "Base configuration."),
+    };
+
     const tracer_backend = b.option(
         TracerBackend,
         "tracer-backend",
@@ -39,6 +43,7 @@ pub fn build(b: *std.build.Builder) void {
         // Ensure that we get stack traces even in release builds.
         tigerbeetle.omit_frame_pointer = false;
         tigerbeetle.addOptions("tigerbeetle_build_options", options);
+        tigerbeetle.addOptions("tigerbeetle_config", config_options(b, config, .development));
         link_tracer_backend(tigerbeetle, tracer_backend, target);
 
         const run_cmd = tigerbeetle.run();
@@ -77,6 +82,7 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
         unit_tests.addOptions("tigerbeetle_build_options", options);
+        unit_tests.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(unit_tests, tracer_backend, target);
 
         // for src/c/tb_client_header_test.zig to use cImport on tb_client.h
@@ -109,6 +115,7 @@ pub fn build(b: *std.build.Builder) void {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
         simulator.addOptions("tigerbeetle_build_options", options);
+        simulator.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(simulator, tracer_backend, target);
 
         const run_cmd = simulator.run();
@@ -130,6 +137,7 @@ pub fn build(b: *std.build.Builder) void {
         // Ensure that we get stack traces even in release builds.
         vopr.omit_frame_pointer = false;
         vopr.addOptions("tigerbeetle_build_options", options);
+        vopr.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(vopr, tracer_backend, target);
 
         const run_cmd = vopr.run();
@@ -168,6 +176,7 @@ pub fn build(b: *std.build.Builder) void {
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_forest.omit_frame_pointer = false;
         fuzz_lsm_forest.addOptions("tigerbeetle_build_options", options);
+        fuzz_lsm_forest.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(fuzz_lsm_forest, tracer_backend, target);
 
         const run_cmd = fuzz_lsm_forest.run();
@@ -187,6 +196,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_manifest_log.setBuildMode(mode);
         fuzz_lsm_manifest_log.omit_frame_pointer = false;
         fuzz_lsm_manifest_log.addOptions("tigerbeetle_build_options", options);
+        fuzz_lsm_manifest_log.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(fuzz_lsm_manifest_log, tracer_backend, target);
 
         const run_cmd = fuzz_lsm_manifest_log.run();
@@ -204,6 +214,7 @@ pub fn build(b: *std.build.Builder) void {
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_tree.omit_frame_pointer = false;
         fuzz_lsm_tree.addOptions("tigerbeetle_build_options", options);
+        fuzz_lsm_tree.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(fuzz_lsm_tree, tracer_backend, target);
 
         const run_cmd = fuzz_lsm_tree.run();
@@ -224,6 +235,7 @@ pub fn build(b: *std.build.Builder) void {
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_segmented_array.omit_frame_pointer = false;
         fuzz_lsm_segmented_array.addOptions("tigerbeetle_build_options", options);
+        fuzz_lsm_segmented_array.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(fuzz_lsm_segmented_array, tracer_backend, target);
 
         const run_cmd = fuzz_lsm_segmented_array.run();
@@ -242,6 +254,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_journal_format.setTarget(target);
         fuzz_vsr_journal_format.setBuildMode(mode);
         fuzz_vsr_journal_format.omit_frame_pointer = false;
+        fuzz_vsr_journal_format.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
 
         const run_cmd = fuzz_vsr_journal_format.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -263,6 +276,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock.setBuildMode(mode);
         fuzz_vsr_superblock.omit_frame_pointer = false;
         fuzz_vsr_superblock.addOptions("tigerbeetle_build_options", options);
+        fuzz_vsr_superblock.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(fuzz_vsr_superblock, tracer_backend, target);
 
         const run_cmd = fuzz_vsr_superblock.run();
@@ -282,6 +296,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock_free_set.setBuildMode(mode);
         fuzz_vsr_superblock_free_set.omit_frame_pointer = false;
         fuzz_vsr_superblock_free_set.addOptions("tigerbeetle_build_options", options);
+        fuzz_vsr_superblock_free_set.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(fuzz_vsr_superblock_free_set, tracer_backend, target);
 
         const run_cmd = fuzz_vsr_superblock_free_set.run();
@@ -304,6 +319,7 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock_quorums.setBuildMode(mode);
         fuzz_vsr_superblock_quorums.omit_frame_pointer = false;
         fuzz_vsr_superblock_quorums.addOptions("tigerbeetle_build_options", options);
+        fuzz_vsr_superblock_quorums.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         link_tracer_backend(fuzz_vsr_superblock_quorums, tracer_backend, target);
 
         const run_cmd = fuzz_vsr_superblock_quorums.run();
@@ -338,6 +354,7 @@ pub fn build(b: *std.build.Builder) void {
         exe.setBuildMode(.ReleaseSafe);
         exe.setMainPkgPath("src");
         exe.addOptions("tigerbeetle_build_options", options);
+        exe.addOptions("tigerbeetle_config", config_options(b, config, .production));
         link_tracer_backend(exe, tracer_backend, target);
 
         const build_step = b.step("build_" ++ benchmark.name, "Build " ++ benchmark.description ++ " benchmark");
@@ -364,6 +381,22 @@ fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
     var output: [40]u8 = undefined;
     std.mem.copy(u8, &output, exec_result.stdout[0..40]);
     return output;
+}
+
+const ConfigBase = enum {
+    production,
+    development,
+    test_min,
+};
+
+fn config_options(
+    b: *std.build.Builder,
+    config: struct { base: ?ConfigBase },
+    default_base: ConfigBase,
+) *std.build.OptionsStep {
+    const options = b.addOptions();
+    options.addOption(ConfigBase, "config_base", config.base orelse default_base);
+    return options;
 }
 
 fn link_tracer_backend(

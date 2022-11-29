@@ -79,12 +79,7 @@ pub const ConfigCluster = struct {
 };
 
 // TODO Pull from build.zig options.
-const config = if (@hasDecl(root, "tigerbeetle_config"))
-    root.tigerbeetle_config
-else if (builtin.is_test)
-    config_test_min
-else
-    config_default_development;
+const config = configs.current;
 
 /// The maximum log level.
 /// One of: .err, .warn, .info, .debug
@@ -479,55 +474,74 @@ pub const root_declarations = struct {
         std.log.defaultLog;
 };
 
-/// A good default config for production.
-pub const config_default_production = Config{
-    .process = .{
-        .direct_io = true,
-        .direct_io_required = true,
-        .cache_accounts_max = 1024 * 1024,
-        .cache_transfers_max = 0,
-        .cache_transfers_posted_max = 256 * 1024,
-        .verify = false,
-    },
-    .cluster = .{
-        .clients_max = 32,
-    },
-};
+pub const configs = struct {
+    /// A good default config for production.
+    pub const default_production = Config{
+        .process = .{
+            .direct_io = true,
+            .direct_io_required = true,
+            .cache_accounts_max = 1024 * 1024,
+            .cache_transfers_max = 0,
+            .cache_transfers_posted_max = 256 * 1024,
+            .verify = false,
+        },
+        .cluster = .{
+            .clients_max = 32,
+        },
+    };
 
-/// A good default config for local development.
-/// For production, use config_default_production instead.
-pub const config_default_development = Config{
-    .process = .{
-        .direct_io = true,
-        .direct_io_required = false,
-        .cache_accounts_max = 1024 * 1024,
-        .cache_transfers_max = 0,
-        .cache_transfers_posted_max = 256 * 1024,
-        .verify = true,
-    },
-    .cluster = .{
-        .clients_max = 8,
-    },
-};
+    /// A good default config for local development.
+    /// For production, use default_production instead.
+    pub const default_development = Config{
+        .process = .{
+            .direct_io = true,
+            .direct_io_required = false,
+            .cache_accounts_max = 1024 * 1024,
+            .cache_transfers_max = 0,
+            .cache_transfers_posted_max = 256 * 1024,
+            .verify = true,
+        },
+        .cluster = .{
+            .clients_max = 8,
+        },
+    };
 
-/// Minimal test configuration — small WAL, small grid block size, etc.
-/// Not suitable for production, but good for testing code that would be otherwise hard to reach.
-pub const config_test_min = Config{
-    .process = .{
-        .direct_io = false,
-        .direct_io_required = false,
-        .cache_accounts_max = 2048,
-        .cache_transfers_max = 0,
-        .cache_transfers_posted_max = 2048,
-        .verify = true,
-    },
-    .cluster = .{
-        .clients_max = 4,
-        .journal_slot_count = journal_slot_count_min,
-        .message_size_max = message_size_max_min(2),
+    /// Minimal test configuration — small WAL, small grid block size, etc.
+    /// Not suitable for production, but good for testing code that would be otherwise hard to reach.
+    pub const test_min = Config{
+        .process = .{
+            .direct_io = false,
+            .direct_io_required = false,
+            .cache_accounts_max = 2048,
+            .cache_transfers_max = 0,
+            .cache_transfers_posted_max = 2048,
+            .verify = true,
+        },
+        .cluster = .{
+            .clients_max = 4,
+            .journal_slot_count = journal_slot_count_min,
+            .message_size_max = message_size_max_min(2),
 
-        .block_size = sector_size,
-        .lsm_growth_factor = 4,
-        .lsm_table_size_max = 64 * 1024,
-    },
+            .block_size = sector_size,
+            .lsm_growth_factor = 4,
+            .lsm_table_size_max = 64 * 1024,
+        },
+    };
+
+    const default = if (@hasDecl(@import("root"), "tigerbeetle_config"))
+        @import("root").tigerbeetle_config
+    else if (builtin.is_test)
+        test_min
+    else
+        default_development;
+
+    const build = @import("tigerbeetle_config");
+    const base = switch (build.config_base) {
+        .production => default_production,
+        .development => default_development,
+        .test_min => test_min,
+    };
+
+    // TODO Use additional build options to overwrite `current`.
+    pub const current = base;
 };
