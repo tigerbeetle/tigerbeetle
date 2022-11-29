@@ -638,6 +638,7 @@ pub fn TableType(
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
                 assert(!builder.filter_block_empty());
+                assert(builder.data_block_empty());
                 assert(options.address > 0);
 
                 const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
@@ -680,6 +681,8 @@ pub fn TableType(
 
             pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
                 assert(options.address > 0);
+                assert(builder.filter_block_empty());
+                assert(builder.data_block_empty());
                 assert(builder.data_block_count > 0);
                 assert(builder.value == 0);
                 assert(builder.data_blocks_in_filter == 0);
