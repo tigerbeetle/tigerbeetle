@@ -43,30 +43,31 @@ func _() {
 	_ = x[TransferOverflowsCreditsPosted-33]
 	_ = x[TransferOverflowsDebits-34]
 	_ = x[TransferOverflowsCredits-35]
-	_ = x[TransferExceedsCredits-36]
-	_ = x[TransferExceedsDebits-37]
-	_ = x[TransferCannotPostAndVoidPendingTransfer-38]
-	_ = x[TransferPendingTransferCannotPostOrVoidAnother-39]
-	_ = x[TransferTimeoutReservedForPendingTransfer-40]
-	_ = x[TransferPendingIdMustNotBeZero-41]
-	_ = x[TransferPendingIdMustNotBeIntMax-42]
-	_ = x[TransferPendingIdMustBeDifferent-43]
-	_ = x[TransferPendingTransferNotFound-44]
-	_ = x[TransferPendingTransferNotPending-45]
-	_ = x[TransferPendingTransferHasDifferentDebitAccountId-46]
-	_ = x[TransferPendingTransferHasDifferentCreditAccountId-47]
-	_ = x[TransferPendingTransferHasDifferentLedger-48]
-	_ = x[TransferPendingTransferHasDifferentCode-49]
-	_ = x[TransferExceedsPendingTransferAmount-50]
-	_ = x[TransferPendingTransferHasDifferentAmount-51]
-	_ = x[TransferPendingTransferAlreadyPosted-52]
-	_ = x[TransferPendingTransferAlreadyVoided-53]
-	_ = x[TransferPendingTransferExpired-54]
+	_ = x[TransferOverflowsTimeout-36]
+	_ = x[TransferExceedsCredits-37]
+	_ = x[TransferExceedsDebits-38]
+	_ = x[TransferCannotPostAndVoidPendingTransfer-39]
+	_ = x[TransferPendingTransferCannotPostOrVoidAnother-40]
+	_ = x[TransferTimeoutReservedForPendingTransfer-41]
+	_ = x[TransferPendingIdMustNotBeZero-42]
+	_ = x[TransferPendingIdMustNotBeIntMax-43]
+	_ = x[TransferPendingIdMustBeDifferent-44]
+	_ = x[TransferPendingTransferNotFound-45]
+	_ = x[TransferPendingTransferNotPending-46]
+	_ = x[TransferPendingTransferHasDifferentDebitAccountId-47]
+	_ = x[TransferPendingTransferHasDifferentCreditAccountId-48]
+	_ = x[TransferPendingTransferHasDifferentLedger-49]
+	_ = x[TransferPendingTransferHasDifferentCode-50]
+	_ = x[TransferExceedsPendingTransferAmount-51]
+	_ = x[TransferPendingTransferHasDifferentAmount-52]
+	_ = x[TransferPendingTransferAlreadyPosted-53]
+	_ = x[TransferPendingTransferAlreadyVoided-54]
+	_ = x[TransferPendingTransferExpired-55]
 }
 
-const _CreateTransferResult_name = "LinkedEventFailedLinkedEventChainOpenReservedFlagReservedFieldIdMustNotBeZeroIdMustNotBeIntMaxDebitAccountIdMustNotBeZeroDebitAccountIdMustNotBeIntMaxCreditAccountIdMustNotBeZeroCreditAccountIdMustNotBeIntMaxAccountsMustBeDifferentPendingIdMustBeZeroPendingTransferMustTimeoutLedgerMustNotBeZeroCodeMustNotBeZeroAmountMustNotBeZeroDebitAccountNotFoundCreditAccountNotFoundAccountsMustHaveTheSameLedgerTransferMustHaveTheSameLedgerAsAccountsExistsWithDifferentFlagsExistsWithDifferentDebitAccountIdExistsWithDifferentCreditAccountIdExistsWithDifferentUserDataExistsWithDifferentPendingIdExistsWithDifferentTimeoutExistsWithDifferentCodeExistsWithDifferentAmountExistsOverflowsDebitsPendingOverflowsCreditsPendingOverflowsDebitsPostedOverflowsCreditsPostedOverflowsDebitsOverflowsCreditsExceedsCreditsExceedsDebitsCannotPostAndVoidPendingTransferPendingTransferCannotPostOrVoidAnotherTimeoutReservedForPendingTransferPendingIdMustNotBeZeroPendingIdMustNotBeIntMaxPendingIdMustBeDifferentPendingTransferNotFoundPendingTransferNotPendingPendingTransferHasDifferentDebitAccountIdPendingTransferHasDifferentCreditAccountIdPendingTransferHasDifferentLedgerPendingTransferHasDifferentCodeExceedsPendingTransferAmountPendingTransferHasDifferentAmountPendingTransferAlreadyPostedPendingTransferAlreadyVoidedPendingTransferExpired"
+const _CreateTransferResult_name = "LinkedEventFailedLinkedEventChainOpenReservedFlagReservedFieldIdMustNotBeZeroIdMustNotBeIntMaxDebitAccountIdMustNotBeZeroDebitAccountIdMustNotBeIntMaxCreditAccountIdMustNotBeZeroCreditAccountIdMustNotBeIntMaxAccountsMustBeDifferentPendingIdMustBeZeroPendingTransferMustTimeoutLedgerMustNotBeZeroCodeMustNotBeZeroAmountMustNotBeZeroDebitAccountNotFoundCreditAccountNotFoundAccountsMustHaveTheSameLedgerTransferMustHaveTheSameLedgerAsAccountsExistsWithDifferentFlagsExistsWithDifferentDebitAccountIdExistsWithDifferentCreditAccountIdExistsWithDifferentUserDataExistsWithDifferentPendingIdExistsWithDifferentTimeoutExistsWithDifferentCodeExistsWithDifferentAmountExistsOverflowsDebitsPendingOverflowsCreditsPendingOverflowsDebitsPostedOverflowsCreditsPostedOverflowsDebitsOverflowsCreditsOverflowsTimeoutExceedsCreditsExceedsDebitsCannotPostAndVoidPendingTransferPendingTransferCannotPostOrVoidAnotherTimeoutReservedForPendingTransferPendingIdMustNotBeZeroPendingIdMustNotBeIntMaxPendingIdMustBeDifferentPendingTransferNotFoundPendingTransferNotPendingPendingTransferHasDifferentDebitAccountIdPendingTransferHasDifferentCreditAccountIdPendingTransferHasDifferentLedgerPendingTransferHasDifferentCodeExceedsPendingTransferAmountPendingTransferHasDifferentAmountPendingTransferAlreadyPostedPendingTransferAlreadyVoidedPendingTransferExpired"
 
-var _CreateTransferResult_index = [...]uint16{0, 17, 37, 49, 62, 77, 94, 121, 150, 178, 208, 231, 250, 276, 295, 312, 331, 351, 372, 401, 440, 464, 497, 531, 558, 586, 612, 635, 660, 666, 688, 711, 732, 754, 769, 785, 799, 812, 844, 882, 915, 937, 961, 985, 1008, 1033, 1074, 1116, 1149, 1180, 1208, 1241, 1269, 1297, 1319}
+var _CreateTransferResult_index = [...]uint16{0, 17, 37, 49, 62, 77, 94, 121, 150, 178, 208, 231, 250, 276, 295, 312, 331, 351, 372, 401, 440, 464, 497, 531, 558, 586, 612, 635, 660, 666, 688, 711, 732, 754, 769, 785, 801, 815, 828, 860, 898, 931, 953, 977, 1001, 1024, 1049, 1090, 1132, 1165, 1196, 1224, 1257, 1285, 1313, 1335}
 
 func (i CreateTransferResult) String() string {
 	i -= 1
