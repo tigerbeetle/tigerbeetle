@@ -54,19 +54,17 @@ fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
     return @ptrCast(*ContextImplementation, @alignCast(@alignOf(ContextImplementation), tb_client));
 }
 
-// Pick the most suitable allocator
-const global_allocator: ?std.mem.Allocator = if (builtin.is_test)
-    std.testing.allocator
-else if (builtin.link_libc)
-    std.heap.c_allocator
-else if (builtin.target.os.tag == .windows)
-    (struct {
-        var gpa = std.heap.HeapAllocator.init();
-    }).gpa.allocator()
-else
-    null;
+// Only export the functions if we're compiling libtb_client.
+// If it's only being imported by another zig file, then exporting the functions
+// will force them to be evaluated/codegen/linked and trigger unexpected comptime paths.
+comptime {
+    if (@import("root") == @This()) {
+        @export(tb_client_init, .{ .name = "tb_client_init", .linkage = .Strong });
+        @export(tb_client_init_echo, .{ .name = "tb_client_init_echo", .linkage = .Strong });
+    }
+}
 
-pub export fn tb_client_init(
+pub fn tb_client_init(
     out_client: *tb_client_t,
     out_packets: *tb_packet_list_t,
     cluster_id: u32,
@@ -75,7 +73,7 @@ pub export fn tb_client_init(
     packets_count: u32,
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
-) tb_status_t {
+) callconv(.C) tb_status_t {
     return init(
         DefaultContext,
         out_client,
@@ -89,7 +87,7 @@ pub export fn tb_client_init(
     );
 }
 
-pub export fn tb_client_init_echo(
+pub fn tb_client_init_echo(
     out_client: *tb_client_t,
     out_packets: *tb_packet_list_t,
     cluster_id: u32,
@@ -98,7 +96,7 @@ pub export fn tb_client_init_echo(
     packets_count: u32,
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
-) tb_status_t {
+) callconv(.C) tb_status_t {
     return init(
         TestingContext,
         out_client,
@@ -123,9 +121,21 @@ fn init(
     on_completion_ctx: usize,
     on_completion_fn: tb_completion_t,
 ) tb_status_t {
+    // Pick the most suitable allocator for the platform.
+    const allocator = if (builtin.is_test)
+        std.testing.allocator
+    else if (builtin.link_libc)
+        std.heap.c_allocator
+    else if (builtin.target.os.tag == .windows)
+        (struct {
+            var gpa = std.heap.HeapAllocator.init();
+        }).gpa.allocator()
+    else
+        @compileError("tb_client must be built with libc");
+
     const addresses = @ptrCast([*]const u8, addresses_ptr)[0..addresses_len];
     const context = Context.init(
-        global_allocator orelse @panic("no C allocator available"),
+        allocator,
         cluster_id,
         addresses,
         packets_count,
