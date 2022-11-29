@@ -95,8 +95,13 @@ func NewClient(
 			return nil, errors.ErrUnexpected{}
 		case C.TB_STATUS_OUT_OF_MEMORY:
 			return nil, errors.ErrOutOfMemory{}
-		case C.TB_STATUS_INVALID_ADDRESS:
+		case C.TB_STATUS_ADDRESS_INVALID:
 			return nil, errors.ErrInvalidAddress{}
+		case C.TB_STATUS_ADDRESS_LIMIT_EXCEEDED:
+			return nil, errors.ErrAddressLimitExceeded{}
+		case C.TB_STATUS_PACKETS_COUNT_INVALID:
+			// We limit the concurrency above so this means we're out-of-sync with tb_client.
+			panic("tb_client_init(): invalid client concurrency")
 		case C.TB_STATUS_SYSTEM_RESOURCES:
 			return nil, errors.ErrSystemResources{}
 		case C.TB_STATUS_NETWORK_SUBSYSTEM:
@@ -138,13 +143,13 @@ func (c *c_client) Close() {
 
 func getEventSize(op C.TB_OPERATION) uintptr {
 	switch op {
-	case C.TB_OP_CREATE_ACCOUNTS:
+	case C.TB_OPERATION_CREATE_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
-	case C.TB_OP_CREATE_TRANSFERS:
+	case C.TB_OPERATION_CREATE_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
-	case C.TB_OP_LOOKUP_ACCOUNTS:
+	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		fallthrough
-	case C.TB_OP_LOOKUP_TRANSFERS:
+	case C.TB_OPERATION_LOOKUP_TRANSFERS:
 		return unsafe.Sizeof(types.Uint128{})
 	default:
 		return 0
@@ -153,13 +158,13 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 
 func getResultSize(op C.TB_OPERATION) uintptr {
 	switch op {
-	case C.TB_OP_CREATE_ACCOUNTS:
+	case C.TB_OPERATION_CREATE_ACCOUNTS:
 		fallthrough
-	case C.TB_OP_CREATE_TRANSFERS:
+	case C.TB_OPERATION_CREATE_TRANSFERS:
 		return unsafe.Sizeof(types.EventResult{})
-	case C.TB_OP_LOOKUP_ACCOUNTS:
+	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
-	case C.TB_OP_LOOKUP_TRANSFERS:
+	case C.TB_OPERATION_LOOKUP_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
 	default:
 		return 0
@@ -284,7 +289,7 @@ func (c *c_client) doCreate(
 }
 
 func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error) {
-	res, err := c.doCreate(C.TB_OP_CREATE_ACCOUNTS, unsafe.Pointer(&accounts[0]), len(accounts))
+	res, err := c.doCreate(C.TB_OPERATION_CREATE_ACCOUNTS, unsafe.Pointer(&accounts[0]), len(accounts))
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +307,7 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEven
 }
 
 func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error) {
-	res, err := c.doCreate(C.TB_OP_CREATE_TRANSFERS, unsafe.Pointer(&transfers[0]), len(transfers))
+	res, err := c.doCreate(C.TB_OPERATION_CREATE_TRANSFERS, unsafe.Pointer(&transfers[0]), len(transfers))
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +328,7 @@ func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, 
 	count := len(accountIDs)
 	results := make([]types.Account, count)
 	wrote, err := c.doRequest(
-		C.TB_OP_LOOKUP_ACCOUNTS,
+		C.TB_OPERATION_LOOKUP_ACCOUNTS,
 		count,
 		unsafe.Pointer(&accountIDs[0]),
 		unsafe.Pointer(&results[0]),
@@ -341,7 +346,7 @@ func (c *c_client) LookupTransfers(transferIDs []types.Uint128) ([]types.Transfe
 	count := len(transferIDs)
 	results := make([]types.Transfer, count)
 	wrote, err := c.doRequest(
-		C.TB_OP_LOOKUP_TRANSFERS,
+		C.TB_OPERATION_LOOKUP_TRANSFERS,
 		count,
 		unsafe.Pointer(&transferIDs[0]),
 		unsafe.Pointer(&results[0]),

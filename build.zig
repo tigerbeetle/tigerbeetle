@@ -61,6 +61,13 @@ pub fn build(b: *std.build.Builder) void {
         lint_step.dependOn(&run_cmd.step);
     }
 
+    // Executable which generates src/c/tb_client.h
+    const tb_client_header_generate = blk: {
+        const tb_client_header = b.addExecutable("tb_client_header", "src/c/tb_client_header.zig");
+        tb_client_header.setMainPkgPath("src");
+        break :blk tb_client_header.run();
+    };
+
     {
         const unit_tests = b.addTest("src/unit_tests.zig");
         unit_tests.setTarget(target);
@@ -73,6 +80,7 @@ pub fn build(b: *std.build.Builder) void {
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
+        test_step.dependOn(&tb_client_header_generate.step);
     }
 
     {
@@ -84,13 +92,11 @@ pub fn build(b: *std.build.Builder) void {
         tb_client.pie = true;
         tb_client.bundle_compiler_rt = true;
 
-        const os_tag = target.os_tag orelse builtin.target.os.tag;
-        if (os_tag != .windows) {
-            tb_client.linkLibC();
-        }
+        tb_client.linkLibC();
 
         const build_step = b.step("tb_client", "Build C client shared library");
         build_step.dependOn(&tb_client.step);
+        build_step.dependOn(&tb_client_header_generate.step);
     }
 
     {
