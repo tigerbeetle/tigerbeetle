@@ -58,7 +58,7 @@ fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
 // If it's only being imported by another zig file, then exporting the functions
 // will force them to be evaluated/codegen/linked and trigger unexpected comptime paths.
 comptime {
-    if (@import("root") == @This()) {
+    if (builtin.link_libc) {
         @export(tb_client_init, .{ .name = "tb_client_init", .linkage = .Strong });
         @export(tb_client_init_echo, .{ .name = "tb_client_init_echo", .linkage = .Strong });
     }
