@@ -28,7 +28,7 @@ pub const Status = enum {
     view_change,
     // Recovery (for replica_count > 1):
     //
-    // 1. At replica start: `status=recovering` and `journal.recovered=false`
+    // 1. At replica start: `status=recovering` and `journal.status=recovering`
     // 2. Load the WAL. Mark questionable entries as faulty.
     // 3. If the WAL has no entries (besides the initial commit), skip to step 5 with view 0.
     // 4. Run VSR recovery protocol:
@@ -609,11 +609,10 @@ pub fn ReplicaType(
             self.grid.tick();
             self.message_bus.tick();
 
-            if (!self.journal.recovered) {
-                if (!self.journal.recovering) self.journal.recover();
-                return;
-            } else {
-                assert(!self.journal.recovering);
+            switch (self.journal.status) {
+                .init => return self.journal.recover(),
+                .recovering => return,
+                .recovered => {},
             }
 
             if (self.status == .recovering) {
@@ -707,11 +706,9 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (!self.journal.recovered) {
+            if (self.journal.status != .recovered) {
                 log.debug("{}: on_message: waiting for journal to recover", .{self.replica});
                 return;
-            } else {
-                assert(!self.journal.recovering);
             }
 
             assert(message.header.replica < self.replica_count);
@@ -1453,7 +1450,7 @@ pub fn ReplicaType(
             }
 
             // Recovery messages with our nonce are not sent until after the journal is recovered.
-            assert(self.journal.recovered);
+            assert(self.journal.status == .recovered);
 
             var responses: *QuorumMessages = &self.recovery_response_from_other_replicas;
             if (responses[message.header.replica]) |existing| {
@@ -3669,7 +3666,7 @@ pub fn ReplicaType(
         // learn the op.
         fn op_certain(self: *const Self) bool {
             assert(self.status == .recovering);
-            assert(self.journal.recovered);
+            assert(self.journal.status == .recovered);
             assert(self.op_checkpoint <= self.op);
 
             const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint).index;
@@ -3884,7 +3881,7 @@ pub fn ReplicaType(
         fn recover(self: *Self) void {
             assert(self.status == .recovering);
             assert(self.replica_count > 1);
-            assert(self.journal.recovered);
+            assert(self.journal.status == .recovered);
 
             log.debug("{}: recover: sending recovery messages nonce={}", .{
                 self.replica,
@@ -5124,7 +5121,7 @@ pub fn ReplicaType(
 
         fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
             assert(self.status == .view_change or self.status == .recovering);
-            assert(self.journal.recovered);
+            assert(self.journal.status == .recovered);
 
             switch (self.status) {
                 .normal => unreachable,
