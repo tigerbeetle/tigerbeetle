@@ -156,8 +156,6 @@ Beyond these rules:
 
 * Use newlines to **group resource allocation and deallocation**, i.e. before the resource allocation and after the corresponding `defer` statement, to make leaks easier to spot.
 
-* TigerBeetle has **a “zero dependencies” policy**, apart from the Zig toolchain. Dependencies, in general, inevitably lead to supply chain attacks, safety and performance risk, and slow install times. For foundational infrastructure in particular, the cost of any dependency is further amplified throughout the rest of the stack.
-
 ### Off-by-one errors
 
 * **The usual suspects for off-by-one errors are casual interactions between an `index`, a `count` or a `size`.** These are all primitive integer types, but should be seen as distinct types, with clear rules to cast between them. To go from an `index` to a `count` you need to add one, since indexes are *0-based* but counts are *1-based*. To go from a `count` to a `size` you need to multiply by the unit. Again, this is why including units and qualifiers in variable names is important.
@@ -172,10 +170,26 @@ Beyond these rules:
 
 * Hard limit all line lengths, without exception, to at most 100 columns for a good typographic "measure". Use it up. Never go beyond. Nothing should be hidden by a horizontal scrollbar. Let your editor help you by setting a column ruler. To wrap a function signature, call or data structure, add a trailing comma, close your eyes and let `zig fmt` do the rest.
 
+### Dependencies
+
+TigerBeetle has **a “zero dependencies” policy**, apart from the Zig toolchain. Dependencies, in general, inevitably lead to supply chain attacks, safety and performance risk, and slow install times. For foundational infrastructure in particular, the cost of any dependency is further amplified throughout the rest of the stack.
+
+### Tooling
+
+Similarly, tools have costs. A small standardized toolbox is simpler to operate than an array of specialized instruments each with a dedicated manual. Our primary tool is Zig. It may not be the best for everything, but it's good enough for most things. We invest into our Zig tooling to ensure that we can tackle new problems quickly, with a minimum of accidental complexity in our local development environment.
+
+> “The right tool for the job is often the tool you are already using—adding new tools has a higher cost than many people appreciate” — John Carmack
+
+For example, the next time you write a script, instead of `scripts/*.sh`, write `scripts/*.zig`.
+
+This not only makes your script cross-platform and portable, but introduces type safety and increases the probability that running your script will succeed for everyone on the team, instead of hitting a Bash/Shell/OS-specific issue.
+
+Standardizing on Zig for tooling is important to ensure that we reduce dimensionality, as the team, and therefore the range of personal tastes, grows. This may be slower for you in the short term, but makes for more velocity for the team in the long term.
+
 ## The Last Stage
 
 At the end of the day, keep trying things out, have fun, and remember—it's called TigerBeetle, not only because it's fast, but because it's small!
 
 > You don’t really suppose, do you, that all your adventures and escapes were managed by mere luck, just for your sole benefit? You are a very fine person, Mr. Baggins, and I am very fond of you; but you are only quite a little fellow in a wide world after all!”
-> 
+>
 > “Thank goodness!” said Bilbo laughing, and handed him the tobacco-jar.
