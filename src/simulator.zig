@@ -34,9 +34,6 @@ const log_simulator = std.log.scoped(.simulator);
 /// You can fine tune your log levels even further (debug/info/warn/err):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
-/// Modifies compile-time constants on "config.zig".
-pub const tigerbeetle_config = config.config_test_min;
-
 const cluster_id = 0;
 
 var cluster: *Cluster = undefined;
