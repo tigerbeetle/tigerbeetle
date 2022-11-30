@@ -129,6 +129,12 @@ pub const port = config.process.port;
 /// Bind to the "127.0.0.1" loopback address to accept local connections as a safe default only.
 pub const address = config.process.address;
 
+comptime {
+    // vsr.parse_address assumes that config.address/config.port are valid.
+    _ = std.net.Address.parseIp4(address, 0) catch unreachable;
+    _ = @as(u16, port);
+}
+
 /// The default maximum amount of memory to use.
 pub const memory_size_max_default = config.process.memory_size_max_default;
 
@@ -158,6 +164,13 @@ pub const cache_transfers_max = config.process.cache_transfers_max;
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const cache_transfers_posted_max = config.process.cache_transfers_posted_max;
 
+comptime {
+    // SetAssociativeCache requires a power-of-two cardinality.
+    assert(cache_accounts_max == 0 or std.math.isPowerOfTwo(cache_accounts_max));
+    assert(cache_transfers_max == 0 or std.math.isPowerOfTwo(cache_transfers_max));
+    assert(cache_transfers_posted_max == 0 or std.math.isPowerOfTwo(cache_transfers_posted_max));
+}
+
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
 /// We need this limit to allocate space for copies of batch headers at the start of the journal.
@@ -180,6 +193,27 @@ pub const journal_size_max = journal_size_headers + journal_size_prepares;
 pub const journal_size_headers = journal_slot_count * @sizeOf(vsr.Header);
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
+comptime {
+    assert(journal_size_max == journal_size_headers + journal_size_prepares);
+
+    // For the given WAL (lsm_batch_multiple=4):
+    //
+    //   A    B    C    D    E
+    //   |····|····|····|····|
+    //
+    // - ("|" delineates measures, where a measure is a multiple of prepare batches.)
+    // - ("·" is a prepare in the WAL.)
+    // - The Replica triggers a checkpoint at "E".
+    // - The entries between "A" and "D" are on-disk in level 0.
+    // - The entries between "D" and "E" are in-memory in the immutable table.
+    // - So the checkpoint only includes "A…D".
+    //
+    // The journal must have at least two measures (batches) to ensure at least one is checkpointed.
+    assert(journal_slot_count >= lsm_batch_multiple * 2);
+    assert(journal_slot_count % lsm_batch_multiple == 0);
+    assert(journal_size_max == journal_size_headers + journal_size_prepares);
+}
+
 /// The maximum number of connections that can be held open by the server at any time:
 pub const connections_max = replicas_max + clients_max;
 
@@ -193,6 +227,14 @@ pub const connections_max = replicas_max + clients_max;
 /// This impacts the amount of memory allocated at initialization by the server.
 pub const message_size_max = config.cluster.message_size_max;
 pub const message_body_size_max = message_size_max - @sizeOf(vsr.Header);
+
+comptime {
+    // The WAL format requires messages to be a multiple of the sector size.
+    assert(message_size_max % sector_size == 0);
+    assert(message_size_max >= @sizeOf(vsr.Header));
+    assert(message_size_max >= sector_size);
+    assert(message_size_max >= message_size_max_min(clients_max));
+}
 
 /// The smallest possible message_size_max (for use in the simulator to improve performance).
 /// The message body must have room for pipeline_max headers in the DVC.
@@ -247,6 +289,12 @@ pub const tcp_rcvbuf = config.process.tcp_rcvbuf;
 /// The kernel doubles this value to allow space for packet bookkeeping overhead.
 pub const tcp_sndbuf_replica = connection_send_queue_max_replica * message_size_max;
 pub const tcp_sndbuf_client = connection_send_queue_max_client * message_size_max;
+
+comptime {
+    // Avoid latency issues from setting sndbuf too high:
+    assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
+    assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
+}
 
 /// Whether to enable TCP keepalive:
 pub const tcp_keepalive = config.process.tcp_keepalive;
@@ -325,6 +373,12 @@ pub const journal_iops_write_max = config.process.journal_iops_write_max;
 /// or when a view change needs to take place to elect a new primary.
 pub const superblock_copies = config.cluster.superblock_copies;
 
+comptime {
+    assert(superblock_copies % 2 == 0);
+    assert(superblock_copies >= 4);
+    assert(superblock_copies <= 8);
+}
+
 /// The maximum size of a local data file.
 /// This should not be much larger than several TiB to limit:
 /// * blast radius and recovery time when a whole replica is lost,
@@ -342,9 +396,21 @@ pub const block_size = config.cluster.block_size;
 
 pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size);
 
+comptime {
+    assert(block_size % sector_size == 0);
+    assert(lsm_table_size_max % sector_size == 0);
+    assert(lsm_table_size_max % block_size == 0);
+}
+
 /// The number of levels in an LSM tree.
 /// A higher number of levels increases read amplification, as well as total storage capacity.
 pub const lsm_levels = config.cluster.lsm_levels;
+
+comptime {
+    // ManifestLog serializes the level as a u7.
+    assert(lsm_levels > 0);
+    assert(lsm_levels <= std.math.maxInt(u7));
+}
 
 /// The number of tables at level i (0 ≤ i < lsm_levels) is `pow(lsm_growth_factor, i+1)`.
 /// A higher growth factor increases write amplification (by increasing the number of tables in
@@ -368,6 +434,11 @@ pub const lsm_manifest_node_size = config.process.lsm_manifest_node_size;
 /// TODO Assert this relative to lsm_table_size_max.
 /// We want to ensure that a mutable table can be converted to an immutable table without overflow.
 pub const lsm_batch_multiple = config.cluster.lsm_batch_multiple;
+
+comptime {
+    // The LSM tree uses half-measures to balance compaction.
+    assert(lsm_batch_multiple % 2 == 0);
+}
 
 pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 
@@ -418,61 +489,6 @@ pub const clock_synchronization_window_max_ms = config.process.clock_synchroniza
 /// Whether to perform intensive online verification.
 pub const verify = config.process.verify;
 
-
-comptime {
-    // vsr.parse_address assumes that config.address/config.port are valid.
-    _ = std.net.Address.parseIp4(address, 0) catch unreachable;
-    _ = @as(u16, port);
-
-    // Avoid latency issues from setting sndbuf too high:
-    assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
-    assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
-
-    assert(journal_size_max == journal_size_headers + journal_size_prepares);
-
-    // For the given WAL (lsm_batch_multiple=4):
-    //
-    //   A    B    C    D    E
-    //   |····|····|····|····|
-    //
-    // - ("|" delineates measures, where a measure is a multiple of prepare batches.)
-    // - ("·" is a prepare in the WAL.)
-    // - The Replica triggers a checkpoint at "E".
-    // - The entries between "A" and "D" are on-disk in level 0.
-    // - The entries between "D" and "E" are in-memory in the immutable table.
-    // - So the checkpoint only includes "A…D".
-    //
-    // The journal must have at least two measures (batches) to ensure at least one is checkpointed.
-    assert(journal_slot_count >= lsm_batch_multiple * 2);
-    assert(journal_slot_count % lsm_batch_multiple == 0);
-    assert(journal_size_max == journal_size_headers + journal_size_prepares);
-
-    // The WAL format requires messages to be a multiple of the sector size.
-    assert(message_size_max % sector_size == 0);
-    assert(message_size_max >= @sizeOf(vsr.Header));
-    assert(message_size_max >= sector_size);
-    assert(message_size_max >= message_size_max_min(clients_max));
-
-    assert(superblock_copies % 2 == 0);
-    assert(superblock_copies >= 4);
-    assert(superblock_copies <= 8);
-
-    // ManifestLog serializes the level as a u7.
-    assert(lsm_levels > 0);
-    assert(lsm_levels <= std.math.maxInt(u7));
-
-    assert(block_size % sector_size == 0);
-    assert(lsm_table_size_max % sector_size == 0);
-    assert(lsm_table_size_max % block_size == 0);
-
-    // The LSM tree uses half-measures to balance compaction.
-    assert(lsm_batch_multiple % 2 == 0);
-
-    // SetAssociativeCache requires a power-of-two cardinality.
-    assert(cache_accounts_max == 0 or std.math.isPowerOfTwo(cache_accounts_max));
-    assert(cache_transfers_max == 0 or std.math.isPowerOfTwo(cache_transfers_max));
-    assert(cache_transfers_posted_max == 0 or std.math.isPowerOfTwo(cache_transfers_posted_max));
-}
 pub const configs = struct {
     /// A good default config for production.
     pub const default_production = Config{
