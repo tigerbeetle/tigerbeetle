@@ -25,6 +25,8 @@ const Forest = StateMachine.Forest;
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
+pub const tigerbeetle_config = config.configs.test_min;
+
 const FuzzOp = union(enum) {
     // TODO Test secondary index lookups and range queries.
     compact: struct {
