@@ -359,8 +359,8 @@ fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime defau
 
     // SetAssociativeCache requires a power-of-two cardinality and a minimal
     // size.
-    assert(result >= 2048);
-    assert(math.isPowerOfTwo(result));
+    assert(result == 0 or result >= 2048);
+    assert(result == 0 or math.isPowerOfTwo(result));
 
     return result;
 }
