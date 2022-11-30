@@ -9,6 +9,8 @@ const vsr = @import("../vsr.zig");
 const journal = @import("./journal.zig");
 const fuzz = @import("../test/fuzz.zig");
 
+pub const tigerbeetle_config = config.configs.test_min;
+
 const cluster = 0;
 
 pub fn main() !void {

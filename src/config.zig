@@ -490,7 +490,8 @@ pub const configs = struct {
     };
 
     /// A good default config for local development.
-    /// For production, use default_production instead.
+    /// (For production, use default_production instead.)
+    /// The cluster-config is compatible with the default production config.
     pub const default_development = Config{
         .process = .{
             .direct_io = true,
@@ -500,9 +501,7 @@ pub const configs = struct {
             .cache_transfers_posted_max = 256 * 1024,
             .verify = true,
         },
-        .cluster = .{
-            .clients_max = 8,
-        },
+        .cluster = default_production.cluster,
     };
 
     /// Minimal test configuration — small WAL, small grid block size, etc.
@@ -528,14 +527,14 @@ pub const configs = struct {
     };
 
     const default = if (@hasDecl(@import("root"), "tigerbeetle_config"))
-        @import("root").tigerbeetle_config
+        root.tigerbeetle_config
     else if (builtin.is_test)
         test_min
     else
         default_development;
 
-    const build = @import("tigerbeetle_config");
-    const base = switch (build.config_base) {
+    const base = switch (build_options.config_base) {
+        .default => default,
         .production => default_production,
         .development => default_development,
         .test_min => test_min,

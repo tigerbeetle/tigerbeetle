@@ -26,6 +26,8 @@ const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../test/fuzz.zig");
 
+pub const tigerbeetle_config = config.configs.test_min;
+
 /// Total calls to checkpoint() + view_change().
 const transitions_count_total = 10;
 const cluster = 0;
