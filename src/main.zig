@@ -31,7 +31,7 @@ const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
 
 pub const log_level: std.log.Level = config.log_level;
-pub usingnamespace config.root_declarations;
+pub const log = config.log;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -224,15 +224,15 @@ fn print_value(
     comptime field: []const u8,
     comptime value: anytype,
 ) !void {
-    if (@typeInfo(@TypeOf(value)) == .Pointer) {
-        try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
+    switch (@typeInfo(@TypeOf(value))) {
+        .Fn => {}, // Ignore the log() function.
+        .Pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
             field,
             std.fmt.fmtSliceEscapeLower(value),
-        });
-    } else {
-        try std.fmt.format(writer, "{s}={}\n", .{
+        }),
+        else => try std.fmt.format(writer, "{s}={}\n", .{
             field,
             value,
-        });
+        }),
     }
 }

@@ -85,6 +85,21 @@ const config = configs.current;
 /// One of: .err, .warn, .info, .debug
 pub const log_level: std.log.Level = config.process.log_level;
 
+pub const log = if (tracer_backend == .tracy)
+    tracer.log_fn
+else
+    std.log.defaultLog;
+
+// Which backend to use for ./tracer.zig.
+// Default is `.none`.
+pub const tracer_backend = if (@hasDecl(root, "tracer_backend"))
+    // TODO(jamii)
+    // This branch is a hack used to work around the absence of tigerbeetle_build_options.
+    // This should be removed once the node client is built using `zig build`.
+    root.tracer_backend
+else
+    build_options.tracer_backend;
+
 /// The maximum number of replicas allowed in a cluster.
 pub const replicas_max = 6;
 
@@ -403,15 +418,6 @@ pub const clock_synchronization_window_max_ms = config.process.clock_synchroniza
 /// Whether to perform intensive online verification.
 pub const verify = config.process.verify;
 
-// Which backend to use for ./tracer.zig.
-// Default is `.none`.
-pub const tracer_backend = if (@hasDecl(root, "tracer_backend"))
-    // TODO(jamii)
-    // This branch is a hack used to work around the absence of tigerbeetle_build_options.
-    // This should be removed once the node client is built using `zig build`.
-    root.tracer_backend
-else
-    build_options.tracer_backend;
 
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
@@ -467,18 +473,6 @@ comptime {
     assert(cache_transfers_max == 0 or std.math.isPowerOfTwo(cache_transfers_max));
     assert(cache_transfers_posted_max == 0 or std.math.isPowerOfTwo(cache_transfers_posted_max));
 }
-
-/// Declarations which must be imported in the root file (eg main.zig) to take effect:
-///
-///     pub usingnamespace config.root_declarations;
-///
-pub const root_declarations = struct {
-    pub const log = if (tracer_backend == .tracy)
-        tracer.log_fn
-    else
-        std.log.defaultLog;
-};
-
 pub const configs = struct {
     /// A good default config for production.
     pub const default_production = Config{
