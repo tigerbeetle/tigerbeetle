@@ -222,13 +222,13 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         /// We copy-on-write to these buffers, as the in-memory headers may change while writing.
         /// The buffers belong to the IOP at the corresponding index in IOPS.
-        headers_iops: *align(config.sector_size) [config.io_depth_write][config.sector_size]u8,
+        headers_iops: *align(config.sector_size) [config.journal_iops_write_max][config.sector_size]u8,
 
         /// Statically allocated read IO operation context data.
-        reads: IOPS(Read, config.io_depth_read) = .{},
+        reads: IOPS(Read, config.journal_iops_read_max) = .{},
 
         /// Statically allocated write IO operation context data.
-        writes: IOPS(Write, config.io_depth_write) = .{},
+        writes: IOPS(Write, config.journal_iops_write_max) = .{},
 
         /// Whether an entry is in memory only and needs to be written or is being written:
         /// We use this in the same sense as a dirty bit in the kernel page cache.
@@ -303,9 +303,9 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const headers_iops = (try allocator.allocAdvanced(
                 [config.sector_size]u8,
                 config.sector_size,
-                config.io_depth_write,
+                config.journal_iops_write_max,
                 .exact,
-            ))[0..config.io_depth_write];
+            ))[0..config.journal_iops_write_max];
             errdefer allocator.free(headers_iops);
 
             log.debug("{}: slot_count={} size={} headers_size={} prepares_size={}", .{

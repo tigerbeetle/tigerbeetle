@@ -41,8 +41,8 @@ pub const ConfigProcess = struct {
     tcp_nodelay: bool = true,
     direct_io: bool,
     direct_io_required: bool,
-    io_depth_read: usize = 8,
-    io_depth_write: usize = 8,
+    journal_iops_read_max: usize = 8,
+    journal_iops_write_max: usize = 8,
     tick_ms: u63 = 10,
     rtt_ms: u64 = 300,
     rtt_multiple: u8 = 2,
@@ -283,10 +283,15 @@ pub const sector_size = 4096;
 pub const direct_io = config.process.direct_io;
 pub const direct_io_required = config.process.direct_io_required;
 
-/// The maximum number of concurrent read I/O operations to allow at once.
-pub const io_depth_read = config.process.io_depth_read;
-/// The maximum number of concurrent write I/O operations to allow at once.
-pub const io_depth_write = config.process.io_depth_write;
+// TODO Add in the Grid's IOPS and the upper-bound that the Superblock will use.
+pub const iops_read_max = journal_iops_read_max;
+pub const iops_write_max = journal_iops_write_max;
+
+/// The maximum number of concurrent WAL read I/O operations to allow at once.
+pub const journal_iops_read_max = config.process.journal_iops_read_max;
+/// The maximum number of concurrent WAL write I/O operations to allow at once.
+/// Ideally this is at least as high as pipeline_max, but it is safe to be lower.
+pub const journal_iops_write_max = config.process.journal_iops_write_max;
 
 /// The number of redundant copies of the superblock in the superblock storage zone.
 /// This must be either { 4, 6, 8 }, i.e. an even number, for more efficient flexible quorums.

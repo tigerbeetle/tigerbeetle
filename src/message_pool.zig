@@ -22,7 +22,7 @@ const message_size_max_padded = config.message_size_max + config.sector_size;
 pub const messages_max_replica = messages_max: {
     var sum: usize = 0;
 
-    sum += config.io_depth_read + config.io_depth_write; // Journal I/O
+    sum += config.journal_iops_read_max + config.journal_iops_write_max; // Journal I/O
     sum += config.clients_max; // SuperBlock.client_table
     sum += 1; // Replica.loopback_queue
     sum += config.pipeline_max; // Replica.pipeline
