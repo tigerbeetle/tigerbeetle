@@ -5,15 +5,16 @@ const assert = std.debug.assert;
 /// See test cases for example usage.
 // TODO(Zig): Change this to a a purely comptime function returning a slice
 // once Zig's "runtime value cannot be passed to comptime arg" bugs are fixed.
-pub fn parse(comptime Row: type, comptime table_string: []const u8) !std.BoundedArray(Row, 128) {
-    var rows = std.BoundedArray(Row, 128).init(0) catch unreachable;
+pub fn parse(comptime Row: type, comptime table_string: []const u8) !std.BoundedArray(Row, 64) {
+    var rows = std.BoundedArray(Row, 64).init(0) catch unreachable;
     var row_strings = std.mem.tokenize(u8, table_string, "\n");
     while (row_strings.next()) |row_string| {
         // Ignore blank line.
         if (row_string.len == 0) continue;
 
         var columns = std.mem.tokenize(u8, row_string, " ");
-        rows.appendAssumeCapacity(parse_data(Row, &columns));
+        const row = parse_data(Row, &columns);
+        rows.appendAssumeCapacity(row);
 
         // Ignore trailing line comment.
         if (columns.next()) |last| assert(std.mem.eql(u8, last, "//"));
@@ -39,8 +40,10 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
         .Int => |info| {
             const max = std.math.maxInt(Data);
             const token = tokens.next().?;
-            //if (std.mem.eql(u8, token, "max")) return max;
+            // If the first character is a letter ("a-zA-Z"), ignore it. (For example, "A1" → 1).
+            // This serves as a comment, to help visually disambiguate sequential integer columns.
             const offset: usize = if (std.ascii.isAlpha(token[0])) 1 else 0;
+            // Negative unsigned values are computed relative to the maxInt.
             if (info.signedness == .unsigned and token[offset] == '-') {
                 return max - (std.fmt.parseInt(Data, token[offset + 1 ..], 10) catch unreachable);
             }
@@ -52,7 +55,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
                 // The repeated else branch seems to be necessary to keep Zig from complaining:
                 //   control flow attempts to use compile-time variable at runtime
                 if (value_field.default_value != null) {
-                    if (take(tokens, "_")) {
+                    if (eat(tokens, "_")) {
                         @field(data, value_field.name) = value_field.default_value.?;
                     } else {
                         @field(data, value_field.name) = parse_data(value_field.field_type, tokens);
@@ -80,7 +83,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
     };
 }
 
-fn take(tokens: *std.mem.TokenIterator(u8), token: []const u8) bool {
+fn eat(tokens: *std.mem.TokenIterator(u8), token: []const u8) bool {
     var index_before = tokens.index;
     if (std.mem.eql(u8, tokens.next().?, token)) return true;
     tokens.index = index_before;
