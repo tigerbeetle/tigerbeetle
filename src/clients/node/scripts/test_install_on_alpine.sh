@@ -13,6 +13,6 @@ docker run -w /test "$id" sh -c "
 set -e
 apk add --update nodejs npm git
 
-npm install /wrk/src/clients/node
+npm install /wrk/src/clients/node/tigerbeetle-node-*.tgz
 node -e 'require(\"tigerbeetle-node\"); console.log(\"SUCCESS!\")'
 "

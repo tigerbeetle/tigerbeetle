@@ -88,6 +88,12 @@ const SlotRange = struct {
     }
 };
 
+const Status = enum {
+    init,
+    recovering,
+    recovered,
+};
+
 const slot_count = config.journal_slot_count;
 const headers_size = config.journal_size_headers;
 const prepares_size = config.journal_size_prepares;
@@ -254,8 +260,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// (`undefined` would may more sense than `0`, but `0` allows it to be asserted).
         prepare_inhabited: []bool,
 
-        recovered: bool = false,
-        recovering: bool = false,
+        status: Status = .init,
 
         pub fn init(allocator: Allocator, storage: *Storage, replica: u8) !Self {
             // TODO Fix this assertion:
@@ -365,8 +370,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Called by the replica immediately after WAL recovery completes, but before the replica
         /// issues any I/O from handling messages.
         pub fn is_empty(self: *const Self) bool {
-            assert(!self.recovering);
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(self.writes.executing() == 0);
 
             if (!self.headers[0].valid_checksum()) return false;
@@ -486,7 +490,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         /// Returns the highest op number prepared, in any slot without reference to the checkpoint.
         pub fn op_maximum(self: *const Self) u64 {
-            assert(self.recovered);
+            assert(self.status == .recovered);
 
             var op: u64 = 0;
             for (self.headers) |*header| {
@@ -516,7 +520,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn has(self: *const Self, header: *const Header) bool {
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(header.command == .prepare);
 
             const slot = self.slot_for_op(header.op);
@@ -562,7 +566,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             op_max: u64,
             dest: []Header,
         ) usize {
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(op_min <= op_max);
             assert(dest.len > 0);
 
@@ -721,7 +725,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             checksum: u128,
             destination_replica: ?u8,
         ) void {
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(checksum != 0);
 
             const replica = @fieldParentPtr(Replica, "journal", self);
@@ -757,7 +761,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const slot = self.slot_for_op(op);
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(self.prepare_inhabited[slot.index]);
             assert(self.prepare_checksums[slot.index] == checksum);
 
@@ -820,7 +824,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const op = read.op;
             const checksum = read.checksum;
-            assert(self.recovered);
+            assert(self.status == .recovered);
 
             defer {
                 replica.message_bus.unref(read.message);
@@ -923,12 +927,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn recover(self: *Self) void {
-            assert(!self.recovered);
-            assert(!self.recovering);
+            assert(self.status == .init);
             assert(self.dirty.count == slot_count);
             assert(self.faulty.count == slot_count);
 
-            self.recovering = true;
+            self.status = .recovering;
 
             log.debug("{}: recover: recovering", .{self.replica});
 
@@ -938,8 +941,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn recover_headers(self: *Self, offset: u64) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
-            assert(!self.recovered);
-            assert(self.recovering);
+            assert(self.status == .recovering);
             assert(self.dirty.count == slot_count);
             assert(self.faulty.count == slot_count);
 
@@ -1000,8 +1002,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 buffer.len,
             });
 
-            assert(!self.recovered);
-            assert(self.recovering);
+            assert(self.status == .recovering);
             assert(offset % @sizeOf(Header) == 0);
             assert(buffer.len >= @sizeOf(Header));
             assert(buffer.len % @sizeOf(Header) == 0);
@@ -1038,8 +1039,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn recover_prepares(self: *Self, slot: Slot) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
-            assert(!self.recovered);
-            assert(self.recovering);
+            assert(self.status == .recovering);
             assert(self.dirty.count == slot_count);
             assert(self.faulty.count == slot_count);
             // We expect that no other process is issuing reads while we are recovering.
@@ -1086,8 +1086,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const self = read.self;
             const replica = @fieldParentPtr(Replica, "journal", self);
 
-            assert(!self.recovered);
-            assert(self.recovering);
+            assert(self.status == .recovering);
             assert(self.dirty.count == slot_count);
             assert(self.faulty.count == slot_count);
             assert(read.destination_replica == null);
@@ -1179,8 +1178,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn recover_slots(self: *Self) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
-            assert(!self.recovered);
-            assert(self.recovering);
+            assert(self.status == .recovering);
             assert(self.reads.executing() == 0);
             assert(self.writes.executing() == 0);
             assert(self.dirty.count == slot_count);
@@ -1233,8 +1231,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.faulty.count,
             });
 
-            self.recovered = true;
-            self.recovering = false;
+            self.status = .recovered;
             self.assert_recovered();
             // From here it's over to the Recovery protocol from VRR 2012.
         }
@@ -1252,8 +1249,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn recover_torn_prepare(self: *const Self, cases: []const *const Case) ?Slot {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
-            assert(!self.recovered);
-            assert(self.recovering);
+            assert(self.status == .recovering);
             assert(self.dirty.count == slot_count);
             assert(self.faulty.count == slot_count);
 
@@ -1333,8 +1329,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const replica = @fieldParentPtr(Replica, "journal", self);
             const cluster = replica.cluster;
 
-            assert(!self.recovered);
-            assert(self.recovering);
+            assert(self.status == .recovering);
             assert(self.dirty.bit(slot));
             assert(self.faulty.bit(slot));
 
@@ -1418,8 +1413,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn assert_recovered(self: *const Self) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
-            assert(self.recovered);
-            assert(!self.recovering);
+            assert(self.status == .recovered);
 
             assert(self.dirty.count <= slot_count);
             assert(self.faulty.count <= slot_count);
@@ -1453,7 +1447,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// Removes entries from `op_min` (inclusive) onwards.
         /// Used after a view change to remove uncommitted entries discarded by the new leader.
         pub fn remove_entries_from(self: *Self, op_min: u64) void {
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(op_min > 0);
 
             log.debug("{}: remove_entries_from: op_min={}", .{ self.replica, op_min });
@@ -1497,7 +1491,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         pub fn set_header_as_dirty(self: *Self, header: *const Header) void {
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(header.command == .prepare);
 
             log.debug("{}: set_header_as_dirty: op={} checksum={}", .{
@@ -1533,7 +1527,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", self);
 
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(message.header.command == .prepare);
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
@@ -1597,7 +1591,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         fn write_prepare_header(write: *Self.Write) void {
             const self = write.self;
             const message = write.message;
-            assert(self.recovered);
+            assert(self.status == .recovered);
 
             {
                 // `prepare_inhabited[slot.index]` is usually false here, but may be true if two
@@ -1641,7 +1635,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn write_prepare_on_lock_header_sector(self: *Self, write: *Write) void {
-            assert(self.recovered);
+            assert(self.status == .recovered);
             assert(write.header_sector_locked);
 
             // TODO It's possible within this section that the header has since been replaced but we
@@ -2225,6 +2219,7 @@ pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize
     assert(offset_logical <= config.journal_size_headers);
     assert(offset_logical % config.sector_size == 0);
     assert(target.len > 0);
+    assert(target.len % @sizeOf(Header) == 0);
     assert(target.len % config.sector_size == 0);
 
     var headers = std.mem.bytesAsSlice(Header, target);
@@ -2245,6 +2240,11 @@ pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize
     return headers_count * @sizeOf(Header);
 }
 
+test "format_wal_headers" {
+    const fuzz = @import("./journal_format_fuzz.zig");
+    try fuzz.fuzz_format_wal_headers(config.sector_size);
+}
+
 /// Format part of a new WAL's Zone.wal_prepares, writing to `target`.
 ///
 /// `offset_logical` is relative to the beginning of the `wal_prepares` zone.
@@ -2253,6 +2253,7 @@ pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usiz
     assert(offset_logical <= config.journal_size_prepares);
     assert(offset_logical % config.sector_size == 0);
     assert(target.len > 0);
+    assert(target.len % @sizeOf(Header) == 0);
     assert(target.len % config.sector_size == 0);
 
     const sectors_per_message = @divExact(config.message_size_max, config.sector_size);
@@ -2285,77 +2286,7 @@ pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usiz
     return target.len;
 }
 
-test "format_wal" {
-    const cluster = 123;
-    const write_sizes = [_]usize{
-        config.sector_size,
-        config.sector_size * 2,
-        config.sector_size * 3,
-    };
-
-    for (write_sizes) |write_size_max| {
-        const headers_ring = try std.testing.allocator.alloc(Header, slot_count);
-        defer std.testing.allocator.free(headers_ring);
-
-        const prepare_ring = try std.testing.allocator.alloc([config.message_size_max]u8, slot_count);
-        defer std.testing.allocator.free(prepare_ring);
-
-        const write_data = try std.testing.allocator.alloc(u8, write_size_max);
-        defer std.testing.allocator.free(write_data);
-
-        const headers_data = std.mem.sliceAsBytes(headers_ring);
-        const prepare_data = std.mem.sliceAsBytes(prepare_ring);
-
-        {
-            var offset: u64 = 0;
-            while (true) {
-                const write_size = format_wal_headers(cluster, offset, write_data);
-                if (write_size == 0) break;
-                util.copy_disjoint(
-                    .exact,
-                    u8,
-                    headers_data[offset..][0..write_size],
-                    write_data[0..write_size],
-                );
-                offset += write_size;
-            }
-        }
-
-        {
-            var offset: u64 = 0;
-            while (true) {
-                const write_size = format_wal_prepares(cluster, offset, write_data);
-                if (write_size == 0) break;
-                util.copy_disjoint(
-                    .exact,
-                    u8,
-                    prepare_data[offset..][0..write_size],
-                    write_data[0..write_size],
-                );
-                offset += write_size;
-            }
-        }
-
-        for (headers_ring) |*header, slot| {
-            try std.testing.expect(header.valid_checksum());
-            try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
-            try std.testing.expectEqual(header.invalid(), null);
-            try std.testing.expectEqual(header.cluster, cluster);
-            try std.testing.expectEqual(header.op, slot);
-            try std.testing.expectEqual(header.size, @sizeOf(Header));
-            if (slot == 0) {
-                try std.testing.expectEqual(header.command, .prepare);
-                try std.testing.expectEqual(header.operation, .root);
-            } else {
-                try std.testing.expectEqual(header.command, .reserved);
-            }
-
-            const prepare_bytes = prepare_ring[slot];
-            const prepare_header = std.mem.bytesAsValue(Header, prepare_bytes[0..@sizeOf(Header)]);
-            const prepare_body = prepare_bytes[@sizeOf(Header)..];
-
-            try std.testing.expectEqual(header.*, prepare_header.*);
-            for (prepare_body) |byte| try std.testing.expectEqual(byte, 0);
-        }
-    }
+test "format_wal_prepares" {
+    const fuzz = @import("./journal_format_fuzz.zig");
+    try fuzz.fuzz_format_wal_prepares(256 * 1024);
 }

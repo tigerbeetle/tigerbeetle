@@ -92,7 +92,7 @@ const Completion = struct {
 test "c_client echo" {
     // Using the create_accounts operation for this test.
     const RequestContext = RequestContextType(config.message_body_size_max);
-    const create_accounts_operation: u8 = c.TB_OP_CREATE_ACCOUNTS;
+    const create_accounts_operation: u8 = c.TB_OPERATION_CREATE_ACCOUNTS;
     const event_size = @sizeOf(c.tb_account_t);
     const event_request_max = @divFloor(config.message_body_size_max, event_size);
 
@@ -303,7 +303,7 @@ test "c_client tb_packet_status" {
     try assert_result(
         tb_client,
         packet_list,
-        c.TB_OP_CREATE_TRANSFERS,
+        c.TB_OPERATION_CREATE_TRANSFERS,
         config.message_body_size_max + @sizeOf(c.tb_transfer_t),
         c.TB_PACKET_TOO_MUCH_DATA,
     );
@@ -343,28 +343,28 @@ test "c_client tb_packet_status" {
     try assert_result(
         tb_client,
         packet_list,
-        c.TB_OP_CREATE_ACCOUNTS,
+        c.TB_OPERATION_CREATE_ACCOUNTS,
         0,
         c.TB_PACKET_INVALID_DATA_SIZE,
     );
     try assert_result(
         tb_client,
         packet_list,
-        c.TB_OP_CREATE_TRANSFERS,
+        c.TB_OPERATION_CREATE_TRANSFERS,
         @sizeOf(c.tb_transfer_t) - 1,
         c.TB_PACKET_INVALID_DATA_SIZE,
     );
     try assert_result(
         tb_client,
         packet_list,
-        c.TB_OP_LOOKUP_TRANSFERS,
+        c.TB_OPERATION_LOOKUP_TRANSFERS,
         @sizeOf(u128) + 1,
         c.TB_PACKET_INVALID_DATA_SIZE,
     );
     try assert_result(
         tb_client,
         packet_list,
-        c.TB_OP_LOOKUP_ACCOUNTS,
+        c.TB_OPERATION_LOOKUP_ACCOUNTS,
         @sizeOf(u128) * 2.5,
         c.TB_PACKET_INVALID_DATA_SIZE,
     );

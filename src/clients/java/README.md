@@ -5,7 +5,7 @@
 
 ## Pre-built package
 
-Available at [GitHub Packages Registry](https://github.com/orgs/tigerbeetledb/packages?repo_name=tigerbeetle-java) as a `jar` package.
+Available at [GitHub Packages Registry](https://github.com/orgs/tigerbeetledb/packages?repo_name=tigerbeetle) as a `jar` package.
 
 You can install it by just downloading and placing the `jar` package directly in your `classpath` or by using a package management system such as [Maven](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-apache-maven-registry) or [Gradle](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-gradle-registry).
 

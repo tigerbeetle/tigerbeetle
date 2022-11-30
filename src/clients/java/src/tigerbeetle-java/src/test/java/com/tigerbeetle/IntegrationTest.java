@@ -93,25 +93,37 @@ public class IntegrationTest {
         }
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testConstructorEmptyStringReplicaAddresses() throws Throwable {
+    public void testConstructorReplicaAddressesLimitExceeded() throws Throwable {
+        var replicaAddresses = new String[100];
+        for (int i = 0; i < replicaAddresses.length; i++)
+            replicaAddresses[i] = "3000";
 
-        var replicaAddresses = new String[] {"", "", ""};
         try (var client = new Client(0, replicaAddresses)) {
-
-        } catch (Throwable any) {
-            throw any;
+            assert false;
+        } catch (InitializationException initializationException) {
+            assertEquals(InitializationException.Status.ADDRESS_LIMIT_EXCEEDED,
+                    initializationException.getStatus());
         }
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    public void testConstructorEmptyStringReplicaAddresses() throws Throwable {
+        var replicaAddresses = new String[] {"", "", ""};
+        try (var client = new Client(0, replicaAddresses)) {
+            assert false;
+        } catch (InitializationException initializationException) {
+            assertEquals(InitializationException.Status.ADDRESS_INVALID,
+                    initializationException.getStatus());
+        }
+    }
+
     public void testConstructorInvalidReplicaAddresses() throws Throwable {
 
         var replicaAddresses = new String[] {"127.0.0.1:99999"};
         try (var client = new Client(0, replicaAddresses)) {
-
-        } catch (Throwable any) {
-            throw any;
+            assert false;
+        } catch (InitializationException initializationException) {
+            assertEquals(InitializationException.Status.ADDRESS_INVALID,
+                    initializationException.getStatus());
         }
     }
 

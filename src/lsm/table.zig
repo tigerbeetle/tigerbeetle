@@ -126,6 +126,8 @@ pub fn TableType(
         const block_body_size = block_size - @sizeOf(vsr.Header);
 
         pub const layout = layout: {
+            @setEvalBranchQuota(10_000);
+
             assert(block_size % config.sector_size == 0);
             assert(math.isPowerOfTwo(table_size_max));
             assert(math.isPowerOfTwo(block_size));
@@ -182,7 +184,8 @@ pub fn TableType(
             assert((block_keys_layout_count * key_size) % config.cache_line_size == 0);
 
             const block_key_layout_size = block_keys_layout_count * key_size;
-            const block_key_count = block_keys_layout_count - 1;
+            const block_key_count =
+                if (block_keys_layout_count == 0) 0 else block_keys_layout_count - 1;
 
             const block_value_count_max = @divFloor(
                 block_body_size - block_key_layout_size,
@@ -200,6 +203,7 @@ pub fn TableType(
             );
 
             // Compute the number of data and filter blocks by solving the constraints:
+            // * the cumulative table size must not exceed lsm_table_size_max
             // * the filter and data blocks' metadata must fix in the index block
             // * the filter blocks must index all data blocks
             // * minimize the number of filter blocks
@@ -234,13 +238,18 @@ pub fn TableType(
                 .filter_block_count_max = filter_blocks,
 
                 // The number of data blocks covered by a single filter block.
-                .filter_data_block_count_max = filter_data_block_count_max,
+                .filter_data_block_count_max = std.math.min(
+                    filter_data_block_count_max,
+                    data_blocks,
+                ),
             };
         };
 
         const index_block_count = 1;
-        const filter_block_count_max = layout.filter_block_count_max;
+        pub const filter_block_count_max = layout.filter_block_count_max;
         pub const data_block_count_max = layout.data_block_count_max;
+        pub const block_count_max =
+            index_block_count + filter_block_count_max + data_block_count_max;
 
         const index = struct {
             const size = @sizeOf(vsr.Header) + filter_checksums_size + data_checksums_size +
@@ -553,21 +562,23 @@ pub fn TableType(
                 }
 
                 assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
-                const key_layout_bytes = @alignCast(
-                    @alignOf(Key),
-                    block[data.key_layout_offset..][0..data.key_layout_size],
-                );
-                const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
+                if (data.key_count > 0) {
+                    const key_layout_bytes = @alignCast(
+                        @alignOf(Key),
+                        block[data.key_layout_offset..][0..data.key_layout_size],
+                    );
+                    const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
-                const e = eytzinger(data.key_count, data.value_count_max);
-                e.layout_from_keys_or_values(
-                    Key,
-                    Value,
-                    key_from_value,
-                    sentinel_key,
-                    values,
-                    key_layout,
-                );
+                    const e = eytzinger(data.key_count, data.value_count_max);
+                    e.layout_from_keys_or_values(
+                        Key,
+                        Value,
+                        key_from_value,
+                        sentinel_key,
+                        values,
+                        key_layout,
+                    );
+                }
 
                 const values_padding = mem.sliceAsBytes(values_max[builder.value..]);
                 const block_padding = block[data.padding_offset..][0..data.padding_size];
@@ -627,6 +638,7 @@ pub fn TableType(
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
                 assert(!builder.filter_block_empty());
+                assert(builder.data_block_empty());
                 assert(options.address > 0);
 
                 const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
@@ -669,6 +681,8 @@ pub fn TableType(
 
             pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
                 assert(options.address > 0);
+                assert(builder.filter_block_empty());
+                assert(builder.data_block_empty());
                 assert(builder.data_block_count > 0);
                 assert(builder.value == 0);
                 assert(builder.data_blocks_in_filter == 0);

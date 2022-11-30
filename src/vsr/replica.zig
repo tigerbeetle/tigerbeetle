@@ -10,8 +10,6 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientTable = @import("superblock_client_table.zig").ClientTable;
-const format_wal_headers = @import("./journal.zig").format_wal_headers;
-const format_wal_prepares = @import("./journal.zig").format_wal_prepares;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -21,13 +19,14 @@ const Version = vsr.Version;
 const VSRState = vsr.VSRState;
 
 const log = std.log.scoped(.replica);
+const tracer = @import("../tracer.zig");
 
 pub const Status = enum {
     normal,
     view_change,
     // Recovery (for replica_count > 1):
     //
-    // 1. At replica start: `status=recovering` and `journal.recovered=false`
+    // 1. At replica start: `status=recovering` and `journal.status=recovering`
     // 2. Load the WAL. Mark questionable entries as faulty.
     // 3. If the WAL has no entries (besides the initial commit), skip to step 5 with view 0.
     // 4. Run VSR recovery protocol:
@@ -285,6 +284,9 @@ pub fn ReplicaType(
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
+
+        tracer_slot_commit: ?tracer.SpanStart = null,
+        tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
         const OpenOptions = struct {
             replica_count: u8,
@@ -544,6 +546,9 @@ pub fn ReplicaType(
         /// Free all memory and unref all messages held by the replica
         /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time
         pub fn deinit(self: *Self, allocator: Allocator) void {
+            assert(self.tracer_slot_checkpoint == null);
+            assert(self.tracer_slot_commit == null);
+
             self.static_allocator.transition_from_static_to_deinit();
 
             self.journal.deinit(allocator);
@@ -602,11 +607,10 @@ pub fn ReplicaType(
             self.grid.tick();
             self.message_bus.tick();
 
-            if (!self.journal.recovered) {
-                if (!self.journal.recovering) self.journal.recover();
-                return;
-            } else {
-                assert(!self.journal.recovering);
+            switch (self.journal.status) {
+                .init => return self.journal.recover(),
+                .recovering => return,
+                .recovered => {},
             }
 
             if (self.status == .recovering) {
@@ -700,11 +704,9 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (!self.journal.recovered) {
+            if (self.journal.status != .recovered) {
                 log.debug("{}: on_message: waiting for journal to recover", .{self.replica});
                 return;
-            } else {
-                assert(!self.journal.recovering);
             }
 
             assert(message.header.replica < self.replica_count);
@@ -748,6 +750,9 @@ pub fn ReplicaType(
 
             // Any message handlers that loopback must take responsibility for the flush.
             assert(self.loopback_queue == null);
+
+            // We have to regularly flush the tracer to get output from short benchmarks.
+            tracer.flush();
         }
 
         fn on_ping(self: *Self, message: *const Message) void {
@@ -1443,7 +1448,7 @@ pub fn ReplicaType(
             }
 
             // Recovery messages with our nonce are not sent until after the journal is recovered.
-            assert(self.journal.recovered);
+            assert(self.journal.status == .recovered);
 
             var responses: *QuorumMessages = &self.recovery_response_from_other_replicas;
             if (responses[message.header.replica]) |existing| {
@@ -2515,6 +2520,13 @@ pub fn ReplicaType(
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
 
+            tracer.start(
+                &self.tracer_slot_commit,
+                .main,
+                .{ .commit = .{ .op = prepare.header.op } },
+                @src(),
+            );
+
             self.commit_prepare = prepare.ref();
             self.commit_callback = callback;
             self.state_machine.prefetch(
@@ -2593,6 +2605,12 @@ pub fn ReplicaType(
                     self.op_checkpoint,
                     self.op_checkpoint_next(),
                 });
+                tracer.start(
+                    &self.tracer_slot_checkpoint,
+                    .main,
+                    .checkpoint,
+                    @src(),
+                );
                 self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
                 self.commit_op_done();
@@ -2651,6 +2669,11 @@ pub fn ReplicaType(
                 self.op,
                 self.op_checkpoint,
             });
+            tracer.end(
+                &self.tracer_slot_checkpoint,
+                .main,
+                .checkpoint,
+            );
 
             if (self.on_checkpoint) |on_checkpoint| on_checkpoint(self);
             self.commit_op_done();
@@ -2662,9 +2685,18 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_trigger());
 
+            const op = self.commit_prepare.?.header.op;
+
             self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
             self.commit_callback = null;
+
+            tracer.end(
+                &self.tracer_slot_commit,
+                .main,
+                .{ .commit = .{ .op = op } },
+            );
+
             callback(self);
         }
 
@@ -3634,7 +3666,7 @@ pub fn ReplicaType(
         // learn the op.
         fn op_certain(self: *const Self) bool {
             assert(self.status == .recovering);
-            assert(self.journal.recovered);
+            assert(self.journal.status == .recovered);
             assert(self.op_checkpoint <= self.op);
 
             const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint).index;
@@ -3849,7 +3881,7 @@ pub fn ReplicaType(
         fn recover(self: *Self) void {
             assert(self.status == .recovering);
             assert(self.replica_count > 1);
-            assert(self.journal.recovered);
+            assert(self.journal.status == .recovered);
 
             log.debug("{}: recover: sending recovery messages nonce={}", .{
                 self.replica,
@@ -5089,7 +5121,7 @@ pub fn ReplicaType(
 
         fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
             assert(self.status == .view_change or self.status == .recovering);
-            assert(self.journal.recovered);
+            assert(self.journal.status == .recovered);
 
             switch (self.status) {
                 .normal => unreachable,
@@ -5958,147 +5990,6 @@ pub fn ReplicaType(
                 .repair => self.repair(),
                 .pipeline => self.repair(),
             }
-        }
-    };
-}
-
-/// Initialize the TigerBeetle replica's data file.
-pub fn format(
-    comptime Storage: type,
-    allocator: std.mem.Allocator,
-    cluster: u32,
-    replica: u8,
-    storage: *Storage,
-    superblock: *vsr.SuperBlockType(Storage),
-) !void {
-    const ReplicaFormat = ReplicaFormatType(Storage);
-    var replica_format = ReplicaFormat{};
-
-    try replica_format.format_wal(allocator, cluster, storage);
-    assert(!replica_format.formatting);
-
-    superblock.format(
-        ReplicaFormat.format_superblock_callback,
-        &replica_format.superblock_context,
-        .{
-            .cluster = cluster,
-            .replica = replica,
-            .size_max = config.size_max, // This can later become a runtime arg, to cap storage.
-        },
-    );
-
-    replica_format.formatting = true;
-    while (replica_format.formatting) storage.tick();
-}
-
-fn ReplicaFormatType(comptime Storage: type) type {
-    const SuperBlock = vsr.SuperBlockType(Storage);
-    return struct {
-        const Self = @This();
-
-        formatting: bool = false,
-        superblock_context: SuperBlock.Context = undefined,
-        wal_write: Storage.Write = undefined,
-
-        fn format_wal(
-            self: *Self,
-            allocator: std.mem.Allocator,
-            cluster: u32,
-            storage: *Storage,
-        ) !void {
-            const header_zeroes = [_]u8{0} ** @sizeOf(Header);
-            const wal_write_size_max = 4 * 1024 * 1024;
-            assert(wal_write_size_max % config.sector_size == 0);
-
-            // Direct I/O requires the buffer to be sector-aligned.
-            var wal_buffer = try allocator.allocAdvanced(
-                u8,
-                config.sector_size,
-                wal_write_size_max,
-                .exact,
-            );
-            errdefer allocator.free(wal_buffer);
-
-            // The logical offset *within the Zone*.
-            // Even though the prepare zone follows the redundant header zone, write the prepares
-            // first. This allows the test Storage to check the invariant "never write the redundant
-            // header before the prepare".
-            var wal_offset: u64 = 0;
-            while (wal_offset < config.journal_size_prepares) {
-                const size = format_wal_prepares(cluster, wal_offset, wal_buffer);
-                assert(size > 0);
-
-                for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
-                    if (std.mem.eql(u8, std.mem.asBytes(header), &header_zeroes)) {
-                        // This is the (empty) body of a reserved or root Prepare.
-                    } else {
-                        // This is a Prepare's header.
-                        assert(header.valid_checksum());
-                        if (header.op == 0) {
-                            assert(header.command == .prepare);
-                            assert(header.operation == .root);
-                        } else {
-                            assert(header.command == .reserved);
-                            assert(header.operation == .reserved);
-                        }
-                    }
-                }
-
-                storage.write_sectors(
-                    format_wal_sectors_callback,
-                    &self.wal_write,
-                    wal_buffer[0..size],
-                    .wal_prepares,
-                    wal_offset,
-                );
-                self.formatting = true;
-                while (self.formatting) storage.tick();
-                wal_offset += size;
-            }
-            // There are no prepares left to write.
-            assert(format_wal_prepares(cluster, wal_offset, wal_buffer) == 0);
-
-            wal_offset = 0;
-            while (wal_offset < config.journal_size_headers) {
-                const size = format_wal_headers(cluster, wal_offset, wal_buffer);
-                assert(size > 0);
-
-                for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
-                    assert(header.valid_checksum());
-                    if (header.op == 0) {
-                        assert(header.command == .prepare);
-                        assert(header.operation == .root);
-                    } else {
-                        assert(header.command == .reserved);
-                        assert(header.operation == .reserved);
-                    }
-                }
-
-                storage.write_sectors(
-                    format_wal_sectors_callback,
-                    &self.wal_write,
-                    wal_buffer[0..size],
-                    .wal_headers,
-                    wal_offset,
-                );
-                self.formatting = true;
-                while (self.formatting) storage.tick();
-                wal_offset += size;
-            }
-            // There are no headers left to write.
-            assert(format_wal_headers(cluster, wal_offset, wal_buffer) == 0);
-        }
-
-        fn format_wal_sectors_callback(write: *Storage.Write) void {
-            const self = @fieldParentPtr(Self, "wal_write", write);
-            assert(self.formatting);
-            self.formatting = false;
-        }
-
-        fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
-            const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
-            assert(self.formatting);
-            self.formatting = false;
         }
     };
 }

@@ -6,7 +6,9 @@ const assert = std.debug.assert;
 const config = @import("../config.zig");
 const fuzz = @import("../test/fuzz.zig");
 const vsr = @import("../vsr.zig");
+
 const log = std.log.scoped(.lsm_tree_fuzz);
+const tracer = @import("../tracer.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
@@ -27,7 +29,7 @@ const Table = @import("table.zig").TableType(
     Key.tombstone,
     Key.tombstone_from_key,
 );
-const Tree = @import("tree.zig").TreeType(Table, Storage, @typeName(Table) ++ "_test");
+const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
@@ -129,6 +131,7 @@ const Environment = struct {
     tree_exists: bool,
     lookup_context: Tree.LookupContext = undefined,
     lookup_value: ?*const Key.Value = null,
+    checkpoint_op: ?u64 = null,
 
     fn init(env: *Environment, storage: *Storage) !void {
         env.state = .uninit;
@@ -241,7 +244,8 @@ const Environment = struct {
         env.change_state(.tree_compacting, .tree_open);
     }
 
-    pub fn checkpoint(env: *Environment) void {
+    pub fn checkpoint(env: *Environment, op: u64) void {
+        env.checkpoint_op = op - config.lsm_batch_multiple;
         env.change_state(.tree_open, .tree_checkpointing);
         env.tree.checkpoint(tree_checkpoint_callback);
         env.tick_until_state_change(.tree_checkpointing, .superblock_checkpointing);
@@ -253,11 +257,12 @@ const Environment = struct {
         env.change_state(.tree_checkpointing, .superblock_checkpointing);
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
             .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
-            .commit_min = env.superblock.working.vsr_state.commit_min + 1,
-            .commit_max = env.superblock.working.vsr_state.commit_max + 1,
+            .commit_min = env.checkpoint_op.?,
+            .commit_max = env.checkpoint_op.? + 1,
             .view_normal = 0,
             .view = 0,
         });
+        env.checkpoint_op = null;
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
@@ -311,8 +316,7 @@ const Environment = struct {
             switch (fuzz_op) {
                 .compact => |compact| {
                     env.compact(compact.op);
-                    if (compact.checkpoint)
-                        env.checkpoint();
+                    if (compact.checkpoint) env.checkpoint(compact.op);
                 },
                 .put => |value| {
                     env.tree.put(&value);
@@ -404,6 +408,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
                 const checkpoint =
                     // Can only checkpoint on the last beat of the bar.
                     compact_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1 and
+                    compact_op > config.lsm_batch_multiple and
                     // Checkpoint at roughly the same rate as log wraparound.
                     random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
                 break :compact FuzzOp{
@@ -437,6 +442,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
 }
 
 pub fn main() !void {
+    try tracer.init(allocator);
+    defer tracer.deinit(allocator);
+
     const fuzz_args = try fuzz.parse_fuzz_args(allocator);
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();

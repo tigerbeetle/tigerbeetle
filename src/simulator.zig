@@ -333,7 +333,7 @@ pub fn main() !void {
         var crashes = cluster.replica_normal_count() -| replica_normal_min;
 
         for (cluster.storages) |*storage, replica| {
-            if (cluster.replicas[replica].journal.recovered) {
+            if (cluster.replicas[replica].journal.status == .recovered) {
                 // TODO Remove this workaround when VSR recovery protocol is disabled.
                 // When only the minimum number of replicas are healthy (no more crashes allowed),
                 // disable storage faults on all healthy replicas.

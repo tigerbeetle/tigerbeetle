@@ -279,8 +279,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             key: Key,
             level: u8 = 0,
             inner: ?Level.Iterator = null,
-            // Verifies that we never check a newer table after an older one.
-            precedence: ?u64 = null,
 
             pub fn next(it: *LookupIterator) ?*const TableInfo {
                 while (it.level < config.lsm_levels) : (it.level += 1) {
@@ -294,9 +292,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     );
 
                     if (inner.next()) |table| {
-                        if (it.precedence) |p| assert(p > table.snapshot_min);
-                        it.precedence = table.snapshot_min;
-
                         assert(table.visible(it.snapshot));
                         assert(compare_keys(it.key, table.key_min) != .lt);
                         assert(compare_keys(it.key, table.key_max) != .gt);
@@ -547,8 +542,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             return true;
         }
 
+        pub fn reserve(manifest: *Manifest) void {
+            assert(manifest.compact_callback == null);
+            assert(manifest.checkpoint_callback == null);
+
+            manifest.manifest_log.reserve();
+        }
+
         pub fn compact(manifest: *Manifest, callback: Callback) void {
             assert(manifest.compact_callback == null);
+            assert(manifest.checkpoint_callback == null);
             manifest.compact_callback = callback;
 
             manifest.manifest_log.compact(manifest_log_compact_callback);
@@ -557,6 +560,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {
             const manifest = @fieldParentPtr(Manifest, "manifest_log", manifest_log);
             assert(manifest.compact_callback != null);
+            assert(manifest.checkpoint_callback == null);
 
             const callback = manifest.compact_callback.?;
             manifest.compact_callback = null;
@@ -564,6 +568,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn checkpoint(manifest: *Manifest, callback: Callback) void {
+            assert(manifest.compact_callback == null);
             assert(manifest.checkpoint_callback == null);
             manifest.checkpoint_callback = callback;
 
@@ -572,6 +577,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         fn manifest_log_checkpoint_callback(manifest_log: *ManifestLog) void {
             const manifest = @fieldParentPtr(Manifest, "manifest_log", manifest_log);
+            assert(manifest.compact_callback == null);
             assert(manifest.checkpoint_callback != null);
 
             const callback = manifest.checkpoint_callback.?;

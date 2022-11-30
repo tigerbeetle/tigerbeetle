@@ -15,6 +15,6 @@ yum update -y
 yum install -y xz wget git glibc tar
 wget -O- -q https://rpm.nodesource.com/setup_16.x | bash -
 yum install -y nodejs
-npm install /wrk/src/clients/node
+npm install /wrk/src/clients/node/tigerbeetle-node-*.tgz
 node -e 'require(\"tigerbeetle-node\"); console.log(\"SUCCESS!\")'
 "

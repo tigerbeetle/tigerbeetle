@@ -8,6 +8,8 @@ const mem = std.mem;
 const config = @import("../config.zig");
 const util = @import("../util.zig");
 
+// TODO Compute & use the upper bound of manifest blocks (per tree) to size the trailer zone.
+
 /// SuperBlock.Manifest schema:
 /// │ [manifest.count]u128 │ Tree id (for the owner of the ManifestLog)
 /// │ [manifest.count]u128 │ ManifestLog block checksum
@@ -179,6 +181,8 @@ pub const Manifest = struct {
     }
 
     /// Addresses must be unique across all appends, or remove() must be called first.
+    /// Warning: The caller is responsible for ensuring that concurrent tree compactions call
+    /// append() in a deterministic order with respect to each other.
     pub fn append(manifest: *Manifest, tree: u128, checksum: u128, address: u64) void {
         assert(address > 0);
         assert(manifest.index_for_address(address) == null);

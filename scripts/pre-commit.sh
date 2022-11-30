@@ -4,6 +4,6 @@
 # ln -s ../../scripts/pre-commit.sh .git/hooks/pre-commit
 
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(git rev-parse --show-toplevel)"
 
 zig fmt --check .

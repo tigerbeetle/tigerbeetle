@@ -1,7 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const tigerbeetle = @import("tigerbeetle.zig");
+const root = @import("root");
 const vsr = @import("vsr.zig");
+const tracer = @import("tracer.zig");
+
+const build_options = @import("tigerbeetle_build_options");
 
 const Environment = enum {
     development,
@@ -11,7 +14,7 @@ const Environment = enum {
 
 /// Whether development or production:
 pub const deployment_environment: Environment =
-    if (@hasDecl(@import("root"), "deployment_environment")) @import("root").deployment_environment else .development;
+    if (@hasDecl(root, "deployment_environment")) root.deployment_environment else .development;
 
 /// The maximum log level in increasing order of verbosity (emergency=0, debug=3):
 pub const log_level = 2;
@@ -64,7 +67,7 @@ pub const cache_transfers_max = switch (deployment_environment) {
 
 /// The maximum number of two-phase transfers to store in memory:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_transfers_pending_max = cache_transfers_max;
+pub const cache_transfers_posted_max = cache_transfers_max;
 
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
@@ -263,6 +266,8 @@ pub const lsm_growth_factor = 8;
 /// The maximum key size for an LSM tree in bytes.
 pub const lsm_key_size_max = 32;
 
+/// The maximum cumulative size of a table — computed as the sum of the size of the index block,
+/// filter blocks, and data blocks.
 pub const lsm_table_size_max = 64 * 1024 * 1024;
 
 /// Size of nodes used by the LSM tree manifest implementation.
@@ -329,6 +334,16 @@ pub const verify = true;
 pub const journal_size_headers = journal_slot_count * @sizeOf(vsr.Header);
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
+// Which backend to use for ./tracer.zig.
+// Default is `.none`.
+pub const tracer_backend = if (@hasDecl(root, "tracer_backend"))
+    // TODO(jamii)
+    // This branch is a hack used to work around the absence of tigerbeetle_build_options.
+    // This should be removed once the node client is built using `zig build`.
+    root.tracer_backend
+else
+    build_options.tracer_backend;
+
 // TODO Move these into a separate `config_valid.zig` which we import here:
 comptime {
     // vsr.parse_address assumes that config.address/config.port are valid.
@@ -381,7 +396,18 @@ comptime {
     // SetAssociativeCache requires a power-of-two cardinality.
     assert(std.math.isPowerOfTwo(cache_accounts_max));
     assert(std.math.isPowerOfTwo(cache_transfers_max));
-    assert(std.math.isPowerOfTwo(cache_transfers_pending_max));
+    assert(std.math.isPowerOfTwo(cache_transfers_posted_max));
 }
 
 pub const is_32_bit = @sizeOf(usize) == 4; // TODO Return a compile error if we are not 32-bit.
+
+/// Declarations which must be imported in the root file (eg main.zig) to take effect:
+///
+///     pub usingnamespace config.root_declarations;
+///
+pub const root_declarations = struct {
+    pub const log = if (tracer_backend == .tracy)
+        tracer.log_fn
+    else
+        std.log.defaultLog;
+};

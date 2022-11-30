@@ -62,6 +62,14 @@ jobs:
       - run: zig/zig build test
       - run: ./scripts/install.sh
 
+  fuzz_ewah:
+    name: 'Fuzz EWAH codec'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_ewah -- --seed 123
+
   fuzz_lsm_manifest_log:
     name: 'Fuzz LSM ManifestLog'
     runs-on: ubuntu-latest
@@ -78,6 +86,14 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build fuzz_lsm_segmented_array -- --seed 123
 
+  fuzz_vsr_journal_format:
+    name: 'Fuzz VSR WAL format'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_vsr_journal_format -- --seed 123
+
   fuzz_vsr_superblock:
     name: 'Fuzz VSR SuperBlock'
     runs-on: ubuntu-latest
@@ -85,6 +101,14 @@ jobs:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
       - run: zig/zig build fuzz_vsr_superblock -- --seed 123
+
+  fuzz_vsr_superblock_free_set:
+    name: 'Fuzz VSR SuperBlock Quorums'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_vsr_superblock_free_set -- --seed 123
 
   fuzz_vsr_superblock_quorums:
     name: 'Fuzz VSR SuperBlock Quorums'
@@ -115,6 +139,10 @@ jobs:
       - run: zig/zig build build_benchmark_ewah
       - run: zig/zig build build_benchmark_eytzinger
       - run: zig/zig build build_benchmark_segmented_array
+      - run: zig/zig build -Dtracer-backend=perfetto
+      - run: git submodule init -- tools/tracy
+      - run: git submodule update -- tools/tracy
+      - run: zig/zig build -Dtracer-backend=tracy
 
   build-and-push:
     name: 'Build and push Docker image'

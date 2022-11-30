@@ -6,9 +6,11 @@ public final class InitializationException extends RuntimeException {
         int SUCCESS = 0;
         int UNEXPECTED = 1;
         int OUT_OF_MEMORY = 2;
-        int INVALID_ADDRESS = 3;
-        int SYSTEM_RESOURCES = 4;
-        int NETWORK_SUBSYSTEM = 5;
+        int ADDRESS_INVALID = 3;
+        int ADDRESS_LIMIT_EXCEEDED = 4;
+        int PACKETS_COUNT_INVALID = 5;
+        int SYSTEM_RESOURCES = 6;
+        int NETWORK_SUBSYSTEM = 7;
     }
 
     private final int status;
@@ -31,22 +33,28 @@ public final class InitializationException extends RuntimeException {
         switch (status) {
 
             case Status.UNEXPECTED:
-                return "Unexpected error";
+                return "Unexpected internal error";
 
             case Status.OUT_OF_MEMORY:
-                return "Out of memory";
+                return "Internal client ran out of memory";
 
-            case Status.INVALID_ADDRESS:
-                return "Invalid addresses";
+            case Status.ADDRESS_INVALID:
+                return "Replica addresses format is invalid";
+
+            case Status.ADDRESS_LIMIT_EXCEEDED:
+                return "Replica addresses limit exceeded";
+
+            case Status.PACKETS_COUNT_INVALID:
+                return "Invalid maxConcurrency";
 
             case Status.SYSTEM_RESOURCES:
-                return "System Resources";
+                return "Internal client ran out of system resources";
 
             case Status.NETWORK_SUBSYSTEM:
-                return "Network subsystem";
+                return "Internal client had unexpected networking issues";
 
             default:
-                return "Unknown error status " + status;
+                return "Error status " + status;
         }
     }
 

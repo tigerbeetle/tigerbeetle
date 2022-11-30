@@ -1,6 +1,6 @@
 {
   "name": "tigerbeetle-node",
-  "version": "0.11.0",
+  "version": "0.11.3",
   "description": "TigerBeetle Node.js client",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
@@ -13,6 +13,7 @@
     "LICENSE",
     "README.md",
     "dist",
+    "dist/.client.node.sha256",
     "!dist/client.node",
     "package.json",
     "package-lock.json",

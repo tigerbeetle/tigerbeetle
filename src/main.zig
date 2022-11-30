@@ -4,11 +4,11 @@ const assert = std.debug.assert;
 const fmt = std.fmt;
 const mem = std.mem;
 const os = std.os;
-const log = std.log.scoped(.main);
+const log_main = std.log.scoped(.main);
 
 const build_options = @import("tigerbeetle_build_options");
 const config = @import("config.zig");
-pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
+const tracer = @import("tracer.zig");
 
 const cli = @import("cli.zig");
 const fatal = cli.fatal;
@@ -30,6 +30,9 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
 
+pub const log_level: std.log.Level = @intToEnum(std.log.Level, config.log_level);
+pub usingnamespace config.root_declarations;
+
 comptime {
     assert(config.deployment_environment == .production or
         config.deployment_environment == .development);
@@ -46,7 +49,18 @@ pub fn main() !void {
 
     switch (parse_args) {
         .format => |*args| try Command.format(allocator, args.cluster, args.replica, args.path),
-        .start => |*args| try Command.start(&arena, args.addresses, args.memory, args.path),
+        .start => |*args| try Command.start(
+            &arena,
+            args.addresses,
+            .{
+                // TODO Tune lsm_forest_node_count better.
+                .lsm_forest_node_count = 4096,
+                .cache_entries_accounts = args.cache_accounts,
+                .cache_entries_transfers = args.cache_transfers,
+                .cache_entries_posted = args.cache_transfers_posted,
+            },
+            args.path,
+        ),
         .version => |*args| try Command.version(allocator, args.verbose),
     }
 }
@@ -114,12 +128,18 @@ const Command = struct {
     pub fn start(
         arena: *std.heap.ArenaAllocator,
         addresses: []std.net.Address,
-        memory: u64,
+        options: StateMachine.Options,
         path: [:0]const u8,
     ) !void {
-        _ = memory; // TODO
+        var tracer_allocator = if (config.tracer_backend == .tracy)
+            tracer.TracerAllocator.init(arena.allocator())
+        else
+            arena;
 
-        const allocator = arena.allocator();
+        const allocator = tracer_allocator.allocator();
+
+        try tracer.init(allocator);
+        defer tracer.deinit(allocator);
 
         var command: Command = undefined;
         try command.init(allocator, path, false);
@@ -131,13 +151,7 @@ const Command = struct {
             .storage = &command.storage,
             .message_pool = &command.message_pool,
             .time = .{},
-            .state_machine_options = .{
-                // TODO Tune lsm_forest_node_count better.
-                .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = config.cache_accounts_max,
-                .cache_entries_transfers = config.cache_transfers_max,
-                .cache_entries_posted = config.cache_transfers_pending_max,
-            },
+            .state_machine_options = options,
             .message_bus_options = .{
                 .configuration = addresses,
                 .io = &command.io,
@@ -159,13 +173,13 @@ const Command = struct {
                 node_maybe = node.next;
             }
         }
-        log.info("{}: Allocated {} bytes in {} regions during replica init", .{
+        log_main.info("{}: Allocated {} bytes in {} regions during replica init", .{
             replica.replica,
             allocation_size,
             allocation_count,
         });
 
-        log.info("{}: cluster={}: listening on {}", .{
+        log_main.info("{}: cluster={}: listening on {}", .{
             replica.replica,
             replica.cluster,
             addresses[replica.replica],

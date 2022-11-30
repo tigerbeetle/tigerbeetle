@@ -3,26 +3,13 @@ package com.tigerbeetle;
 import java.util.Objects;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
-import static com.tigerbeetle.AssertionError.assertTrue;
 
 public final class Client implements AutoCloseable {
-    static {
-        JNILoader.loadFromJar();
-    }
 
     private static final int DEFAULT_MAX_CONCURRENCY = 32;
 
     private final int clusterID;
-    private final int maxConcurrency;
-    private final Semaphore maxConcurrencySemaphore;
-
-    private final ReentrantLock packetsLock;
-    private volatile long clientHandle;
-    private volatile long packetsHead;
-    private volatile long packetsTail;
+    private final NativeClient nativeClient;
 
     /**
      * Initializes an instance of TigerBeetle client. This class is thread-safe and for optimal
@@ -46,7 +33,11 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException if {@code maxConcurrency} is zero or negative.
      */
     public Client(final int clusterID, final String[] replicaAddresses, final int maxConcurrency) {
-        this(clusterID, maxConcurrency);
+        if (clusterID < 0)
+            throw new IllegalArgumentException("ClusterID must be positive");
+
+        if (maxConcurrency <= 0)
+            throw new IllegalArgumentException("Invalid maxConcurrency");
 
         Objects.requireNonNull(replicaAddresses, "Replica addresses cannot be null");
 
@@ -59,15 +50,9 @@ public final class Client implements AutoCloseable {
             joiner.add(address);
         }
 
-        int status = clientInit(clusterID, joiner.toString(), maxConcurrency);
-
-        if (status == InitializationException.Status.INVALID_ADDRESS)
-            throw new IllegalArgumentException("Replica addresses format is invalid.");
-
-        if (status != 0)
-            throw new InitializationException(status);
+        this.clusterID = clusterID;
+        this.nativeClient = NativeClient.init(clusterID, joiner.toString(), maxConcurrency);
     }
-
 
     /**
      * Initializes an instance of TigerBeetle client. This class is thread-safe and for optimal
@@ -92,23 +77,13 @@ public final class Client implements AutoCloseable {
         this(clusterID, replicaAddresses, DEFAULT_MAX_CONCURRENCY);
     }
 
-    Client(final int clusterID, final int maxConcurrency) {
-        if (clusterID < 0)
-            throw new IllegalArgumentException("ClusterID must be positive");
-
-        // Cap the maximum amount of packets
-        if (maxConcurrency <= 0)
-            throw new IllegalArgumentException("Invalid maxConcurrency");
-
-        if (maxConcurrency > 4096) {
-            this.maxConcurrency = 4096;
-        } else {
-            this.maxConcurrency = maxConcurrency;
-        }
-
-        this.clusterID = clusterID;
-        this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
-        this.packetsLock = new ReentrantLock(false);
+    /**
+     * Gets the cluster ID
+     *
+     * @return clusterID
+     */
+    public int getClusterID() {
+        return clusterID;
     }
 
     /**
@@ -126,7 +101,7 @@ public final class Client implements AutoCloseable {
      */
     public CreateAccountResultBatch createAccounts(final AccountBatch batch)
             throws RequestException {
-        final var request = BlockingRequest.createAccounts(this, batch);
+        final var request = BlockingRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -144,7 +119,7 @@ public final class Client implements AutoCloseable {
      */
     public CompletableFuture<CreateAccountResultBatch> createAccountsAsync(
             final AccountBatch batch) {
-        final var request = AsyncRequest.createAccounts(this, batch);
+        final var request = AsyncRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
     }
@@ -161,7 +136,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public AccountBatch lookupAccounts(final IdBatch batch) throws RequestException {
-        final var request = BlockingRequest.lookupAccounts(this, batch);
+        final var request = BlockingRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -177,7 +152,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<AccountBatch> lookupAccountsAsync(final IdBatch batch) {
-        final var request = AsyncRequest.lookupAccounts(this, batch);
+        final var request = AsyncRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
     }
@@ -197,7 +172,7 @@ public final class Client implements AutoCloseable {
      */
     public CreateTransferResultBatch createTransfers(final TransferBatch batch)
             throws RequestException {
-        final var request = BlockingRequest.createTransfers(this, batch);
+        final var request = BlockingRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -214,11 +189,10 @@ public final class Client implements AutoCloseable {
      */
     public CompletableFuture<CreateTransferResultBatch> createTransfersAsync(
             final TransferBatch batch) {
-        final var request = AsyncRequest.createTransfers(this, batch);
+        final var request = AsyncRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
     }
-
 
     /**
      * Looks up a batch of transfers.
@@ -233,7 +207,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public TransferBatch lookupTransfers(final IdBatch batch) throws RequestException {
-        final var request = BlockingRequest.lookupTransfers(this, batch);
+        final var request = BlockingRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -249,68 +223,9 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<TransferBatch> lookupTransfersAsync(final IdBatch batch) {
-        final var request = AsyncRequest.lookupTransfers(this, batch);
+        final var request = AsyncRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
-    }
-
-    void submit(final Request<?> request) {
-        final long packet = acquirePacket();
-        submit(clientHandle, request, packet);
-    }
-
-    private long acquirePacket() {
-
-        // Assure that only the max number of concurrent requests can acquire a packet
-        // It forces other threads to wait until a packet became available
-        // We also assure that the clientHandle will be zeroed only after all permits
-        // have been released
-        final int TIMEOUT = 5;
-        boolean acquired = false;
-        do {
-
-            if (clientHandle == 0)
-                throw new IllegalStateException("Client is closed");
-
-            try {
-                acquired = maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException interruptedException) {
-
-                // This exception should never exposed by the API to be handled by the user
-                throw new AssertionError(interruptedException,
-                        "Unexpected thread interruption on acquiring a packet.");
-            }
-
-        } while (!acquired);
-
-        packetsLock.lock();
-        try {
-            return popPacket(packetsHead, packetsTail);
-        } finally {
-            packetsLock.unlock();
-        }
-    }
-
-    void returnPacket(final long packet) {
-
-        // It is not expected to return a packet with a disconnected client,
-        // since we wait for all pending requests before zeroing the handle.
-        // This condition allows running tests without initializing the client
-
-        if (clientHandle != 0) {
-
-            assertTrue(packet != 0L, "Packet cannot be null.");
-
-            packetsLock.lock();
-            try {
-                pushPacket(packetsHead, packetsTail, packet);
-            } finally {
-                packetsLock.unlock();
-            }
-        }
-
-        // Releasing the packet to be used by another thread
-        maxConcurrencySemaphore.release();
     }
 
     /**
@@ -322,38 +237,6 @@ public final class Client implements AutoCloseable {
      */
     @Override
     public void close() throws Exception {
-
-        if (clientHandle != 0) {
-
-            // Acquire all permits, forcing to wait for any processing thread to release
-            // Note that "acquireUninterruptibly(maxConcurrency)" atomically acquires the permits
-            // all at once, causing this operation to take longer.
-            for (int i = 0; i < maxConcurrency; i++) {
-                this.maxConcurrencySemaphore.acquireUninterruptibly();
-            }
-
-            // Deinit and signalize that this client is closed by setting the handles to 0
-            packetsLock.lock();
-            try {
-
-                clientDeinit(clientHandle);
-
-                clientHandle = 0;
-                packetsHead = 0;
-                packetsTail = 0;
-            } finally {
-                packetsLock.unlock();
-            }
-        }
+        nativeClient.close();
     }
-
-    private native void submit(long clientHandle, Request<?> request, long packet);
-
-    private native int clientInit(int clusterID, String addresses, int maxConcurrency);
-
-    private native void clientDeinit(long clientHandle);
-
-    private native long popPacket(long packetHead, long packetTail);
-
-    private native void pushPacket(long packetHead, long packetTail, long packet);
 }

@@ -27,11 +27,20 @@ abstract class Request<TResponse extends Batch> {
      */
     // @formatter:on
 
-    interface Operations {
-        byte CREATE_ACCOUNTS = 3;
-        byte CREATE_TRANSFERS = 4;
-        byte LOOKUP_ACCOUNTS = 5;
-        byte LOOKUP_TRANSFERS = 6;
+    enum Operations {
+        CREATE_ACCOUNTS(3),
+        CREATE_TRANSFERS(4),
+        LOOKUP_ACCOUNTS(5),
+        LOOKUP_TRANSFERS(6),
+
+        ECHO_ACCOUNTS(3),
+        ECHO_TRANSFERS(4);
+
+        byte value;
+
+        Operations(int value) {
+            this.value = (byte) value;
+        }
     }
 
     // Used ony by the JNI side
@@ -41,15 +50,16 @@ abstract class Request<TResponse extends Batch> {
     @Native
     private final long bufferLen;
 
-    private final Client client;
-    private final byte operation;
+    private final NativeClient nativeClient;
+    private final Operations operation;
     private final int requestLen;
 
-    protected Request(final Client client, final byte operation, final Batch batch) {
-        Objects.requireNonNull(client, "Id cannot be null");
+    protected Request(final NativeClient nativeClient, final Operations operation,
+            final Batch batch) {
+        Objects.requireNonNull(nativeClient, "Client cannot be null");
         Objects.requireNonNull(batch, "Batch cannot be null");
 
-        this.client = client;
+        this.nativeClient = nativeClient;
         this.operation = operation;
         this.requestLen = batch.getLength();
         this.buffer = batch.getBuffer();
@@ -60,7 +70,7 @@ abstract class Request<TResponse extends Batch> {
     }
 
     public void beginRequest() {
-        client.submit(this);
+        nativeClient.submit(this);
     }
 
     // Unchecked: Since we just support a limited set of operations, it is safe to cast the
@@ -76,46 +86,50 @@ abstract class Request<TResponse extends Batch> {
         Batch result = null;
         Throwable exception = null;
 
-        if (receivedOperation != operation) {
+        try {
 
-            exception = new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
-                    operation, receivedOperation);
+            if (receivedOperation != operation.value) {
 
-        } else if (packet == 0) {
+                exception =
+                        new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
+                                operation.value, receivedOperation);
 
-            exception = new AssertionError("Unexpected callback packet: packet=null");
+            } else if (packet == 0) {
 
-        } else if (status != RequestException.Status.OK) {
+                exception = new AssertionError("Unexpected callback packet: packet=null");
 
-            exception = new RequestException(status);
+            } else if (status != RequestException.Status.OK) {
 
-        } else if (buffer == null) {
+                exception = new RequestException(status);
 
-            exception = new AssertionError("Unexpected callback buffer: buffer=null");
+            } else if (buffer == null) {
 
-        } else {
+                exception = new AssertionError("Unexpected callback buffer: buffer=null");
 
-            try {
+            } else {
+
                 switch (operation) {
-                    case Operations.CREATE_ACCOUNTS: {
+                    case CREATE_ACCOUNTS: {
                         result = buffer.capacity() == 0 ? CreateAccountResultBatch.EMPTY
                                 : new CreateAccountResultBatch(memcpy(buffer));
                         break;
                     }
 
-                    case Operations.CREATE_TRANSFERS: {
+                    case CREATE_TRANSFERS: {
                         result = buffer.capacity() == 0 ? CreateTransferResultBatch.EMPTY
                                 : new CreateTransferResultBatch(memcpy(buffer));
                         break;
                     }
 
-                    case Operations.LOOKUP_ACCOUNTS: {
+                    case ECHO_ACCOUNTS:
+                    case LOOKUP_ACCOUNTS: {
                         result = buffer.capacity() == 0 ? AccountBatch.EMPTY
                                 : new AccountBatch(memcpy(buffer));
                         break;
                     }
 
-                    case Operations.LOOKUP_TRANSFERS: {
+                    case ECHO_TRANSFERS:
+                    case LOOKUP_TRANSFERS: {
                         result = buffer.capacity() == 0 ? TransferBatch.EMPTY
                                 : new TransferBatch(memcpy(buffer));
                         break;
@@ -126,13 +140,10 @@ abstract class Request<TResponse extends Batch> {
                         break;
                     }
                 }
-            } catch (Throwable any) {
-
-                exception = any;
             }
+        } catch (Throwable any) {
+            exception = any;
         }
-
-        client.returnPacket(packet);
 
         if (exception != null) {
             setException(exception);
@@ -149,6 +160,14 @@ abstract class Request<TResponse extends Batch> {
         }
     }
 
+    byte getOperation() {
+        return this.operation.value;
+    }
+
+    void releasePermit() {
+        // Releasing the packet to be used by another thread
+        nativeClient.releasePermit();
+    }
 
     /**
      * Copies the message buffer memory to managed memory.

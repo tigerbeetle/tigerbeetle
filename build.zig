@@ -1,26 +1,45 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const TracerBackend = enum {
+    none,
+    // Writes to a file (./tracer.json) which can be uploaded to https://ui.perfetto.dev/
+    perfetto,
+    // Sends data to https://github.com/wolfpld/tracy.
+    tracy,
+};
+
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
+    const options = b.addOptions();
+
+    // The "tigerbeetle version" command includes the build-time commit hash.
+    if (git_commit(allocator)) |commit| {
+        options.addOption(?[]const u8, "git_commit", commit[0..]);
+    } else {
+        options.addOption(?[]const u8, "git_commit", null);
+    }
+
+    const tracer_backend = b.option(
+        TracerBackend,
+        "tracer-backend",
+        "Which backend to use for tracing.",
+    ) orelse TracerBackend.none;
+    options.addOption(TracerBackend, "tracer_backend", tracer_backend);
+
     {
         const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
         tigerbeetle.setTarget(target);
         tigerbeetle.setBuildMode(mode);
         tigerbeetle.install();
-
-        // The "tigerbeetle version" command includes the build-time commit hash.
-        const options = b.addOptions();
-        if (git_commit(allocator)) |commit| {
-            options.addOption(?[]const u8, "git_commit", commit[0..]);
-        } else {
-            options.addOption(?[]const u8, "git_commit", null);
-        }
+        // Ensure that we get stack traces even in release builds.
+        tigerbeetle.omit_frame_pointer = false;
         tigerbeetle.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(tigerbeetle, tracer_backend, target);
 
         const run_cmd = tigerbeetle.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -45,10 +64,20 @@ pub fn build(b: *std.build.Builder) void {
         lint_step.dependOn(&run_cmd.step);
     }
 
+    // Executable which generates src/c/tb_client.h
+    const tb_client_header_generate = blk: {
+        const tb_client_header = b.addExecutable("tb_client_header", "src/c/tb_client_header.zig");
+        tb_client_header.addOptions("tigerbeetle_build_options", options);
+        tb_client_header.setMainPkgPath("src");
+        break :blk tb_client_header.run();
+    };
+
     {
         const unit_tests = b.addTest("src/unit_tests.zig");
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
+        unit_tests.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(unit_tests, tracer_backend, target);
 
         // for src/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
@@ -56,6 +85,7 @@ pub fn build(b: *std.build.Builder) void {
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
+        test_step.dependOn(&tb_client_header_generate.step);
     }
 
     {
@@ -63,24 +93,23 @@ pub fn build(b: *std.build.Builder) void {
         tb_client.setMainPkgPath("src");
         tb_client.setTarget(target);
         tb_client.setBuildMode(mode);
+        tb_client.addOptions("tigerbeetle_build_options", options);
         tb_client.setOutputDir("zig-out");
         tb_client.pie = true;
         tb_client.bundle_compiler_rt = true;
 
-        const os_tag = target.os_tag orelse builtin.target.os.tag;
-        if (os_tag != .windows) {
-            tb_client.linkLibC();
-        }
+        tb_client.linkLibC();
 
         const build_step = b.step("tb_client", "Build C client shared library");
         build_step.dependOn(&tb_client.step);
+        build_step.dependOn(&tb_client_header_generate.step);
     }
 
     {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
-        // Ensure that we get stack traces even in release builds.
-        simulator.omit_frame_pointer = false;
+        simulator.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(simulator, tracer_backend, target);
 
         const run_cmd = simulator.run();
 
@@ -100,6 +129,8 @@ pub fn build(b: *std.build.Builder) void {
         vopr.setTarget(target);
         // Ensure that we get stack traces even in release builds.
         vopr.omit_frame_pointer = false;
+        vopr.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(vopr, tracer_backend, target);
 
         const run_cmd = vopr.run();
 
@@ -115,12 +146,29 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const fuzz_ewah = b.addExecutable("fuzz_ewah", "src/ewah_fuzz.zig");
+        fuzz_ewah.setMainPkgPath("src");
+        fuzz_ewah.setTarget(target);
+        fuzz_ewah.setBuildMode(mode);
+        // Ensure that we get stack traces even in release builds.
+        fuzz_ewah.omit_frame_pointer = false;
+
+        const run_cmd = fuzz_ewah.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("fuzz_ewah", "Fuzz EWAH codec. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
         const fuzz_lsm_forest = b.addExecutable("fuzz_lsm_forest", "src/lsm/forest_fuzz.zig");
         fuzz_lsm_forest.setMainPkgPath("src");
         fuzz_lsm_forest.setTarget(target);
         fuzz_lsm_forest.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_forest.omit_frame_pointer = false;
+        fuzz_lsm_forest.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(fuzz_lsm_forest, tracer_backend, target);
 
         const run_cmd = fuzz_lsm_forest.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -138,6 +186,8 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_manifest_log.setTarget(target);
         fuzz_lsm_manifest_log.setBuildMode(mode);
         fuzz_lsm_manifest_log.omit_frame_pointer = false;
+        fuzz_lsm_manifest_log.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(fuzz_lsm_manifest_log, tracer_backend, target);
 
         const run_cmd = fuzz_lsm_manifest_log.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -153,6 +203,8 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_tree.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_tree.omit_frame_pointer = false;
+        fuzz_lsm_tree.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(fuzz_lsm_tree, tracer_backend, target);
 
         const run_cmd = fuzz_lsm_tree.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -171,11 +223,33 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_lsm_segmented_array.setBuildMode(mode);
         // Ensure that we get stack traces even in release builds.
         fuzz_lsm_segmented_array.omit_frame_pointer = false;
+        fuzz_lsm_segmented_array.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(fuzz_lsm_segmented_array, tracer_backend, target);
 
         const run_cmd = fuzz_lsm_segmented_array.run();
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("fuzz_lsm_segmented_array", "Fuzz the LSM segmented array. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const fuzz_vsr_journal_format = b.addExecutable(
+            "fuzz_vsr_journal_format",
+            "src/vsr/journal_format_fuzz.zig",
+        );
+        fuzz_vsr_journal_format.setMainPkgPath("src");
+        fuzz_vsr_journal_format.setTarget(target);
+        fuzz_vsr_journal_format.setBuildMode(mode);
+        fuzz_vsr_journal_format.omit_frame_pointer = false;
+
+        const run_cmd = fuzz_vsr_journal_format.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step(
+            "fuzz_vsr_journal_format",
+            "Fuzz the WAL format. Args: [--seed <seed>]",
+        );
         run_step.dependOn(&run_cmd.step);
     }
 
@@ -188,11 +262,35 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock.setTarget(target);
         fuzz_vsr_superblock.setBuildMode(mode);
         fuzz_vsr_superblock.omit_frame_pointer = false;
+        fuzz_vsr_superblock.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(fuzz_vsr_superblock, tracer_backend, target);
 
         const run_cmd = fuzz_vsr_superblock.run();
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("fuzz_vsr_superblock", "Fuzz the SuperBlock. Args: [--seed <seed>]");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const fuzz_vsr_superblock_free_set = b.addExecutable(
+            "fuzz_vsr_superblock_free_set",
+            "src/vsr/superblock_free_set_fuzz.zig",
+        );
+        fuzz_vsr_superblock_free_set.setMainPkgPath("src");
+        fuzz_vsr_superblock_free_set.setTarget(target);
+        fuzz_vsr_superblock_free_set.setBuildMode(mode);
+        fuzz_vsr_superblock_free_set.omit_frame_pointer = false;
+        fuzz_vsr_superblock_free_set.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(fuzz_vsr_superblock_free_set, tracer_backend, target);
+
+        const run_cmd = fuzz_vsr_superblock_free_set.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step(
+            "fuzz_vsr_superblock_free_set",
+            "Fuzz the SuperBlock FreeSet. Args: [--seed <seed>]",
+        );
         run_step.dependOn(&run_cmd.step);
     }
 
@@ -205,6 +303,8 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_superblock_quorums.setTarget(target);
         fuzz_vsr_superblock_quorums.setBuildMode(mode);
         fuzz_vsr_superblock_quorums.omit_frame_pointer = false;
+        fuzz_vsr_superblock_quorums.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(fuzz_vsr_superblock_quorums, tracer_backend, target);
 
         const run_cmd = fuzz_vsr_superblock_quorums.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -237,6 +337,8 @@ pub fn build(b: *std.build.Builder) void {
         exe.setTarget(target);
         exe.setBuildMode(.ReleaseSafe);
         exe.setMainPkgPath("src");
+        exe.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(exe, tracer_backend, target);
 
         const build_step = b.step("build_" ++ benchmark.name, "Build " ++ benchmark.description ++ " benchmark");
         build_step.dependOn(&exe.step);
@@ -262,4 +364,43 @@ fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
     var output: [40]u8 = undefined;
     std.mem.copy(u8, &output, exec_result.stdout[0..40]);
     return output;
+}
+
+fn link_tracer_backend(
+    exe: *std.build.LibExeObjStep,
+    tracer_backend: TracerBackend,
+    target: std.zig.CrossTarget,
+) void {
+    switch (tracer_backend) {
+        .none, .perfetto => {},
+        .tracy => {
+            // Code here is based on
+            // https://github.com/ziglang/zig/blob/a660df4900520c505a0865707552dcc777f4b791/build.zig#L382
+
+            // On mingw, we need to opt into windows 7+ to get some features required by tracy.
+            const tracy_c_flags: []const []const u8 = if (target.isWindows() and target.getAbi() == .gnu)
+                &[_][]const u8{
+                    "-DTRACY_ENABLE=1",
+                    "-DTRACY_FIBERS=1",
+                    "-fno-sanitize=undefined",
+                    "-D_WIN32_WINNT=0x601",
+                }
+            else
+                &[_][]const u8{
+                    "-DTRACY_ENABLE=1",
+                    "-DTRACY_FIBERS=1",
+                    "-fno-sanitize=undefined",
+                };
+
+            exe.addIncludeDir("./tools/tracy/public/tracy");
+            exe.addCSourceFile("./tools/tracy/public/TracyClient.cpp", tracy_c_flags);
+            exe.linkLibC();
+            exe.linkSystemLibraryName("c++");
+
+            if (target.isWindows()) {
+                exe.linkSystemLibrary("dbghelp");
+                exe.linkSystemLibrary("ws2_32");
+            }
+        },
+    }
 }

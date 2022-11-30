@@ -18,6 +18,10 @@ func (s ErrNetworkSubsystem) Error() string {
 	return "Internal client had unexpected networking issues."
 }
 
+type ErrAddressLimitExceeded struct{}
+
+func (s ErrAddressLimitExceeded) Error() string { return "Too many addresses provided." }
+
 type ErrInvalidAddress struct{}
 
 func (s ErrInvalidAddress) Error() string { return "Invalid client cluster address." }
