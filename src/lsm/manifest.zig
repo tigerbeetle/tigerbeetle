@@ -279,8 +279,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             key: Key,
             level: u8 = 0,
             inner: ?Level.Iterator = null,
-            // Verifies that we never check a newer table after an older one.
-            precedence: ?u64 = null,
 
             pub fn next(it: *LookupIterator) ?*const TableInfo {
                 while (it.level < config.lsm_levels) : (it.level += 1) {
@@ -294,9 +292,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     );
 
                     if (inner.next()) |table| {
-                        if (it.precedence) |p| assert(p > table.snapshot_min);
-                        it.precedence = table.snapshot_min;
-
                         assert(table.visible(it.snapshot));
                         assert(compare_keys(it.key, table.key_min) != .lt);
                         assert(compare_keys(it.key, table.key_max) != .gt);
