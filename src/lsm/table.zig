@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
 const bloom_filter = @import("bloom_filter.zig");

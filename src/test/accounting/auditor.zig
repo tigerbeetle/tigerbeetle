@@ -6,7 +6,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_auditor);
 
-const config = @import("../../config.zig");
+const config = @import("../../constants.zig");
 const tb = @import("../../tigerbeetle.zig");
 const vsr = @import("../../vsr.zig");
 const RingBuffer = @import("../../ring_buffer.zig").RingBuffer;

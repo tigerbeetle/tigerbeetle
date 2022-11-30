@@ -16,7 +16,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
 const vsr = @import("../vsr.zig");
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
@@ -28,7 +28,7 @@ const BlockType = @import("grid.zig").BlockType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage, TableInfo);
 const fuzz = @import("../test/fuzz.zig");
 
-pub const tigerbeetle_config = config.configs.test_min;
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const storage_size_max = data_file_size_min + config.block_size * 1024;
 

@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.clock);
 const fmt = std.fmt;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const clock_offset_tolerance_max: u64 = config.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
 const epoch_max: u64 = config.clock_epoch_max_ms * std.time.ns_per_ms;

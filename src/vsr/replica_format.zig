@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const format_wal_headers = @import("./journal.zig").format_wal_headers;

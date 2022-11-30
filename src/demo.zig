@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const config = @import("config.zig");
+const config = @import("constants.zig");
 
 const tb = @import("tigerbeetle.zig");
 const Account = tb.Account;

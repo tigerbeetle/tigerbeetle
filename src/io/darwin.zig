@@ -4,7 +4,7 @@ const mem = std.mem;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
