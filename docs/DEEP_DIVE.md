@@ -50,7 +50,7 @@ Take a look at the source code of these demos before you run them. Check out our
 
 Let's turn up the log level some more (and your favorite album), so you can see everything the server does as you run these demos:
 
-- Open `src/config.zig` in your editor and change `log_level` to `3` (debug).
+- Open `src/config.zig` in your editor and change `log_level` to `.debug`.
 
 - Rebuild TigerBeetle using the new debug log level by running `zig/zig build -Dcpu=baseline -Drelease-safe && mv zig-out/bin/tigerbeetle .`
 

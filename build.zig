@@ -1,19 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const config = @import("./src/config.zig");
 const ConfigBase = enum {
     production,
     development,
     test_min,
     default,
-};
-
-const TracerBackend = enum {
-    none,
-    // Writes to a file (./tracer.json) which can be uploaded to https://ui.perfetto.dev/
-    perfetto,
-    // Sends data to https://github.com/wolfpld/tracy.
-    tracy,
 };
 
 pub fn build(b: *std.build.Builder) void {
@@ -38,11 +31,11 @@ pub fn build(b: *std.build.Builder) void {
     );
 
     const tracer_backend = b.option(
-        TracerBackend,
+        config.TracerBackend,
         "tracer-backend",
         "Which backend to use for tracing.",
-    ) orelse TracerBackend.none;
-    options.addOption(TracerBackend, "tracer_backend", tracer_backend);
+    ) orelse config.TracerBackend.none;
+    options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
     {
         const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
@@ -383,7 +376,7 @@ fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
 
 fn link_tracer_backend(
     exe: *std.build.LibExeObjStep,
-    tracer_backend: TracerBackend,
+    tracer_backend: config.TracerBackend,
     target: std.zig.CrossTarget,
 ) void {
     switch (tracer_backend) {

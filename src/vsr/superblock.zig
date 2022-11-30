@@ -16,7 +16,7 @@ const mem = std.mem;
 const meta = std.meta;
 const os = std.os;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);

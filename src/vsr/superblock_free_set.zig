@@ -5,7 +5,7 @@ const mem = std.mem;
 const DynamicBitSetUnmanaged = std.bit_set.DynamicBitSetUnmanaged;
 const MaskInt = DynamicBitSetUnmanaged.MaskInt;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const ewah = @import("../ewah.zig").ewah(usize);
 const div_ceil = @import("../util.zig").div_ceil;

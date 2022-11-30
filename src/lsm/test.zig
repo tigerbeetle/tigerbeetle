@@ -4,7 +4,7 @@ const allocator = testing.allocator;
 const assert = std.debug.assert;
 const os = std.os;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.lsm_forest_test);
 

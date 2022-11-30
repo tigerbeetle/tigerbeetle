@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const config = @import("config.zig");
+const config = @import("constants.zig");
 
 const log = std.log;
 pub const log_level: std.log.Level = .err;

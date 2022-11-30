@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const util = @import("../util.zig");

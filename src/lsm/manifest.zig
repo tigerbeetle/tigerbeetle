@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const growth_factor = config.lsm_growth_factor;
 
 const table_count_max = @import("tree.zig").table_count_max;

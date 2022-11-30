@@ -83,7 +83,7 @@ test {
 
 const test_bloom_filter = struct {
     const fuzz = @import("../test/fuzz.zig");
-    const block_size = @import("../config.zig").block_size;
+    const block_size = @import("../constants.zig").block_size;
 
     fn random_keys(random: std.rand.Random, iter: usize) !void {
         const keys_count = @minimum(

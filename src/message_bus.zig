@@ -6,7 +6,7 @@ const os = std.os;
 
 const is_linux = builtin.target.os.tag == .linux;
 
-const config = @import("config.zig");
+const config = @import("constants.zig");
 const log = std.log.scoped(.message_bus);
 
 const vsr = @import("vsr.zig");
