@@ -139,6 +139,10 @@ jobs:
       - run: zig/zig build build_benchmark_ewah
       - run: zig/zig build build_benchmark_eytzinger
       - run: zig/zig build build_benchmark_segmented_array
+      - run: zig/zig build -Dtracer-backend=perfetto
+      - run: git submodule init -- tools/tracy
+      - run: git submodule update -- tools/tracy
+      - run: zig/zig build -Dtracer-backend=tracy
 
   build-and-push:
     name: 'Build and push Docker image'
