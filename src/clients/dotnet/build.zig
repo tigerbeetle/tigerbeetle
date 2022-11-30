@@ -16,7 +16,7 @@ pub fn build(b: *std.build.Builder) void {
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
-        const lib = b.addSharedLibrary("tb_client", "tigerbeetle/src/c/tb_client.zig", .unversioned);
+        const lib = b.addSharedLibrary("tb_client", "tigerbeetle/src/clients/c/tb_client.zig", .unversioned);
         lib.setMainPkgPath("tigerbeetle/src");
         lib.setOutputDir(b.pathJoin(&.{ "src/TigerBeetle/native/", platform[1] }));
         lib.setTarget(cross_target);

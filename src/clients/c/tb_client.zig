@@ -26,10 +26,10 @@ pub const tb_completion_t = fn (
     result_len: u32,
 ) callconv(.C) void;
 
-const config = @import("../config.zig");
-const Storage = @import("../storage.zig").Storage;
-const MessageBus = @import("../message_bus.zig").MessageBusClient;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
+const config = @import("../../config.zig");
+const Storage = @import("../../storage.zig").Storage;
+const MessageBus = @import("../../message_bus.zig").MessageBusClient;
+const StateMachine = @import("../../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = config.message_body_size_max,
 });
 
@@ -37,7 +37,7 @@ const ContextType = @import("tb_client/context.zig").ContextType;
 const ContextImplementation = @import("tb_client/context.zig").ContextImplementation;
 
 const DefaultContext = blk: {
-    const Client = @import("../vsr/client.zig").Client(StateMachine, MessageBus);
+    const Client = @import("../../vsr/client.zig").Client(StateMachine, MessageBus);
     break :blk ContextType(Client);
 };
 

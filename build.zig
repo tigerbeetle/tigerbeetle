@@ -1,5 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const CrossTarget = std.zig.CrossTarget;
+const Mode = std.builtin.Mode;
 
 const TracerBackend = enum {
     none,
@@ -64,9 +66,9 @@ pub fn build(b: *std.build.Builder) void {
         lint_step.dependOn(&run_cmd.step);
     }
 
-    // Executable which generates src/c/tb_client.h
+    // Executable which generates src/clients/c/tb_client.h
     const tb_client_header_generate = blk: {
-        const tb_client_header = b.addExecutable("tb_client_header", "src/c/tb_client_header.zig");
+        const tb_client_header = b.addExecutable("tb_client_header", "src/clients/c/tb_client_header.zig");
         tb_client_header.addOptions("tigerbeetle_build_options", options);
         tb_client_header.setMainPkgPath("src");
         break :blk tb_client_header.run();
@@ -79,9 +81,9 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(unit_tests, tracer_backend, target);
 
-        // for src/c/tb_client_header_test.zig to use cImport on tb_client.h
+        // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
-        unit_tests.addIncludeDir("src/c/");
+        unit_tests.addIncludeDir("src/clients/c/");
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
@@ -89,7 +91,7 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
-        const tb_client = b.addStaticLibrary("tb_client", "src/c/tb_client.zig");
+        const tb_client = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
         tb_client.setMainPkgPath("src");
         tb_client.setTarget(target);
         tb_client.setBuildMode(mode);
@@ -104,6 +106,8 @@ pub fn build(b: *std.build.Builder) void {
         build_step.dependOn(&tb_client.step);
         build_step.dependOn(&tb_client_header_generate.step);
     }
+
+    java_client(b, mode, options, tracer_backend);
 
     {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
@@ -402,5 +406,49 @@ fn link_tracer_backend(
                 exe.linkSystemLibrary("ws2_32");
             }
         },
+    }
+}
+
+fn java_client(b: *std.build.Builder, mode: Mode, options: *std.build.OptionsStep, tracer_backend: TracerBackend) void { 
+    const build_step = b.step("java_client", "Build Java client shared library");
+
+    // Zig cross-target x java os-arch names
+    const platforms = .{
+        .{ "x86_64-linux-gnu", "linux-x86_64" },
+        .{ "x86_64-macos", "macos-x86_64" },
+        .{ "aarch64-linux-gnu", "linux-aarch_64" },
+        .{ "aarch64-macos", "macos-aarch64" },
+        .{ "x86_64-windows", "win-x86_64" },
+    };
+
+    inline for (platforms) |platform| {
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+
+        const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/zig/client.zig", .unversioned);
+        lib.setMainPkgPath("src");
+        lib.addPackagePath("jui", "src/clients/java/src/zig//lib/jui/src/jui.zig");
+        lib.setOutputDir("src/clients/java/src/tigerbeetle-java/src/main/resources/lib/" ++ platform[1]);
+        lib.setTarget(cross_target);
+        lib.setBuildMode(mode);
+
+        if (cross_target.os_tag.? == .windows) {
+            lib.linkSystemLibrary("ws2_32");
+            lib.linkSystemLibrary("advapi32");
+        } else {
+            lib.linkLibC();
+        }
+
+        // Hit some issue with the build cache between cross compilations:
+        // - From Linux, it runs fine
+        // - From Windows it fails on libc "invalid object"
+        // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
+        // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
+        b.cache_root = "zig-cache/" ++ platform[1];
+        b.global_cache_root = "zig-cache/" ++ platform[1] ++ "/global";
+
+        lib.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(lib, tracer_backend, cross_target);
+
+        build_step.dependOn(&lib.step);
     }
 }

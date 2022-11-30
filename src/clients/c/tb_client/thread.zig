@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const config = @import("../../config.zig");
+const config = @import("../../../config.zig");
 const log = std.log.scoped(.tb_client_thread);
 
 const Packet = @import("packet.zig").Packet;

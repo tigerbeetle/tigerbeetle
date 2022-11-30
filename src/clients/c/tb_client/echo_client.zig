@@ -2,13 +2,13 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../../config.zig");
-const vsr = @import("../../vsr.zig");
+const config = @import("../../../config.zig");
+const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 
-const RingBuffer = @import("../../ring_buffer.zig").RingBuffer;
-const MessagePool = @import("../../message_pool.zig").MessagePool;
-const Message = @import("../../message_pool.zig").MessagePool.Message;
+const RingBuffer = @import("../../../ring_buffer.zig").RingBuffer;
+const MessagePool = @import("../../../message_pool.zig").MessagePool;
+const Message = @import("../../../message_pool.zig").MessagePool.Message;
 
 pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type {
     return struct {
@@ -16,7 +16,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
         // Exposing the same types the real client does:
         pub usingnamespace blk: {
-            const Client = @import("../../vsr/client.zig").Client(StateMachine_, MessageBus);
+            const Client = @import("../../../vsr/client.zig").Client(StateMachine_, MessageBus);
             break :blk struct {
                 pub const StateMachine = Client.StateMachine;
                 pub const Error = Client.Error;
