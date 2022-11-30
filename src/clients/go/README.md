@@ -42,9 +42,9 @@ itself. If you are just using the client, you can ignore this.
 - zig 0.9.1
 
 ```sh
-# Step 1 - Set up Zig
-$ cd src/clients/go
-$ ./tigerbeetle/scripts/install_zig.sh
+# Step 1 - Pull tigerbeetle
+git submodule init
+git submodule update 
 
 # Step 2 - Build tb_client for your platform and use it in go
 $ ./scripts/rebuild_binaries.sh

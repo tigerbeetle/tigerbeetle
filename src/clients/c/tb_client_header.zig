@@ -1,5 +1,5 @@
 const std = @import("std");
-const tb = @import("../tigerbeetle.zig");
+const tb = @import("../../tigerbeetle.zig");
 const tb_client = @import("tb_client.zig");
 
 const type_mappings = .{
@@ -214,5 +214,5 @@ pub fn main() !void {
     , .{});
 
     try buffer.writer().print("#endif // TB_CLIENT_H\n\n", .{});
-    try std.fs.cwd().writeFile("src/c/tb_client.h", buffer.items);
+    try std.fs.cwd().writeFile("src/clients/c/tb_client.h", buffer.items);
 }

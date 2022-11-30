@@ -1216,8 +1216,8 @@ public class IntegrationTest {
         public static final String TB_EXE = "tigerbeetle";
         public static final String TB_PORT = "3001";
         public static final String TB_FILE = "./0_0.tigerbeetle.tests";
-        public static final String TB_PATH = "../zig/lib/tigerbeetle";
-        public static final String TB_SERVER = TB_PATH + "/" + TB_EXE;
+        public static final String ROOT_PATH = "../../../../..";
+        public static final String TB_SERVER = ROOT_PATH + "/" + TB_EXE;
 
         private Process process;
 
