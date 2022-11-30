@@ -229,6 +229,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 &self.tracer_slot,
                 .main,
                 .state_machine_prefetch,
+
+                @src(),
             );
 
             self.prefetch_input = input;
@@ -391,6 +393,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 &self.tracer_slot,
                 .main,
                 .state_machine_commit,
+                @src(),
             );
 
             const result = switch (operation) {
@@ -420,6 +423,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 &self.tracer_slot,
                 .main,
                 .state_machine_compact,
+                @src(),
             );
 
             self.compact_callback = callback;

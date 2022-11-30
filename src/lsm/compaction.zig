@@ -122,7 +122,7 @@ pub fn CompactionType(
             done,
         };
 
-        tree_name: []const u8,
+        tree_name: [:0]const u8,
 
         grid: *Grid,
         grid_reservation: Grid.Reservation,
@@ -161,7 +161,7 @@ pub fn CompactionType(
 
         tracer_slot: ?tracer.SpanStart = null,
 
-        pub fn init(allocator: mem.Allocator, tree_name: []const u8) !Compaction {
+        pub fn init(allocator: mem.Allocator, tree_name: [:0]const u8) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
             errdefer iterator_a.deinit(allocator);
 
@@ -355,6 +355,7 @@ pub fn CompactionType(
                     .tree_name = compaction.tree_name,
                     .level_b = compaction.level_b,
                 } },
+                @src(),
             );
 
             // Generate fake IO to make sure io_pending doesn't reach zero multiple times from
@@ -433,6 +434,7 @@ pub fn CompactionType(
                     .tree_name = compaction.tree_name,
                     .level_b = compaction.level_b,
                 } },
+                @src(),
             );
 
             // Create the merge iterator only when we can peek() from the read iterators.

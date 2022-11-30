@@ -67,7 +67,7 @@ pub const compaction_tables_output_max = compaction_tables_input_max;
 /// The maximum number of concurrent compactions (per tree).
 pub const compactions_max = div_ceil(config.lsm_levels, 2);
 
-pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_name: []const u8) type {
+pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_name: [:0]const u8) type {
     const Key = TreeTable.Key;
     const Value = TreeTable.Value;
     const compare_keys = TreeTable.compare_keys;
@@ -557,6 +557,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 &tree.tracer_slot,
                 .{ .tree = .{ .tree_name = tree_name } },
                 .{ .tree_compaction_beat = .{ .tree_name = tree_name } },
+                @src(),
             );
 
             tree.compaction_callback = callback;
