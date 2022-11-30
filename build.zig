@@ -100,6 +100,7 @@ pub fn build(b: *std.build.Builder) void {
         tb_client.setTarget(target);
         tb_client.setBuildMode(mode);
         tb_client.addOptions("tigerbeetle_build_options", options);
+        tb_client.addOptions("tigerbeetle_config", config_options(b, config, .test_min));
         tb_client.setOutputDir("zig-out");
         tb_client.pie = true;
         tb_client.bundle_compiler_rt = true;

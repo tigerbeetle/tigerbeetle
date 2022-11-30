@@ -2015,7 +2015,7 @@ pub fn ReplicaType(
                 // We may be slow and waiting for the write to complete.
                 //
                 // We may even have maxed out our IO depth and been unable to initiate the write,
-                // which can happen if `config.pipeline_max` exceeds `config.io_depth_write`.
+                // which can happen if `config.pipeline_max` exceeds `config.journal_iops_write_max`.
                 // This can lead to deadlock for a cluster of one or two (if we do not retry here),
                 // since there is no other way for the leader to repair the dirty op because no
                 // other replica has it.
