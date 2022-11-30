@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const CrossTarget = std.zig.CrossTarget;
 const Pkg = std.build.Pkg;
 
-
 pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
@@ -35,7 +34,7 @@ pub fn build(b: *std.build.Builder) void {
             lib.addPackage(Pkg{
                 .name = "tigerbeetle",
                 .path = .{ .path = "tb_client.zig" },
-                .dependencies = &[_]Pkg { tigerbeetle_build_options },
+                .dependencies = &[_]Pkg{tigerbeetle_build_options},
             });
         }
 
