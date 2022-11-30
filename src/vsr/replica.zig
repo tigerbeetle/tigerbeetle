@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const StaticAllocator = @import("../static_allocator.zig");
 const GridType = @import("../lsm/grid.zig").GridType;
@@ -403,7 +403,7 @@ pub fn ReplicaType(
             // The view change quorum may be more expensive to make the replication quorum cheaper.
             // The insight is that the replication phase is by far more common than the view change.
             // This trade-off allows us to optimize for the common case.
-            // See the comments in `config.zig` for further explanation.
+            // See the comments in `constants.zig` for further explanation.
             assert(quorum_view_change >= majority);
 
             if (replica_count <= 2) {

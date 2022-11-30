@@ -20,7 +20,7 @@ const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
 const MessagePool = @import("tigerbeetle/src/message_pool.zig").MessagePool;
 const IO = @import("tigerbeetle/src/io.zig").IO;
-const config = @import("tigerbeetle/src/config.zig");
+const config = @import("tigerbeetle/src/constants.zig");
 
 const vsr = @import("tigerbeetle/src/vsr.zig");
 const Header = vsr.Header;

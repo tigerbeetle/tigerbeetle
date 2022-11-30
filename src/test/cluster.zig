@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;

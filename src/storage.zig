@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
 
 const IO = @import("io.zig").IO;
-const config = @import("config.zig");
+const config = @import("constants.zig");
 const fatal = @import("cli.zig").fatal;
 const vsr = @import("vsr.zig");
 

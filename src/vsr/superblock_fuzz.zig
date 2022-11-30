@@ -14,7 +14,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock);
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const util = @import("../util.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../test/storage.zig").Storage;
@@ -26,7 +26,7 @@ const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../test/fuzz.zig");
 
-pub const tigerbeetle_config = config.configs.test_min;
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 /// Total calls to checkpoint() + view_change().
 const transitions_count_total = 10;

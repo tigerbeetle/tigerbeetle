@@ -9,7 +9,7 @@ const log = std.log.scoped(.test_conductor);
 
 const vsr = @import("../vsr.zig");
 const util = @import("../util.zig");
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const IdPermutation = @import("id.zig").IdPermutation;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;

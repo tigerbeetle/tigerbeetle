@@ -7,7 +7,7 @@ const meta = std.meta;
 const net = std.net;
 const os = std.os;
 
-const config = @import("config.zig");
+const config = @import("constants.zig");
 const tigerbeetle = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
 const IO = @import("io.zig").IO;

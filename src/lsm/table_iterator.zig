@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const util = @import("../util.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;

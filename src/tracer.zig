@@ -59,7 +59,7 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.tracer);
 
-const config = @import("./config.zig");
+const config = @import("./constants.zig");
 const Time = @import("./time.zig").Time;
 const util = @import("util.zig");
 
@@ -363,7 +363,7 @@ const TracerTracy = struct {
         @cInclude("TracyC.h");
     });
 
-    // TODO Ask config.zig for a static bound on callstack depth.
+    // TODO Ask constants.zig for a static bound on callstack depth.
     const callstack_depth = 64;
 
     pub const SpanStart = c.___tracy_c_zone_context;

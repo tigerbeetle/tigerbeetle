@@ -3,7 +3,7 @@ const testing = std.testing;
 const allocator = testing.allocator;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const fuzz = @import("../test/fuzz.zig");
 const vsr = @import("../vsr.zig");
 
@@ -34,7 +34,7 @@ const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
-pub const tigerbeetle_config = config.configs.test_min;
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const Key = packed struct {
     id: u64 align(@alignOf(u64)),
@@ -357,10 +357,11 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
-        8
+        //8
+        100 * config.lsm_growth_factor * Environment.tree_options.cache_entries_max
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
-        Environment.tree_options.cache_entries_max;
+        config.lsm_growth_factor * Environment.tree_options.cache_entries_max;
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 

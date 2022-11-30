@@ -38,7 +38,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.compaction);
 const tracer = @import("../tracer.zig");
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const GridType = @import("grid.zig").GridType;
 const ManifestType = @import("manifest.zig").ManifestType;

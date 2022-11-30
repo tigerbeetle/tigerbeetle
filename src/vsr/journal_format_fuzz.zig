@@ -3,13 +3,13 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_journal_format);
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const util = @import("../util.zig");
 const vsr = @import("../vsr.zig");
 const journal = @import("./journal.zig");
 const fuzz = @import("../test/fuzz.zig");
 
-pub const tigerbeetle_config = config.configs.test_min;
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const cluster = 0;
 

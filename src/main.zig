@@ -7,7 +7,7 @@ const os = std.os;
 const log_main = std.log.scoped(.main);
 
 const build_options = @import("tigerbeetle_build_options");
-const config = @import("config.zig");
+const config = @import("constants.zig");
 const tracer = @import("tracer.zig");
 
 const cli = @import("cli.zig");

@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("config.zig");
+const config = @import("constants.zig");
 
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;

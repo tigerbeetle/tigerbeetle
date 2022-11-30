@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const binary_search = @import("binary_search.zig");
 const snapshot_latest = @import("tree.zig").snapshot_latest;

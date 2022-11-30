@@ -3,7 +3,7 @@ const testing = std.testing;
 const allocator = testing.allocator;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const fuzz = @import("../test/fuzz.zig");
 const vsr = @import("../vsr.zig");
 
@@ -25,7 +25,7 @@ const Forest = StateMachine.Forest;
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
-pub const tigerbeetle_config = config.configs.test_min;
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const FuzzOp = union(enum) {
     // TODO Test secondary index lookups and range queries.
