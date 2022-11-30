@@ -5,8 +5,8 @@ const assert = std.debug.assert;
 /// See test cases for example usage.
 // TODO(Zig): Change this to a a purely comptime function returning a slice
 // once Zig's "runtime value cannot be passed to comptime arg" bugs are fixed.
-pub fn parse(comptime Row: type, comptime table_string: []const u8) !std.BoundedArray(Row, 64) {
-    var rows = std.BoundedArray(Row, 64).init(0) catch unreachable;
+pub fn parse(comptime Row: type, comptime table_string: []const u8) std.BoundedArray(Row, 128) {
+    var rows = std.BoundedArray(Row, 128).init(0) catch unreachable;
     var row_strings = std.mem.tokenize(u8, table_string, "\n");
     while (row_strings.next()) |row_string| {
         // Ignore blank line.
@@ -102,34 +102,48 @@ fn field(comptime Enum: type, name: []const u8) Enum {
     std.debug.panic("Unkown field name={s} for type={}", .{ name, Enum });
 }
 
+fn test_parse(
+    comptime Row: type,
+    comptime rows_expect: []const Row,
+    comptime string: []const u8,
+) !void {
+    const rows_actual = parse(Row, string).constSlice();
+    try std.testing.expectEqual(rows_expect.len, rows_actual.len);
+
+    for (rows_expect) |row, i| {
+        try std.testing.expectEqual(row, rows_actual[i]);
+    }
+}
+
 test "comment" {
-    const rows = try parse(struct {
+    try test_parse(struct {
         a: u8,
+    }, &.{
+        .{ .a = 1 },
     },
         \\
         \\ 1 // Comment
         \\
     );
-
-    try std.testing.expectEqual(rows.len, 1);
-    try std.testing.expectEqual(rows.get(0), .{ .a = 1 });
 }
 
 test "enum" {
-    const rows = try parse(enum { a, b, c },
+    try test_parse(enum { a, b, c }, &.{ .c, .b, .a },
         \\ c
         \\ b
         \\ a
     );
-
-    try std.testing.expectEqual(rows.len, 3);
-    try std.testing.expectEqual(rows.get(0), .c);
-    try std.testing.expectEqual(rows.get(1), .b);
-    try std.testing.expectEqual(rows.get(2), .a);
 }
 
 test "bool" {
-    const rows = try parse(struct { i: bool },
+    try test_parse(struct { i: bool }, &.{
+        .{ .i = false },
+        .{ .i = true },
+        .{ .i = false },
+        .{ .i = true },
+        .{ .i = false },
+        .{ .i = true },
+    },
         \\ 0
         \\ 1
         \\ false
@@ -137,18 +151,17 @@ test "bool" {
         \\ F
         \\ T
     );
-
-    try std.testing.expectEqual(rows.len, 6);
-    try std.testing.expectEqual(rows.get(0), .{ .i = false });
-    try std.testing.expectEqual(rows.get(1), .{ .i = true });
-    try std.testing.expectEqual(rows.get(2), .{ .i = false });
-    try std.testing.expectEqual(rows.get(3), .{ .i = true });
-    try std.testing.expectEqual(rows.get(4), .{ .i = false });
-    try std.testing.expectEqual(rows.get(5), .{ .i = true });
 }
 
 test "int" {
-    const rows = try parse(struct { i: usize },
+    try test_parse(struct { i: usize }, &.{
+        .{ .i = 1 },
+        .{ .i = 2 },
+        .{ .i = 3 },
+        .{ .i = 4 },
+        .{ .i = std.math.maxInt(usize) - 5 },
+        .{ .i = std.math.maxInt(usize) },
+    },
         \\ 1
         \\ 2
         \\ A3
@@ -157,68 +170,57 @@ test "int" {
         \\ -5
         \\ -0
     );
-
-    try std.testing.expectEqual(rows.len, 6);
-    try std.testing.expectEqual(rows.get(0), .{ .i = 1 });
-    try std.testing.expectEqual(rows.get(1), .{ .i = 2 });
-    try std.testing.expectEqual(rows.get(2), .{ .i = 3 });
-    try std.testing.expectEqual(rows.get(3), .{ .i = 4 });
-    try std.testing.expectEqual(rows.get(4), .{ .i = std.math.maxInt(usize) - 5 });
-    try std.testing.expectEqual(rows.get(5), .{ .i = std.math.maxInt(usize) });
 }
 
 test "struct" {
-    const rows = try parse(struct {
+    try test_parse(struct {
         c1: enum { a, b, c, d },
         c2: u8,
         c3: u16 = 30,
         c4: ?u32 = null,
         c5: bool = false,
+    }, &.{
+        .{ .c1 = .a, .c2 = 1, .c3 = 10, .c4 = 1000, .c5 = true },
+        .{ .c1 = .b, .c2 = 2, .c3 = 20, .c4 = null, .c5 = true },
+        .{ .c1 = .c, .c2 = 3, .c3 = 30, .c4 = null, .c5 = false },
+        .{ .c1 = .d, .c2 = 4, .c3 = 30, .c4 = null, .c5 = false },
     },
         \\ a 1 10 1000 1
         \\ b 2 20    _ T
         \\ c 3  _    _ F
         \\ d 4  _    _ _
     );
-
-    try std.testing.expectEqual(rows.len, 4);
-    try std.testing.expectEqual(rows.get(0), .{ .c1 = .a, .c2 = 1, .c3 = 10, .c4 = 1000, .c5 = true });
-    try std.testing.expectEqual(rows.get(1), .{ .c1 = .b, .c2 = 2, .c3 = 20, .c4 = null, .c5 = true });
-    try std.testing.expectEqual(rows.get(2), .{ .c1 = .c, .c2 = 3, .c3 = 30, .c4 = null, .c5 = false });
-    try std.testing.expectEqual(rows.get(3), .{ .c1 = .d, .c2 = 4, .c3 = 30, .c4 = null, .c5 = false });
 }
 
 test "struct (nested)" {
-    const rows = try parse(struct {
+    try test_parse(struct {
         a: u32,
         b: struct {
             b1: u8,
             b2: u8,
         },
         c: u32,
+    }, &.{
+        .{ .a = 1, .b = .{ .b1 = 2, .b2 = 3 }, .c = 4 },
+        .{ .a = 5, .b = .{ .b1 = 6, .b2 = 7 }, .c = 8 },
     },
         \\ 1 2 3 4
         \\ 5 6 7 8
     );
-
-    try std.testing.expectEqual(rows.len, 2);
-    try std.testing.expectEqual(rows.get(0), .{ .a = 1, .b = .{ .b1 = 2, .b2 = 3 }, .c = 4 });
-    try std.testing.expectEqual(rows.get(1), .{ .a = 5, .b = .{ .b1 = 6, .b2 = 7 }, .c = 8 });
 }
 
 test "union" {
-    const rows = try parse(union(enum) {
+    try test_parse(union(enum) {
         a: struct { b: u8, c: i8 },
         d: u8,
         e: void,
+    }, &.{
+        .{ .a = .{ .b = 1, .c = -2 } },
+        .{ .d = 3 },
+        .{ .e = {} },
     },
         \\a 1 -2
         \\d 3
         \\e
     );
-
-    try std.testing.expectEqual(rows.len, 3);
-    try std.testing.expectEqual(rows.get(0), .{ .a = .{ .b = 1, .c = -2 } });
-    try std.testing.expectEqual(rows.get(1), .{ .d = 3 });
-    try std.testing.expectEqual(rows.get(2), .{ .e = {} });
 }
