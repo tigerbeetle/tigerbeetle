@@ -1298,7 +1298,8 @@ fn check(comptime test_table: []const u8) !void {
     defer reply.deinit();
 
     var operation: ?TestContext.StateMachine.Operation = null;
-    const test_actions = try parse_table(TestAction, test_table);
+
+    const test_actions = parse_table(TestAction, test_table);
     for (test_actions.constSlice()) |test_action| {
         switch (test_action) {
             .setup => |b| {
