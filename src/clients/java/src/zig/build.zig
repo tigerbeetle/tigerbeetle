@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const CrossTarget = std.zig.CrossTarget;
+const Pkg = std.build.Pkg;
+
 
 pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
@@ -20,8 +22,24 @@ pub fn build(b: *std.build.Builder) void {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
         const lib = b.addSharedLibrary("tb_jniclient", "src/client.zig", .unversioned);
+
+        // TODO(batiati)
+        // This is a hack used to work around the absence of tigerbeetle_build_options.
+        // This should be removed once the client is built using the root `build.zig`.
+        {
+            const TracerBackend = enum { none, perfetto, tracy };
+            const dummy_options = b.addOptions();
+            dummy_options.addOption(TracerBackend, "tracer_backend", .none);
+            var tigerbeetle_build_options = dummy_options.getPackage("tigerbeetle_build_options");
+
+            lib.addPackage(Pkg{
+                .name = "tigerbeetle",
+                .path = .{ .path = "tb_client.zig" },
+                .dependencies = &[_]Pkg { tigerbeetle_build_options },
+            });
+        }
+
         lib.addPackagePath("jui", "lib/jui/src/jui.zig");
-        lib.addPackagePath("tigerbeetle", "tb_client.zig");
         lib.setOutputDir("../tigerbeetle-java/src/main/resources/lib/" ++ platform);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
