@@ -1110,8 +1110,9 @@ const TestContext = struct {
     const StateMachine = StateMachineType(Storage, .{
         // Overestimate the batch size (in order to overprovision commit_entries_max)
         // because the test never compacts.
-        .message_body_size_max = 1000 * @sizeOf(Account),
+        .message_body_size_max = message_body_size_max,
     });
+    const message_body_size_max = 256 * @sizeOf(Account);
 
     storage: Storage,
     message_pool: MessagePool,
@@ -1290,10 +1291,10 @@ fn check(comptime test_table: []const u8) !void {
     var transfers = std.AutoHashMap(u128, Transfer).init(allocator);
     defer transfers.deinit();
 
-    var request = std.ArrayListAligned(u8, 16).init(allocator);
+    var request = std.ArrayListAligned(u8, TestContext.message_body_size_max).init(allocator);
     defer request.deinit();
 
-    var reply = std.ArrayListAligned(u8, 16).init(allocator);
+    var reply = std.ArrayListAligned(u8, TestContext.message_body_size_max).init(allocator);
     defer reply.deinit();
 
     var operation: ?TestContext.StateMachine.Operation = null;
