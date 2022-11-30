@@ -34,6 +34,8 @@ const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
+pub const tigerbeetle_config = config.configs.test_min;
+
 const Key = packed struct {
     id: u64 align(@alignOf(u64)),
 

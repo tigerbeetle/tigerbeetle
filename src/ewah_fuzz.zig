@@ -6,6 +6,8 @@ const log = std.log.scoped(.fuzz_ewah);
 const ewah = @import("./ewah.zig");
 const fuzz = @import("./test/fuzz.zig");
 
+pub const tigerbeetle_config = @import("config.zig").configs.test_min;
+
 pub fn main() !void {
     const allocator = std.testing.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
