@@ -25,7 +25,7 @@ pub fn FuzzRunner(
         const cluster = 32;
         const replica = 4;
         // TODO Is this appropriate for the number of fuzz_ops we want to run?
-        const size_max = vsr.Zone.superblock.size().? +
+        pub const size_max = vsr.Zone.superblock.size().? +
             vsr.Zone.wal_headers.size().? +
             vsr.Zone.wal_prepares.size().? +
             1024 * 1024 * 1024;
@@ -61,7 +61,7 @@ pub fn FuzzRunner(
             runner.callback = null;
             runner.pending = 0;
             runner.storage = storage;
-            runner.checkpoint_op = null; 
+            runner.checkpoint_op = null;
 
             runner.message_pool = try MessagePool.init(allocator, .replica);
             defer runner.message_pool.deinit(allocator);
@@ -73,7 +73,7 @@ pub fn FuzzRunner(
             defer runner.grid.deinit(allocator);
 
             runner.tree = undefined;
-            try runner.tree_context.init();
+            runner.tree_context = try TreeContext.init();
             defer runner.tree_context.deinit();
 
             runner.format_then_open(callback);
@@ -88,14 +88,14 @@ pub fn FuzzRunner(
             assert(runner.state == current);
 
             runner.callback = callback;
-            runner.state = state;
+            runner.state = next;
         }
 
         fn intermediate_transition(runner: *Runner, current: State, next: State) void {
             assert(runner.callback != null);
             assert(runner.state == current);
-            
-            runner.state = state;
+
+            runner.state = next;
         }
 
         fn finish_transition(runner: *Runner, current: State, next: State) void {
@@ -104,7 +104,7 @@ pub fn FuzzRunner(
 
             const callback = runner.callback.?;
             runner.callback = null;
-            runner.state = state;
+            runner.state = next;
             callback(runner);
         }
 
@@ -137,17 +137,17 @@ pub fn FuzzRunner(
         }
 
         pub fn compact(runner: *Runner, callback: Callback, op: u64) void {
-            runner.start_transition(.running, .tree_compact);
+            runner.start_transition(.running, .tree_compact, callback);
             runner.tree.compact(tree_compact_callback, op);
         }
 
         fn tree_compact_callback(tree: *Tree) void {
-            const runer = @fieldParentPtr(@This(), "tree", tree);
+            const runner = @fieldParentPtr(@This(), "tree", tree);
             runner.finish_transition(.tree_compact, .running);
         }
 
         pub fn checkpoint(runner: *Runner, callback: Callback, op: u64) void {
-            runner.start_transition(.running, .tree_checkpoint);
+            runner.start_transition(.running, .tree_checkpoint, callback);
 
             assert(runner.checkpoint_op == null);
             runner.checkpoint_op = op - config.lsm_batch_multiple;
@@ -174,9 +174,9 @@ pub fn FuzzRunner(
             runner.finish_transition(.superblock_checkpoint, .running);
         }
 
-        pub fn access(runner: *Runner, callback: Callback, args: anytype) void {
+        pub fn access(runner: *Runner, callback: Callback, arg: anytype) void {
             runner.start_transition(.running, .tree_access, callback);
-            runner.tree_context.access(.{ callback, &runner.tree } ++ args);
+            runner.tree_context.access(access_callback, &runner.tree, arg);
         }
 
         fn access_callback(tree_context: *TreeContext) void {
@@ -187,8 +187,7 @@ pub fn FuzzRunner(
         pub fn stop(runner: *Runner) void {
             assert(runner.callback == null);
             assert(runner.state == .running);
-            runer.state = .stopped;
+            runner.state = .stopped;
         }
     };
 }
-    
