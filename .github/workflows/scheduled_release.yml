@@ -12,3 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: hub release create --prerelease --message "Weekly automated build. Do not use in production." "$(date +%Y-%m-%d)-weekly"
+        # Propagate token into environment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
