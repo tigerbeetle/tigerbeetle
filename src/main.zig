@@ -7,7 +7,8 @@ const os = std.os;
 const log_main = std.log.scoped(.main);
 
 const build_options = @import("tigerbeetle_build_options");
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
+const config = @import("config.zig").configs.current;
 const tracer = @import("tracer.zig");
 
 const cli = @import("cli.zig");
@@ -20,7 +21,7 @@ const Storage = @import("storage.zig").Storage;
 const MessageBus = @import("message_bus.zig").MessageBusReplica;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 
 const vsr = @import("vsr.zig");
@@ -30,8 +31,8 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
 
-pub const log_level: std.log.Level = config.log_level;
-pub const log = config.log;
+pub const log_level: std.log.Level = constants.log_level;
+pub const log = constants.log;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -126,7 +127,7 @@ const Command = struct {
         options: StateMachine.Options,
         path: [:0]const u8,
     ) !void {
-        var tracer_allocator = if (config.tracer_backend == .tracy)
+        var tracer_allocator = if (constants.tracer_backend == .tracy)
             tracer.TracerAllocator.init(arena.allocator())
         else
             arena;
@@ -182,7 +183,7 @@ const Command = struct {
 
         while (true) {
             replica.tick();
-            try command.io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
+            try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
     }
 
@@ -205,14 +206,20 @@ const Command = struct {
             );
 
             try stdout.writeAll("\n");
-            inline for (.{ "zig_version", "mode" }) |declaration| {
-                try print_value(stdout, declaration, @field(builtin, declaration));
+            inline for (.{ "mode", "zig_version" }) |declaration| {
+                try print_value(stdout, "build." ++ declaration, @field(builtin, declaration));
+            }
+
+            // TODO(Zig): Use meta.fieldNames() after upgrading to 0.10.
+            // See: https://github.com/ziglang/zig/issues/10235
+            try stdout.writeAll("\n");
+            inline for (std.meta.fields(@TypeOf(config.cluster))) |field| {
+                try print_value(stdout, "cluster." ++ field.name, @field(config.cluster, field.name));
             }
 
             try stdout.writeAll("\n");
-            inline for (std.meta.declarations(config)) |declaration| {
-                if (!declaration.is_pub) continue;
-                try print_value(stdout, declaration.name, @field(config, declaration.name));
+            inline for (std.meta.fields(@TypeOf(config.process))) |field| {
+                try print_value(stdout, "process." ++ field.name, @field(config.process, field.name));
             }
         }
         try stdout_buffer.flush();
