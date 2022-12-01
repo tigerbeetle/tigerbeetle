@@ -236,7 +236,7 @@ const Fuzzer = struct {
         const compact = fuzzer.ops[fuzzer.op_index].compact;
 
         if (compact.checkpoint) {
-            fuzzer.runner.compact(runner_checkpoint_callback, compact.op);
+            fuzzer.runner.checkpoint(runner_checkpoint_callback, compact.op);
         } else {
             fuzzer.tick();
         }
