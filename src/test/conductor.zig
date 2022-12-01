@@ -9,7 +9,7 @@ const log = std.log.scoped(.test_conductor);
 
 const vsr = @import("../vsr.zig");
 const util = @import("../util.zig");
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const IdPermutation = @import("id.zig").IdPermutation;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -47,7 +47,8 @@ pub fn ConductorType(
         ///
         /// `Conduction.stalled_queue` hold replies (and corresponding requests) that are
         /// waiting to be processed.
-        pub const stalled_queue_capacity = config.clients_max * config.client_request_queue_max * 2;
+        pub const stalled_queue_capacity =
+            constants.clients_max * constants.client_request_queue_max * 2;
 
         random: std.rand.Random,
         workload: *Workload,
@@ -225,7 +226,7 @@ pub fn ConductorType(
             var client = &self.clients[client_index];
 
             // Check for space in the client's own request queue.
-            if (client.request_queue.count + 1 > config.client_request_queue_max) return;
+            if (client.request_queue.count + 1 > constants.client_request_queue_max) return;
 
             var request_message = client.get_message();
             defer client.unref(request_message);
@@ -234,10 +235,10 @@ pub fn ConductorType(
                 client_index,
                 @alignCast(
                     @alignOf(vsr.Header),
-                    request_message.buffer[@sizeOf(vsr.Header)..config.message_size_max],
+                    request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
                 ),
             );
-            assert(request_metadata.size <= config.message_size_max - @sizeOf(vsr.Header));
+            assert(request_metadata.size <= constants.message_size_max - @sizeOf(vsr.Header));
 
             client.request(
                 0,

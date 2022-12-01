@@ -6,7 +6,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_auditor);
 
-const config = @import("../../constants.zig");
+const constants = @import("../../constants.zig");
 const tb = @import("../../tigerbeetle.zig");
 const vsr = @import("../../vsr.zig");
 const RingBuffer = @import("../../ring_buffer.zig").RingBuffer;
@@ -16,7 +16,7 @@ const IdPermutation = @import("../id.zig").IdPermutation;
 const PriorityQueue = @import("../priority_queue.zig").PriorityQueue;
 const Storage = @import("../storage.zig").Storage;
 const StateMachine = @import("../../state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);

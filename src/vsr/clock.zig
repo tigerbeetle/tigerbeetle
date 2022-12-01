@@ -3,12 +3,12 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.clock);
 const fmt = std.fmt;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
-const clock_offset_tolerance_max: u64 = config.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
-const epoch_max: u64 = config.clock_epoch_max_ms * std.time.ns_per_ms;
-const window_min: u64 = config.clock_synchronization_window_min_ms * std.time.ns_per_ms;
-const window_max: u64 = config.clock_synchronization_window_max_ms * std.time.ns_per_ms;
+const clock_offset_tolerance_max: u64 = constants.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
+const epoch_max: u64 = constants.clock_epoch_max_ms * std.time.ns_per_ms;
+const window_min: u64 = constants.clock_synchronization_window_min_ms * std.time.ns_per_ms;
+const window_max: u64 = constants.clock_synchronization_window_max_ms * std.time.ns_per_ms;
 
 const Marzullo = @import("marzullo.zig").Marzullo;
 
@@ -83,7 +83,8 @@ pub fn Clock(comptime Time: type) type {
         time: *Time,
 
         /// An epoch from which the clock can read synchronized clock timestamps within safe bounds.
-        /// At least `config.clock_synchronization_window_min_ms` is needed for this to be ready to use.
+        /// At least `constants.clock_synchronization_window_min_ms` is needed for this to be ready
+        /// to use.
         epoch: Epoch,
 
         /// The next epoch (collecting samples and being synchronized) to replace the current epoch.
@@ -156,8 +157,8 @@ pub fn Clock(comptime Time: type) type {
 
             // Our m0 and m2 readings should always be monotonically increasing if not equal.
             // Crucially, it is possible for a very fast network to have m0 == m2, especially where
-            // `config.tick_ms` is at a more course granularity. We must therefore tolerate RTT=0 or
-            // otherwise we would have a liveness bug simply because we would be throwing away
+            // `constants.tick_ms` is at a more course granularity. We must therefore tolerate RTT=0
+            // or otherwise we would have a liveness bug simply because we would be throwing away
             // perfectly good clock samples.
             // This condition should never be true. Reject this as a bad sample:
             if (m0 > m2) {

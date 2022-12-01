@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
 
 const log = std.log;
 pub const log_level: std.log.Level = .err;
@@ -14,7 +14,7 @@ const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
@@ -26,7 +26,7 @@ const tb = @import("tigerbeetle.zig");
 const batches_count = 100;
 
 const transfers_per_batch: u32 = @divExact(
-    config.message_size_max - @sizeOf(vsr.Header),
+    constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tb.Transfer),
 );
 comptime {
@@ -78,7 +78,7 @@ pub fn main() !void {
 
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
-    var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
+    var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", constants.port)};
 
     var io = try IO.init(32, 0);
     defer io.deinit();

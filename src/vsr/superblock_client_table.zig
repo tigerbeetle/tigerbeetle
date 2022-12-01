@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const util = @import("../util.zig");
 
@@ -43,10 +43,10 @@ pub const ClientTable = struct {
         var entries: Entries = .{};
         errdefer entries.deinit(allocator);
 
-        try entries.ensureTotalCapacity(allocator, @intCast(u32, config.clients_max));
-        assert(entries.capacity() >= config.clients_max);
+        try entries.ensureTotalCapacity(allocator, @intCast(u32, constants.clients_max));
+        assert(entries.capacity() >= constants.clients_max);
 
-        const sorted = try allocator.alloc(*const Entry, config.clients_max);
+        const sorted = try allocator.alloc(*const Entry, constants.clients_max);
         errdefer allocator.free(sorted);
 
         return ClientTable{
@@ -84,15 +84,15 @@ pub const ClientTable = struct {
         // First goes the vsr headers for the entries.
         // This takes advantage of the buffer alignment to avoid adding padding for the headers.
         size_max = std.mem.alignForward(size_max, @alignOf(vsr.Header));
-        size_max += @sizeOf(vsr.Header) * config.clients_max;
+        size_max += @sizeOf(vsr.Header) * constants.clients_max;
 
         // Then follows the session values for the entries.
         size_max = std.mem.alignForward(size_max, @alignOf(u64));
-        size_max += @sizeOf(u64) * config.clients_max;
+        size_max += @sizeOf(u64) * constants.clients_max;
 
         // Followed by the message bodies for the entries.
         size_max = std.mem.alignForward(size_max, @alignOf(u8));
-        size_max += config.message_size_max * config.clients_max;
+        size_max += constants.message_size_max * constants.clients_max;
 
         // Finally the entry count at the end
         size_max = std.mem.alignForward(size_max, @alignOf(u32));
@@ -239,13 +239,13 @@ pub const ClientTable = struct {
         const client = entry.reply.header.client;
         client_table.entries.putAssumeCapacityNoClobber(client, entry.*);
 
-        if (config.verify) assert(client_table.entries.contains(client));
+        if (constants.verify) assert(client_table.entries.contains(client));
     }
 
     pub fn remove(client_table: *ClientTable, client: u128) void {
         assert(client_table.entries.remove(client));
 
-        if (config.verify) assert(!client_table.entries.contains(client));
+        if (constants.verify) assert(!client_table.entries.contains(client));
     }
 
     pub const Iterator = Entries.ValueIterator;

@@ -6,7 +6,7 @@ const testing = std.testing;
 const c = @cImport(@cInclude("tb_client.h"));
 
 const util = @import("../util.zig");
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const Packet = @import("tb_client/packet.zig").Packet;
 
 const Mutex = std.Thread.Mutex;
@@ -91,10 +91,10 @@ const Completion = struct {
 // 3. the data marshaling is correct, and exactly the same data sent was received back.
 test "c_client echo" {
     // Using the create_accounts operation for this test.
-    const RequestContext = RequestContextType(config.message_body_size_max);
+    const RequestContext = RequestContextType(constants.message_body_size_max);
     const create_accounts_operation: u8 = c.TB_OPERATION_CREATE_ACCOUNTS;
     const event_size = @sizeOf(c.tb_account_t);
-    const event_request_max = @divFloor(config.message_body_size_max, event_size);
+    const event_request_max = @divFloor(constants.message_body_size_max, event_size);
 
     // Initializing an echo client for testing purposes.
     // We ensure that the retry mechanism is being tested
@@ -103,7 +103,7 @@ test "c_client echo" {
     var tb_packet_list: c.tb_packet_list_t = undefined;
     const cluster_id = 0;
     const address = "3000";
-    const packets_count: u32 = config.client_request_queue_max * 2;
+    const packets_count: u32 = constants.client_request_queue_max * 2;
     const tb_context: usize = 42;
     const result = c.tb_client_init_echo(
         &tb_client,
@@ -221,7 +221,7 @@ test "c_client tb_status" {
     // More addresses thant "replicas_max" should return "TB_STATUS_ADDRESS_LIMIT_EXCEEDED":
     try assert_status(
         1,
-        ("3000," ** config.replicas_max) ++ "3001",
+        ("3000," ** constants.replicas_max) ++ "3001",
         c.TB_STATUS_ADDRESS_LIMIT_EXCEEDED,
     );
 
@@ -234,7 +234,7 @@ test "c_client tb_status" {
 
 // Asserts the validation rules associated with the "TB_PACKET_STATUS" enum.
 test "c_client tb_packet_status" {
-    const RequestContext = RequestContextType(config.message_body_size_max);
+    const RequestContext = RequestContextType(constants.message_body_size_max);
 
     var tb_client: c.tb_client_t = undefined;
     var tb_packet_list: c.tb_packet_list_t = undefined;
@@ -299,12 +299,12 @@ test "c_client tb_packet_status" {
 
     var packet_list = @ptrCast(*Packet.List, &tb_packet_list);
 
-    // Messages larger than config.message_body_size_max should return "too_much_data":
+    // Messages larger than constants.message_body_size_max should return "too_much_data":
     try assert_result(
         tb_client,
         packet_list,
         c.TB_OPERATION_CREATE_TRANSFERS,
-        config.message_body_size_max + @sizeOf(c.tb_transfer_t),
+        constants.message_body_size_max + @sizeOf(c.tb_transfer_t),
         c.TB_PACKET_TOO_MUCH_DATA,
     );
 

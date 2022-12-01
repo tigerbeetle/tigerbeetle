@@ -2,7 +2,7 @@ const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
@@ -941,8 +941,8 @@ pub const IO = struct {
         must_create: bool,
     ) !os.fd_t {
         assert(relative_path.len > 0);
-        assert(size >= config.sector_size);
-        assert(size % config.sector_size == 0);
+        assert(size >= constants.sector_size);
+        assert(size % constants.sector_size == 0);
 
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
@@ -1013,7 +1013,7 @@ pub const IO = struct {
                 log.warn("file system failed to preallocate the file memory", .{});
                 log.info("allocating by writing to the last sector of the file instead...", .{});
 
-                const sector_size = config.sector_size;
+                const sector_size = constants.sector_size;
                 const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
 
                 // Handle partial writes where the physical sector is less than a logical sector:

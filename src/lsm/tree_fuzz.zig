@@ -3,7 +3,7 @@ const testing = std.testing;
 const allocator = testing.allocator;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const fuzz = @import("../test/fuzz.zig");
 const vsr = @import("../vsr.zig");
 
@@ -15,11 +15,11 @@ const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../test/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 
 const GridType = @import("grid.zig").GridType;
-const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const Table = @import("table.zig").TableType(
     Key,
     Key.Value,
@@ -92,7 +92,7 @@ const Environment = struct {
         1024 * 1024 * 1024;
 
     const node_count = 1024;
-    const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
+    const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
     const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
     const tree_options = Tree.Options{
         .commit_entries_max = commit_entries_max,
@@ -104,8 +104,8 @@ const Environment = struct {
 
     const compacts_per_checkpoint = std.math.divCeil(
         usize,
-        config.journal_slot_count,
-        config.lsm_batch_multiple,
+        constants.journal_slot_count,
+        constants.lsm_batch_multiple,
     ) catch unreachable;
 
     const State = enum {
@@ -242,7 +242,7 @@ const Environment = struct {
     }
 
     pub fn checkpoint(env: *Environment, op: u64) void {
-        env.checkpoint_op = op - config.lsm_batch_multiple;
+        env.checkpoint_op = op - constants.lsm_batch_multiple;
         env.change_state(.tree_open, .tree_checkpointing);
         env.tree.checkpoint(tree_checkpoint_callback);
         env.tick_until_state_change(.tree_checkpointing, .superblock_checkpointing);
@@ -358,10 +358,10 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
         //8
-        100 * config.lsm_growth_factor * Environment.tree_options.cache_entries_max
+        100 * constants.lsm_growth_factor * Environment.tree_options.cache_entries_max
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
-        config.lsm_growth_factor * Environment.tree_options.cache_entries_max;
+        constants.lsm_growth_factor * Environment.tree_options.cache_entries_max;
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
@@ -375,11 +375,11 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (random.boolean()) 0 else 1,
         // Always do puts, and always more puts than removes.
-        .put = config.lsm_batch_multiple * 2,
+        .put = constants.lsm_batch_multiple * 2,
         // Maybe do some removes.
-        .remove = if (random.boolean()) 0 else config.lsm_batch_multiple,
+        .remove = if (random.boolean()) 0 else constants.lsm_batch_multiple,
         // Maybe do some gets.
-        .get = if (random.boolean()) 0 else config.lsm_batch_multiple,
+        .get = if (random.boolean()) 0 else constants.lsm_batch_multiple,
     };
     log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
@@ -401,8 +401,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 op += 1;
                 const checkpoint =
                     // Can only checkpoint on the last beat of the bar.
-                    compact_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1 and
-                    compact_op > config.lsm_batch_multiple and
+                    compact_op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
+                    compact_op > constants.lsm_batch_multiple and
                     // Checkpoint at roughly the same rate as log wraparound.
                     random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
                 break :compact FuzzOp{

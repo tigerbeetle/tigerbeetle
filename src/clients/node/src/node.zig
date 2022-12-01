@@ -14,13 +14,13 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 
 const Storage = @import("tigerbeetle/src/storage.zig").Storage;
 const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
 const MessagePool = @import("tigerbeetle/src/message_pool.zig").MessagePool;
 const IO = @import("tigerbeetle/src/io.zig").IO;
-const config = @import("tigerbeetle/src/constants.zig");
+const constants = @import("tigerbeetle/src/constants.zig");
 
 const vsr = @import("tigerbeetle/src/vsr.zig");
 const Header = vsr.Header;
@@ -46,7 +46,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
         env,
         exports,
         "tick_ms",
-        config.tick_ms,
+        constants.tick_ms,
         "failed to add tick_ms to exports",
     ) catch return null;
 
@@ -145,7 +145,7 @@ const Context = struct {
         context.message_pool = try MessagePool.init(allocator, .client);
         errdefer context.message_pool.deinit(allocator);
 
-        context.addresses = try vsr.parse_addresses(allocator, addresses_raw, config.replicas_max);
+        context.addresses = try vsr.parse_addresses(allocator, addresses_raw, constants.replicas_max);
         errdefer allocator.free(context.addresses);
         assert(context.addresses.len > 0);
 
@@ -242,7 +242,7 @@ fn decode_events_from_array(
     if (array_length < 1) return translate.throw(env, "Batch must contain at least one event.");
 
     const body_length = @sizeOf(T) * array_length;
-    if (@sizeOf(Header) + body_length > config.message_size_max) {
+    if (@sizeOf(Header) + body_length > constants.message_size_max) {
         return translate.throw(env, "Batch is larger than the maximum message size.");
     }
 

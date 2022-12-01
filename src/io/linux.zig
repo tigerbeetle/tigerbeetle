@@ -7,7 +7,7 @@ const io_uring_cqe = linux.io_uring_cqe;
 const io_uring_sqe = linux.io_uring_sqe;
 const log = std.log.scoped(.io);
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const buffer_limit = @import("../io.zig").buffer_limit;
 
@@ -905,8 +905,8 @@ pub const IO = struct {
         must_create: bool,
     ) !os.fd_t {
         assert(relative_path.len > 0);
-        assert(size >= config.sector_size);
-        assert(size % config.sector_size == 0);
+        assert(size >= constants.sector_size);
+        assert(size % constants.sector_size == 0);
 
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
@@ -918,11 +918,11 @@ pub const IO = struct {
         if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
         var direct_io_supported = false;
-        if (config.direct_io) {
+        if (constants.direct_io) {
             direct_io_supported = try fs_supports_direct_io(dir_fd);
             if (direct_io_supported) {
                 flags |= os.O.DIRECT;
-            } else if (!config.direct_io_required) {
+            } else if (!constants.direct_io_required) {
                 log.warn("file system does not support Direct I/O", .{});
             } else {
                 // We require Direct I/O for safety to handle fsync failure correctly, and therefore
@@ -968,7 +968,7 @@ pub const IO = struct {
                     log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
                     log.info("allocating by writing to the last sector of the file instead...", .{});
 
-                    const sector_size = config.sector_size;
+                    const sector_size = constants.sector_size;
                     const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
 
                     // Handle partial writes where the physical sector is less than a logical sector:

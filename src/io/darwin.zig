@@ -4,7 +4,7 @@ const mem = std.mem;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
@@ -658,8 +658,8 @@ pub const IO = struct {
         must_create: bool,
     ) !os.fd_t {
         assert(relative_path.len > 0);
-        assert(size >= config.sector_size);
-        assert(size % config.sector_size == 0);
+        assert(size >= constants.sector_size);
+        assert(size % constants.sector_size == 0);
 
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
@@ -694,7 +694,7 @@ pub const IO = struct {
 
         // On darwin assume that Direct I/O is always supported.
         // Use F_NOCACHE to disable the page cache as O_DIRECT doesn't exist.
-        if (config.direct_io) {
+        if (constants.direct_io) {
             _ = try os.fcntl(fd, os.F.NOCACHE, 1);
         }
 

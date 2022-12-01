@@ -3,7 +3,7 @@ const math = std.math;
 const mem = std.mem;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const util = @import("../util.zig");
 
@@ -115,7 +115,7 @@ pub const Network = struct {
         const raw_process = switch (process) {
             .replica => |replica| replica,
             .client => |client| blk: {
-                assert(client >= config.replicas_max);
+                assert(client >= constants.replicas_max);
                 break :blk client;
             },
         };
@@ -194,7 +194,7 @@ pub const Network = struct {
             const sector_ceil = vsr.sector_ceil(target_message.header.size);
             if (target_message.header.size != sector_ceil) {
                 assert(target_message.header.size < sector_ceil);
-                assert(target_message.buffer.len == config.message_size_max + config.sector_size);
+                assert(target_message.buffer.len == constants.message_size_max + constants.sector_size);
                 mem.set(u8, target_message.buffer[target_message.header.size..sector_ceil], 0);
             }
         }
@@ -204,9 +204,9 @@ pub const Network = struct {
 
     fn raw_process_to_process(raw: u128) Process {
         switch (raw) {
-            0...(config.replicas_max - 1) => return .{ .replica = @intCast(u8, raw) },
+            0...(constants.replicas_max - 1) => return .{ .replica = @intCast(u8, raw) },
             else => {
-                assert(raw >= config.replicas_max);
+                assert(raw >= constants.replicas_max);
                 return .{ .client = raw };
             },
         }

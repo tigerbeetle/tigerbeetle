@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const util = @import("../util.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
@@ -19,7 +19,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         const Manifest = ManifestType(Table, Storage);
         const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.value_count_max, .pointer);
 
-        const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
+        const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
         const IndexBlockCallback = fn (it: *TableIterator, index_block: BlockPtrConst) void;
 
         grid: *Grid,
@@ -55,18 +55,26 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         pub fn init(allocator: mem.Allocator) !TableIterator {
             const index_block = try allocator.alignedAlloc(
                 u8,
-                config.sector_size,
-                config.block_size,
+                constants.sector_size,
+                constants.block_size,
             );
             errdefer allocator.free(index_block);
 
             var values = try ValuesRingBuffer.init(allocator);
             errdefer values.deinit(allocator);
 
-            const block_a = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
+            const block_a = try allocator.alignedAlloc(
+                u8,
+                constants.sector_size,
+                constants.block_size,
+            );
             errdefer allocator.free(block_a);
 
-            const block_b = try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
+            const block_b = try allocator.alignedAlloc(
+                u8,
+                constants.sector_size,
+                constants.block_size,
+            );
             errdefer allocator.free(block_b);
 
             return TableIterator{
@@ -76,14 +84,14 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
                 // Use 0 so that we can assert(address != 0) in tick().
                 .address = 0,
                 .checksum = undefined,
-                .index_block = index_block[0..config.block_size],
+                .index_block = index_block[0..constants.block_size],
                 .index_block_callback = null,
                 .data_block_index = undefined,
                 .values = values,
                 .data_blocks = .{
                     .buffer = .{
-                        block_a[0..config.block_size],
-                        block_b[0..config.block_size],
+                        block_a[0..constants.block_size],
+                        block_b[0..constants.block_size],
                     },
                 },
                 .value = undefined,
