@@ -26,8 +26,10 @@ pub fn build(b: *std.build.Builder) void {
         // This is a hack used to work around the absence of tigerbeetle_build_options.
         // This should be removed once the client is built using the root `build.zig`.
         {
+            const ConfigBase = enum { production, development, test_min, default };
             const TracerBackend = enum { none, perfetto, tracy };
             const dummy_options = b.addOptions();
+            dummy_options.addOption(ConfigBase, "config_base", .default);
             dummy_options.addOption(TracerBackend, "tracer_backend", .none);
             var tigerbeetle_build_options = dummy_options.getPackage("tigerbeetle_build_options");
 

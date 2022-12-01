@@ -2,12 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const config = @import("./src/config.zig");
-const ConfigBase = enum {
-    production,
-    development,
-    test_min,
-    default,
-};
 
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
@@ -25,9 +19,9 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     options.addOption(
-        ConfigBase,
+        config.ConfigBase,
         "config_base",
-        b.option(ConfigBase, "config", "Base configuration.") orelse .default,
+        b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
     );
 
     const tracer_backend = b.option(
