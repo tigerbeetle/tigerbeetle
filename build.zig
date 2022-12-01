@@ -437,7 +437,7 @@ fn go_client(
             lib.linkLibC();
         }
 
-        lib.setOutputDir("src/clients/go/pkg/native/" ++ platform ++ "/tigerbeetle");
+        lib.setOutputDir("src/clients/go/pkg/native/" ++ platform);
 
         set_cache_dir(b, platform);
 
