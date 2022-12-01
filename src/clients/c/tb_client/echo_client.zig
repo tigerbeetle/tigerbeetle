@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../../../constants.zig");
+const constants = @import("../../../constants.zig");
 const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 
@@ -24,7 +24,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             };
         };
 
-        request_queue: RingBuffer(Self.Request, config.client_request_queue_max, .array) = .{},
+        request_queue: RingBuffer(Self.Request, constants.client_request_queue_max, .array) = .{},
         message_pool: *MessagePool,
 
         pub fn init(

@@ -16,7 +16,7 @@ const mem = std.mem;
 const meta = std.meta;
 const os = std.os;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
@@ -27,7 +27,7 @@ pub const SuperBlockManifest = @import("superblock_manifest.zig").Manifest;
 pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
 pub const SuperBlockClientTable = @import("superblock_client_table.zig").ClientTable;
 pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
-    .superblock_copies = config.superblock_copies,
+    .superblock_copies = constants.superblock_copies,
 });
 
 pub const SuperBlockVersion: u16 = 0;
@@ -81,7 +81,7 @@ pub const SuperBlockSector = extern struct {
 
     /// A listing of persistent read snapshots that have been issued to clients.
     /// A snapshot.created timestamp of 0 indicates that the snapshot is null.
-    snapshots: [config.lsm_snapshots_max]Snapshot,
+    snapshots: [constants.lsm_snapshots_max]Snapshot,
 
     /// The size of the manifest block references stored in the superblock trailer.
     /// The block addresses and checksums in this section of the trailer are laid out as follows:
@@ -170,7 +170,7 @@ pub const SuperBlockSector = extern struct {
         /// to ensure determinstic storage.
         pub fn op_compacted(state: VSRState, op: u64) bool {
             // If commit_min is 0, we have never checkpointed, so no compactions are checkpointed.
-            return state.commit_min > 0 and op <= state.commit_min + config.lsm_batch_multiple;
+            return state.commit_min > 0 and op <= state.commit_min + constants.lsm_batch_multiple;
         }
     };
 
@@ -204,7 +204,7 @@ pub const SuperBlockSector = extern struct {
     };
 
     comptime {
-        assert(@sizeOf(SuperBlockSector) == config.sector_size);
+        assert(@sizeOf(SuperBlockSector) == constants.sector_size);
         // Assert that there is no implicit padding in the struct.
         assert(@bitSizeOf(SuperBlockSector) == @sizeOf(SuperBlockSector) * 8);
     }
@@ -225,7 +225,7 @@ pub const SuperBlockSector = extern struct {
     }
 
     pub fn set_checksum(superblock: *SuperBlockSector) void {
-        assert(superblock.copy < config.superblock_copies);
+        assert(superblock.copy < constants.superblock_copies);
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.flags == 0);
 
@@ -271,19 +271,19 @@ pub const SuperBlockSector = extern struct {
 };
 
 comptime {
-    switch (config.superblock_copies) {
+    switch (constants.superblock_copies) {
         4, 6, 8 => {},
         else => @compileError("superblock_copies must be either { 4, 6, 8 } for flexible quorums."),
     }
 }
 
 /// The size of the entire superblock storage zone.
-pub const superblock_zone_size = superblock_copy_size * config.superblock_copies;
+pub const superblock_zone_size = superblock_copy_size * constants.superblock_copies;
 
 /// The size of an individual superblock including trailer.
 pub const superblock_copy_size = @sizeOf(SuperBlockSector) + superblock_trailer_size_max;
 comptime {
-    assert(superblock_copy_size % config.sector_size == 0);
+    assert(superblock_copy_size % constants.sector_size == 0);
 }
 
 /// The maximum possible size of the superblock trailer, following the superblock sector.
@@ -293,14 +293,14 @@ pub const superblock_trailer_size_max = blk: {
     // 2. the maximum possible size of the EWAH-compressed bit set addressable by the free set.
 
     assert(superblock_trailer_manifest_size_max > 0);
-    assert(superblock_trailer_manifest_size_max % config.sector_size == 0);
+    assert(superblock_trailer_manifest_size_max % constants.sector_size == 0);
     assert(superblock_trailer_manifest_size_max % SuperBlockManifest.BlockReferenceSize == 0);
 
     assert(superblock_trailer_free_set_size_max > 0);
-    assert(superblock_trailer_free_set_size_max % config.sector_size == 0);
+    assert(superblock_trailer_free_set_size_max % constants.sector_size == 0);
 
     assert(superblock_trailer_client_table_size_max > 0);
-    assert(superblock_trailer_client_table_size_max % config.sector_size == 0);
+    assert(superblock_trailer_client_table_size_max % constants.sector_size == 0);
 
     // We order the smaller manifest section ahead of the block free set for better access locality.
     // For example, it's cheaper to skip over 1 MiB when reading from disk than to skip over 32 MiB.
@@ -317,15 +317,15 @@ pub const superblock_trailer_manifest_size_max = blk: {
     // Use a multiple of sector * reference so that the size is exactly divisible without padding:
     // For example, this 2.5 MiB manifest trailer == 65536 references == 65536 * 511 or 34m tables.
     // TODO Size this relative to the expected number of tables & fragmentation.
-    break :blk 16 * config.sector_size * SuperBlockManifest.BlockReferenceSize;
+    break :blk 16 * constants.sector_size * SuperBlockManifest.BlockReferenceSize;
 };
 
 pub const superblock_trailer_free_set_size_max = blk: {
-    const encode_size_max = SuperBlockFreeSet.encode_size_max(config.block_count_max);
+    const encode_size_max = SuperBlockFreeSet.encode_size_max(constants.block_count_max);
     assert(encode_size_max > 0);
 
     // Round up to the nearest sector:
-    break :blk div_ceil(encode_size_max, config.sector_size) * config.sector_size;
+    break :blk div_ceil(encode_size_max, constants.sector_size) * constants.sector_size;
 };
 
 pub const superblock_trailer_client_table_size_max = blk: {
@@ -333,11 +333,11 @@ pub const superblock_trailer_client_table_size_max = blk: {
     assert(encode_size_max > 0);
 
     // Round up to the nearest sector:
-    break :blk div_ceil(encode_size_max, config.sector_size) * config.sector_size;
+    break :blk div_ceil(encode_size_max, constants.sector_size) * constants.sector_size;
 };
 
 pub const data_file_size_min = blk: {
-    break :blk superblock_zone_size + config.journal_size_max;
+    break :blk superblock_zone_size + constants.journal_size_max;
 };
 
 /// This table shows the sequence number progression of the SuperBlock's sectors.
@@ -405,15 +405,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
         storage_size: u64 = superblock_zone_size,
 
         /// The superblock that was recovered at startup after a crash or that was last written.
-        working: *align(config.sector_size) SuperBlockSector,
+        working: *align(constants.sector_size) SuperBlockSector,
 
         /// The superblock that will replace the current working superblock once written.
         /// We cannot mutate any working state directly until it is safely on stable storage.
         /// Otherwise, we may accidentally externalize guarantees that are not yet durable.
-        staging: *align(config.sector_size) SuperBlockSector,
+        staging: *align(constants.sector_size) SuperBlockSector,
 
         /// The copies that we read into at startup or when verifying the written superblock.
-        reading: []align(config.sector_size) SuperBlockSector,
+        reading: []align(constants.sector_size) SuperBlockSector,
 
         /// It might seem that, at startup, we simply install the copy with the highest sequence.
         ///
@@ -435,9 +435,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
         free_set: FreeSet,
         client_table: ClientTable,
 
-        manifest_buffer: []align(config.sector_size) u8,
-        free_set_buffer: []align(config.sector_size) u8,
-        client_table_buffer: []align(config.sector_size) u8,
+        manifest_buffer: []align(constants.sector_size) u8,
+        free_set_buffer: []align(constants.sector_size) u8,
+        client_table_buffer: []align(constants.sector_size) u8,
 
         /// Whether the superblock has been opened. An open superblock may not be formatted.
         opened: bool = false,
@@ -457,15 +457,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
             storage: *Storage,
             message_pool: *MessagePool,
         ) !SuperBlock {
-            const a = try allocator.allocAdvanced(SuperBlockSector, config.sector_size, 1, .exact);
+            const a = try allocator.allocAdvanced(SuperBlockSector, constants.sector_size, 1, .exact);
             errdefer allocator.free(a);
 
-            const b = try allocator.allocAdvanced(SuperBlockSector, config.sector_size, 1, .exact);
+            const b = try allocator.allocAdvanced(SuperBlockSector, constants.sector_size, 1, .exact);
             errdefer allocator.free(b);
 
             const reading = try allocator.allocAdvanced(
-                [config.superblock_copies]SuperBlockSector,
-                config.sector_size,
+                [constants.superblock_copies]SuperBlockSector,
+                constants.sector_size,
                 1,
                 .exact,
             );
@@ -481,7 +481,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
             errdefer manifest.deinit(allocator);
 
-            var free_set = try FreeSet.init(allocator, config.block_count_max);
+            var free_set = try FreeSet.init(allocator, constants.block_count_max);
             errdefer free_set.deinit(allocator);
 
             var client_table = try ClientTable.init(allocator, message_pool);
@@ -489,7 +489,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const manifest_buffer = try allocator.allocAdvanced(
                 u8,
-                config.sector_size,
+                constants.sector_size,
                 superblock_trailer_manifest_size_max,
                 .exact,
             );
@@ -497,7 +497,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const free_set_buffer = try allocator.allocAdvanced(
                 u8,
-                config.sector_size,
+                constants.sector_size,
                 superblock_trailer_free_set_size_max,
                 .exact,
             );
@@ -505,7 +505,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const client_table_buffer = try allocator.allocAdvanced(
                 u8,
-                config.sector_size,
+                constants.sector_size,
                 superblock_trailer_client_table_size_max,
                 .exact,
             );
@@ -555,9 +555,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
         ) void {
             assert(!superblock.opened);
 
-            assert(options.replica < config.replicas_max);
+            assert(options.replica < constants.replicas_max);
             assert(options.size_max >= data_file_size_min);
-            assert(options.size_max % config.sector_size == 0);
+            assert(options.size_max % constants.sector_size == 0);
 
             // This working copy provides the parent checksum, and will not be written to disk.
             // We therefore use zero values to make this parent checksum as stable as possible.
@@ -757,7 +757,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn write_staging_encode_free_set(superblock: *SuperBlock) void {
             const staging: *SuperBlockSector = superblock.staging;
-            const encode_size_max = FreeSet.encode_size_max(config.block_count_max);
+            const encode_size_max = FreeSet.encode_size_max(constants.block_count_max);
             const target = superblock.free_set_buffer[0..encode_size_max];
 
             superblock.free_set.include_staging();
@@ -768,7 +768,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             staging.size = data_file_size_min;
 
             if (superblock.free_set.highest_address_acquired()) |address| {
-                staging.size += address * config.block_size;
+                staging.size += address * constants.block_size;
             }
             assert(staging.size >= data_file_size_min);
             assert(staging.size <= staging.size_max);
@@ -933,7 +933,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.size >= data_file_size_min);
             assert(superblock.staging.size <= superblock.staging.size_max);
 
-            assert(context.copy.? < config.superblock_copies);
+            assert(context.copy.? < constants.superblock_copies);
             superblock.staging.copy = context.copy.?;
 
             // Updating the copy number should not affect the checksum, which was previously set:
@@ -970,7 +970,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             assert(superblock.queue_head == context);
 
-            assert(copy < config.superblock_copies);
+            assert(copy < constants.superblock_copies);
             assert(copy == superblock.staging.copy);
 
             if (context.caller == .open) {
@@ -979,7 +979,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 return;
             }
 
-            if (copy + 1 == config.superblock_copies) {
+            if (copy + 1 == constants.superblock_copies) {
                 context.copy = null;
                 superblock.read_working(context, .verify);
             } else {
@@ -1015,7 +1015,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn read_sector(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
-            assert(context.copy.? < config.superblock_copies);
+            assert(context.copy.? < constants.superblock_copies);
             assert(context.read_threshold != null);
 
             const buffer = mem.asBytes(&superblock.reading[context.copy.?]);
@@ -1046,8 +1046,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             assert(superblock.queue_head == context);
 
-            assert(context.copy.? < config.superblock_copies);
-            if (context.copy.? + 1 != config.superblock_copies) {
+            assert(context.copy.? < constants.superblock_copies);
+            if (context.copy.? + 1 != constants.superblock_copies) {
                 context.copy = context.copy.? + 1;
                 superblock.read_sector(context);
                 return;
@@ -1134,7 +1134,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_manifest(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy.? < config.superblock_copies);
+            assert(context.copy.? < constants.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.manifest_size);
             assert(size <= superblock_trailer_manifest_size_max);
@@ -1189,7 +1189,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 // We do not repair padding.
                 context.copy = 0;
                 superblock.read_free_set(context);
-            } else if (copy + 1 == config.superblock_copies) {
+            } else if (copy + 1 == constants.superblock_copies) {
                 @panic("superblock manifest lost");
             } else {
                 log.debug("open: read_manifest: corrupt copy={}", .{copy});
@@ -1201,7 +1201,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_free_set(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy.? < config.superblock_copies);
+            assert(context.copy.? < constants.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.free_set_size);
             assert(size <= superblock_trailer_free_set_size_max);
@@ -1248,14 +1248,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 log.debug("open: read_free_set: acquired blocks: {}/{}", .{
                     superblock.free_set.count_acquired(),
-                    config.block_count_max,
+                    constants.block_count_max,
                 });
 
                 superblock.verify_manifest_blocks_are_acquired_in_free_set();
 
                 // TODO Repair any impaired copies before we continue.
                 superblock.read_client_table(context);
-            } else if (copy + 1 == config.superblock_copies) {
+            } else if (copy + 1 == constants.superblock_copies) {
                 @panic("superblock free set lost");
             } else {
                 log.debug("open: read_free_set: corrupt copy={}", .{copy});
@@ -1274,7 +1274,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn read_client_table(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
-            assert(context.copy.? < config.superblock_copies);
+            assert(context.copy.? < constants.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.client_table_size);
             assert(size <= superblock_trailer_client_table_size_max);
@@ -1321,12 +1321,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 log.debug("open: read_client_table: client requests: {}/{}", .{
                     superblock.client_table.count(),
-                    config.clients_max,
+                    constants.clients_max,
                 });
 
                 context.copy = null;
                 superblock.repair(context);
-            } else if (copy + 1 == config.superblock_copies) {
+            } else if (copy + 1 == constants.superblock_copies) {
                 @panic("superblock client table lost");
             } else {
                 log.debug("open: read_client_table: corrupt copy={}", .{copy});
@@ -1430,7 +1430,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // The rule is that the write quorum plus the read quorum must be exactly copies + 1.
 
             return switch (caller) {
-                .format, .checkpoint, .view_change => switch (config.superblock_copies) {
+                .format, .checkpoint, .view_change => switch (constants.superblock_copies) {
                     4 => 3,
                     6 => 4,
                     8 => 5,
@@ -1438,7 +1438,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 },
                 // The open quorum must allow for at least two copy faults, because our view change
                 // updates an existing set of copies in place, temporarily impairing one copy.
-                .open => switch (config.superblock_copies) {
+                .open => switch (constants.superblock_copies) {
                     4 => 2,
                     6 => 3,
                     8 => 4,
@@ -1451,22 +1451,22 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
 pub const Layout = struct {
     pub fn offset_sector(copy: u8) u64 {
-        assert(copy < config.superblock_copies);
+        assert(copy < constants.superblock_copies);
         return superblock_copy_size * @as(u64, copy);
     }
 
     pub fn offset_manifest(copy: u8) u64 {
-        assert(copy < config.superblock_copies);
+        assert(copy < constants.superblock_copies);
         return offset_sector(copy) + @sizeOf(SuperBlockSector);
     }
 
     pub fn offset_free_set(copy: u8) u64 {
-        assert(copy < config.superblock_copies);
+        assert(copy < constants.superblock_copies);
         return offset_manifest(copy) + superblock_trailer_manifest_size_max;
     }
 
     pub fn offset_client_table(copy: u8) u64 {
-        assert(copy < config.superblock_copies);
+        assert(copy < constants.superblock_copies);
         return offset_free_set(copy) + superblock_trailer_free_set_size_max;
     }
 };

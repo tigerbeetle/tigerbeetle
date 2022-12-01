@@ -38,7 +38,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.compaction);
 const tracer = @import("../tracer.zig");
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const GridType = @import("grid.zig").GridType;
 const ManifestType = @import("manifest.zig").ManifestType;
@@ -226,17 +226,17 @@ pub fn CompactionType(
             assert(!compaction.merge_done and compaction.merge_iterator == null);
             assert(compaction.tracer_slot == null);
 
-            assert(op_min % @divExact(config.lsm_batch_multiple, 2) == 0);
+            assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
             assert(range.table_count > 0);
             if (table_a) |t| assert(t.visible(op_min));
 
-            assert(level_b < config.lsm_levels);
+            assert(level_b < constants.lsm_levels);
             assert((level_b == 0) == (table_a == null));
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.
             // This invariant is always true for the last level as it doesn't have any lower ones.
             const drop_tombstones = manifest.compaction_must_drop_tombstones(level_b, range);
-            assert(drop_tombstones or level_b < config.lsm_levels - 1);
+            assert(drop_tombstones or level_b < constants.lsm_levels - 1);
 
             compaction.* = .{
                 .tree_name = compaction.tree_name,
@@ -625,11 +625,11 @@ pub fn CompactionType(
 }
 
 fn snapshot_max_for_table_input(op_min: u64) u64 {
-    assert(op_min % @divExact(config.lsm_batch_multiple, 2) == 0);
-    return op_min + @divExact(config.lsm_batch_multiple, 2) - 1;
+    assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
+    return op_min + @divExact(constants.lsm_batch_multiple, 2) - 1;
 }
 
 fn snapshot_min_for_table_output(op_min: u64) u64 {
-    assert(op_min % @divExact(config.lsm_batch_multiple, 2) == 0);
-    return op_min + @divExact(config.lsm_batch_multiple, 2);
+    assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
+    return op_min + @divExact(constants.lsm_batch_multiple, 2);
 }

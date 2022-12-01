@@ -3,36 +3,36 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
 
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
 comptime {
     // message_size_max must be a multiple of sector_size for Direct I/O
-    assert(config.message_size_max % config.sector_size == 0);
+    assert(constants.message_size_max % constants.sector_size == 0);
 }
 
 /// Add an extra sector_size bytes to allow a partially received subsequent
 /// message to be shifted to make space for 0 padding to vsr.sector_ceil.
-const message_size_max_padded = config.message_size_max + config.sector_size;
+const message_size_max_padded = constants.message_size_max + constants.sector_size;
 
 /// The number of full-sized messages allocated at initialization by the replica message pool.
 /// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
 pub const messages_max_replica = messages_max: {
     var sum: usize = 0;
 
-    sum += config.journal_iops_read_max + config.journal_iops_write_max; // Journal I/O
-    sum += config.clients_max; // SuperBlock.client_table
+    sum += constants.journal_iops_read_max + constants.journal_iops_write_max; // Journal I/O
+    sum += constants.clients_max; // SuperBlock.client_table
     sum += 1; // Replica.loopback_queue
-    sum += config.pipeline_max; // Replica.pipeline
+    sum += constants.pipeline_max; // Replica.pipeline
     sum += 1; // Replica.commit_prepare
     // Replica.do_view_change_from_all_replicas quorum:
     // Replica.recovery_response_quorum is only used for recovery and does not increase the limit.
     // All other quorums are bitsets.
-    sum += config.replicas_max;
-    sum += config.connections_max; // Connection.recv_message
-    sum += config.connections_max * config.connection_send_queue_max_replica; // Connection.send_queue
+    sum += constants.replicas_max;
+    sum += constants.connections_max; // Connection.recv_message
+    sum += constants.connections_max * constants.connection_send_queue_max_replica; // Connection.send_queue
     sum += 1; // Handle bursts (e.g. Connection.parse_message)
     // Handle Replica.commit_op's reply:
     // (This is separate from the burst +1 because they may occur concurrently).
@@ -45,9 +45,9 @@ pub const messages_max_replica = messages_max: {
 pub const messages_max_client = messages_max: {
     var sum: usize = 0;
 
-    sum += config.replicas_max; // Connection.recv_message
-    sum += config.replicas_max * config.connection_send_queue_max_client; // Connection.send_queue
-    sum += config.client_request_queue_max; // Client.request_queue
+    sum += constants.replicas_max; // Connection.recv_message
+    sum += constants.replicas_max * constants.connection_send_queue_max_client; // Connection.send_queue
+    sum += constants.client_request_queue_max; // Client.request_queue
     // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
     sum += 1;
 
@@ -56,8 +56,8 @@ pub const messages_max_client = messages_max: {
 
 comptime {
     // These conditions are necessary (but not sufficient) to prevent deadlocks.
-    assert(messages_max_replica > config.replicas_max);
-    assert(messages_max_client > config.client_request_queue_max);
+    assert(messages_max_replica > constants.replicas_max);
+    assert(messages_max_client > constants.client_request_queue_max);
 }
 
 /// A pool of reference-counted Messages, memory for which is allocated only once during
@@ -66,7 +66,7 @@ pub const MessagePool = struct {
     pub const Message = struct {
         // TODO: replace this with a header() function to save memory
         header: *Header,
-        buffer: []align(config.sector_size) u8,
+        buffer: []align(constants.sector_size) u8,
         references: u32 = 0,
         next: ?*Message,
 
@@ -103,7 +103,7 @@ pub const MessagePool = struct {
             while (i < messages_max) : (i += 1) {
                 const buffer = try allocator.allocAdvanced(
                     u8,
-                    config.sector_size,
+                    constants.sector_size,
                     message_size_max_padded,
                     .exact,
                 );
@@ -134,7 +134,7 @@ pub const MessagePool = struct {
         assert(free_count == pool.messages_max);
     }
 
-    /// Get an unused message with a buffer of config.message_size_max.
+    /// Get an unused message with a buffer of constants.message_size_max.
     /// The returned message has exactly one reference.
     pub fn get_message(pool: *MessagePool) *Message {
         const message = pool.free_list.?;

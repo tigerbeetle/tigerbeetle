@@ -14,7 +14,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock);
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const util = @import("../util.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../test/storage.zig").Storage;
@@ -254,7 +254,7 @@ const Environment = struct {
             .replica = 0,
             // Include extra space (beyond what Storage actually needs) because SuperBlock will
             // update the sector's size according to the highest FreeSet block allocated.
-            .size_max = data_file_size_min + 1000 * config.block_size,
+            .size_max = data_file_size_min + 1000 * constants.block_size,
         });
 
         assert(env.sequence_states.items.len == 0);

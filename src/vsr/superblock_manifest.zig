@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.superblock_manifest);
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const util = @import("../util.zig");
 
 // TODO Compute & use the upper bound of manifest blocks (per tree) to size the trailer zone.
@@ -92,7 +92,7 @@ pub const Manifest = struct {
     }
 
     pub fn encode(manifest: *const Manifest, target: []align(@alignOf(u128)) u8) u64 {
-        if (config.verify) manifest.verify();
+        if (constants.verify) manifest.verify();
 
         assert(target.len > 0);
         assert(target.len % @sizeOf(u128) == 0);
@@ -177,7 +177,7 @@ pub const Manifest = struct {
         mem.set(u128, manifest.checksums[manifest.count..], 0);
         mem.set(u64, manifest.addresses[manifest.count..], 0);
 
-        if (config.verify) manifest.verify();
+        if (constants.verify) manifest.verify();
     }
 
     /// Addresses must be unique across all appends, or remove() must be called first.
@@ -208,7 +208,7 @@ pub const Manifest = struct {
             manifest.count_max,
         });
 
-        if (config.verify) {
+        if (constants.verify) {
             const index = manifest.index_for_address(address).?;
             assert(index == manifest.count - 1);
             manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
@@ -243,7 +243,7 @@ pub const Manifest = struct {
             manifest.count_max,
         });
 
-        if (config.verify) {
+        if (constants.verify) {
             assert(manifest.index_for_address(address) == null);
             manifest.verify();
         }

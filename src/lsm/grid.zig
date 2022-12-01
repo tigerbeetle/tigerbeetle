@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const free_set = @import("../vsr/superblock_free_set.zig");
 
@@ -41,7 +41,7 @@ pub const BlockType = enum(u8) {
 ///
 /// Recently/frequently-used blocks are transparently cached in memory.
 pub fn GridType(comptime Storage: type) type {
-    const block_size = config.block_size;
+    const block_size = constants.block_size;
     const SuperBlock = SuperBlockType(Storage);
 
     const cache_interface = struct {
@@ -72,7 +72,7 @@ pub fn GridType(comptime Storage: type) type {
         cache_interface.equal_addresses,
         .{
             .ways = set_associative_cache_ways,
-            .value_alignment = config.sector_size,
+            .value_alignment = constants.sector_size,
         },
     );
 
@@ -90,8 +90,8 @@ pub fn GridType(comptime Storage: type) type {
         // TODO put more thought into how low/high this limit should be.
         pub const write_iops_max = 16;
 
-        pub const BlockPtr = *align(config.sector_size) [block_size]u8;
-        pub const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+        pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
+        pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
         pub const Reservation = free_set.Reservation;
 
         pub const Write = struct {

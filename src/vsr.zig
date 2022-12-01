@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.vsr);
 
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
@@ -29,8 +29,8 @@ pub const Zone = enum {
     grid,
 
     const size_superblock = @import("vsr/superblock.zig").superblock_zone_size;
-    const size_wal_headers = config.journal_size_headers;
-    const size_wal_prepares = config.journal_size_prepares;
+    const size_wal_headers = constants.journal_size_headers;
+    const size_wal_prepares = constants.journal_size_prepares;
 
     comptime {
         for (.{
@@ -38,7 +38,7 @@ pub const Zone = enum {
             size_wal_headers,
             size_wal_prepares,
         }) |zone_size| {
-            assert(zone_size % config.sector_size == 0);
+            assert(zone_size % constants.sector_size == 0);
         }
     }
 
@@ -630,7 +630,7 @@ pub const Header = extern struct {
     }
 
     pub fn reserved(cluster: u32, slot: u64) Header {
-        assert(slot < config.journal_slot_count);
+        assert(slot < constants.journal_slot_count);
 
         var header = Header{
             .command = .reserved,
@@ -662,8 +662,8 @@ pub const Timeout = struct {
     id: u128,
     after: u64,
     attempts: u8 = 0,
-    rtt: u64 = config.rtt_ticks,
-    rtt_multiple: u8 = config.rtt_multiple,
+    rtt: u64 = constants.rtt_ticks,
+    rtt_multiple: u8 = constants.rtt_multiple,
     ticks: u64 = 0,
     ticking: bool = false,
 
@@ -714,8 +714,8 @@ pub const Timeout = struct {
 
         const after = (self.rtt * self.rtt_multiple) + exponential_backoff_with_jitter(
             random,
-            config.backoff_min_ticks,
-            config.backoff_max_ticks,
+            constants.backoff_min_ticks,
+            constants.backoff_max_ticks,
             self.attempts,
         );
 
@@ -727,8 +727,8 @@ pub const Timeout = struct {
             self.after,
             after,
             self.rtt,
-            config.backoff_min_ticks,
-            config.backoff_max_ticks,
+            constants.backoff_min_ticks,
+            constants.backoff_max_ticks,
             self.attempts,
         });
 
@@ -871,12 +871,12 @@ pub fn parse_address(raw: []const u8) !std.net.Address {
 
         // Let's try parsing as a port first:
         if (std.fmt.parseUnsigned(u16, raw, 10)) |port| {
-            return std.net.Address.parseIp4(config.address, port) catch unreachable;
+            return std.net.Address.parseIp4(constants.address, port) catch unreachable;
         } else |err| switch (err) {
             error.Overflow => return error.PortOverflow,
             error.InvalidCharacter => {
                 // Something was not a digit, let's try parsing as an IPv4 instead:
-                return std.net.Address.parseIp4(raw, config.port) catch {
+                return std.net.Address.parseIp4(raw, constants.port) catch {
                     return error.AddressInvalid;
                 };
             },
@@ -912,8 +912,8 @@ test "parse_addresses" {
             .raw = "1.2.3.4:5,4321,2.3.4.5",
             .addresses = &[3]std.net.Address{
                 std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 5),
-                try std.net.Address.parseIp4(config.address, 4321),
-                std.net.Address.initIp4([_]u8{ 2, 3, 4, 5 }, config.port),
+                try std.net.Address.parseIp4(constants.address, 4321),
+                std.net.Address.initIp4([_]u8{ 2, 3, 4, 5 }, constants.port),
             },
         },
         .{
@@ -921,7 +921,7 @@ test "parse_addresses" {
             .raw = "1.2.3.4:5,4321",
             .addresses = &[2]std.net.Address{
                 std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 5),
-                try std.net.Address.parseIp4(config.address, 4321),
+                try std.net.Address.parseIp4(constants.address, 4321),
             },
         },
     };
@@ -963,13 +963,13 @@ test "parse_addresses" {
 }
 
 pub fn sector_floor(offset: u64) u64 {
-    const sectors = math.divFloor(u64, offset, config.sector_size) catch unreachable;
-    return sectors * config.sector_size;
+    const sectors = math.divFloor(u64, offset, constants.sector_size) catch unreachable;
+    return sectors * constants.sector_size;
 }
 
 pub fn sector_ceil(offset: u64) u64 {
-    const sectors = math.divCeil(u64, offset, config.sector_size) catch unreachable;
-    return sectors * config.sector_size;
+    const sectors = math.divCeil(u64, offset, constants.sector_size) catch unreachable;
+    return sectors * constants.sector_size;
 }
 
 pub fn checksum(source: []const u8) u128 {

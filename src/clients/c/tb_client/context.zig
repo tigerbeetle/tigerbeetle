@@ -2,7 +2,7 @@ const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
 
-const config = @import("../../../constants.zig");
+const constants = @import("../../../constants.zig");
 const log = std.log.scoped(.tb_client_context);
 
 const util = @import("../../../util.zig");
@@ -122,7 +122,7 @@ pub fn ContextType(
             context.addresses = vsr.parse_addresses(
                 context.allocator,
                 addresses,
-                config.replicas_max,
+                constants.replicas_max,
             ) catch |err| return switch (err) {
                 error.AddressLimitExceeded => error.AddressLimitExceeded,
                 else => error.AddressInvalid,
@@ -165,7 +165,7 @@ pub fn ContextType(
             );
             errdefer context.client.deinit(context.allocator);
 
-            context.messages_available = config.client_request_queue_max;
+            context.messages_available = constants.client_request_queue_max;
             context.on_completion_ctx = on_completion_ctx;
             context.on_completion_fn = on_completion_fn;
             context.implementation = .{
@@ -199,7 +199,7 @@ pub fn ContextType(
         pub fn run(self: *Context) void {
             while (!self.thread.signal.is_shutdown()) {
                 self.tick();
-                self.io.run_for_ns(config.tick_ms * std.time.ns_per_ms) catch |err| {
+                self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
                         self.client_id,
                         @errorName(err),
@@ -226,7 +226,7 @@ pub fn ContextType(
             }
 
             // Make sure the packet.data wouldn't overflow a message:
-            const writable = message.buffer[@sizeOf(Header)..][0..config.message_body_size_max];
+            const writable = message.buffer[@sizeOf(Header)..][0..constants.message_body_size_max];
             if (readable.len > writable.len) {
                 return self.on_complete(packet, error.TooMuchData);
             }
@@ -267,7 +267,7 @@ pub fn ContextType(
             result: PacketError![]const u8,
         ) void {
             self.messages_available += 1;
-            assert(self.messages_available <= config.client_request_queue_max);
+            assert(self.messages_available <= constants.client_request_queue_max);
 
             // Signal to resume sending requests that was waiting for available messages.
             if (self.messages_available == 1) self.thread.signal.notify();

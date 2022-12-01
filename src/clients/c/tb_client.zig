@@ -26,11 +26,11 @@ pub const tb_completion_t = fn (
     result_len: u32,
 ) callconv(.C) void;
 
-const config = @import("../../constants.zig");
+const constants = @import("../../constants.zig");
 const Storage = @import("../../storage.zig").Storage;
 const MessageBus = @import("../../message_bus.zig").MessageBusClient;
 const StateMachine = @import("../../state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 
 const ContextType = @import("tb_client/context.zig").ContextType;

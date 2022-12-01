@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
 const Cluster = @import("cluster.zig").Cluster;
@@ -23,7 +23,7 @@ const log = std.log.scoped(.state_checker);
 
 pub const StateChecker = struct {
     /// Indexed by replica index.
-    replica_states: [config.replicas_max]u128 = [_]u128{0} ** config.replicas_max,
+    replica_states: [constants.replicas_max]u128 = [_]u128{0} ** constants.replicas_max,
 
     /// Keyed by committed `message.header.checksum`.
     ///

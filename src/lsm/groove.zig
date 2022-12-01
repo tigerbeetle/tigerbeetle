@@ -4,13 +4,13 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const TableType = @import("table.zig").TableType;
 const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("grid.zig").GridType;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
-const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_op;
@@ -655,7 +655,7 @@ pub fn GrooveType(
                     assert(!id_tree_value.tombstone());
                     lookup_id_callback(&worker.lookup_id, id_tree_value);
 
-                    if (config.verify) {
+                    if (constants.verify) {
                         // If the id is cached, then we must be prefetching it because the object
                         // was not also cached.
                         assert(worker.context.groove.objects.lookup_from_memory(
@@ -682,7 +682,7 @@ pub fn GrooveType(
                 const worker = @fieldParentPtr(PrefetchWorker, "lookup_id", completion);
 
                 if (result) |id_tree_value| {
-                    if (config.verify) {
+                    if (constants.verify) {
                         // This was checked in prefetch_enqueue().
                         assert(
                             worker.context.groove.ids.lookup_from_memory(

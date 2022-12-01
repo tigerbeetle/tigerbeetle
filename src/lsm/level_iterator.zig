@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const Direction = @import("direction.zig").Direction;
 const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
@@ -24,7 +24,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         const Grid = GridType(Storage);
         const Manifest = ManifestType(Table, Storage);
 
-        const BlockPtrConst = *align(config.sector_size) const [config.block_size]u8;
+        const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
         const TableInfo = Manifest.TableInfo;
         const TableInfoCallback = fn (

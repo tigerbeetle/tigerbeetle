@@ -16,7 +16,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
 const vsr = @import("../vsr.zig");
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
@@ -30,7 +30,7 @@ const fuzz = @import("../test/fuzz.zig");
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
-const storage_size_max = data_file_size_min + config.block_size * 1024;
+const storage_size_max = data_file_size_min + constants.block_size * 1024;
 
 const entries_max_block = ManifestLog.Block.entry_count_max;
 const entries_max_buffered = entries_max_block *
@@ -145,12 +145,18 @@ fn generate_events(
 
     var event_distribution = fuzz.random_enum_distribution(random, EventType);
     // Don't remove too often, so that there are plenty of tables accumulating.
-    event_distribution.remove /= @intToFloat(f64, config.lsm_levels);
+    event_distribution.remove /= @intToFloat(f64, constants.lsm_levels);
     // Don't compact or checkpoint too often, to approximate a real workload.
     // Additionally, checkpoint is slow because of the verification, so run it less
     // frequently.
-    event_distribution.compact /= @intToFloat(f64, config.lsm_levels * config.lsm_batch_multiple);
-    event_distribution.checkpoint /= @intToFloat(f64, config.lsm_levels * config.journal_slot_count);
+    event_distribution.compact /= @intToFloat(
+        f64,
+        constants.lsm_levels * constants.lsm_batch_multiple,
+    );
+    event_distribution.checkpoint /= @intToFloat(
+        f64,
+        constants.lsm_levels * constants.journal_slot_count,
+    );
 
     log.info("event_distribution = {d:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
@@ -185,7 +191,7 @@ fn generate_events(
 
         event.* = switch (event_type) {
             .insert_new => insert: {
-                const level = random.uintLessThan(u7, config.lsm_levels);
+                const level = random.uintLessThan(u7, constants.lsm_levels);
                 const table = .{
                     .checksum = 0,
                     .address = i + 1,
@@ -206,7 +212,9 @@ fn generate_events(
 
             .insert_change_level => insert: {
                 const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
-                if (table.level == config.lsm_levels - 1) break :insert ManifestEvent{ .noop = {} };
+                if (table.level == constants.lsm_levels - 1) {
+                    break :insert ManifestEvent{ .noop = {} };
+                }
 
                 table.level += 1;
                 break :insert ManifestEvent{ .insert = .{
