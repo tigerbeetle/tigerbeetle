@@ -1,3 +1,5 @@
+name: "Release (weekly)"
+
 on:
   schedule:
     # Every Monday at 14:00
