@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build fuzz_lsm_manifest_log -- --seed 123
+      - run: zig/zig build fuzz_lsm_manifest_log -- --seed 123 --events-max 400
 
   fuzz_lsm_segmented_array:
     name: 'Fuzz LSM SegmentedArray'
@@ -100,10 +100,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build fuzz_vsr_superblock -- --seed 123
+      - run: zig/zig build fuzz_vsr_superblock -- --seed 123 --events-max 3
 
   fuzz_vsr_superblock_free_set:
-    name: 'Fuzz VSR SuperBlock Quorums'
+    name: 'Fuzz VSR SuperBlock FreeSet'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2

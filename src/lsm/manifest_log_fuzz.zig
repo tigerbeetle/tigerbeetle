@@ -42,7 +42,12 @@ pub fn main() !void {
 
     var prng = std.rand.DefaultPrng.init(args.seed);
 
-    const events = try generate_events(allocator, prng.random());
+    const events_count = std.math.min(
+        args.events_max orelse @as(usize, 2e5),
+        fuzz.random_int_exponential(prng.random(), usize, 1e4),
+    );
+
+    const events = try generate_events(allocator, prng.random(), events_count);
     defer allocator.free(events);
 
     try run_fuzz(allocator, prng.random(), events);
@@ -124,6 +129,7 @@ const ManifestEvent = union(enum) {
 fn generate_events(
     allocator: std.mem.Allocator,
     random: std.rand.Random,
+    events_count: usize,
 ) ![]const ManifestEvent {
     const EventType = enum {
         insert_new,
@@ -134,10 +140,7 @@ fn generate_events(
         checkpoint,
     };
 
-    const events = try allocator.alloc(ManifestEvent, std.math.min(
-        @as(usize, 1e6),
-        fuzz.random_int_exponential(random, usize, 1e4),
-    ));
+    const events = try allocator.alloc(ManifestEvent, events_count);
     errdefer allocator.free(events);
 
     var event_distribution = fuzz.random_enum_distribution(random, EventType);

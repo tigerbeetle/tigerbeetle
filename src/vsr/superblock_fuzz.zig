@@ -28,18 +28,19 @@ const fuzz = @import("../test/fuzz.zig");
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
-/// Total calls to checkpoint() + view_change().
-const transitions_count_total = 10;
 const cluster = 0;
 
 pub fn main() !void {
     const allocator = std.testing.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
-    try run_fuzz(allocator, args.seed);
+    // Total calls to checkpoint() + view_change().
+    const transitions_count_total = args.events_max orelse 10;
+
+    try run_fuzz(allocator, args.seed, transitions_count_total);
 }
 
-fn run_fuzz(allocator: std.mem.Allocator, seed: u64) !void {
+fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: usize) !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
