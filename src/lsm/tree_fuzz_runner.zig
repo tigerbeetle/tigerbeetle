@@ -151,7 +151,7 @@ pub fn FuzzRunner(
 
             assert(runner.checkpoint_op == null);
             runner.checkpoint_op = op - config.lsm_batch_multiple;
-            runner.tree.compact(tree_checkpoint_callback, op);
+            runner.tree.checkpoint(tree_checkpoint_callback);
         }
 
         fn tree_checkpoint_callback(tree: *Tree) void {
