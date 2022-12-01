@@ -115,24 +115,11 @@ pub fn build(b: *std.build.Builder) void {
         test_step.dependOn(&unit_tests.step);
     }
 
+    // Clients build:
     {
-        const tb_client = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
-        tb_client.setMainPkgPath("src");
-        tb_client.setTarget(target);
-        tb_client.setBuildMode(mode);
-        tb_client.addOptions("tigerbeetle_build_options", options);
-        tb_client.setOutputDir("zig-out");
-        tb_client.pie = true;
-        tb_client.bundle_compiler_rt = true;
-        tb_client.step.dependOn(&tb_client_header_generate.step);
-
-        tb_client.linkLibC();
-
-        const build_step = b.step("tb_client", "Build C client shared library");
-        build_step.dependOn(&tb_client.step);
+        go_client(b, &tb_client_header_generate.step, mode, options, tracer_backend,);
+        java_client(b, mode, options, tracer_backend,);
     }
-
-    java_client(b, mode, options, tracer_backend);
 
     {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
@@ -325,25 +312,84 @@ fn link_tracer_backend(
     }
 }
 
-fn java_client(b: *std.build.Builder, mode: Mode, options: *std.build.OptionsStep, tracer_backend: TracerBackend) void { 
-    const build_step = b.step("java_client", "Build Java client shared library");
+fn go_client(
+    b: *std.build.Builder,
+    header_generate_step: *std.build.Step,
+    mode: Mode,
+    options: *std.build.OptionsStep,
+    tracer_backend: TracerBackend,
+) void {
+    const build_step = b.step("go_client", "Build Go client shared library");
 
-    // Zig cross-target x java os-arch names
+    // Updates the generated header file:
+    const install_header = b.addInstallFile(
+        .{ .path = "src/clients/c/tb_client.h" },
+        "../src/clients/go/pkg/native/tb_client.h",
+    );
+    
+    build_step.dependOn(header_generate_step);
+    build_step.dependOn(&install_header.step);
+
+    // Zig cross-targets
     const platforms = .{
-        .{ "x86_64-linux-gnu", "linux-x86_64" },
-        .{ "x86_64-macos", "macos-x86_64" },
-        .{ "aarch64-linux-gnu", "linux-aarch_64" },
-        .{ "aarch64-macos", "macos-aarch64" },
-        .{ "x86_64-windows", "win-x86_64" },
+        "x86_64-linux",
+        "x86_64-macos",
+        "x86_64-windows",
+        "aarch64-linux",
+        "aarch64-macos",
     };
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
+
+        const lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+        lib.setMainPkgPath("src");
+        lib.setTarget(cross_target);
+        lib.setBuildMode(mode);
+        lib.pie = true;
+        lib.bundle_compiler_rt = true;
+
+        if (cross_target.os_tag.? != .windows) {
+            lib.linkLibC();
+        }
+
+        lib.setOutputDir("src/clients/go/pkg/native/" ++ platform ++ "/tigerbeetle");
+
+        set_cache_dir(b, platform);
+
+        lib.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(lib, tracer_backend, cross_target);
+
+        build_step.dependOn(&lib.step);
+    }
+}
+
+fn java_client(
+    b: *std.build.Builder,
+    mode: Mode,
+    options: *std.build.OptionsStep,
+    tracer_backend: TracerBackend,
+) void {
+    const build_step = b.step("java_client", "Build Java client shared library");
+
+    // Zig cross-targets
+    const platforms = .{
+        "x86_64-linux-gnu",
+        "x86_64-linux-musl",
+        "x86_64-macos",
+        "aarch64-linux-gnu",
+        "aarch64-linux-musl",
+        "aarch64-macos",
+        "x86_64-windows",
+    };
+
+    inline for (platforms) |platform| {
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
         const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/zig/client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.addPackagePath("jui", "src/clients/java/src/zig//lib/jui/src/jui.zig");
-        lib.setOutputDir("src/clients/java/src/tigerbeetle-java/src/main/resources/lib/" ++ platform[1]);
+        lib.setOutputDir("src/clients/java/src/tigerbeetle-java/src/main/resources/lib/" ++ platform);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
 
@@ -354,17 +400,21 @@ fn java_client(b: *std.build.Builder, mode: Mode, options: *std.build.OptionsSte
             lib.linkLibC();
         }
 
-        // Hit some issue with the build cache between cross compilations:
-        // - From Linux, it runs fine
-        // - From Windows it fails on libc "invalid object"
-        // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
-        // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
-        b.cache_root = "zig-cache/" ++ platform[1];
-        b.global_cache_root = "zig-cache/" ++ platform[1] ++ "/global";
+        set_cache_dir(b, platform);
 
         lib.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         build_step.dependOn(&lib.step);
     }
+}
+
+fn set_cache_dir(b: *std.build.Builder, comptime platform: []const u8) void {
+    // Hit some issue with the build cache between cross compilations:
+    // - From Linux, it runs fine
+    // - From Windows it fails on libc "invalid object"
+    // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
+    // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
+    b.cache_root = "zig-cache/" ++ platform;
+    b.global_cache_root = "zig-cache/" ++ platform ++ "/global";
 }
