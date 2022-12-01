@@ -102,6 +102,13 @@ const ConfigCluster = struct {
     }
 };
 
+pub const ConfigBase = enum {
+    production,
+    development,
+    test_min,
+    default,
+};
+
 pub const TracerBackend = enum {
     none,
     // Writes to a file (./tracer.json) which can be uploaded to https://ui.perfetto.dev/
