@@ -365,11 +365,7 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
-pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
-    const fuzz_op_count = @minimum(
-        @as(usize, 1E7),
-        fuzz.random_int_exponential(random, usize, 1E6),
-    );
+pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
@@ -447,7 +443,12 @@ pub fn main() !void {
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
-    const fuzz_ops = try generate_fuzz_ops(random);
+    const fuzz_op_count = @minimum(
+        fuzz_args.events_max orelse @as(usize, 1E7),
+        fuzz.random_int_exponential(random, usize, 1E6),
+    );
+
+    const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
     const storage_options = .{
