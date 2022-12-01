@@ -158,19 +158,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [ 
-                'openjdk:20-oracle',
-                'openjdk:17-bullseye',
-                'openjdk:17-alpine',
-                'eclipse-temurin:19-alpine',
-                'eclipse-temurin:19',
-                'azul/zulu-openjdk:19',
-                'azul/zulu-openjdk-alpine:19',
-                'azul/zulu-openjdk-centos:19',
-                'azul/zulu-openjdk-debian:19',
-                'amazoncorretto:17',
-                'amazoncorretto:17-alpine'
-              ]
+        image:
+          - openjdk:20-oracle
+          - openjdk:17-bullseye
+          - openjdk:17-alpine
+          - eclipse-temurin:19-alpine
+          - eclipse-temurin:19
+          - azul/zulu-openjdk:19
+          - azul/zulu-openjdk-alpine:19
+          - azul/zulu-openjdk-centos:19
+          - azul/zulu-openjdk-debian:19
+          - amazoncorretto:17
+          - amazoncorretto:17-alpine 
     steps:    
     - uses: actions/download-artifact@v3
       with:
