@@ -29,18 +29,10 @@ func toU128(value string) *types.Uint128 {
 
 func WithClient(s testing.TB, withClient func(Client)) {
 	var tigerbeetlePath string
-	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
-		tigerbeetlePath = "./pkg/native/x86_64-windows/tigerbeetle.exe"
-	} else if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
-		tigerbeetlePath = "./pkg/native/x86_64-linux/tigerbeetle"
-	} else if runtime.GOOS == "linux" && runtime.GOARCH == "arm64" {
-		tigerbeetlePath = "./pkg/native/aarch64-linux/tigerbeetle"
-	} else if runtime.GOOS == "darwin" && runtime.GOARCH == "amd64" {
-		tigerbeetlePath = "./pkg/native/x86_64-macos/tigerbeetle"
-	} else if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
-		tigerbeetlePath = "./pkg/native/aarch64-macos/tigerbeetle"
+	if runtime.GOOS == "windows" {
+		tigerbeetlePath = "../../../tigerbeetle.exe"
 	} else {
-		panic("tigerbeetle was not built for your platform")
+		tigerbeetlePath = "../../../tigerbeetle"
 	}
 
 	addressArg := "--addresses=" + TIGERBEETLE_PORT
