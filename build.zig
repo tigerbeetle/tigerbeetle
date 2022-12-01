@@ -92,8 +92,19 @@ pub fn build(b: *std.build.Builder) void {
 
     // Clients build:
     {
-        go_client(b, &tb_client_header_generate.step, mode, options, tracer_backend,);
-        java_client(b, mode, options, tracer_backend,);
+        go_client(
+            b,
+            &tb_client_header_generate.step,
+            mode,
+            options,
+            tracer_backend,
+        );
+        java_client(
+            b,
+            mode,
+            options,
+            tracer_backend,
+        );
     }
 
     {
@@ -410,7 +421,7 @@ fn go_client(
         .{ .path = "src/clients/c/tb_client.h" },
         "../src/clients/go/pkg/native/tb_client.h",
     );
-    
+
     build_step.dependOn(header_generate_step);
     build_step.dependOn(&install_header.step);
 
