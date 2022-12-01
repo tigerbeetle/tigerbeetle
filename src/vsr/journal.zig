@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const util = @import("../util.zig");
@@ -23,7 +23,7 @@ const log = std.log.scoped(.journal);
 const Ring = enum {
     /// A circular buffer of (redundant) prepare message headers.
     headers,
-    /// A circular buffer of prepare messages. Each slot is padded to `config.message_size_max`.
+    /// A circular buffer of prepare messages. Each slot is padded to `constants.message_size_max`.
     prepares,
 
     /// Returns the slot's offset relative to the start of the ring.
@@ -31,13 +31,13 @@ const Ring = enum {
         assert(slot.index < slot_count);
         switch (ring) {
             .headers => {
-                comptime assert(config.sector_size % @sizeOf(Header) == 0);
+                comptime assert(constants.sector_size % @sizeOf(Header) == 0);
                 const ring_offset = vsr.sector_floor(slot.index * @sizeOf(Header));
                 assert(ring_offset < headers_size);
                 return ring_offset;
             },
             .prepares => {
-                const ring_offset = config.message_size_max * slot.index;
+                const ring_offset = constants.message_size_max * slot.index;
                 assert(ring_offset < prepares_size);
                 return ring_offset;
             },
@@ -45,7 +45,7 @@ const Ring = enum {
     }
 };
 
-const headers_per_sector = @divExact(config.sector_size, @sizeOf(Header));
+const headers_per_sector = @divExact(constants.sector_size, @sizeOf(Header));
 comptime {
     assert(headers_per_sector > 0);
 }
@@ -59,7 +59,7 @@ comptime {
 /// - `journal.dirty`
 /// - `journal.faulty`
 ///
-/// A header's slot is `header.op % config.journal_slot_count`.
+/// A header's slot is `header.op % constants.journal_slot_count`.
 const Slot = struct { index: u64 };
 
 /// An inclusive, non-empty range of slots.
@@ -94,9 +94,9 @@ const Status = enum {
     recovered,
 };
 
-const slot_count = config.journal_slot_count;
-const headers_size = config.journal_size_headers;
-const prepares_size = config.journal_size_prepares;
+const slot_count = constants.journal_slot_count;
+const headers_size = constants.journal_size_headers;
+const prepares_size = constants.journal_size_prepares;
 
 pub const write_ahead_log_zone_size = headers_size + prepares_size;
 
@@ -107,14 +107,14 @@ comptime {
     assert(slot_count >= headers_per_sector);
     // The length of the prepare pipeline is the upper bound on how many ops can be
     // reordered during a view change. See `recover_prepares_callback()` for more detail.
-    assert(slot_count > config.pipeline_max);
+    assert(slot_count > constants.pipeline_max);
 
     assert(headers_size > 0);
-    assert(headers_size % config.sector_size == 0);
+    assert(headers_size % constants.sector_size == 0);
 
     assert(prepares_size > 0);
-    assert(prepares_size % config.sector_size == 0);
-    assert(prepares_size % config.message_size_max == 0);
+    assert(prepares_size % constants.sector_size == 0);
+    assert(prepares_size % constants.message_size_max == 0);
 }
 
 pub fn Journal(comptime Replica: type, comptime Storage: type) type {
@@ -151,7 +151,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             /// This is reset to undefined and reused for each Storage.write_sectors() call.
             range: Range,
 
-            const Sector = *align(config.sector_size) [config.sector_size]u8;
+            const Sector = *align(constants.sector_size) [constants.sector_size]u8;
 
             fn header_sector(write: *Self.Write, journal: *Self) Sector {
                 assert(journal.writes.items.len == journal.headers_iops.len);
@@ -161,7 +161,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 );
                 // TODO The compiler should not need this align cast as the type of `headers_iops`
                 // ensures that each buffer is properly aligned.
-                return @alignCast(config.sector_size, &journal.headers_iops[i]);
+                return @alignCast(constants.sector_size, &journal.headers_iops[i]);
             }
         };
 
@@ -201,7 +201,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         /// When the slot's header is `reserved`, the header's `op` is the slot index.
         ///
         /// During recovery, store the (unvalidated) headers of the prepare ring.
-        headers: []align(config.sector_size) Header,
+        headers: []align(constants.sector_size) Header,
 
         /// Store headers whose prepares are on disk.
         /// Redundant headers are updated after the corresponding prepare(s) are written,
@@ -218,17 +218,17 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         ///    which requires remote repair.
         ///
         /// During recovery, store the redundant (unvalidated) headers.
-        headers_redundant: []align(config.sector_size) Header,
+        headers_redundant: []align(constants.sector_size) Header,
 
         /// We copy-on-write to these buffers, as the in-memory headers may change while writing.
         /// The buffers belong to the IOP at the corresponding index in IOPS.
-        headers_iops: *align(config.sector_size) [config.journal_iops_write_max][config.sector_size]u8,
+        headers_iops: *align(constants.sector_size) [constants.journal_iops_write_max][constants.sector_size]u8,
 
         /// Statically allocated read IO operation context data.
-        reads: IOPS(Read, config.journal_iops_read_max) = .{},
+        reads: IOPS(Read, constants.journal_iops_read_max) = .{},
 
         /// Statically allocated write IO operation context data.
-        writes: IOPS(Write, config.journal_iops_write_max) = .{},
+        writes: IOPS(Write, constants.journal_iops_write_max) = .{},
 
         /// Whether an entry is in memory only and needs to be written or is being written:
         /// We use this in the same sense as a dirty bit in the kernel page cache.
@@ -268,7 +268,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             var headers = try allocator.allocAdvanced(
                 Header,
-                config.sector_size,
+                constants.sector_size,
                 slot_count,
                 .exact,
             );
@@ -277,7 +277,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
             var headers_redundant = try allocator.allocAdvanced(
                 Header,
-                config.sector_size,
+                constants.sector_size,
                 slot_count,
                 .exact,
             );
@@ -301,11 +301,11 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             std.mem.set(bool, prepare_inhabited, false);
 
             const headers_iops = (try allocator.allocAdvanced(
-                [config.sector_size]u8,
-                config.sector_size,
-                config.journal_iops_write_max,
+                [constants.sector_size]u8,
+                constants.sector_size,
+                constants.journal_iops_write_max,
                 .exact,
-            ))[0..config.journal_iops_write_max];
+            ))[0..constants.journal_iops_write_max];
             errdefer allocator.free(headers_iops);
 
             log.debug("{}: slot_count={} size={} headers_size={} prepares_size={}", .{
@@ -328,7 +328,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 .headers_iops = headers_iops,
             };
 
-            assert(@mod(@ptrToInt(&self.headers[0]), config.sector_size) == 0);
+            assert(@mod(@ptrToInt(&self.headers[0]), constants.sector_size) == 0);
             assert(self.dirty.bits.bit_length == slot_count);
             assert(self.faulty.bits.bit_length == slot_count);
             assert(self.dirty.count == slot_count);
@@ -768,7 +768,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
-            var message_size: usize = config.message_size_max;
+            var message_size: usize = constants.message_size_max;
 
             // If the header is in-memory, we can skip the read from the disk.
             if (self.header_with_op_and_checksum(op, checksum)) |exact| {
@@ -776,14 +776,14 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                     message.header.* = exact.*;
                     // Normally the message's padding would have been zeroed by the MessageBus,
                     // but we are copying (only) a message header into a new buffer.
-                    std.mem.set(u8, message.buffer[@sizeOf(Header)..config.sector_size], 0);
+                    std.mem.set(u8, message.buffer[@sizeOf(Header)..constants.sector_size], 0);
                     callback(replica, message, destination_replica);
                     return;
                 } else {
                     // As an optimization, we can read fewer than `message_size_max` bytes because
                     // we know the message's exact size.
                     message_size = vsr.sector_ceil(exact.size);
-                    assert(message_size <= config.message_size_max);
+                    assert(message_size <= constants.message_size_max);
                 }
             }
 
@@ -1032,7 +1032,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
 
         fn recover_headers_buffer(message: *Message, offset: u64) []align(@alignOf(Header)) u8 {
             const max = std.math.min(message.buffer.len, headers_size - offset);
-            assert(max % config.sector_size == 0);
+            assert(max % constants.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
             return message.buffer[0..max];
         }
@@ -1075,7 +1075,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 &read.completion,
                 // We load the entire message to verify that it isn't torn or corrupt.
                 // We don't know the message's size, so use the entire buffer.
-                message.buffer[0..config.message_size_max],
+                message.buffer[0..constants.message_size_max],
                 .wal_prepares,
                 Ring.prepares.offset(slot),
             );
@@ -1652,7 +1652,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             };
 
             const offset = Ring.headers.offset(slot_of_message);
-            assert(offset % config.sector_size == 0);
+            assert(offset % constants.sector_size == 0);
 
             const buffer: []u8 = write.header_sector(self);
             const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
@@ -1686,7 +1686,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 self.replica,
                 message.header.op,
                 offset,
-                offset + config.sector_size,
+                offset + constants.sector_size,
             });
 
             // Memory must not be owned by self.headers as these may be modified concurrently:
@@ -2216,11 +2216,11 @@ test "recovery_cases" {
 /// `offset_logical` is relative to the beginning of the `wal_headers` zone.
 /// Returns the number of bytes written to `target`.
 pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize {
-    assert(offset_logical <= config.journal_size_headers);
-    assert(offset_logical % config.sector_size == 0);
+    assert(offset_logical <= constants.journal_size_headers);
+    assert(offset_logical % constants.sector_size == 0);
     assert(target.len > 0);
     assert(target.len % @sizeOf(Header) == 0);
-    assert(target.len % config.sector_size == 0);
+    assert(target.len % constants.sector_size == 0);
 
     var headers = std.mem.bytesAsSlice(Header, target);
     const headers_past = @divExact(offset_logical, @sizeOf(Header));
@@ -2242,7 +2242,7 @@ pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize
 
 test "format_wal_headers" {
     const fuzz = @import("./journal_format_fuzz.zig");
-    try fuzz.fuzz_format_wal_headers(config.sector_size);
+    try fuzz.fuzz_format_wal_headers(constants.sector_size);
 }
 
 /// Format part of a new WAL's Zone.wal_prepares, writing to `target`.
@@ -2250,23 +2250,23 @@ test "format_wal_headers" {
 /// `offset_logical` is relative to the beginning of the `wal_prepares` zone.
 /// Returns the number of bytes written to `target`.
 pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usize {
-    assert(offset_logical <= config.journal_size_prepares);
-    assert(offset_logical % config.sector_size == 0);
+    assert(offset_logical <= constants.journal_size_prepares);
+    assert(offset_logical % constants.sector_size == 0);
     assert(target.len > 0);
     assert(target.len % @sizeOf(Header) == 0);
-    assert(target.len % config.sector_size == 0);
+    assert(target.len % constants.sector_size == 0);
 
-    const sectors_per_message = @divExact(config.message_size_max, config.sector_size);
-    const sector_max = @divExact(config.journal_size_prepares, config.sector_size);
+    const sectors_per_message = @divExact(constants.message_size_max, constants.sector_size);
+    const sector_max = @divExact(constants.journal_size_prepares, constants.sector_size);
 
-    var sectors = std.mem.bytesAsSlice([config.sector_size]u8, target);
+    var sectors = std.mem.bytesAsSlice([constants.sector_size]u8, target);
     for (sectors) |*sector_data, i| {
-        const sector = @divExact(offset_logical, config.sector_size) + i;
+        const sector = @divExact(offset_logical, constants.sector_size) + i;
         if (sector == sector_max) {
             if (i == 0) {
-                assert(offset_logical == config.journal_size_prepares);
+                assert(offset_logical == constants.journal_size_prepares);
             }
-            return i * config.sector_size;
+            return i * constants.sector_size;
         } else {
             const message_slot = @divFloor(sector, sectors_per_message);
             assert(message_slot < slot_count);

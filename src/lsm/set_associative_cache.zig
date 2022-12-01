@@ -7,9 +7,9 @@ const mem = std.mem;
 const meta = std.meta;
 const Vector = meta.Vector;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const div_ceil = @import("../util.zig").div_ceil;
-const verify = config.verify;
+const verify = constants.verify;
 
 pub const Layout = struct {
     ways: u64 = 16,

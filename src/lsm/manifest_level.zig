@@ -4,7 +4,7 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const lsm = @import("tree.zig");
 const binary_search = @import("binary_search.zig");
 
@@ -360,7 +360,7 @@ pub fn ManifestLevelType(
 
         /// The function is only used for verification; it is not performance-critical.
         pub fn contains(level: Self, table: *const TableInfo) bool {
-            assert(config.verify);
+            assert(constants.verify);
 
             var level_tables = level.iterator(.visible, &.{
                 table.snapshot_min,

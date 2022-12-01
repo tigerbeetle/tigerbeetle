@@ -4,12 +4,12 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const TableType = @import("table.zig").TableType;
 const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("grid.zig").GridType;
-const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_op;
@@ -268,7 +268,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                     return;
                 };
 
-                if (config.verify) {
+                if (constants.verify) {
                     // This was checked in prefetch_enqueue().
                     assert(worker.context.groove.tree.lookup_from_memory(worker.context.snapshot, id.*) == null);
                 }

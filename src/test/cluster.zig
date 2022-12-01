@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
@@ -12,7 +12,7 @@ const Network = @import("network.zig").Network;
 const NetworkOptions = @import("network.zig").NetworkOptions;
 
 pub const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
@@ -77,7 +77,7 @@ pub const Cluster = struct {
         assert(options.replica_count > 0);
         assert(options.client_count > 0);
         assert(options.grid_size_max > 0);
-        assert(options.grid_size_max % config.sector_size == 0);
+        assert(options.grid_size_max % constants.sector_size == 0);
         assert(options.health_options.crash_probability < 1.0);
         assert(options.health_options.crash_probability >= 0.0);
         assert(options.health_options.restart_probability < 1.0);
@@ -123,10 +123,10 @@ pub const Cluster = struct {
             .network = network,
         };
 
-        var buffer: [config.replicas_max]Storage.FaultyAreas = undefined;
+        var buffer: [constants.replicas_max]Storage.FaultyAreas = undefined;
         const faulty_wal_areas = Storage.generate_faulty_wal_areas(
             prng,
-            config.journal_size_max,
+            constants.journal_size_max,
             options.replica_count,
             &buffer,
         );
@@ -138,7 +138,7 @@ pub const Cluster = struct {
             storage_options.faulty_wal_areas = faulty_wal_areas[replica_index];
             storage.* = try Storage.init(
                 allocator,
-                superblock_zone_size + config.journal_size_max + options.grid_size_max,
+                superblock_zone_size + constants.journal_size_max + options.grid_size_max,
                 storage_options,
             );
         }
@@ -161,7 +161,7 @@ pub const Cluster = struct {
 
         for (cluster.replicas) |_, replica_index| {
             try cluster.open_replica(@intCast(u8, replica_index), .{
-                .resolution = config.tick_ms * std.time.ns_per_ms,
+                .resolution = constants.tick_ms * std.time.ns_per_ms,
                 .offset_type = .linear,
                 .offset_coefficient_A = 0,
                 .offset_coefficient_B = 0,
@@ -238,7 +238,7 @@ pub const Cluster = struct {
 
             // This whole workaround doesn't handle log wrapping correctly.
             // If the log has wrapped, don't crash the replica.
-            if (cluster_op_max >= config.journal_slot_count) {
+            if (cluster_op_max >= constants.journal_slot_count) {
                 return false;
             }
 

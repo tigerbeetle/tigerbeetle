@@ -5,7 +5,7 @@ const mem = std.mem;
 const DynamicBitSetUnmanaged = std.bit_set.DynamicBitSetUnmanaged;
 const MaskInt = DynamicBitSetUnmanaged.MaskInt;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const ewah = @import("../ewah.zig").ewah(usize);
 const div_ceil = @import("../util.zig").div_ceil;
@@ -74,7 +74,7 @@ pub const FreeSet = struct {
     //
     // e.g. 10TiB disk ÷ 64KiB/block ÷ 512*8 blocks/shard ÷ 8 shards/byte = 5120B index
     const shard_cache_lines = 8;
-    pub const shard_size = shard_cache_lines * config.cache_line_size * @bitSizeOf(u8);
+    pub const shard_size = shard_cache_lines * constants.cache_line_size * @bitSizeOf(u8);
     comptime {
         assert(shard_size == 4096);
         assert(@bitSizeOf(MaskInt) == 64);
@@ -404,8 +404,8 @@ fn bit_set_masks(bit_set: DynamicBitSetUnmanaged) []usize {
 }
 
 test "FreeSet block shard count" {
-    if (config.block_size != 64 * 1024) return;
-    const blocks_in_tb = @divExact(1 << 40, config.block_size);
+    if (constants.block_size != 64 * 1024) return;
+    const blocks_in_tb = @divExact(1 << 40, constants.block_size);
     try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
     try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - FreeSet.shard_size);
     try test_block_shards_count(1, FreeSet.shard_size); // Must be at least one index bit.

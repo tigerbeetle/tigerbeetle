@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
 
 const tb = @import("tigerbeetle.zig");
 const Account = tb.Account;
@@ -16,7 +16,7 @@ const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 
 const vsr = @import("vsr.zig");
@@ -37,7 +37,7 @@ pub fn request(
     const allocator = std.heap.page_allocator;
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
-    var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", config.port)};
+    var addresses = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", constants.port)};
 
     var io = try IO.init(32, 0);
     defer io.deinit();
@@ -74,7 +74,7 @@ pub fn request(
 
     while (client.request_queue.count > 0) {
         client.tick();
-        try io.run_for_ns(config.tick_ms * std.time.ns_per_ms);
+        try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
 }
 

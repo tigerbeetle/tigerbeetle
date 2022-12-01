@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 
 const StaticAllocator = @import("../static_allocator.zig");
 const GridType = @import("../lsm/grid.zig").GridType;
@@ -58,10 +58,10 @@ const Prepare = struct {
     ok_quorum_received: bool = false,
 };
 
-const QuorumMessages = [config.replicas_max]?*Message;
-const quorum_messages_null = [_]?*Message{null} ** config.replicas_max;
+const QuorumMessages = [constants.replicas_max]?*Message;
+const quorum_messages_null = [_]?*Message{null} ** constants.replicas_max;
 
-const QuorumCounter = std.StaticBitSet(config.replicas_max);
+const QuorumCounter = std.StaticBitSet(constants.replicas_max);
 const quorum_counter_null = QuorumCounter.initEmpty();
 
 // CRITICAL: The number of prepare headers to include in the body:
@@ -70,13 +70,13 @@ const quorum_counter_null = QuorumCounter.initEmpty();
 // that cannot be repaired because they are gaps, and this must be relative to the
 // cluster as a whole (not relative to the difference between our op and commit number)
 // as otherwise we would break correctness.
-const view_change_headers_count = config.pipeline_max;
+const view_change_headers_count = constants.pipeline_max;
 
 comptime {
     assert(view_change_headers_count > 0);
-    assert(view_change_headers_count >= config.pipeline_max);
+    assert(view_change_headers_count >= constants.pipeline_max);
     assert(view_change_headers_count <=
-        @divFloor(config.message_size_max - @sizeOf(Header), @sizeOf(Header)));
+        @divFloor(constants.message_size_max - @sizeOf(Header), @sizeOf(Header)));
 }
 
 pub fn ReplicaType(
@@ -197,7 +197,7 @@ pub fn ReplicaType(
         ///
         /// After a view change, the old leader's pipeline is left untouched so that it is able to
         /// help the new leader repair, even in the face of local storage faults.
-        pipeline: RingBuffer(Prepare, config.pipeline_max, .array) = .{},
+        pipeline: RingBuffer(Prepare, constants.pipeline_max, .array) = .{},
 
         /// In some cases, a replica may send a message to itself. We do not submit these messages
         /// to the message bus but rather queue them here for guaranteed immediate delivery, which
@@ -392,8 +392,8 @@ pub fn ReplicaType(
             const majority = (replica_count / 2) + 1;
             assert(majority <= replica_count);
 
-            assert(config.quorum_replication_max >= 2);
-            const quorum_replication = std.math.min(config.quorum_replication_max, majority);
+            assert(constants.quorum_replication_max >= 2);
+            const quorum_replication = std.math.min(constants.quorum_replication_max, majority);
             assert(quorum_replication >= 2 or quorum_replication == replica_count);
 
             const quorum_view_change = std.math.max(
@@ -534,10 +534,10 @@ pub fn ReplicaType(
 
             // To reduce the probability of clustering, for efficient linear probing, the hash map will
             // always overallocate capacity by a factor of two.
-            log.debug("{}: init: client_table.capacity()={} for config.clients_max={} entries", .{
+            log.debug("{}: init: client_table.capacity()={} for constants.clients_max={} entries", .{
                 self.replica,
                 self.client_table().capacity(),
-                config.clients_max,
+                constants.clients_max,
             });
 
             assert(self.status == .recovering);
@@ -1005,7 +1005,7 @@ pub fn ReplicaType(
             // TODO: When Block recover & state transfer are implemented, this can be removed.
             const threshold =
                 if (prepare.message.header.op == self.op_checkpoint_trigger() or
-                prepare.message.header.op == self.op_checkpoint + config.lsm_batch_multiple + 1)
+                prepare.message.header.op == self.op_checkpoint + constants.lsm_batch_multiple + 1)
                 self.replica_count
             else
                 self.quorum_replication;
@@ -1598,7 +1598,7 @@ pub fn ReplicaType(
                 // more useful (i.e. older) headers.
                 self.replace_headers(leader_headers);
 
-                if (self.op < config.journal_slot_count) {
+                if (self.op < constants.journal_slot_count) {
                     if (self.journal.header_with_op(0)) |header| {
                         assert(header.command == .prepare);
                         assert(header.operation == .root);
@@ -1983,7 +1983,7 @@ pub fn ReplicaType(
             }
 
             // The list of remote replicas yet to send a prepare_ok:
-            var waiting: [config.replicas_max]u8 = undefined;
+            var waiting: [constants.replicas_max]u8 = undefined;
             var waiting_len: usize = 0;
             var ok_from_all_replicas_iterator = prepare.ok_from_all_replicas.iterator(.{
                 .kind = .unset,
@@ -1993,7 +1993,7 @@ pub fn ReplicaType(
                 // The bits between `replica_count` and `replicas_max` are always unset,
                 // since they don't actually represent replicas.
                 if (replica == self.replica_count) {
-                    assert(self.replica_count < config.replicas_max);
+                    assert(self.replica_count < constants.replicas_max);
                     break;
                 }
                 assert(replica < self.replica_count);
@@ -2003,7 +2003,7 @@ pub fn ReplicaType(
                     waiting_len += 1;
                 }
             } else {
-                assert(self.replica_count == config.replicas_max);
+                assert(self.replica_count == constants.replicas_max);
             }
 
             if (waiting_len == 0) {
@@ -2015,7 +2015,7 @@ pub fn ReplicaType(
                 // We may be slow and waiting for the write to complete.
                 //
                 // We may even have maxed out our IO depth and been unable to initiate the write,
-                // which can happen if `config.pipeline_max` exceeds `config.journal_iops_write_max`.
+                // which can happen if `constants.pipeline_max` exceeds `constants.journal_iops_write_max`.
                 // This can lead to deadlock for a cluster of one or two (if we do not retry here),
                 // since there is no other way for the leader to repair the dirty op because no
                 // other replica has it.
@@ -2121,7 +2121,7 @@ pub fn ReplicaType(
             assert(threshold >= 1);
             assert(threshold <= self.replica_count);
 
-            assert(messages.len == config.replicas_max);
+            assert(messages.len == constants.replicas_max);
             assert(message.header.cluster == self.cluster);
             assert(message.header.replica < self.replica_count);
             assert(message.header.view == self.view);
@@ -2222,7 +2222,7 @@ pub fn ReplicaType(
             assert(threshold >= 1);
             assert(threshold <= self.replica_count);
 
-            assert(QuorumCounter.bit_length == config.replicas_max);
+            assert(QuorumCounter.bit_length == constants.replicas_max);
             assert(message.header.cluster == self.cluster);
             assert(message.header.replica < self.replica_count);
             assert(message.header.view == self.view);
@@ -2597,7 +2597,7 @@ pub fn ReplicaType(
 
             if (op == self.op_checkpoint_trigger()) {
                 assert(op == self.op);
-                assert((op + 1) % config.lsm_batch_multiple == 0);
+                assert((op + 1) % constants.lsm_batch_multiple == 0);
                 log.debug("{}: commit_op_compact_callback: checkpoint start " ++
                     "(op={} current_checkpoint={} next_checkpoint={})", .{
                     self.replica,
@@ -2660,7 +2660,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
 
             self.op_checkpoint = self.op_checkpoint_next();
-            assert(self.op_checkpoint == self.commit_min - config.lsm_batch_multiple);
+            assert(self.op_checkpoint == self.commit_min - constants.lsm_batch_multiple);
             assert(self.op_checkpoint == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint == self.superblock.working.vsr_state.commit_min);
 
@@ -2921,7 +2921,7 @@ pub fn ReplicaType(
             command: Command,
             context: u128,
         ) usize {
-            assert(messages.len == config.replicas_max);
+            assert(messages.len == constants.replicas_max);
             var count: usize = 0;
             for (messages) |received, replica| {
                 if (received) |m| {
@@ -2962,16 +2962,16 @@ pub fn ReplicaType(
 
             // For correctness, it's critical that all replicas evict deterministically:
             // We cannot depend on `HashMap.capacity()` since `HashMap.ensureTotalCapacity()` may
-            // change across versions of the Zig std lib. We therefore rely on `config.clients_max`,
-            // which must be the same across all replicas, and must not change after initializing a
-            // cluster.
+            // change across versions of the Zig std lib. We therefore rely on
+            // `constants.clients_max`, which must be the same across all replicas, and must not
+            // change after initializing a cluster.
             // We also do not depend on `HashMap.valueIterator()` being deterministic here. However,
             // we do require that all entries have different commit numbers and are iterated.
             // This ensures that we will always pick the entry with the oldest commit number.
             // We also check that a client has only one entry in the hash map (or it's buggy).
             const clients = self.client_table().count();
-            assert(clients <= config.clients_max);
-            if (clients == config.clients_max) {
+            assert(clients <= constants.clients_max);
+            if (clients == constants.clients_max) {
                 var evictee: ?*Message = null;
                 var iterated: usize = 0;
                 var iterator = self.client_table().iterator();
@@ -2996,7 +2996,7 @@ pub fn ReplicaType(
                 log.err("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
                     self.replica,
                     clients,
-                    config.clients_max,
+                    constants.clients_max,
                     evictee.?.header.client,
                 });
                 self.client_table().remove(evictee.?.header.client);
@@ -3016,7 +3016,7 @@ pub fn ReplicaType(
                 .session = session,
                 .reply = reply.ref(),
             });
-            assert(self.client_table().count() <= config.clients_max);
+            assert(self.client_table().count() <= constants.clients_max);
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -3114,16 +3114,16 @@ pub fn ReplicaType(
                 self.op - self.commit_min,
                 // The number of uncommitted ops cannot be more than the length of the pipeline.
                 // Do not reset any ops that we did not include in our do_view_change message.
-                config.pipeline_max,
+                constants.pipeline_max,
             );
 
-            assert(uncanonical_op_count <= config.pipeline_max);
+            assert(uncanonical_op_count <= constants.pipeline_max);
             if (uncanonical_op_count == 0) return self.op;
 
             // * When uncanonical_op_count = self.op - self.commit_min,
             //   self.op - uncanonical_op_count = self.commit_min.
-            // * When uncanonical_op_count = config.pipeline_max,
-            //   config.pipeline_max < self.op - self.commit_min holds.
+            // * When uncanonical_op_count = constants.pipeline_max,
+            //   constants.pipeline_max < self.op - self.commit_min holds.
             const canonical_op_max = self.op - uncanonical_op_count;
 
             log.debug("{}: on_do_view_change: not canonical ops={}..{}", .{
@@ -3134,7 +3134,7 @@ pub fn ReplicaType(
 
             assert(canonical_op_max <= self.op);
             assert(canonical_op_max >= self.commit_min);
-            assert(canonical_op_max + config.pipeline_max >= self.op);
+            assert(canonical_op_max + constants.pipeline_max >= self.op);
             return canonical_op_max;
         }
 
@@ -3724,16 +3724,16 @@ pub fn ReplicaType(
             assert(self.op_checkpoint <= self.commit_min);
             assert(self.op_checkpoint <= self.op);
             assert(self.op_checkpoint == 0 or
-                (self.op_checkpoint + 1) % config.lsm_batch_multiple == 0);
+                (self.op_checkpoint + 1) % constants.lsm_batch_multiple == 0);
 
             const op = if (self.op_checkpoint == 0)
                 // First wrap: op_checkpoint_next = 8-2-1 = 5
-                config.journal_slot_count - config.lsm_batch_multiple - 1
+                constants.journal_slot_count - constants.lsm_batch_multiple - 1
             else
                 // Second wrap: op_checkpoint_next = 5+8-2 = 11
                 // Third wrap: op_checkpoint_next = 11+8-2 = 17
-                self.op_checkpoint + config.journal_slot_count - config.lsm_batch_multiple;
-            assert((op + 1) % config.lsm_batch_multiple == 0);
+                self.op_checkpoint + constants.journal_slot_count - constants.lsm_batch_multiple;
+            assert((op + 1) % constants.lsm_batch_multiple == 0);
             // The checkpoint always advances.
             assert(op > self.op_checkpoint);
 
@@ -3748,7 +3748,7 @@ pub fn ReplicaType(
         ///
         /// See `op_checkpoint_next` for more detail.
         fn op_checkpoint_trigger(self: *const Self) u64 {
-            return self.op_checkpoint_next() + config.lsm_batch_multiple;
+            return self.op_checkpoint_next() + constants.lsm_batch_multiple;
         }
 
         /// Finds the header with the highest op number in a slice of headers from a replica.
@@ -3834,7 +3834,7 @@ pub fn ReplicaType(
                 op += 1;
             }
 
-            assert(self.pipeline.count <= config.pipeline_max);
+            assert(self.pipeline.count <= constants.pipeline_max);
             assert(self.commit_max + self.pipeline.count == op - 1);
             assert(self.commit_max + self.pipeline.count == self.op);
 
@@ -4376,7 +4376,7 @@ pub fn ReplicaType(
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
-            assert(self.op - self.commit_min + 1 <= config.journal_slot_count);
+            assert(self.op - self.commit_min + 1 <= constants.journal_slot_count);
 
             // Request enough prepares to utilize our max IO depth:
             var budget = self.journal.writes.available();
@@ -4385,12 +4385,12 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.op < config.journal_slot_count) {
+            if (self.op < constants.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
                 // Therefore, any faulty ops to the right of `replica.op` are corrupt reserved
                 // entries from the initial format, or corrupt prepares which were since truncated.
                 var op: usize = self.op + 1;
-                while (op < config.journal_slot_count) : (op += 1) {
+                while (op < constants.journal_slot_count) : (op += 1) {
                     const slot = self.journal.slot_for_op(op);
                     assert(slot.index == op);
 
@@ -4411,7 +4411,7 @@ pub fn ReplicaType(
             var op = self.op + 1;
             // To maximize durability, repair all prepares for which we have a header (not only
             // uncommitted headers). This in turn enables the replica to help repair other replicas.
-            const op_min = op -| config.journal_slot_count;
+            const op_min = op -| constants.journal_slot_count;
             while (op > op_min) {
                 op -= 1;
 
@@ -4713,7 +4713,7 @@ pub fn ReplicaType(
         }
 
         fn reset_quorum_messages(self: *Self, messages: *QuorumMessages, command: Command) void {
-            assert(messages.len == config.replicas_max);
+            assert(messages.len == constants.replicas_max);
             var view: ?u32 = null;
             var count: usize = 0;
             for (messages) |*received, replica| {
@@ -5158,7 +5158,7 @@ pub fn ReplicaType(
             }
 
             assert(commit_max >=
-                self.commit_max - std.math.min(config.pipeline_max, self.commit_max));
+                self.commit_max - std.math.min(constants.pipeline_max, self.commit_max));
 
             assert(self.commit_min <= self.commit_max);
             assert(self.op >= self.commit_max or self.op < self.commit_max);
@@ -5240,7 +5240,7 @@ pub fn ReplicaType(
             // headers to become dirty.
             const op_canonical = self.op_canonical_max(view_normal_canonical);
             assert(op_canonical <= self.op);
-            assert(op_canonical >= self.op -| config.pipeline_max);
+            assert(op_canonical >= self.op -| constants.pipeline_max);
             assert(op_canonical >= self.commit_min);
 
             if (do_view_change_head.op > self.op_checkpoint_trigger()) {
@@ -5373,7 +5373,7 @@ pub fn ReplicaType(
                     assert(message.header.replica == replica);
                     assert(message.header.view == self.view);
                     assert(message.header.op >= message.header.commit);
-                    assert(message.header.op - message.header.commit <= config.journal_slot_count);
+                    assert(message.header.op - message.header.commit <= constants.journal_slot_count);
 
                     // The view when this replica was last in normal status, which:
                     // * may be higher than the view in any of the prepare headers.
@@ -5484,8 +5484,8 @@ pub fn ReplicaType(
             assert(self.op >= self.commit_max);
             // At least one replica in the new quorum committed in the new replica.op's WAL wrap —
             // wrapping implies a checkpoint (which implies a commit).
-            assert(self.op - self.commit_max <= config.journal_slot_count);
-            assert(self.op - self.commit_min <= config.journal_slot_count);
+            assert(self.op - self.commit_max <= constants.journal_slot_count);
+            assert(self.op - self.commit_min <= constants.journal_slot_count);
 
             assert(op_canonical <= self.op);
             assert(op_canonical >= self.commit_min);
@@ -5518,7 +5518,7 @@ pub fn ReplicaType(
             // if it was committed it would have survived into the new view as a header not a gap.
             const op_before_gap = blk: {
                 // An op cannot be uncommitted if it is definitely outside the pipeline.
-                const op_committed = std.math.max(self.commit_max, self.op -| config.pipeline_max);
+                const op_committed = std.math.max(self.commit_max, self.op -| constants.pipeline_max);
                 assert(op_committed <= self.op);
 
                 var op = op_committed;
@@ -5864,7 +5864,7 @@ pub fn ReplicaType(
                 parent = prepare.message.header.checksum;
                 op += 1;
             }
-            assert(self.pipeline.count <= config.pipeline_max);
+            assert(self.pipeline.count <= constants.pipeline_max);
             assert(self.commit_max + self.pipeline.count == op - 1);
         }
 

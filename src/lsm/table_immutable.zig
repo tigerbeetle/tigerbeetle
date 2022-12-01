@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const binary_search = @import("binary_search.zig");
 const snapshot_latest = @import("tree.zig").snapshot_latest;
@@ -27,7 +27,7 @@ pub fn TableImmutableType(comptime Table: type) type {
             assert(commit_entries_max > 0);
 
             // The in-memory immutable table is the same size as the mutable table:
-            const value_count_max = commit_entries_max * config.lsm_batch_multiple;
+            const value_count_max = commit_entries_max * constants.lsm_batch_multiple;
             const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
             assert(data_block_count <= Table.data_block_count_max);
 
@@ -95,7 +95,7 @@ pub fn TableImmutableType(comptime Table: type) type {
             assert(sorted_values.len <= table.value_count_max);
             assert(sorted_values.len <= Table.data.value_count_max * Table.data_block_count_max);
 
-            if (config.verify) {
+            if (constants.verify) {
                 var i: usize = 1;
                 while (i < sorted_values.len) : (i += 1) {
                     assert(i > 0);
@@ -128,7 +128,7 @@ pub fn TableImmutableType(comptime Table: type) type {
             );
             if (result.exact) {
                 const value = &table.values[result.index];
-                if (config.verify) assert(compare_keys(key, key_from_value(value)) == .eq);
+                if (constants.verify) assert(compare_keys(key, key_from_value(value)) == .eq);
                 return value;
             }
 

@@ -3,8 +3,8 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
-const growth_factor = config.lsm_growth_factor;
+const constants = @import("../constants.zig");
+const growth_factor = constants.lsm_growth_factor;
 
 const table_count_max = @import("tree.zig").table_count_max;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
@@ -14,7 +14,7 @@ const Direction = @import("direction.zig").Direction;
 const GridType = @import("grid.zig").GridType;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
-const NodePool = @import("node_pool.zig").NodePool(config.lsm_manifest_node_size, 16);
+const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 
 pub fn TableInfoType(comptime Table: type) type {
     const Key = Table.Key;
@@ -121,7 +121,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         node_pool: *NodePool,
 
-        levels: [config.lsm_levels]Level,
+        levels: [constants.lsm_levels]Level,
 
         // TODO Set this at startup when reading in the manifest.
         // This should be the greatest TableInfo.snapshot_min/snapshot_max (if deleted) or
@@ -140,7 +140,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             grid: *Grid,
             tree_hash: u128,
         ) !Manifest {
-            var levels: [config.lsm_levels]Level = undefined;
+            var levels: [constants.lsm_levels]Level = undefined;
             for (levels) |*level, i| {
                 errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
                 level.* = try Level.init(allocator);
@@ -178,7 +178,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest = @fieldParentPtr(Manifest, "manifest_log", manifest_log);
             assert(manifest.open_callback != null);
 
-            assert(level < config.lsm_levels);
+            assert(level < constants.lsm_levels);
             manifest.levels[level].insert_table(manifest.node_pool, table);
         }
 
@@ -203,7 +203,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
 
-            if (config.verify) {
+            if (constants.verify) {
                 assert(manifest_level.contains(table));
             }
         }
@@ -234,7 +234,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             key_min: Key,
             key_max: Key,
         ) void {
-            assert(level < config.lsm_levels);
+            assert(level < constants.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
             // Remove tables in descending order to avoid desynchronizing the iterator from
@@ -261,7 +261,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 manifest_level.remove_table(manifest.node_pool, &snapshots, table);
             }
 
-            if (config.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
+            if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
         }
 
         /// Returns an iterator over tables that might contain `key` (but are not guaranteed to).
@@ -281,7 +281,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             inner: ?Level.Iterator = null,
 
             pub fn next(it: *LookupIterator) ?*const TableInfo {
-                while (it.level < config.lsm_levels) : (it.level += 1) {
+                while (it.level < constants.lsm_levels) : (it.level += 1) {
                     const level = &it.manifest.levels[it.level];
 
                     var inner = level.iterator(
@@ -302,7 +302,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     }
                 }
 
-                assert(it.level == config.lsm_levels);
+                assert(it.level == constants.lsm_levels);
                 return null;
             }
         };
@@ -347,7 +347,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             key_exclusive: ?Key,
             direction: Direction,
         ) ?*const TableInfo {
-            assert(level < config.lsm_levels);
+            assert(level < constants.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
             const snapshots = [_]u64{snapshot};
@@ -394,7 +394,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         /// Returns the most optimal table for compaction from a level that is due for compaction.
         /// Returns null if the level is not due for compaction (table_count_visible < count_max).
         pub fn compaction_table(manifest: *const Manifest, level_a: u8) ?CompactionTableRange {
-            assert(level_a < config.lsm_levels - 1); // The last level is not compacted into another.
+            // The last level is not compacted into another.
+            assert(level_a < constants.lsm_levels - 1);
 
             const table_count_visible_max = table_count_max_for_level(growth_factor, level_a);
             assert(table_count_visible_max > 0);
@@ -468,7 +469,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             key_min: Key,
             key_max: Key,
         ) CompactionRange {
-            assert(level_b < config.lsm_levels);
+            assert(level_b < constants.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
             var range = CompactionRange{
@@ -516,12 +517,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             level_b: u8,
             range: CompactionRange,
         ) bool {
-            assert(level_b < config.lsm_levels);
+            assert(level_b < constants.lsm_levels);
             assert(range.table_count > 0);
             assert(compare_keys(range.key_min, range.key_max) != .gt);
 
             var level_c: u8 = level_b + 1;
-            while (level_c < config.lsm_levels) : (level_c += 1) {
+            while (level_c < constants.lsm_levels) : (level_c += 1) {
                 const snapshots = [_]u64{snapshot_latest};
 
                 var it = manifest.levels[level_c].iterator(
@@ -533,12 +534,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 if (it.next() == null) {
                     // If the range is being compacted into the last level then this is unreachable,
                     // as the last level has no subsequent levels and must always drop tombstones.
-                    assert(level_b != config.lsm_levels - 1);
+                    assert(level_b != constants.lsm_levels - 1);
                     return false;
                 }
             }
 
-            assert(level_c == config.lsm_levels);
+            assert(level_c == constants.lsm_levels);
             return true;
         }
 

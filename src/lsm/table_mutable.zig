@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
@@ -62,10 +62,10 @@ pub fn TableMutableType(comptime Table: type) type {
             values_cache: ?*ValuesCache,
             commit_entries_max: u32,
         ) !TableMutable {
-            comptime assert(config.lsm_batch_multiple > 0);
+            comptime assert(constants.lsm_batch_multiple > 0);
             assert(commit_entries_max > 0);
 
-            const value_count_max = commit_entries_max * config.lsm_batch_multiple;
+            const value_count_max = commit_entries_max * constants.lsm_batch_multiple;
             const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
             assert(data_block_count <= Table.data_block_count_max);
 
