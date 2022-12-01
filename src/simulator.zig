@@ -31,6 +31,8 @@ const log_state_transitions_only = builtin.mode != .Debug;
 
 const log_simulator = std.log.scoped(.simulator);
 
+pub const tigerbeetle_config = @import("config.zig").configs.test_min;
+
 /// You can fine tune your log levels even further (debug/info/warn/err):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
