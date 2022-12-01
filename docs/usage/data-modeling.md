@@ -64,8 +64,9 @@ Example uses:
 ## `id`
 
 The primary purpose of an `id` (for both [accounts](../reference/accounts.md#id) and
-[transfers](../reference/transfers.md#id)) is to serve as an "idempotency key".
-The database uses ids to avoid repeating duplicate events.
+[transfers](../reference/transfers.md#id)) is to serve as an "idempotency key" — to avoid
+executing an event twice. For example, if a client creates a transfer but the server's reply is
+lost, the client (or application) will retry — the database must not transfer the money twice.
 
 [Randomly-generated identifiers](#random-identifier) are recommended for most applications.
 
