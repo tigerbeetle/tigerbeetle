@@ -86,6 +86,14 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build fuzz_lsm_segmented_array -- --seed 123
 
+  fuzz_lsm_tree:
+    name: 'Fuzz LSM Tree'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_lsm_tree -- --seed 123 --events-max 400
+
   fuzz_vsr_journal_format:
     name: 'Fuzz VSR WAL format'
     runs-on: ubuntu-latest
