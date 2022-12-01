@@ -7,7 +7,7 @@ const meta = std.meta;
 const net = std.net;
 const os = std.os;
 
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
 const tigerbeetle = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
 const IO = @import("io.zig").IO;
@@ -72,8 +72,8 @@ const usage = fmt.comptimePrint(
     \\  tigerbeetle version --verbose
     \\
 , .{
-    .default_address = config.address,
-    .default_port = config.port,
+    .default_address = constants.address,
+    .default_port = constants.port,
 });
 
 pub const Command = union(enum) {
@@ -206,17 +206,17 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                     .cache_accounts = parse_size_to_count(
                         tigerbeetle.Account,
                         cache_accounts,
-                        config.cache_accounts_max,
+                        constants.cache_accounts_max,
                     ),
                     .cache_transfers = parse_size_to_count(
                         tigerbeetle.Transfer,
                         cache_transfers,
-                        config.cache_transfers_max,
+                        constants.cache_transfers_max,
                     ),
                     .cache_transfers_posted = parse_size_to_count(
                         u256, // TODO(#264): Use actual type here, once exposed.
                         cache_transfers_posted,
-                        config.cache_transfers_posted_max,
+                        constants.cache_transfers_posted_max,
                     ),
                     .path = path orelse fatal("required: <path>", .{}),
                 },
@@ -255,11 +255,11 @@ fn parse_cluster(raw_cluster: []const u8) u32 {
 
 /// Parse and allocate the addresses returning a slice into that array.
 fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []net.Address {
-    return vsr.parse_addresses(allocator, raw_addresses, config.replicas_max) catch |err| switch (err) {
+    return vsr.parse_addresses(allocator, raw_addresses, constants.replicas_max) catch |err| switch (err) {
         error.AddressHasTrailingComma => fatal("--addresses: invalid trailing comma", .{}),
         error.AddressLimitExceeded => {
             fatal("--addresses: too many addresses, at most {d} are allowed", .{
-                config.replicas_max,
+                constants.replicas_max,
             });
         },
         error.AddressHasMoreThanOneColon => {
@@ -366,7 +366,7 @@ fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime defau
 }
 
 fn parse_replica(raw_replica: []const u8) u8 {
-    comptime assert(config.replicas_max <= std.math.maxInt(u8));
+    comptime assert(constants.replicas_max <= std.math.maxInt(u8));
     const replica = fmt.parseUnsigned(u8, raw_replica, 10) catch |err| switch (err) {
         error.Overflow => fatal("--replica: value exceeds an 8-bit unsigned integer", .{}),
         error.InvalidCharacter => fatal("--replica: value contains an invalid character", .{}),

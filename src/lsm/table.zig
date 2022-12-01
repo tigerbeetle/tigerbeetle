@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
 const bloom_filter = @import("bloom_filter.zig");
@@ -96,9 +96,9 @@ pub fn TableType(
             }
         };
 
-        const block_size = config.block_size;
-        const BlockPtr = *align(config.sector_size) [block_size]u8;
-        const BlockPtrConst = *align(config.sector_size) const [block_size]u8;
+        const block_size = constants.block_size;
+        const BlockPtr = *align(constants.sector_size) [block_size]u8;
+        const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
 
         pub const key_size = @sizeOf(Key);
         pub const value_size = @sizeOf(Value);
@@ -121,14 +121,14 @@ pub fn TableType(
 
         const address_size = @sizeOf(u64);
         const checksum_size = @sizeOf(u128);
-        const table_size_max = config.lsm_table_size_max;
+        const table_size_max = constants.lsm_table_size_max;
         const table_block_count_max = @divExact(table_size_max, block_size);
         const block_body_size = block_size - @sizeOf(vsr.Header);
 
         pub const layout = layout: {
             @setEvalBranchQuota(10_000);
 
-            assert(block_size % config.sector_size == 0);
+            assert(block_size % constants.sector_size == 0);
             assert(math.isPowerOfTwo(table_size_max));
             assert(math.isPowerOfTwo(block_size));
 
@@ -140,7 +140,7 @@ pub fn TableType(
             // X = values per block
             // Y = keys per block
             //
-            // R = config.lsm_value_to_key_layout_ratio_min
+            // R = constants.lsm_value_to_key_layout_ratio_min
             //
             // To maximize:
             //     Y
@@ -164,7 +164,7 @@ pub fn TableType(
             // Y = (body - (R / (R + 1)) * body) / key_size
             // Y = body / ((R + 1) * key_size)
             var block_keys_layout_count = math.min(
-                block_body_size / ((config.lsm_value_to_key_layout_ratio_min + 1) * key_size),
+                block_body_size / ((constants.lsm_value_to_key_layout_ratio_min + 1) * key_size),
                 block_body_size / (value_size + key_size),
             );
 
@@ -178,10 +178,10 @@ pub fn TableType(
             // the total index size is not 64 byte cache line aligned.
             assert(@sizeOf(Key) >= 4);
             assert(@sizeOf(Key) % 4 == 0);
-            if (block_keys_layout_count < @divExact(config.cache_line_size, 4)) {
+            if (block_keys_layout_count < @divExact(constants.cache_line_size, 4)) {
                 block_keys_layout_count = 0;
             }
-            assert((block_keys_layout_count * key_size) % config.cache_line_size == 0);
+            assert((block_keys_layout_count * key_size) % constants.cache_line_size == 0);
 
             const block_key_layout_size = block_keys_layout_count * key_size;
             const block_key_count =
@@ -424,7 +424,7 @@ pub fn TableType(
                 assert(math.isPowerOfTwo(data.key_count + 1));
                 assert(data.key_count + 1 == @divExact(data.key_layout_size, key_size));
                 assert(data.values_size / data.key_layout_size >=
-                    config.lsm_value_to_key_layout_ratio_min);
+                    constants.lsm_value_to_key_layout_ratio_min);
             } else {
                 assert(data.key_count == 0);
                 assert(data.key_layout_size == 0);
@@ -434,10 +434,10 @@ pub fn TableType(
             assert(data.value_count_max > 0);
             assert(data.value_count_max >= data.key_count);
             assert(@divExact(data.values_size, value_size) == data.value_count_max);
-            assert(data.values_offset % config.cache_line_size == 0);
+            assert(data.values_offset % constants.cache_line_size == 0);
             // You can have any size value you want, as long as it fits
             // neatly into the CPU cache lines :)
-            assert((data.value_count_max * value_size) % config.cache_line_size == 0);
+            assert((data.value_count_max * value_size) % constants.cache_line_size == 0);
 
             assert(data.padding_size >= 0);
             assert(block_size == @sizeOf(vsr.Header) + data.key_layout_size +
@@ -471,13 +471,13 @@ pub fn TableType(
             data_blocks_in_filter: u32 = 0,
 
             pub fn init(allocator: mem.Allocator) !Builder {
-                const index_block = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                const index_block = try allocator.alignedAlloc(u8, constants.sector_size, block_size);
                 errdefer allocator.free(index_block);
 
-                const filter_block = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                const filter_block = try allocator.alignedAlloc(u8, constants.sector_size, block_size);
                 errdefer allocator.free(filter_block);
 
-                const data_block = try allocator.alignedAlloc(u8, config.sector_size, block_size);
+                const data_block = try allocator.alignedAlloc(u8, constants.sector_size, block_size);
                 errdefer allocator.free(data_block);
 
                 return Builder{
@@ -553,7 +553,7 @@ pub fn TableType(
                 const values = values_max[0..builder.value];
                 const key_max = key_from_value(&values[values.len - 1]);
 
-                if (config.verify) {
+                if (constants.verify) {
                     var a = &values[0];
                     for (values[1..]) |*b| {
                         assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
@@ -952,13 +952,13 @@ pub fn TableType(
             );
             if (result.exact) {
                 const value = &values[result.index];
-                if (config.verify) {
+                if (constants.verify) {
                     assert(compare_keys(key, key_from_value(value)) == .eq);
                 }
                 return value;
             }
 
-            if (config.verify) {
+            if (constants.verify) {
                 for (data_block_values_used(data_block)) |*value| {
                     assert(compare_keys(key, key_from_value(value)) != .eq);
                 }

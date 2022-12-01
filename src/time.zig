@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const config = @import("./constants.zig");
 
 const os = std.os;
 const assert = std.debug.assert;

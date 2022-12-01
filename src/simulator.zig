@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const tb = @import("tigerbeetle.zig");
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
@@ -77,8 +77,8 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, config.replicas_max);
-    const client_count = 1 + random.uintLessThan(u8, config.clients_max);
+    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
+    const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
     const node_count = replica_count + client_count;
 
     const ticks_max = 50_000_000;
@@ -88,7 +88,7 @@ pub fn main() !void {
 
     // TODO: When block recovery and state transfer are implemented, remove this flag to allow
     // crashes to coexist with WAL wraps.
-    const requests_committed_max: usize = config.journal_slot_count * 3;
+    const requests_committed_max: usize = constants.journal_slot_count * 3;
 
     const cluster_options: ClusterOptions = .{
         .cluster = cluster_id,

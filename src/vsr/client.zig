@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 
@@ -69,7 +69,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
-        request_queue: RingBuffer(Request, config.client_request_queue_max, .array) = .{},
+        request_queue: RingBuffer(Request, constants.client_request_queue_max, .array) = .{},
 
         /// The number of ticks without a reply before the client resends the inflight request.
         /// Dynamically adjusted as a function of recent request round-trip time.
@@ -122,12 +122,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .request_timeout = .{
                     .name = "request_timeout",
                     .id = id,
-                    .after = config.rtt_ticks * config.rtt_multiple,
+                    .after = constants.rtt_ticks * constants.rtt_multiple,
                 },
                 .ping_timeout = .{
                     .name = "ping_timeout",
                     .id = id,
-                    .after = 30000 / config.tick_ms,
+                    .after = 30000 / constants.tick_ms,
                 },
                 .prng = std.rand.DefaultPrng.init(@truncate(u64, id)),
             };
@@ -503,7 +503,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.context == 0);
             assert(message.header.request < self.request_number);
             assert(message.header.view == 0);
-            assert(message.header.size <= config.message_size_max);
+            assert(message.header.size <= constants.message_size_max);
 
             // We set the message checksums only when sending the request for the first time,
             // which is when we have the checksum of the latest reply available to set as `parent`,

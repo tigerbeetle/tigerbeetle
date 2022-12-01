@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const format_wal_headers = @import("./journal.zig").format_wal_headers;
@@ -29,7 +29,7 @@ pub fn format(
             .cluster = cluster,
             .replica = replica,
             // TODO Convert this to a runtime arg, to cap storage.
-            .size_max = config.size_max,
+            .size_max = constants.size_max,
         },
     );
 
@@ -54,12 +54,12 @@ fn ReplicaFormatType(comptime Storage: type) type {
         ) !void {
             const header_zeroes = [_]u8{0} ** @sizeOf(Header);
             const wal_write_size_max = 4 * 1024 * 1024;
-            assert(wal_write_size_max % config.sector_size == 0);
+            assert(wal_write_size_max % constants.sector_size == 0);
 
             // Direct I/O requires the buffer to be sector-aligned.
             var wal_buffer = try allocator.allocAdvanced(
                 u8,
-                config.sector_size,
+                constants.sector_size,
                 wal_write_size_max,
                 .exact,
             );
@@ -70,7 +70,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             // first. This allows the test Storage to check the invariant "never write the redundant
             // header before the prepare".
             var wal_offset: u64 = 0;
-            while (wal_offset < config.journal_size_prepares) {
+            while (wal_offset < constants.journal_size_prepares) {
                 const size = format_wal_prepares(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
@@ -105,7 +105,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             assert(format_wal_prepares(cluster, wal_offset, wal_buffer) == 0);
 
             wal_offset = 0;
-            while (wal_offset < config.journal_size_headers) {
+            while (wal_offset < constants.journal_size_headers) {
                 const size = format_wal_headers(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
@@ -160,7 +160,7 @@ test "format" {
 
     var storage = try Storage.init(
         allocator,
-        superblock_zone_size + config.journal_size_headers + config.journal_size_prepares,
+        superblock_zone_size + constants.journal_size_headers + constants.journal_size_prepares,
         .{
             .read_latency_min = 0,
             .read_latency_mean = 0,
@@ -180,7 +180,7 @@ test "format" {
 
     // Verify the superblock sectors.
     var copy: u8 = 0;
-    while (copy < config.superblock_copies) : (copy += 1) {
+    while (copy < constants.superblock_copies) : (copy += 1) {
         const sector = storage.superblock_sector(copy);
 
         try std.testing.expectEqual(sector.copy, copy);

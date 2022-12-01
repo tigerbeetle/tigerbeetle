@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
 
 const IO = @import("io.zig").IO;
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
 const fatal = @import("cli.zig").fatal;
 const vsr = @import("vsr.zig");
 
@@ -50,10 +50,10 @@ pub const Storage = struct {
             // that we need to subtract from `target_max` to get back onto the boundary.
             var max = read.target_max;
 
-            const partial_sector_read_remainder = read.buffer.len % config.sector_size;
+            const partial_sector_read_remainder = read.buffer.len % constants.sector_size;
             if (partial_sector_read_remainder != 0) {
                 // TODO log.debug() because this is interesting, and to ensure fuzz test coverage.
-                const partial_sector_read = config.sector_size - partial_sector_read_remainder;
+                const partial_sector_read = constants.sector_size - partial_sector_read_remainder;
                 max -= partial_sector_read;
             }
 
@@ -151,7 +151,7 @@ pub const Storage = struct {
                 // physical sectors than the logical sector size, so we cannot expect `target.len`
                 // to be an exact logical sector multiple.
                 const target = read.target();
-                if (target.len > config.sector_size) {
+                if (target.len > constants.sector_size) {
                     // We tried to read more than a logical sector and failed.
                     log.err("latent sector error: offset={}, subdividing read...", .{read.offset});
 
@@ -164,10 +164,10 @@ pub const Storage = struct {
                     // These lines both implement ceiling division e.g. `((3 - 1) / 2) + 1 == 2` and
                     // require that the numerator is always greater than zero:
                     assert(target.len > 0);
-                    const target_sectors = @divFloor(target.len - 1, config.sector_size) + 1;
+                    const target_sectors = @divFloor(target.len - 1, constants.sector_size) + 1;
                     assert(target_sectors > 0);
-                    read.target_max = (@divFloor(target_sectors - 1, 2) + 1) * config.sector_size;
-                    assert(read.target_max >= config.sector_size);
+                    read.target_max = (@divFloor(target_sectors - 1, 2) + 1) * constants.sector_size;
+                    assert(read.target_max >= constants.sector_size);
 
                     // Pass 0 for `bytes_read`, we want to retry the read with smaller `target_max`:
                     self.start_read(read, 0);
@@ -227,9 +227,9 @@ pub const Storage = struct {
         // then increase `target_max` according to AIMD now that we have read successfully and
         // hopefully cleared the faulty zone.
         // We assume that `target_max` may exceed `read.buffer.len` at any time.
-        if (read.target_max == config.sector_size) {
+        if (read.target_max == constants.sector_size) {
             // TODO Add log.debug because this is interesting.
-            read.target_max += config.sector_size;
+            read.target_max += constants.sector_size;
         }
 
         self.start_read(read, bytes_read);
@@ -319,9 +319,9 @@ pub const Storage = struct {
     /// We check this only at the start of a read or write because the physical sector size may be
     /// less than our logical sector size so that partial IOs then leave us no longer aligned.
     fn assert_alignment(buffer: []const u8, offset: u64) void {
-        assert(@ptrToInt(buffer.ptr) % config.sector_size == 0);
-        assert(buffer.len % config.sector_size == 0);
-        assert(offset % config.sector_size == 0);
+        assert(@ptrToInt(buffer.ptr) % constants.sector_size == 0);
+        assert(buffer.len % constants.sector_size == 0);
+        assert(offset % constants.sector_size == 0);
     }
 
     /// Ensures that the read or write is within bounds and intends to read or write some bytes.

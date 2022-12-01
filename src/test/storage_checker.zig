@@ -22,7 +22,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage_checker);
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const SuperBlockLayout = @import("../vsr/superblock.zig").Layout;
 const SuperBlockSector = @import("../vsr/superblock.zig").SuperBlockSector;
@@ -87,7 +87,7 @@ pub const StorageChecker = struct {
         if (replica.superblock.working.vsr_state.op_compacted(replica.commit_min)) return;
 
         // TODO(Beat Compaction) Remove when deterministic beat compaction is implemented.
-        const half_measure_beat_count = @divExact(config.lsm_batch_multiple, 2);
+        const half_measure_beat_count = @divExact(constants.lsm_batch_multiple, 2);
         if ((replica.commit_min + 1) % half_measure_beat_count != 0) return;
 
         const checksum = checksum_grid(replica);
@@ -138,7 +138,7 @@ pub const StorageChecker = struct {
             const trailer_size = @field(working, @tagName(trailer.field) ++ "_size");
 
             var copy: u8 = 0;
-            while (copy < config.superblock_copies) : (copy += 1) {
+            while (copy < constants.superblock_copies) : (copy += 1) {
                 const offset_in_storage = vsr.Zone.superblock.offset(trailer.offset(copy));
                 @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer.field)) |=
                     vsr.checksum(storage.memory[offset_in_storage..][0..trailer_size]);

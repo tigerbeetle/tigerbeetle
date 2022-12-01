@@ -21,7 +21,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_workload);
 
-const config = @import("../../constants.zig");
+const constants = @import("../../constants.zig");
 const tb = @import("../../tigerbeetle.zig");
 const vsr = @import("../../vsr.zig");
 const accounting_auditor = @import("./auditor.zig");
@@ -266,7 +266,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             var transfers_delivered_recently = TransferBatchQueue.init(allocator, {});
             errdefer transfers_delivered_recently.deinit();
             try transfers_delivered_recently.ensureTotalCapacity(
-                options.auditor_options.client_count * config.client_request_queue_max,
+                options.auditor_options.client_count * constants.client_request_queue_max,
             );
 
             for (auditor.accounts) |*account, i| {
@@ -308,7 +308,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             size: usize,
         } {
             assert(client_index < self.auditor.options.client_count);
-            assert(body.len == config.message_size_max - @sizeOf(vsr.Header));
+            assert(body.len == constants.message_size_max - @sizeOf(vsr.Header));
 
             const action = action: {
                 if (!self.accounts_sent and self.random.boolean()) {
@@ -353,8 +353,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             reply_body: []align(@alignOf(vsr.Header)) const u8,
         ) void {
             assert(timestamp != 0);
-            assert(request_body.len <= config.message_size_max - @sizeOf(vsr.Header));
-            assert(reply_body.len <= config.message_size_max - @sizeOf(vsr.Header));
+            assert(request_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
+            assert(reply_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
 
             switch (operation.cast(AccountingStateMachine)) {
                 .create_accounts => self.auditor.on_create_accounts(

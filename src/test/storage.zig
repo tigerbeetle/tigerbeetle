@@ -25,7 +25,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
 const BlockType = @import("../lsm/grid.zig").BlockType;
@@ -129,7 +129,7 @@ pub const Storage = struct {
 
     allocator: mem.Allocator,
 
-    memory: []align(config.sector_size) u8,
+    memory: []align(constants.sector_size) u8,
     /// Set bits correspond to sectors that have ever been written to.
     memory_written: std.DynamicBitSetUnmanaged,
     /// Set bits correspond to faulty sectors. The underlying sectors of `memory` is left clean.
@@ -153,30 +153,30 @@ pub const Storage = struct {
         assert(options.write_latency_mean >= options.write_latency_min);
         assert(options.read_latency_mean >= options.read_latency_min);
 
-        const memory = try allocator.allocAdvanced(u8, config.sector_size, size, .exact);
+        const memory = try allocator.allocAdvanced(u8, constants.sector_size, size, .exact);
         errdefer allocator.free(memory);
         // TODO: random data
         mem.set(u8, memory, 0);
 
         var memory_written = try std.DynamicBitSetUnmanaged.initEmpty(
             allocator,
-            @divExact(size, config.sector_size),
+            @divExact(size, constants.sector_size),
         );
         errdefer memory_written.deinit(allocator);
 
         var faults = try std.DynamicBitSetUnmanaged.initEmpty(
             allocator,
-            @divExact(size, config.sector_size),
+            @divExact(size, constants.sector_size),
         );
         errdefer faults.deinit(allocator);
 
         var reads = std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than).init(allocator, {});
         errdefer reads.deinit();
-        try reads.ensureTotalCapacity(config.iops_read_max);
+        try reads.ensureTotalCapacity(constants.iops_read_max);
 
         var writes = std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
         errdefer writes.deinit();
-        try writes.ensureTotalCapacity(config.iops_write_max);
+        try writes.ensureTotalCapacity(constants.iops_write_max);
 
         return Storage{
             .allocator = allocator,
@@ -206,8 +206,8 @@ pub const Storage = struct {
 
             if (!storage.x_in_100(storage.options.crash_fault_probability)) continue;
 
-            const sector_min = @divExact(write.zone.offset(write.offset), config.sector_size);
-            const sector_max = sector_min + @divExact(write.buffer.len, config.sector_size);
+            const sector_min = @divExact(write.zone.offset(write.offset), constants.sector_size);
+            const sector_max = sector_min + @divExact(write.buffer.len, constants.sector_size);
 
             // Randomly corrupt one of the faulty sectors the operation targeted.
             // TODO: inject more realistic and varied storage faults as described above.
@@ -232,7 +232,7 @@ pub const Storage = struct {
     /// Returns the number of bytes that have been written to, assuming that (the simulated)
     /// `fallocate()` creates a sparse file.
     pub fn size_used(storage: *const Storage) usize {
-        return storage.memory_written.count() * config.sector_size;
+        return storage.memory_written.count() * constants.sector_size;
     }
 
     /// Copy state from `origin` to `storage`:
@@ -300,8 +300,8 @@ pub const Storage = struct {
         storage.verify_bounds_and_alignment(buffer, offset_in_storage);
 
         {
-            const sector_min = @divExact(offset_in_storage, config.sector_size);
-            const sector_max = @divExact(offset_in_storage + buffer.len, config.sector_size);
+            const sector_min = @divExact(offset_in_storage, constants.sector_size);
+            const sector_max = @divExact(offset_in_storage + buffer.len, constants.sector_size);
             var sector: usize = sector_min;
             while (sector < sector_max) : (sector += 1) {
                 assert(storage.memory_written.isSet(sector));
@@ -316,7 +316,7 @@ pub const Storage = struct {
             .done_at_tick = storage.ticks + storage.read_latency(),
         };
 
-        // We ensure the capacity is sufficient for config.iops_read_max in init()
+        // We ensure the capacity is sufficient for constants.iops_read_max in init()
         storage.reads.add(read) catch unreachable;
     }
 
@@ -335,13 +335,13 @@ pub const Storage = struct {
 
         if (storage.faulty) {
             // Corrupt faulty sectors.
-            const sector_min = @divExact(offset_in_storage, config.sector_size);
-            const sector_max = @divExact(offset_in_storage + read.buffer.len, config.sector_size);
+            const sector_min = @divExact(offset_in_storage, constants.sector_size);
+            const sector_max = @divExact(offset_in_storage + read.buffer.len, constants.sector_size);
             var sector: usize = sector_min;
             while (sector < sector_max) : (sector += 1) {
                 if (storage.faults.isSet(sector)) {
-                    const faulty_sector_offset = (sector - sector_min) * config.sector_size;
-                    const faulty_sector_bytes = read.buffer[faulty_sector_offset..][0..config.sector_size];
+                    const faulty_sector_offset = (sector - sector_min) * constants.sector_size;
+                    const faulty_sector_bytes = read.buffer[faulty_sector_offset..][0..constants.sector_size];
                     storage.prng.random().bytes(faulty_sector_bytes);
                 }
             }
@@ -390,7 +390,7 @@ pub const Storage = struct {
             .done_at_tick = storage.ticks + storage.write_latency(),
         };
 
-        // We ensure the capacity is sufficient for config.iops_write_max in init()
+        // We ensure the capacity is sufficient for constants.iops_write_max in init()
         storage.writes.add(write) catch unreachable;
     }
 
@@ -403,8 +403,8 @@ pub const Storage = struct {
             write.buffer,
         );
 
-        const sector_min = @divExact(offset_in_storage, config.sector_size);
-        const sector_max = @divExact(offset_in_storage + write.buffer.len, config.sector_size);
+        const sector_min = @divExact(offset_in_storage, constants.sector_size);
+        const sector_max = @divExact(offset_in_storage + write.buffer.len, constants.sector_size);
         var sector: usize = sector_min;
         while (sector < sector_max) : (sector += 1) {
             storage.faults.unset(sector);
@@ -445,15 +445,15 @@ pub const Storage = struct {
         prng: std.rand.Random,
         size: u64,
         replica_count: u8,
-        out: *[config.replicas_max]FaultyAreas,
+        out: *[constants.replicas_max]FaultyAreas,
     ) []FaultyAreas {
-        comptime assert(config.message_size_max % config.sector_size == 0);
-        const message_size_max = config.message_size_max;
+        comptime assert(constants.message_size_max % constants.sector_size == 0);
+        const message_size_max = constants.message_size_max;
 
         // We need to ensure there is message_size_max fault-free padding
         // between faulty areas of memory so that a single message
         // cannot straddle the corruptable areas of a majority of replicas.
-        comptime assert(config.replicas_max == 6);
+        comptime assert(constants.replicas_max == 6);
         switch (replica_count) {
             1 => {
                 // If there is only one replica in the cluster, storage faults are not recoverable.
@@ -522,7 +522,7 @@ pub const Storage = struct {
             // TODO Allow more than `f` faulty replicas when the fault is to the right of the
             // highest known replica.op (and to the left of the last checkpointed op).
             const majority = @divFloor(replica_count, 2) + 1;
-            const quorum_replication = std.math.min(config.quorum_replication_max, majority);
+            const quorum_replication = std.math.min(constants.quorum_replication_max, majority);
             const quorum_view_change = std.math.max(
                 replica_count - quorum_replication + 1,
                 majority,
@@ -567,17 +567,20 @@ pub const Storage = struct {
             // 2. Crash. Recover.
             // 3. `SuperBlock.open()`. The highest valid quorum is sequence=6, but there is no
             //    valid manifest.
-            const fault_count_max = @divExact(config.superblock_copies, 2) - 1;
+            const fault_count_max = @divExact(constants.superblock_copies, 2) - 1;
             assert(fault_count_max >= 1);
 
             const fault_count = blk: {
                 var fault_count: usize = 0;
                 var copy_: u8 = 0;
-                while (copy_ < config.superblock_copies) : (copy_ += 1) {
+                while (copy_ < constants.superblock_copies) : (copy_ += 1) {
                     const copy_area = SuperBlockArea{ .group = target_area.group, .copy = copy_ };
                     const copy_area_offset_zone = copy_area.to_offset();
                     const copy_area_offset_storage = zone.offset(copy_area_offset_zone);
-                    const copy_area_sector = @divExact(copy_area_offset_storage, config.sector_size);
+                    const copy_area_sector = @divExact(
+                        copy_area_offset_storage,
+                        constants.sector_size,
+                    );
                     fault_count += @boolToInt(storage.faults.isSet(copy_area_sector));
                 }
                 break :blk fault_count;
@@ -590,7 +593,7 @@ pub const Storage = struct {
 
             // Always fault the first sector of the read/write so that we can easily test
             // `storage.faults` to probe the current `fault_count`.
-            const sector = @divExact(offset_in_storage, config.sector_size);
+            const sector = @divExact(offset_in_storage, constants.sector_size);
             return SectorRange{
                 .min = sector,
                 .max = sector + 1,
@@ -599,7 +602,7 @@ pub const Storage = struct {
 
         if (zone == .wal_headers or zone == .wal_prepares) {
             const faulty_wal_areas = storage.options.faulty_wal_areas orelse return null;
-            const message_size_max = config.message_size_max;
+            const message_size_max = constants.message_size_max;
             const period = faulty_wal_areas.period;
 
             const offset_faulty =
@@ -615,8 +618,8 @@ pub const Storage = struct {
             if (offset_start >= offset_end) return null;
 
             return SectorRange{
-                .min = @divExact(offset_start, config.sector_size),
-                .max = @divExact(offset_end, config.sector_size),
+                .min = @divExact(offset_start, constants.sector_size),
+                .max = @divExact(offset_end, constants.sector_size),
             };
         }
 
@@ -627,8 +630,8 @@ pub const Storage = struct {
 
     fn fault_faulty_sectors(storage: *Storage, zone: vsr.Zone, offset_in_zone: u64, size: u64) void {
         const faulty = storage.faulty_sectors(zone, offset_in_zone, size) orelse return;
-        const target_sector_min = @divExact(zone.offset(offset_in_zone), config.sector_size);
-        const target_sector_max = target_sector_min + @divExact(size, config.sector_size);
+        const target_sector_min = @divExact(zone.offset(offset_in_zone), constants.sector_size);
+        const target_sector_max = target_sector_min + @divExact(size, constants.sector_size);
         assert(faulty.min < faulty.max);
         assert(faulty.min >= target_sector_min);
         assert(faulty.max <= target_sector_max);
@@ -644,7 +647,7 @@ pub const Storage = struct {
             log.debug("{}: corrupting sector at zone={} offset={}", .{
                 replica_index,
                 zone,
-                sector * config.sector_size - zone.offset(0),
+                sector * constants.sector_size - zone.offset(0),
             });
         }
     }
@@ -655,9 +658,9 @@ pub const Storage = struct {
 
         // Ensure that the read or write is aligned correctly for Direct I/O:
         // If this is not the case, the underlying syscall will return EINVAL.
-        assert(@mod(@ptrToInt(buffer.ptr), config.sector_size) == 0);
-        assert(@mod(buffer.len, config.sector_size) == 0);
-        assert(@mod(offset, config.sector_size) == 0);
+        assert(@mod(@ptrToInt(buffer.ptr), constants.sector_size) == 0);
+        assert(@mod(buffer.len, constants.sector_size) == 0);
+        assert(@mod(offset, constants.sector_size) == 0);
     }
 
     /// Each redundant header written must either:
@@ -671,12 +674,12 @@ pub const Storage = struct {
         // The checksum is zero when writing the header of a faulty prepare.
         if (header.checksum == 0) return;
 
-        const header_slot = header.op % config.journal_slot_count;
+        const header_slot = header.op % constants.journal_slot_count;
         const header_old = storage.wal_headers()[header_slot];
 
         const prepare_header = storage.wal_prepares()[header_slot].header;
-        const prepare_offset = vsr.Zone.wal_prepares.offset(header_slot * config.message_size_max);
-        const prepare_sector = @divExact(prepare_offset, config.sector_size);
+        const prepare_offset = vsr.Zone.wal_prepares.offset(header_slot * constants.message_size_max);
+        const prepare_sector = @divExact(prepare_offset, constants.sector_size);
 
         assert(storage.memory_written.isSet(prepare_sector));
         if (header.command == .prepare) {
@@ -701,7 +704,7 @@ pub const Storage = struct {
         // Ignore trailer writes; only check the superblock sector writes.
         if (buffer.len != @sizeOf(superblock.SuperBlockSector)) return;
         var copy_: u8 = 0;
-        while (copy_ < config.superblock_copies) : (copy_ += 1) {
+        while (copy_ < constants.superblock_copies) : (copy_ += 1) {
             if (Layout.offset_sector(copy_) == offset_in_zone) break;
         } else return;
 
@@ -740,7 +743,7 @@ pub const Storage = struct {
         manifest.decode(manifest_buffer);
 
         for (manifest.addresses[0..manifest.count]) |block_address, i| {
-            const block_offset = vsr.Zone.grid.offset((block_address - 1) * config.block_size);
+            const block_offset = vsr.Zone.grid.offset((block_address - 1) * constants.block_size);
             const block_header = mem.bytesAsValue(
                 vsr.Header,
                 storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
@@ -768,7 +771,7 @@ pub const Storage = struct {
 
     const MessageRaw = extern struct {
         header: vsr.Header,
-        body: [config.message_size_max - @sizeOf(vsr.Header)]u8,
+        body: [constants.message_size_max - @sizeOf(vsr.Header)]u8,
 
         comptime {
             assert(@sizeOf(MessageRaw) * 8 == @bitSizeOf(MessageRaw));
@@ -784,19 +787,19 @@ pub const Storage = struct {
     pub fn grid_block(
         storage: *const Storage,
         address: u64,
-    ) *align(config.sector_size) const [config.block_size]u8 {
+    ) *align(constants.sector_size) const [constants.block_size]u8 {
         assert(address > 0);
 
-        const block_offset = vsr.Zone.grid.offset((address - 1) * config.block_size);
+        const block_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
         const block_header = mem.bytesToValue(
             vsr.Header,
             storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
         );
-        assert(storage.memory_written.isSet(@divExact(block_offset, config.sector_size)));
+        assert(storage.memory_written.isSet(@divExact(block_offset, constants.sector_size)));
         assert(block_header.valid_checksum());
-        assert(block_header.size <= config.block_size);
+        assert(block_header.size <= constants.block_size);
 
-        return storage.memory[block_offset..][0..config.block_size];
+        return storage.memory[block_offset..][0..constants.block_size];
     }
 };
 
@@ -817,7 +820,7 @@ const SuperBlockArea = struct {
 
     fn from_offset(offset: u64) SuperBlockArea {
         var copy: u8 = 0;
-        while (copy < config.superblock_copies) : (copy += 1) {
+        while (copy < constants.superblock_copies) : (copy += 1) {
             for (std.enums.values(Group)) |group| {
                 const area = SuperBlockArea{ .group = group, .copy = copy };
                 if (area.to_offset() == offset) return area;
@@ -831,7 +834,7 @@ test "SuperBlockArea" {
     for (std.enums.values(SuperBlockArea.Group)) |group| {
         const area_expect = SuperBlockArea{
             .group = group,
-            .copy = prng.random().uintLessThan(u8, config.superblock_copies),
+            .copy = prng.random().uintLessThan(u8, constants.superblock_copies),
         };
         const area_actual = SuperBlockArea.from_offset(area_expect.to_offset());
 
