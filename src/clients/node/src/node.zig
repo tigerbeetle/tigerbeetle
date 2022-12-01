@@ -20,7 +20,7 @@ const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
 const MessagePool = @import("tigerbeetle/src/message_pool.zig").MessagePool;
 const IO = @import("tigerbeetle/src/io.zig").IO;
-const config = @import("tigerbeetle/src/config.zig");
+const config = @import("tigerbeetle/src/constants.zig");
 
 const vsr = @import("tigerbeetle/src/vsr.zig");
 const Header = vsr.Header;
@@ -29,7 +29,7 @@ const Client = vsr.Client(StateMachine, MessageBus);
 // TODO(jamii)
 // This is a hack used to work around the absence of tigerbeetle_build_options.
 // This should be removed once the node client is built using `zig build`.
-pub const tracer_backend: enum { none, perfetto, tracy } = .none;
+pub const tracer_backend: @import("tigerbeetle/src/config.zig").TracerBackend = .none;
 
 // Since this is running in application space, log only critical messages to reduce noise.
 pub const log_level: std.log.Level = .err;

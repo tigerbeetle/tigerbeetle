@@ -10,6 +10,8 @@ const fuzz = @import("../test/fuzz.zig");
 const superblock_quorums = @import("superblock_quorums.zig");
 const QuorumsType = superblock_quorums.QuorumsType;
 
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
+
 pub fn main() !void {
     const fuzz_args = try fuzz.parse_fuzz_args(std.testing.allocator);
     var prng = std.rand.DefaultPrng.init(fuzz_args.seed);

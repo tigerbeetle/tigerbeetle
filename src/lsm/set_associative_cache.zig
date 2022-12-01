@@ -7,7 +7,7 @@ const mem = std.mem;
 const meta = std.meta;
 const Vector = meta.Vector;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const verify = config.verify;
 

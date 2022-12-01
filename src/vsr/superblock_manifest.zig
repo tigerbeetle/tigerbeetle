@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.superblock_manifest);
 const mem = std.mem;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const util = @import("../util.zig");
 
 // TODO Compute & use the upper bound of manifest blocks (per tree) to size the trailer zone.

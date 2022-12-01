@@ -1,12 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const TracerBackend = enum {
-    none,
-    // Writes to a file (./tracer.json) which can be uploaded to https://ui.perfetto.dev/
-    perfetto,
-    // Sends data to https://github.com/wolfpld/tracy.
-    tracy,
+const config = @import("./src/config.zig");
+const ConfigBase = enum {
+    production,
+    development,
+    test_min,
+    default,
 };
 
 pub fn build(b: *std.build.Builder) void {
@@ -24,12 +24,18 @@ pub fn build(b: *std.build.Builder) void {
         options.addOption(?[]const u8, "git_commit", null);
     }
 
+    options.addOption(
+        ConfigBase,
+        "config_base",
+        b.option(ConfigBase, "config", "Base configuration.") orelse .default,
+    );
+
     const tracer_backend = b.option(
-        TracerBackend,
+        config.TracerBackend,
         "tracer-backend",
         "Which backend to use for tracing.",
-    ) orelse TracerBackend.none;
-    options.addOption(TracerBackend, "tracer_backend", tracer_backend);
+    ) orelse config.TracerBackend.none;
+    options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
     {
         const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
@@ -242,6 +248,8 @@ pub fn build(b: *std.build.Builder) void {
         fuzz_vsr_journal_format.setTarget(target);
         fuzz_vsr_journal_format.setBuildMode(mode);
         fuzz_vsr_journal_format.omit_frame_pointer = false;
+        fuzz_vsr_journal_format.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(fuzz_vsr_journal_format, tracer_backend, target);
 
         const run_cmd = fuzz_vsr_journal_format.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -368,7 +376,7 @@ fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
 
 fn link_tracer_backend(
     exe: *std.build.LibExeObjStep,
-    tracer_backend: TracerBackend,
+    tracer_backend: config.TracerBackend,
     target: std.zig.CrossTarget,
 ) void {
     switch (tracer_backend) {

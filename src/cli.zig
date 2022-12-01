@@ -7,7 +7,7 @@ const meta = std.meta;
 const net = std.net;
 const os = std.os;
 
-const config = @import("config.zig");
+const config = @import("constants.zig");
 const tigerbeetle = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
 const IO = @import("io.zig").IO;
@@ -351,7 +351,7 @@ fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime defau
         const count = math.cast(u32, count_u64) catch |err| switch (err) {
             error.Overflow => fatal("size value is too large: '{s}'", .{string}),
         };
-        if (count < 2048) fatal("size value is too small: '{s}'", .{string});
+        if (count > 0 and count < 2048) fatal("size value is too small: '{s}'", .{string});
         assert(count * @sizeOf(T) <= byte_size);
 
         result = count;
@@ -359,8 +359,8 @@ fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime defau
 
     // SetAssociativeCache requires a power-of-two cardinality and a minimal
     // size.
-    assert(result >= 2048);
-    assert(math.isPowerOfTwo(result));
+    assert(result == 0 or result >= 2048);
+    assert(result == 0 or math.isPowerOfTwo(result));
 
     return result;
 }

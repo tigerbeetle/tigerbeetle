@@ -6,7 +6,7 @@ const testing = std.testing;
 const c = @cImport(@cInclude("tb_client.h"));
 
 const util = @import("../util.zig");
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const Packet = @import("tb_client/packet.zig").Packet;
 
 const Mutex = std.Thread.Mutex;

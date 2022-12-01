@@ -2,7 +2,7 @@ const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;

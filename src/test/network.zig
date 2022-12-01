@@ -3,7 +3,7 @@ const math = std.math;
 const mem = std.mem;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const util = @import("../util.zig");
 

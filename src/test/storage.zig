@@ -25,7 +25,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
 const BlockType = @import("../lsm/grid.zig").BlockType;
@@ -172,11 +172,11 @@ pub const Storage = struct {
 
         var reads = std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than).init(allocator, {});
         errdefer reads.deinit();
-        try reads.ensureTotalCapacity(config.io_depth_read);
+        try reads.ensureTotalCapacity(config.iops_read_max);
 
         var writes = std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
         errdefer writes.deinit();
-        try writes.ensureTotalCapacity(config.io_depth_write);
+        try writes.ensureTotalCapacity(config.iops_write_max);
 
         return Storage{
             .allocator = allocator,
@@ -316,7 +316,7 @@ pub const Storage = struct {
             .done_at_tick = storage.ticks + storage.read_latency(),
         };
 
-        // We ensure the capacity is sufficient for config.io_depth_read in init()
+        // We ensure the capacity is sufficient for config.iops_read_max in init()
         storage.reads.add(read) catch unreachable;
     }
 
@@ -390,7 +390,7 @@ pub const Storage = struct {
             .done_at_tick = storage.ticks + storage.write_latency(),
         };
 
-        // We ensure the capacity is sufficient for config.io_depth_write in init()
+        // We ensure the capacity is sufficient for config.iops_write_max in init()
         storage.writes.add(write) catch unreachable;
     }
 

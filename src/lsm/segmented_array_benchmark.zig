@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const NodePoolType = @import("node_pool.zig").NodePool;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const table_count_max_for_tree = @import("tree.zig").table_count_max_for_tree;

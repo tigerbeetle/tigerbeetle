@@ -3,7 +3,7 @@ const testing = std.testing;
 const allocator = testing.allocator;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const fuzz = @import("../test/fuzz.zig");
 const vsr = @import("../vsr.zig");
 
@@ -24,6 +24,8 @@ const Forest = StateMachine.Forest;
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
+
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const FuzzOp = union(enum) {
     // TODO Test secondary index lookups and range queries.
@@ -308,11 +310,7 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
-pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
-    const fuzz_op_count = @minimum(
-        @as(usize, 1E7),
-        fuzz.random_int_exponential(random, usize, 1E6),
-    );
+pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
@@ -404,7 +402,12 @@ pub fn main() !void {
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
-    const fuzz_ops = try generate_fuzz_ops(random);
+    const fuzz_op_count = @minimum(
+        fuzz_args.events_max orelse @as(usize, 1E7),
+        fuzz.random_int_exponential(random, usize, 1E6),
+    );
+
+    const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
     try run_fuzz_ops(Storage.Options{

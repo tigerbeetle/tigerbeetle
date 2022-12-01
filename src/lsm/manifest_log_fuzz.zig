@@ -16,7 +16,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
 const vsr = @import("../vsr.zig");
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
@@ -27,6 +27,8 @@ const Grid = @import("grid.zig").GridType(Storage);
 const BlockType = @import("grid.zig").BlockType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage, TableInfo);
 const fuzz = @import("../test/fuzz.zig");
+
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const storage_size_max = data_file_size_min + config.block_size * 1024;
 
@@ -40,7 +42,12 @@ pub fn main() !void {
 
     var prng = std.rand.DefaultPrng.init(args.seed);
 
-    const events = try generate_events(allocator, prng.random());
+    const events_count = std.math.min(
+        args.events_max orelse @as(usize, 2e5),
+        fuzz.random_int_exponential(prng.random(), usize, 1e4),
+    );
+
+    const events = try generate_events(allocator, prng.random(), events_count);
     defer allocator.free(events);
 
     try run_fuzz(allocator, prng.random(), events);
@@ -122,6 +129,7 @@ const ManifestEvent = union(enum) {
 fn generate_events(
     allocator: std.mem.Allocator,
     random: std.rand.Random,
+    events_count: usize,
 ) ![]const ManifestEvent {
     const EventType = enum {
         insert_new,
@@ -132,20 +140,17 @@ fn generate_events(
         checkpoint,
     };
 
-    const events = try allocator.alloc(ManifestEvent, std.math.min(
-        @as(usize, 1e6),
-        fuzz.random_int_exponential(random, usize, 1e4),
-    ));
+    const events = try allocator.alloc(ManifestEvent, events_count);
     errdefer allocator.free(events);
 
     var event_distribution = fuzz.random_enum_distribution(random, EventType);
     // Don't remove too often, so that there are plenty of tables accumulating.
-    event_distribution.remove /= config.lsm_levels;
+    event_distribution.remove /= @intToFloat(f64, config.lsm_levels);
     // Don't compact or checkpoint too often, to approximate a real workload.
     // Additionally, checkpoint is slow because of the verification, so run it less
     // frequently.
-    event_distribution.compact /= config.lsm_levels * config.lsm_batch_multiple;
-    event_distribution.checkpoint /= config.lsm_levels * config.journal_slot_count;
+    event_distribution.compact /= @intToFloat(f64, config.lsm_levels * config.lsm_batch_multiple);
+    event_distribution.checkpoint /= @intToFloat(f64, config.lsm_levels * config.journal_slot_count);
 
     log.info("event_distribution = {d:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});

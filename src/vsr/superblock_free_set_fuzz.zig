@@ -9,6 +9,8 @@ const FreeSet = @import("./superblock_free_set.zig").FreeSet;
 const Reservation = @import("./superblock_free_set.zig").Reservation;
 const fuzz = @import("../test/fuzz.zig");
 
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
+
 pub fn main() !void {
     const allocator = std.testing.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
