@@ -11,14 +11,14 @@ import java.nio.file.StandardCopyOption;
 final class JNILoader {
 
     enum OS {
-        win,
+        windows,
         linux,
         macos;
 
         public static OS getOS() {
             String osName = System.getProperty("os.name").toLowerCase();
             if (osName.startsWith("win")) {
-                return OS.win;
+                return OS.windows;
             } else if (osName.startsWith("mac") || osName.startsWith("darwin")) {
                 return OS.macos;
             } else if (osName.startsWith("linux")) {
@@ -136,7 +136,7 @@ final class JNILoader {
 
                 return String.format("%s/lib%s.dylib", jniResources, libName);
 
-            case win:
+            case windows:
 
                 if (arch == Arch.x86_64)
                     return String.format("%s/%s.dll", jniResources, libName);
