@@ -108,6 +108,7 @@
               <!-- Excluding JNILoader platform specifics -->
               <exclude>com/tigerbeetle/JNILoader$OS.class</exclude>
               <exclude>com/tigerbeetle/JNILoader$Arch.class</exclude>
+              <exclude>com/tigerbeetle/JNILoader$Abi.class</exclude>
 
               <!-- Excluding the benchmark -->
               <exclude>benchmark/Benchmark.class</exclude>

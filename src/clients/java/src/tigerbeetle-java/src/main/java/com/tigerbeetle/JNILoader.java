@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 
@@ -18,8 +19,7 @@ final class JNILoader {
             String osName = System.getProperty("os.name").toLowerCase();
             if (osName.startsWith("win")) {
                 return OS.win;
-            } else if (osName.startsWith("macos") || osName.startsWith("osx")
-                    || osName.startsWith("darwin")) {
+            } else if (osName.startsWith("mac") || osName.startsWith("darwin")) {
                 return OS.macos;
             } else if (osName.startsWith("linux")) {
                 return OS.linux;
@@ -47,16 +47,56 @@ final class JNILoader {
         }
     }
 
+    enum Abi {
+        none,
+        gnu,
+        musl;
+
+        public static Abi getAbi(OS os) {
+            if (os != OS.linux)
+                return Abi.none;
+
+            /**
+             * We need to detect during runtime which libc the JVM uses to load the correct JNI lib.
+             *
+             * Rationale: The /proc/self/map_files/ subdirectory contains entries corresponding to
+             * memory-mapped files loaded by the JVM.
+             * https://man7.org/linux/man-pages/man5/proc.5.html: We detect a musl-based distro by
+             * checking if any library contains the name "musl".
+             *
+             * Prior art: https://github.com/xerial/sqlite-jdbc/issues/623
+             */
+
+            final var mapFiles = Paths.get("/proc/self/map_files");
+            try (var stream = Files.newDirectoryStream(mapFiles)) {
+                for (final Path path : stream) {
+                    try {
+                        final var libName = path.toRealPath().toString().toLowerCase();
+                        if (libName.contains("musl")) {
+                            return Abi.musl;
+                        }
+                    } catch (IOException exception) {
+                        continue;
+                    }
+                }
+            } catch (IOException exception) {
+            }
+
+            return Abi.gnu;
+        }
+    }
+
     private JNILoader() {}
 
     public static final String libName = "tb_jniclient";
 
     public static void loadFromJar() {
 
-        OS os = OS.getOS();
         Arch arch = Arch.getArch();
+        OS os = OS.getOS();
+        Abi abi = Abi.getAbi(os);
 
-        final String jniResourcesPath = getResourcesPath(os, arch);
+        final String jniResourcesPath = getResourcesPath(arch, os, abi);
         final String fileName = Paths.get(jniResourcesPath).getFileName().toString();
 
         File temp;
@@ -83,14 +123,14 @@ final class JNILoader {
         temp.deleteOnExit();
     }
 
-    static String getResourcesPath(OS os, Arch arch) {
+    static String getResourcesPath(Arch arch, OS os, Abi abi) {
 
-        final String jniResources = String.format("/lib/%s-%s", os, arch);
+        final String jniResources = String.format("/lib/%s-%s", arch, os);
 
         switch (os) {
             case linux:
 
-                return String.format("%s/lib%s.so", jniResources, libName);
+                return String.format("%s-%s/lib%s.so", jniResources, abi, libName);
 
             case macos:
 
