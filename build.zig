@@ -153,176 +153,65 @@ pub fn build(b: *std.build.Builder) void {
         step.dependOn(&run_cmd.step);
     }
 
-    {
-        const fuzz_ewah = b.addExecutable("fuzz_ewah", "src/ewah_fuzz.zig");
-        fuzz_ewah.setMainPkgPath("src");
-        fuzz_ewah.setTarget(target);
-        fuzz_ewah.setBuildMode(mode);
-        // Ensure that we get stack traces even in release builds.
-        fuzz_ewah.omit_frame_pointer = false;
+    inline for (.{
+        .{
+            .name = "fuzz_ewah",
+            .file = "src/ewah_fuzz.zig",
+            .description = "Fuzz EWAH codec. Args: [--seed <seed>]",
+        },
+        .{
+            .name = "fuzz_lsm_forest",
+            .file = "src/lsm/forest_fuzz.zig",
+            .description = "Fuzz the LSM forest. Args: [--seed <seed>] [--events-max <count>]",
+        },
+        .{
+            .name = "fuzz_lsm_manifest_log",
+            .file = "src/lsm/manifest_log_fuzz.zig",
+            .description = "Fuzz the ManifestLog. Args: [--seed <seed>] [--events-max <count>]",
+        },
+        .{
+            .name = "fuzz_lsm_tree",
+            .file = "src/lsm/tree_fuzz.zig",
+            .description = "Fuzz the LSM tree. Args: [--seed <seed>] [--events-max <count>]",
+        },
+        .{
+            .name = "fuzz_lsm_segmented_array",
+            .file = "src/lsm/segmented_array_fuzz.zig",
+            .description = "Fuzz the LSM segmented array. Args: [--seed <seed>]",
+        },
+        .{
+            .name = "fuzz_vsr_journal_format",
+            .file = "src/vsr/journal_format_fuzz.zig",
+            .description = "Fuzz the WAL format. Args: [--seed <seed>]",
+        },
+        .{
+            .name = "fuzz_vsr_superblock",
+            .file = "src/vsr/superblock_fuzz.zig",
+            .description = "Fuzz the SuperBlock. Args: [--seed <seed>] [--events-max <count>]",
+        },
+        .{
+            .name = "fuzz_vsr_superblock_free_set",
+            .file = "src/vsr/superblock_free_set_fuzz.zig",
+            .description = "Fuzz the SuperBlock FreeSet. Args: [--seed <seed>]",
+        },
+        .{
+            .name = "fuzz_vsr_superblock_quorums",
+            .file = "src/vsr/superblock_quorums_fuzz.zig",
+            .description = "Fuzz the SuperBlock Quorums. Args: [--seed <seed>]",
+        },
+    }) |fuzzer| {
+        const exe = b.addExecutable(fuzzer.name, fuzzer.file);
+        exe.setMainPkgPath("src");
+        exe.setTarget(target);
+        exe.setBuildMode(mode);
+        exe.omit_frame_pointer = false;
+        exe.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(exe, tracer_backend, target);
 
-        const run_cmd = fuzz_ewah.run();
+        const run_cmd = exe.run();
         if (b.args) |args| run_cmd.addArgs(args);
 
-        const run_step = b.step("fuzz_ewah", "Fuzz EWAH codec. Args: [--seed <seed>]");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const fuzz_lsm_forest = b.addExecutable("fuzz_lsm_forest", "src/lsm/forest_fuzz.zig");
-        fuzz_lsm_forest.setMainPkgPath("src");
-        fuzz_lsm_forest.setTarget(target);
-        fuzz_lsm_forest.setBuildMode(mode);
-        // Ensure that we get stack traces even in release builds.
-        fuzz_lsm_forest.omit_frame_pointer = false;
-        fuzz_lsm_forest.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(fuzz_lsm_forest, tracer_backend, target);
-
-        const run_cmd = fuzz_lsm_forest.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step("fuzz_lsm_forest", "Fuzz the LSM forest. Args: [--seed <seed>]");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const fuzz_lsm_manifest_log = b.addExecutable(
-            "fuzz_lsm_manifest_log",
-            "src/lsm/manifest_log_fuzz.zig",
-        );
-        fuzz_lsm_manifest_log.setMainPkgPath("src");
-        fuzz_lsm_manifest_log.setTarget(target);
-        fuzz_lsm_manifest_log.setBuildMode(mode);
-        fuzz_lsm_manifest_log.omit_frame_pointer = false;
-        fuzz_lsm_manifest_log.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(fuzz_lsm_manifest_log, tracer_backend, target);
-
-        const run_cmd = fuzz_lsm_manifest_log.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step("fuzz_lsm_manifest_log", "Fuzz the ManifestLog. Args: [--seed <seed>]");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const fuzz_lsm_tree = b.addExecutable("fuzz_lsm_tree", "src/lsm/tree_fuzz.zig");
-        fuzz_lsm_tree.setMainPkgPath("src");
-        fuzz_lsm_tree.setTarget(target);
-        fuzz_lsm_tree.setBuildMode(mode);
-        // Ensure that we get stack traces even in release builds.
-        fuzz_lsm_tree.omit_frame_pointer = false;
-        fuzz_lsm_tree.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(fuzz_lsm_tree, tracer_backend, target);
-
-        const run_cmd = fuzz_lsm_tree.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step("fuzz_lsm_tree", "Fuzz the LSM tree. Args: [--seed <seed>]");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const fuzz_lsm_segmented_array = b.addExecutable(
-            "fuzz_lsm_segmented_array",
-            "src/lsm/segmented_array_fuzz.zig",
-        );
-        fuzz_lsm_segmented_array.setMainPkgPath("src");
-        fuzz_lsm_segmented_array.setTarget(target);
-        fuzz_lsm_segmented_array.setBuildMode(mode);
-        // Ensure that we get stack traces even in release builds.
-        fuzz_lsm_segmented_array.omit_frame_pointer = false;
-        fuzz_lsm_segmented_array.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(fuzz_lsm_segmented_array, tracer_backend, target);
-
-        const run_cmd = fuzz_lsm_segmented_array.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step("fuzz_lsm_segmented_array", "Fuzz the LSM segmented array. Args: [--seed <seed>]");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const fuzz_vsr_journal_format = b.addExecutable(
-            "fuzz_vsr_journal_format",
-            "src/vsr/journal_format_fuzz.zig",
-        );
-        fuzz_vsr_journal_format.setMainPkgPath("src");
-        fuzz_vsr_journal_format.setTarget(target);
-        fuzz_vsr_journal_format.setBuildMode(mode);
-        fuzz_vsr_journal_format.omit_frame_pointer = false;
-        fuzz_vsr_journal_format.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(fuzz_vsr_journal_format, tracer_backend, target);
-
-        const run_cmd = fuzz_vsr_journal_format.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step(
-            "fuzz_vsr_journal_format",
-            "Fuzz the WAL format. Args: [--seed <seed>]",
-        );
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const fuzz_vsr_superblock = b.addExecutable(
-            "fuzz_vsr_superblock",
-            "src/vsr/superblock_fuzz.zig",
-        );
-        fuzz_vsr_superblock.setMainPkgPath("src");
-        fuzz_vsr_superblock.setTarget(target);
-        fuzz_vsr_superblock.setBuildMode(mode);
-        fuzz_vsr_superblock.omit_frame_pointer = false;
-        fuzz_vsr_superblock.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(fuzz_vsr_superblock, tracer_backend, target);
-
-        const run_cmd = fuzz_vsr_superblock.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step("fuzz_vsr_superblock", "Fuzz the SuperBlock. Args: [--seed <seed>]");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const fuzz_vsr_superblock_free_set = b.addExecutable(
-            "fuzz_vsr_superblock_free_set",
-            "src/vsr/superblock_free_set_fuzz.zig",
-        );
-        fuzz_vsr_superblock_free_set.setMainPkgPath("src");
-        fuzz_vsr_superblock_free_set.setTarget(target);
-        fuzz_vsr_superblock_free_set.setBuildMode(mode);
-        fuzz_vsr_superblock_free_set.omit_frame_pointer = false;
-        fuzz_vsr_superblock_free_set.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(fuzz_vsr_superblock_free_set, tracer_backend, target);
-
-        const run_cmd = fuzz_vsr_superblock_free_set.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step(
-            "fuzz_vsr_superblock_free_set",
-            "Fuzz the SuperBlock FreeSet. Args: [--seed <seed>]",
-        );
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const fuzz_vsr_superblock_quorums = b.addExecutable(
-            "fuzz_vsr_superblock_quorums",
-            "src/vsr/superblock_quorums_fuzz.zig",
-        );
-        fuzz_vsr_superblock_quorums.setMainPkgPath("src");
-        fuzz_vsr_superblock_quorums.setTarget(target);
-        fuzz_vsr_superblock_quorums.setBuildMode(mode);
-        fuzz_vsr_superblock_quorums.omit_frame_pointer = false;
-        fuzz_vsr_superblock_quorums.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(fuzz_vsr_superblock_quorums, tracer_backend, target);
-
-        const run_cmd = fuzz_vsr_superblock_quorums.run();
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step(
-            "fuzz_vsr_superblock_quorums",
-            "Fuzz the SuperBlock Quorums. Args: [--seed <seed>]",
-        );
+        const run_step = b.step(fuzzer.name, fuzzer.description);
         run_step.dependOn(&run_cmd.step);
     }
 
