@@ -3,7 +3,7 @@ const testing = std.testing;
 const allocator = testing.allocator;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const fuzz = @import("../test/fuzz.zig");
 const vsr = @import("../vsr.zig");
 
@@ -33,6 +33,8 @@ const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
+
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const Key = packed struct {
     id: u64 align(@alignOf(u64)),
@@ -90,12 +92,12 @@ const Environment = struct {
         1024 * 1024 * 1024;
 
     const node_count = 1024;
-    // This is the smallest size that set_associative_cache will allow us.
-    const cache_entries_max = 2048;
     const batch_size_max = config.message_size_max - @sizeOf(vsr.Header);
     const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
     const tree_options = Tree.Options{
         .commit_entries_max = commit_entries_max,
+        // This is the smallest size that set_associative_cache will allow us.
+        .cache_entries_max = 2048,
     };
 
     const puts_since_compact_max = commit_entries_max;
@@ -125,7 +127,6 @@ const Environment = struct {
     superblock_context: SuperBlock.Context = undefined,
     grid: Grid,
     node_pool: NodePool,
-    cache: Tree.TableMutable.ValuesCache,
     tree: Tree,
     // We need @fieldParentPtr() of tree, so we can't use an optional Tree.
     tree_exists: bool,
@@ -151,9 +152,6 @@ const Environment = struct {
         env.node_pool = try NodePool.init(allocator, node_count);
         errdefer env.node_pool.deinit(allocator);
 
-        env.cache = try Tree.TableMutable.ValuesCache.init(allocator, cache_entries_max);
-        errdefer env.cache.deinit(allocator);
-
         // Tree must be initialized with an open superblock.
         env.tree = undefined;
         env.tree_exists = false;
@@ -168,7 +166,6 @@ const Environment = struct {
             env.tree.deinit(allocator);
             env.tree_exists = false;
         }
-        env.cache.deinit(allocator);
         env.node_pool.deinit(allocator);
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
@@ -223,7 +220,7 @@ const Environment = struct {
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
         env.change_state(.init, .superblock_open);
-        env.tree = Tree.init(allocator, &env.node_pool, &env.grid, &env.cache, tree_options) catch unreachable;
+        env.tree = Tree.init(allocator, &env.node_pool, &env.grid, tree_options) catch unreachable;
         env.tree_exists = true;
         env.tree.open(tree_open_callback);
     }
@@ -360,18 +357,15 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
-        8
+        //8
+        100 * config.lsm_growth_factor * Environment.tree_options.cache_entries_max
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
-        Environment.cache_entries_max;
+        config.lsm_growth_factor * Environment.tree_options.cache_entries_max;
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
-pub fn generate_fuzz_ops(random: std.rand.Random) ![]const FuzzOp {
-    const fuzz_op_count = @minimum(
-        @as(usize, 1E7),
-        fuzz.random_int_exponential(random, usize, 1E6),
-    );
+pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
@@ -449,7 +443,12 @@ pub fn main() !void {
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
-    const fuzz_ops = try generate_fuzz_ops(random);
+    const fuzz_op_count = @minimum(
+        fuzz_args.events_max orelse @as(usize, 1E7),
+        fuzz.random_int_exponential(random, usize, 1E6),
+    );
+
+    const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
     const storage_options = .{

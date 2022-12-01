@@ -26,7 +26,7 @@ const mem = std.mem;
 
 const log = std.log.scoped(.manifest_log);
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const util = @import("../util.zig");
 

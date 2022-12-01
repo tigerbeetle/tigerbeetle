@@ -14,7 +14,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock);
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const util = @import("../util.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../test/storage.zig").Storage;
@@ -26,18 +26,21 @@ const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../test/fuzz.zig");
 
-/// Total calls to checkpoint() + view_change().
-const transitions_count_total = 10;
+pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
+
 const cluster = 0;
 
 pub fn main() !void {
     const allocator = std.testing.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
-    try run_fuzz(allocator, args.seed);
+    // Total calls to checkpoint() + view_change().
+    const transitions_count_total = args.events_max orelse 10;
+
+    try run_fuzz(allocator, args.seed, transitions_count_total);
 }
 
-fn run_fuzz(allocator: std.mem.Allocator, seed: u64) !void {
+fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: usize) !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 

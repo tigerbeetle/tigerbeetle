@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const tb = @import("tigerbeetle.zig");
-const config = @import("config.zig");
+const config = @import("constants.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
@@ -31,11 +31,8 @@ const log_state_transitions_only = builtin.mode != .Debug;
 
 const log_simulator = std.log.scoped(.simulator);
 
-/// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
+/// You can fine tune your log levels even further (debug/info/warn/err):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
-
-/// Modifies compile-time constants on "config.zig".
-pub const deployment_environment = .simulation;
 
 const cluster_id = 0;
 
@@ -44,10 +41,6 @@ var state_checker: *StateChecker = undefined;
 var storage_checker: *StorageChecker = undefined;
 
 pub fn main() !void {
-    comptime {
-        assert(config.deployment_environment == .simulation);
-    }
-
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
     log_buffer.unbuffered_writer = std.io.getStdErr().writer();
 

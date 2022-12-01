@@ -5,7 +5,7 @@ const mem = std.mem;
 const DynamicBitSetUnmanaged = std.bit_set.DynamicBitSetUnmanaged;
 const MaskInt = DynamicBitSetUnmanaged.MaskInt;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const ewah = @import("../ewah.zig").ewah(usize);
 const div_ceil = @import("../util.zig").div_ceil;
@@ -404,7 +404,8 @@ fn bit_set_masks(bit_set: DynamicBitSetUnmanaged) []usize {
 }
 
 test "FreeSet block shard count" {
-    const blocks_in_tb = (1 << 40) / config.block_size;
+    if (config.block_size != 64 * 1024) return;
+    const blocks_in_tb = @divExact(1 << 40, config.block_size);
     try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
     try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - FreeSet.shard_size);
     try test_block_shards_count(1, FreeSet.shard_size); // Must be at least one index bit.

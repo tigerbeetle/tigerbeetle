@@ -968,7 +968,6 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
             return .{
                 .accounts = .{
-                    .cache_entries_max = options.cache_entries_accounts,
                     .prefetch_entries_max = std.math.max(
                         // create_account()/lookup_account() looks up 1 account per item.
                         batch_accounts_max,
@@ -977,13 +976,17 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                         2 * batch_transfers_max,
                     ),
                     .tree_options_object = .{
+                        .cache_entries_max = options.cache_entries_accounts,
                         .commit_entries_max = math.max(
                             batch_accounts_max,
                             // ×2 because creating a transfer will update 2 accounts.
                             2 * batch_transfers_max,
                         ),
                     },
-                    .tree_options_id = .{ .commit_entries_max = batch_accounts_max },
+                    .tree_options_id = .{
+                        .cache_entries_max = options.cache_entries_accounts,
+                        .commit_entries_max = batch_accounts_max,
+                    },
                     .tree_options_index = .{
                         .user_data = .{ .commit_entries_max = batch_accounts_max },
                         .ledger = .{ .commit_entries_max = batch_accounts_max },
@@ -1021,11 +1024,16 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                     },
                 },
                 .transfers = .{
-                    .cache_entries_max = options.cache_entries_transfers,
                     // *2 to fetch pending and post/void transfer.
                     .prefetch_entries_max = 2 * batch_transfers_max,
-                    .tree_options_object = .{ .commit_entries_max = batch_transfers_max },
-                    .tree_options_id = .{ .commit_entries_max = batch_transfers_max },
+                    .tree_options_object = .{
+                        .cache_entries_max = options.cache_entries_transfers,
+                        .commit_entries_max = batch_transfers_max,
+                    },
+                    .tree_options_id = .{
+                        .cache_entries_max = options.cache_entries_transfers,
+                        .commit_entries_max = batch_transfers_max,
+                    },
                     .tree_options_index = .{
                         .debit_account_id = .{ .commit_entries_max = batch_transfers_max },
                         .credit_account_id = .{ .commit_entries_max = batch_transfers_max },
@@ -1112,7 +1120,7 @@ const TestContext = struct {
         // because the test never compacts.
         .message_body_size_max = message_body_size_max,
     });
-    const message_body_size_max = 256 * @sizeOf(Account);
+    const message_body_size_max = 32 * @sizeOf(Account);
 
     storage: Storage,
     message_pool: MessagePool,

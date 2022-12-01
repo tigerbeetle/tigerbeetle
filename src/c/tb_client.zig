@@ -26,7 +26,7 @@ pub const tb_completion_t = fn (
     result_len: u32,
 ) callconv(.C) void;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const Storage = @import("../storage.zig").Storage;
 const MessageBus = @import("../message_bus.zig").MessageBusClient;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{

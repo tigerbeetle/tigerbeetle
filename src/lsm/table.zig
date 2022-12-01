@@ -3,7 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
 const bloom_filter = @import("bloom_filter.zig");
@@ -561,8 +561,9 @@ pub fn TableType(
                     }
                 }
 
-                assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
                 if (data.key_count > 0) {
+                    assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
+
                     const key_layout_bytes = @alignCast(
                         @alignOf(Key),
                         block[data.key_layout_offset..][0..data.key_layout_size],
@@ -919,22 +920,26 @@ pub fn TableType(
         }
 
         pub fn data_block_search(data_block: BlockPtrConst, key: Key) ?*const Value {
-            assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
-            const key_layout_bytes = @alignCast(
-                @alignOf(Key),
-                data_block[data.key_layout_offset..][0..data.key_layout_size],
-            );
-            const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
+            const values = blk: {
+                if (data.key_count == 0) break :blk data_block_values_used(data_block);
 
-            const e = eytzinger(data.key_count, data.value_count_max);
-            const values = e.search_values(
-                Key,
-                Value,
-                compare_keys,
-                key_layout,
-                data_block_values_used(data_block),
-                key,
-            );
+                assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
+                const key_layout_bytes = @alignCast(
+                    @alignOf(Key),
+                    data_block[data.key_layout_offset..][0..data.key_layout_size],
+                );
+                const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
+
+                const e = eytzinger(data.key_count, data.value_count_max);
+                break :blk e.search_values(
+                    Key,
+                    Value,
+                    compare_keys,
+                    key_layout,
+                    data_block_values_used(data_block),
+                    key,
+                );
+            };
 
             const result = binary_search.binary_search_values(
                 Key,

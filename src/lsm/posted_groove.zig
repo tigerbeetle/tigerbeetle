@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const TableType = @import("table.zig").TableType;
 const TreeType = @import("tree.zig").TreeType;
@@ -75,7 +75,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         const PrefetchIDs = std.AutoHashMapUnmanaged(u128, void);
         const PrefetchObjects = std.AutoHashMapUnmanaged(u128, bool); // true:posted, false:voided
 
-        cache: *Tree.TableMutable.ValuesCache,
         tree: Tree,
 
         /// Object IDs enqueued to be prefetched.
@@ -110,19 +109,12 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             grid: *Grid,
             options: Options,
         ) !PostedGroove {
-            // Cache is heap-allocated to pass a pointer into the Object tree.
-            const cache = try allocator.create(Tree.TableMutable.ValuesCache);
-            errdefer allocator.destroy(cache);
-
-            cache.* = try Tree.TableMutable.ValuesCache.init(allocator, options.cache_entries_max);
-            errdefer cache.deinit(allocator);
-
             var tree = try Tree.init(
                 allocator,
                 node_pool,
                 grid,
-                cache,
                 .{
+                    .cache_entries_max = options.cache_entries_max,
                     .commit_entries_max = options.commit_entries_max,
                 },
             );
@@ -137,7 +129,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             errdefer prefetch_objects.deinit(allocator);
 
             return PostedGroove{
-                .cache = cache,
                 .tree = tree,
 
                 .prefetch_ids = prefetch_ids,
@@ -148,8 +139,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 
         pub fn deinit(groove: *PostedGroove, allocator: mem.Allocator) void {
             groove.tree.deinit(allocator);
-            groove.cache.deinit(allocator);
-            allocator.destroy(groove.cache);
 
             groove.prefetch_ids.deinit(allocator);
             groove.prefetch_objects.deinit(allocator);

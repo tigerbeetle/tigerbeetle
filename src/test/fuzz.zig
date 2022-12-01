@@ -64,14 +64,18 @@ pub fn random_enum(
 
 pub const FuzzArgs = struct {
     seed: u64,
+    events_max: ?usize,
 };
 
 /// Parse common command-line arguments to fuzzers:
 ///
 ///    [--seed u64]
 ///        Sets the seed used for the random number generator.
+///    [--events-max usize]
+///        Override the fuzzer's default maximum number of generated events.
 pub fn parse_fuzz_args(allocator: mem.Allocator) !FuzzArgs {
     var seed: ?u64 = null;
+    var events_max: ?usize = null;
 
     var args = std.process.args();
 
@@ -96,6 +100,20 @@ pub fn parse_fuzz_args(allocator: mem.Allocator) !FuzzArgs {
                 "Could not parse \"{}\" as an integer seed: {}",
                 .{ std.zig.fmtEscapes(seed_string), err },
             );
+        } else if (std.mem.eql(u8, arg, "--events-max")) {
+            const events_string_or_err = args.next(allocator) orelse
+                std.debug.panic("Expected an argument to --events-max", .{});
+            const events_string = try events_string_or_err;
+            defer allocator.free(events_string);
+
+            if (events_max != null) {
+                std.debug.panic("Received more than one \"--events-max\"", .{});
+            }
+            events_max = std.fmt.parseInt(usize, events_string, 10) catch |err|
+                std.debug.panic(
+                "Could not parse \"{}\" as an integer events-max: {}",
+                .{ std.zig.fmtEscapes(events_string), err },
+            );
         } else {
             // When run with `--test-cmd`,
             // `zig run` also passes the location of the zig binary as an extra arg.
@@ -117,5 +135,6 @@ pub fn parse_fuzz_args(allocator: mem.Allocator) !FuzzArgs {
 
     return FuzzArgs{
         .seed = seed.?,
+        .events_max = events_max,
     };
 }

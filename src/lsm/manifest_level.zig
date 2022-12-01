@@ -4,7 +4,7 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const lsm = @import("tree.zig");
 const binary_search = @import("binary_search.zig");
 

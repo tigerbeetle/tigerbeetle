@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 
 const TableType = @import("table.zig").TableType;
 const TreeType = @import("tree.zig").TreeType;
@@ -404,12 +404,8 @@ pub fn GrooveType(
         join_pending: usize = 0,
         join_callback: ?Callback = null,
 
-        objects_cache: *ObjectTree.TableMutable.ValuesCache,
         objects: ObjectTree,
-
-        ids_cache: *IdTree.TableMutable.ValuesCache,
         ids: IdTree,
-
         indexes: IndexTrees,
 
         /// Object IDs enqueued to be prefetched.
@@ -428,10 +424,6 @@ pub fn GrooveType(
         prefetch_snapshot: ?u64,
 
         pub const Options = struct {
-            /// TODO Improve unit in this name to make more clear what should be passed.
-            /// For example, is this a size in bytes or a count in objects? It's a count in objects,
-            /// but the name poorly reflects this.
-            cache_entries_max: u32,
             /// The maximum number of objects that might be prefetched by a batch.
             prefetch_entries_max: u32,
 
@@ -446,38 +438,19 @@ pub fn GrooveType(
             grid: *Grid,
             options: Options,
         ) !Groove {
-            // Cache is heap-allocated to pass a pointer into the Object tree.
-            const objects_cache = try allocator.create(ObjectTree.TableMutable.ValuesCache);
-            errdefer allocator.destroy(objects_cache);
-
-            objects_cache.* = try ObjectTree.TableMutable.ValuesCache.init(
-                allocator,
-                options.cache_entries_max,
-            );
-            errdefer objects_cache.deinit(allocator);
-
             // Intialize the object LSM tree.
             var object_tree = try ObjectTree.init(
                 allocator,
                 node_pool,
                 grid,
-                objects_cache,
                 options.tree_options_object,
             );
             errdefer object_tree.deinit(allocator);
-
-            // Cache is heap-allocated to pass a pointer into the ID tree.
-            const ids_cache = try allocator.create(IdTree.TableMutable.ValuesCache);
-            errdefer allocator.destroy(ids_cache);
-
-            ids_cache.* = try IdTree.TableMutable.ValuesCache.init(allocator, options.cache_entries_max);
-            errdefer ids_cache.deinit(allocator);
 
             var id_tree = try IdTree.init(
                 allocator,
                 node_pool,
                 grid,
-                ids_cache,
                 options.tree_options_id,
             );
             errdefer id_tree.deinit(allocator);
@@ -494,11 +467,13 @@ pub fn GrooveType(
 
             // Initialize index LSM trees.
             inline for (std.meta.fields(IndexTrees)) |field| {
+                // No value cache for index trees, since they only do range queries.
+                assert(@field(options.tree_options_index, field.name).cache_entries_max == 0);
+
                 @field(index_trees, field.name) = try field.field_type.init(
                     allocator,
                     node_pool,
                     grid,
-                    null, // No value cache for index trees, since they only do range queries.
                     @field(options.tree_options_index, field.name),
                 );
                 index_trees_initialized += 1;
@@ -513,12 +488,8 @@ pub fn GrooveType(
             errdefer prefetch_objects.deinit(allocator);
 
             return Groove{
-                .objects_cache = objects_cache,
                 .objects = object_tree,
-
-                .ids_cache = ids_cache,
                 .ids = id_tree,
-
                 .indexes = index_trees,
 
                 .prefetch_ids = prefetch_ids,
@@ -533,12 +504,7 @@ pub fn GrooveType(
             }
 
             groove.objects.deinit(allocator);
-            groove.objects_cache.deinit(allocator);
-            allocator.destroy(groove.objects_cache);
-
             groove.ids.deinit(allocator);
-            groove.ids_cache.deinit(allocator);
-            allocator.destroy(groove.ids_cache);
 
             groove.prefetch_ids.deinit(allocator);
             groove.prefetch_objects.deinit(allocator);

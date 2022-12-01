@@ -9,7 +9,7 @@ const os = std.os;
 const log = std.log.scoped(.tree);
 const tracer = @import("../tracer.zig");
 
-const config = @import("../config.zig");
+const config = @import("../constants.zig");
 const div_ceil = @import("../util.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
@@ -107,6 +107,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
         table_mutable: TableMutable,
         table_immutable: TableImmutable,
+        values_cache: ?*TableMutable.ValuesCache,
 
         manifest: Manifest,
 
@@ -168,17 +169,34 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             /// However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
             /// some of these accounts may exist, requiring a remove/put to update the index.
             commit_entries_max: u32,
+            /// The number of objects to cache in the set-associative value cache.
+            cache_entries_max: u32 = 0,
         };
 
         pub fn init(
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            values_cache: ?*TableMutable.ValuesCache,
             options: Options,
         ) !Tree {
             assert(options.commit_entries_max > 0);
             assert(grid.superblock.opened);
+
+            var values_cache: ?*TableMutable.ValuesCache = null;
+
+            if (options.cache_entries_max > 0) {
+                // Cache is heap-allocated to pass a pointer into the mutable table.
+                values_cache = try allocator.create(TableMutable.ValuesCache);
+            }
+            errdefer if (values_cache) |c| allocator.destroy(c);
+
+            if (options.cache_entries_max > 0) {
+                values_cache.?.* = try TableMutable.ValuesCache.init(
+                    allocator,
+                    options.cache_entries_max,
+                );
+            }
+            errdefer if (values_cache) |c| c.deinit(allocator);
 
             var table_mutable = try TableMutable.init(allocator, values_cache, options.commit_entries_max);
             errdefer table_mutable.deinit(allocator);
@@ -211,6 +229,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .options = options,
                 .table_mutable = table_mutable,
                 .table_immutable = table_immutable,
+                .values_cache = values_cache,
                 .manifest = manifest,
                 .compaction_table_immutable = compaction_table_immutable,
                 .compaction_table = compaction_table,
@@ -233,6 +252,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tree.table_mutable.deinit(allocator);
             tree.table_immutable.deinit(allocator);
             tree.manifest.deinit(allocator);
+
+            if (tree.values_cache) |cache| {
+                cache.deinit(allocator);
+                allocator.destroy(cache);
+            }
         }
 
         pub fn put(tree: *Tree, value: *const Value) void {
