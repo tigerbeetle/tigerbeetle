@@ -4,7 +4,7 @@ const allocator = testing.allocator;
 const assert = std.debug.assert;
 const os = std.os;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.lsm_forest_test);
 
@@ -14,7 +14,7 @@ const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../storage.zig").Storage;
 const IO = @import("../io.zig").IO;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = config.message_body_size_max,
+    .message_body_size_max = constants.message_body_size_max,
 });
 
 const GridType = @import("grid.zig").GridType;
@@ -330,7 +330,7 @@ const Environment = struct {
         var crash_probability = std.rand.DefaultPrng.init(1337);
 
         var iter: usize = 0;
-        while (iter < (accounts_to_insert_per_op * config.lsm_batch_multiple * iterations)) : (iter += 1) {
+        while (iter < (accounts_to_insert_per_op * constants.lsm_batch_multiple * iterations)) : (iter += 1) {
             // Insert a bunch of accounts
 
             var i: u32 = 0;
@@ -373,8 +373,8 @@ const Environment = struct {
 
             // Checkpoint when the forest finishes compaction.
             // Don't repeat a checkpoint (commit_min must always advance).
-            const checkpoint_op = op -| config.lsm_batch_multiple;
-            if (checkpoint_op % config.lsm_batch_multiple == config.lsm_batch_multiple - 1 and
+            const checkpoint_op = op -| constants.lsm_batch_multiple;
+            if (checkpoint_op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
                 checkpoint_op != env.superblock.staging.vsr_state.commit_min)
             {
                 // Checkpoint the forest then superblock
@@ -385,7 +385,7 @@ const Environment = struct {
                 const checkpointed = inserted.items[0 .. checkpoint_op * accounts_to_insert_per_op];
                 const uncommitted = inserted.items[checkpointed.len..];
                 log.debug("checkpointed={d} uncommitted={d}", .{ checkpointed.len, uncommitted.len });
-                assert(uncommitted.len == config.lsm_batch_multiple * accounts_to_insert_per_op);
+                assert(uncommitted.len == constants.lsm_batch_multiple * accounts_to_insert_per_op);
 
                 // Randomly initiate a crash
                 if (crash_probability.random().uintLessThanBiased(u32, 100) >= 50) {

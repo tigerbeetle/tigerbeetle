@@ -26,7 +26,7 @@ const mem = std.mem;
 
 const log = std.log.scoped(.manifest_log);
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const util = @import("../util.zig");
 
@@ -66,7 +66,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         comptime {
             // Bit 7 is reserved to indicate whether the event is an insert or remove.
-            assert(config.lsm_levels <= math.maxInt(u7) + 1);
+            assert(constants.lsm_levels <= math.maxInt(u7) + 1);
 
             assert(@sizeOf(Label) == @sizeOf(u8));
 
@@ -107,7 +107,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         comptime {
             assert(blocks_count_max >= 3);
-            assert(blocks_count_max == 3 or config.block_size < 64 * 1024);
+            assert(blocks_count_max == 3 or constants.block_size < 64 * 1024);
         }
 
         superblock: *SuperBlock,
@@ -153,8 +153,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 errdefer for (blocks[0..i]) |b| allocator.free(b);
 
                 const block_slice =
-                    try allocator.alignedAlloc(u8, config.sector_size, config.block_size);
-                block.* = block_slice[0..config.block_size];
+                    try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
+                block.* = block_slice[0..constants.block_size];
             }
             errdefer for (blocks) |b| allocator.free(b);
 
@@ -296,7 +296,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         fn append(manifest_log: *ManifestLog, label: Label, table: *const TableInfo) void {
             assert(manifest_log.opened);
-            assert(label.level < config.lsm_levels);
+            assert(label.level < constants.lsm_levels);
             assert(table.address > 0);
             assert(table.snapshot_min > 0);
             assert(table.snapshot_max > table.snapshot_min);
@@ -673,7 +673,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             assert(BlockType.from(header.operation) == .manifest);
 
-            if (config.verify) {
+            if (constants.verify) {
                 assert(header.valid_checksum());
                 assert(header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size]));
             }
@@ -695,7 +695,7 @@ fn ManifestLogBlockType(comptime Storage: type, comptime TableInfo: type) type {
         const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
 
-        const block_body_size = config.block_size - @sizeOf(vsr.Header);
+        const block_body_size = constants.block_size - @sizeOf(vsr.Header);
         const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
         const entry_count_max_unaligned = @divFloor(block_body_size, entry_size);
         pub const entry_count_max = @divFloor(

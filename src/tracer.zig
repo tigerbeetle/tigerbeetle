@@ -49,8 +49,8 @@
 //!     tracer.end(&a, group, ...);
 //!     tracer.end(&b, group, ...);
 //!
-//! The tracer itself will not object to non-tree spans,
-//! but some config.tracer_backends will either refuse to open the trace or will render it weirdly.
+//! The tracer itself will not object to non-tree spans, but
+//! some constants.tracer_backends will either refuse to open the trace or will render it weirdly.
 //!
 //! If you're having trouble making your spans form a tree, feel free to just add new groups.
 
@@ -59,7 +59,7 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.tracer);
 
-const config = @import("./constants.zig");
+const constants = @import("./constants.zig");
 const Time = @import("./time.zig").Time;
 const util = @import("util.zig");
 
@@ -134,7 +134,7 @@ pub const EventGroup = union(enum) {
     }
 };
 
-usingnamespace switch (config.tracer_backend) {
+usingnamespace switch (constants.tracer_backend) {
     .none => TracerNone,
     .perfetto => TracerPerfetto,
     .tracy => TracerTracy,

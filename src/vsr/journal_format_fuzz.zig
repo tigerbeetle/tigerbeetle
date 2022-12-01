@@ -3,7 +3,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_journal_format);
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const util = @import("../util.zig");
 const vsr = @import("../vsr.zig");
 const journal = @import("./journal.zig");
@@ -19,9 +19,9 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
 
     // +10 to occasionally test formatting into a buffer larger than the total data size.
-    const write_sectors_max = @divExact(config.journal_size_headers, config.sector_size);
+    const write_sectors_max = @divExact(constants.journal_size_headers, constants.sector_size);
     const write_sectors = 1 + prng.random().uintLessThan(usize, write_sectors_max + 10);
-    const write_size = write_sectors * config.sector_size;
+    const write_size = write_sectors * constants.sector_size;
 
     log.info("write_size={} write_sectors={}", .{ write_size, write_sectors });
 
@@ -32,13 +32,13 @@ pub fn main() !void {
 pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
     assert(write_size_max > 0);
     assert(write_size_max % @sizeOf(vsr.Header) == 0);
-    assert(write_size_max % config.sector_size == 0);
+    assert(write_size_max % constants.sector_size == 0);
 
     const write = try std.testing.allocator.alloc(u8, write_size_max);
     defer std.testing.allocator.free(write);
 
     var offset: usize = 0;
-    while (offset < config.journal_size_headers) {
+    while (offset < constants.journal_size_headers) {
         const write_size = journal.format_wal_headers(cluster, offset, write);
         defer offset += write_size;
 
@@ -48,19 +48,19 @@ pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
             try verify_slot_header(slot, header);
         }
     }
-    assert(offset == config.journal_size_headers);
+    assert(offset == constants.journal_size_headers);
 }
 
 pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
     assert(write_size_max > 0);
     assert(write_size_max % @sizeOf(vsr.Header) == 0);
-    assert(write_size_max % config.sector_size == 0);
+    assert(write_size_max % constants.sector_size == 0);
 
     const write = try std.testing.allocator.alloc(u8, write_size_max);
     defer std.testing.allocator.free(write);
 
     var offset: usize = 0;
-    while (offset < config.journal_size_prepares) {
+    while (offset < constants.journal_size_prepares) {
         const write_size = journal.format_wal_prepares(cluster, offset, write);
         defer offset += write_size;
 
@@ -68,12 +68,12 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
         while (offset_checked < write_size) {
             const offset_header_next = std.mem.alignForward(
                 offset + offset_checked,
-                config.message_size_max,
+                constants.message_size_max,
             ) - offset;
 
             if (offset_checked == offset_header_next) {
                 // Message header.
-                const slot = @divExact(offset + offset_checked, config.message_size_max);
+                const slot = @divExact(offset + offset_checked, constants.message_size_max);
                 const header_bytes = write[offset_checked..][0..@sizeOf(vsr.Header)];
                 const header = std.mem.bytesToValue(vsr.Header, header_bytes);
 
@@ -92,7 +92,7 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
         }
         assert(offset_checked == write_size);
     }
-    assert(offset == config.journal_size_prepares);
+    assert(offset == constants.journal_size_prepares);
 }
 
 fn verify_slot_header(slot: usize, header: vsr.Header) !void {

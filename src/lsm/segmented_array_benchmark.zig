@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const config = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const NodePoolType = @import("node_pool.zig").NodePool;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const table_count_max_for_tree = @import("tree.zig").table_count_max_for_tree;
@@ -27,38 +27,38 @@ const configs = [_]Options{
     Options{
         .Key = u64,
         .value_size = 112,
-        .value_count = table_count_max_for_level(config.lsm_growth_factor, 1),
-        .node_size = config.lsm_manifest_node_size,
+        .value_count = table_count_max_for_level(constants.lsm_growth_factor, 1),
+        .node_size = constants.lsm_manifest_node_size,
     },
     Options{
         .Key = u64,
         .value_size = 112,
-        .value_count = table_count_max_for_level(config.lsm_growth_factor, 2),
-        .node_size = config.lsm_manifest_node_size,
+        .value_count = table_count_max_for_level(constants.lsm_growth_factor, 2),
+        .node_size = constants.lsm_manifest_node_size,
     },
     Options{
         .Key = u64,
         .value_size = 112,
-        .value_count = table_count_max_for_level(config.lsm_growth_factor, 3),
-        .node_size = config.lsm_manifest_node_size,
+        .value_count = table_count_max_for_level(constants.lsm_growth_factor, 3),
+        .node_size = constants.lsm_manifest_node_size,
     },
     Options{
         .Key = u64,
         .value_size = 112,
-        .value_count = table_count_max_for_level(config.lsm_growth_factor, 4),
-        .node_size = config.lsm_manifest_node_size,
+        .value_count = table_count_max_for_level(constants.lsm_growth_factor, 4),
+        .node_size = constants.lsm_manifest_node_size,
     },
     Options{
         .Key = u64,
         .value_size = 112,
-        .value_count = table_count_max_for_level(config.lsm_growth_factor, 5),
-        .node_size = config.lsm_manifest_node_size,
+        .value_count = table_count_max_for_level(constants.lsm_growth_factor, 5),
+        .node_size = constants.lsm_manifest_node_size,
     },
     Options{
         .Key = u64,
         .value_size = 112,
-        .value_count = table_count_max_for_level(config.lsm_growth_factor, 6),
-        .node_size = config.lsm_manifest_node_size,
+        .value_count = table_count_max_for_level(constants.lsm_growth_factor, 6),
+        .node_size = constants.lsm_manifest_node_size,
     },
 };
 

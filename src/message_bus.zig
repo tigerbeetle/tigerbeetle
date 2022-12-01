@@ -6,7 +6,7 @@ const os = std.os;
 
 const is_linux = builtin.target.os.tag == .linux;
 
-const config = @import("constants.zig");
+const constants = @import("constants.zig");
 const log = std.log.scoped(.message_bus);
 
 const vsr = @import("vsr.zig");
@@ -23,14 +23,14 @@ pub const MessageBusClient = MessageBusType(.client);
 
 fn MessageBusType(comptime process_type: vsr.ProcessType) type {
     const SendQueue = RingBuffer(*Message, switch (process_type) {
-        .replica => config.connection_send_queue_max_replica,
+        .replica => constants.connection_send_queue_max_replica,
         // A client has at most 1 in-flight request, plus pings.
-        .client => config.connection_send_queue_max_client,
+        .client => constants.connection_send_queue_max_client,
     }, .array);
 
     const tcp_sndbuf = switch (process_type) {
-        .replica => config.tcp_sndbuf_replica,
-        .client => config.tcp_sndbuf_client,
+        .replica => constants.tcp_sndbuf_replica,
+        .client => constants.tcp_sndbuf_client,
     };
 
     const Process = union(vsr.ProcessType) {
@@ -99,10 +99,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             options: Options,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
-            assert(config.connections_max > options.configuration.len);
+            assert(constants.connections_max > options.configuration.len);
             assert(@as(vsr.ProcessType, process) == process_type);
 
-            const connections = try allocator.alloc(Connection, config.connections_max);
+            const connections = try allocator.alloc(Connection, constants.connections_max);
             errdefer allocator.free(connections);
             mem.set(Connection, connections, .{});
 
@@ -140,7 +140,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             // Pre-allocate enough memory to hold all possible connections in the client map.
             if (process_type == .replica) {
-                try bus.process.clients.ensureTotalCapacity(allocator, config.connections_max);
+                try bus.process.clients.ensureTotalCapacity(allocator, constants.connections_max);
             }
 
             return bus;
@@ -174,17 +174,17 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 }
             }.set;
 
-            if (config.tcp_rcvbuf > 0) rcvbuf: {
+            if (constants.tcp_rcvbuf > 0) rcvbuf: {
                 if (is_linux) {
                     // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
-                    if (set(fd, os.SOL.SOCKET, os.SO.RCVBUFFORCE, config.tcp_rcvbuf)) |_| {
+                    if (set(fd, os.SOL.SOCKET, os.SO.RCVBUFFORCE, constants.tcp_rcvbuf)) |_| {
                         break :rcvbuf;
                     } else |err| switch (err) {
                         error.PermissionDenied => {},
                         else => |e| return e,
                     }
                 }
-                try set(fd, os.SOL.SOCKET, os.SO.RCVBUF, config.tcp_rcvbuf);
+                try set(fd, os.SOL.SOCKET, os.SO.RCVBUF, constants.tcp_rcvbuf);
             }
 
             if (tcp_sndbuf > 0) sndbuf: {
@@ -200,23 +200,23 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 try set(fd, os.SOL.SOCKET, os.SO.SNDBUF, tcp_sndbuf);
             }
 
-            if (config.tcp_keepalive) {
+            if (constants.tcp_keepalive) {
                 try set(fd, os.SOL.SOCKET, os.SO.KEEPALIVE, 1);
                 if (is_linux) {
-                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPIDLE, config.tcp_keepidle);
-                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPINTVL, config.tcp_keepintvl);
-                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPCNT, config.tcp_keepcnt);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPIDLE, constants.tcp_keepidle);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPINTVL, constants.tcp_keepintvl);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.KEEPCNT, constants.tcp_keepcnt);
                 }
             }
 
-            if (config.tcp_user_timeout_ms > 0) {
+            if (constants.tcp_user_timeout_ms > 0) {
                 if (is_linux) {
-                    try set(fd, os.IPPROTO.TCP, os.TCP.USER_TIMEOUT, config.tcp_user_timeout_ms);
+                    try set(fd, os.IPPROTO.TCP, os.TCP.USER_TIMEOUT, constants.tcp_user_timeout_ms);
                 }
             }
 
             // Set tcp no-delay
-            if (config.tcp_nodelay) {
+            if (constants.tcp_nodelay) {
                 if (is_linux) {
                     try set(fd, os.IPPROTO.TCP, os.TCP.NODELAY, 1);
                 }
@@ -224,7 +224,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             try set(fd, os.SOL.SOCKET, os.SO.REUSEADDR, 1);
             try os.bind(fd, &address.any, address.getOsSockLen());
-            try os.listen(fd, config.tcp_backlog);
+            try os.listen(fd, constants.tcp_backlog);
 
             return fd;
         }
@@ -465,8 +465,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 var attempts = &bus.replicas_connect_attempts[replica];
                 const ms = vsr.exponential_backoff_with_jitter(
                     bus.prng.random(),
-                    config.connection_delay_min_ms,
-                    config.connection_delay_max_ms,
+                    constants.connection_delay_min_ms,
+                    constants.connection_delay_max_ms,
                     attempts.*,
                 );
                 attempts.* += 1;
@@ -691,7 +691,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         return null;
                     }
 
-                    if (header.size < @sizeOf(Header) or header.size > config.message_size_max) {
+                    if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
                         log.err("header with invalid size {d} received from peer {}", .{
                             header.size,
                             connection.peer,
@@ -771,7 +771,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     const sector_ceil = vsr.sector_ceil(message.header.size);
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);
-                        assert(message.buffer.len == config.message_size_max + config.sector_size);
+                        assert(message.buffer.len == constants.message_size_max + constants.sector_size);
                         mem.set(u8, message.buffer[message.header.size..sector_ceil], 0);
                     }
                 }
@@ -862,7 +862,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(!connection.recv_submitted);
                 connection.recv_submitted = true;
 
-                assert(connection.recv_progress < config.message_size_max);
+                assert(connection.recv_progress < constants.message_size_max);
 
                 bus.io.recv(
                     *Self,
@@ -870,7 +870,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     on_recv,
                     &connection.recv_completion,
                     connection.fd,
-                    connection.recv_message.?.buffer[connection.recv_progress..config.message_size_max],
+                    connection.recv_message.?.buffer[connection.recv_progress..constants.message_size_max],
                 );
             }
 
