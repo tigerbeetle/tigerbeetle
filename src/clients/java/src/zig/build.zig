@@ -44,14 +44,13 @@ pub fn build(b: *std.build.Builder) void {
         lib.setOutputDir("../tigerbeetle-java/src/main/resources/lib/" ++ platform);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
+        lib.linkLibC();
 
         if (cross_target.os_tag.? == .windows) {
             // The linker cannot resolve these dependencies from tb_client
             // So we have to insert them manually here, or we are going to receive a "lld-link: error: undefined symbol"
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
-        } else {
-            lib.linkLibC();
         }
 
         // Hit some issue with the build cache between cross compilations:
