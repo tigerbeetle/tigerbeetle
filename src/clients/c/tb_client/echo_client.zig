@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const config = @import("../../../constants.zig");
+const constants = @import("../../../constants.zig");
 const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 
