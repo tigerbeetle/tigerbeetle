@@ -102,6 +102,7 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
         unit_tests.addOptions("tigerbeetle_build_options", options);
+        unit_tests.step.dependOn(&tb_client_header_generate.step);
         link_tracer_backend(unit_tests, tracer_backend, target);
 
         // for src/c/tb_client_header_test.zig to use cImport on tb_client.h
@@ -110,7 +111,6 @@ pub fn build(b: *std.build.Builder) void {
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
-        test_step.dependOn(&tb_client_header_generate.step);
     }
 
     {
@@ -122,12 +122,12 @@ pub fn build(b: *std.build.Builder) void {
         tb_client.setOutputDir("zig-out");
         tb_client.pie = true;
         tb_client.bundle_compiler_rt = true;
+        tb_client.step.dependOn(&tb_client_header_generate.step);
 
         tb_client.linkLibC();
 
         const build_step = b.step("tb_client", "Build C client shared library");
         build_step.dependOn(&tb_client.step);
-        build_step.dependOn(&tb_client_header_generate.step);
     }
 
     {
