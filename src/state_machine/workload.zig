@@ -21,18 +21,16 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_workload);
 
-const constants = @import("../../constants.zig");
-const tb = @import("../../tigerbeetle.zig");
-const vsr = @import("../../vsr.zig");
-const accounting_auditor = @import("./auditor.zig");
+const constants = @import("../constants.zig");
+const tb = @import("../tigerbeetle.zig");
+const vsr = @import("../vsr.zig");
+const accounting_auditor = @import("auditor.zig");
 const Auditor = accounting_auditor.AccountingAuditor;
-const IdPermutation = @import("../id.zig").IdPermutation;
-const fuzz = @import("../fuzz.zig");
+const IdPermutation = @import("../test/id.zig").IdPermutation;
+const fuzz = @import("../test/fuzz.zig");
 
 // TODO(zig) This won't be necessary in Zig 0.10.
-const PriorityQueue = @import("../priority_queue.zig").PriorityQueue;
-
-// TODO Test linked create_accounts.
+const PriorityQueue = @import("../test/priority_queue.zig").PriorityQueue;
 
 const TransferOutcome = enum {
     /// The transfer is guaranteed to commit.
@@ -177,44 +175,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     return struct {
         const Self = @This();
 
-        pub const Options = struct {
-            auditor_options: Auditor.Options,
-            transfer_id_permutation: IdPermutation,
-
-            operations: std.enums.EnumFieldStruct(Action, usize, null),
-
-            create_account_invalid_probability: u8, // ≤ 100
-            create_transfer_invalid_probability: u8, // ≤ 100
-            create_transfer_limit_probability: u8, // ≤ 100
-            create_transfer_pending_probability: u8, // ≤ 100
-            create_transfer_post_probability: u8, // ≤ 100
-            create_transfer_void_probability: u8, // ≤ 100
-            lookup_account_invalid_probability: u8, // ≤ 100
-
-            lookup_transfer: std.enums.EnumFieldStruct(enum {
-                /// Query a transfer that has either been committed or rejected.
-                delivered,
-                /// Query a transfer whose `create_transfers` is in-flight.
-                sending,
-            }, usize, null),
-
-            // Size of timespan for querying, measured in transfers
-            lookup_transfer_span_mean: usize,
-
-            account_limit_probability: u8, // ≤ 100
-
-            /// This probability is only checked for consecutive guaranteed-successful transfers.
-            linked_valid_probability: u8,
-            /// This probability is only checked for consecutive invalid transfers.
-            linked_invalid_probability: u8,
-
-            pending_timeout_mean: u64,
-
-            accounts_batch_size_min: usize,
-            accounts_batch_size_span: usize, // inclusive
-            transfers_batch_size_min: usize,
-            transfers_batch_size_span: usize, // inclusive
-        };
+        pub const Options = OptionsType(AccountingStateMachine, Action);
 
         random: std.rand.Random,
         auditor: Auditor,
@@ -781,6 +742,101 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .unknown => {},
                 }
             }
+        }
+    };
+}
+
+fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
+    return struct {
+        const Options = @This();
+
+        auditor_options: Auditor.Options,
+        transfer_id_permutation: IdPermutation,
+
+        operations: std.enums.EnumFieldStruct(Action, usize, null),
+
+        create_account_invalid_probability: u8, // ≤ 100
+        create_transfer_invalid_probability: u8, // ≤ 100
+        create_transfer_limit_probability: u8, // ≤ 100
+        create_transfer_pending_probability: u8, // ≤ 100
+        create_transfer_post_probability: u8, // ≤ 100
+        create_transfer_void_probability: u8, // ≤ 100
+        lookup_account_invalid_probability: u8, // ≤ 100
+
+        lookup_transfer: std.enums.EnumFieldStruct(enum {
+            /// Query a transfer that has either been committed or rejected.
+            delivered,
+            /// Query a transfer whose `create_transfers` is in-flight.
+            sending,
+        }, usize, null),
+
+        // Size of timespan for querying, measured in transfers
+        lookup_transfer_span_mean: usize,
+
+        account_limit_probability: u8, // ≤ 100
+
+        /// This probability is only checked for consecutive guaranteed-successful transfers.
+        linked_valid_probability: u8,
+        /// This probability is only checked for consecutive invalid transfers.
+        linked_invalid_probability: u8,
+
+        pending_timeout_mean: u64,
+
+        accounts_batch_size_min: usize,
+        accounts_batch_size_span: usize, // inclusive
+        transfers_batch_size_min: usize,
+        transfers_batch_size_span: usize, // inclusive
+
+        pub fn generate(random: std.rand.Random, options: struct {
+            client_count: usize,
+            in_flight_max: usize,
+        }) Options {
+            return .{
+                .auditor_options = .{
+                    .accounts_max = 2 + random.uintLessThan(usize, 128),
+                    .account_id_permutation = IdPermutation.generate(random),
+                    .client_count = options.client_count,
+                    .transfers_pending_max = 256,
+                    .in_flight_max = options.in_flight_max,
+                },
+                .transfer_id_permutation = IdPermutation.generate(random),
+                .operations = .{
+                    .create_accounts = 1 + random.uintLessThan(usize, 10),
+                    .create_transfers = 1 + random.uintLessThan(usize, 100),
+                    .lookup_accounts = 1 + random.uintLessThan(usize, 20),
+                    .lookup_transfers = 1 + random.uintLessThan(usize, 20),
+                },
+                .create_account_invalid_probability = 1,
+                .create_transfer_invalid_probability = 1,
+                .create_transfer_limit_probability = random.uintLessThan(u8, 101),
+                .create_transfer_pending_probability = 1 + random.uintLessThan(u8, 100),
+                .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
+                .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
+                .lookup_account_invalid_probability = 1,
+                .lookup_transfer = .{
+                    .delivered = 1 + random.uintLessThan(usize, 10),
+                    .sending = 1 + random.uintLessThan(usize, 10),
+                },
+                .lookup_transfer_span_mean = 10 + random.uintLessThan(usize, 1000),
+                .account_limit_probability = random.uintLessThan(u8, 80),
+                .linked_valid_probability = random.uintLessThan(u8, 101),
+                // 100% chance because this only applies to consecutive invalid transfers, which are rare.
+                .linked_invalid_probability = 100,
+                // TODO(Timeouts): When timeouts are implemented in the StateMachine, change this to the
+                // (commented out) value so that timeouts can actually trigger.
+                .pending_timeout_mean = std.math.maxInt(u64) / 2,
+                // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
+                .accounts_batch_size_min = 0,
+                .accounts_batch_size_span = 1 + random.uintLessThan(
+                    usize,
+                    StateMachine.constants.batch_max.create_accounts,
+                ),
+                .transfers_batch_size_min = 0,
+                .transfers_batch_size_span = 1 + random.uintLessThan(
+                    usize,
+                    StateMachine.constants.batch_max.create_transfers,
+                ),
+            };
         }
     };
 }
