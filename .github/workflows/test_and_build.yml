@@ -131,10 +131,12 @@ jobs:
   # simulator:
   #   name: 'Simulator canary'
   #   runs-on: ubuntu-latest
+  #   matrix:
+  #     state_machine: [accounting, test]
   #   steps:
   #     - uses: actions/checkout@v2
   #     - run: ./scripts/install_zig.sh
-  #     - run: zig/zig run -OReleaseSafe src/simulator.zig -- 123
+  #     - run: zig/zig run -OReleaseSafe -Dconfig-cluster-state-machine=${{matrix.state_machine}} src/simulator.zig -- 123
 
   # Verify that these build without errors:
   build-tools:
