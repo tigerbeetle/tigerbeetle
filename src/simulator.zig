@@ -17,9 +17,7 @@ const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StorageChecker = @import("test/storage_checker.zig").StorageChecker;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
 const MessageBus = @import("test/message_bus.zig").MessageBus;
-const auditor = @import("test/accounting/auditor.zig");
-const Workload = @import("test/accounting/workload.zig").WorkloadType(StateMachine);
-const Conductor = @import("test/conductor.zig").ConductorType(Client, MessageBus, StateMachine, Workload);
+const Conductor = @import("test/conductor.zig").ConductorType(Client, MessageBus, StateMachine);
 const IdPermutation = @import("test/id.zig").IdPermutation;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
@@ -154,53 +152,6 @@ pub fn main() !void {
         },
     };
 
-    const workload_options: Workload.Options = .{
-        .auditor_options = .{
-            .accounts_max = 2 + random.uintLessThan(usize, 128),
-            .account_id_permutation = random_id_permutation(random),
-            .client_count = client_count,
-            .transfers_pending_max = 256,
-            .in_flight_max = Conductor.stalled_queue_capacity,
-        },
-        .transfer_id_permutation = random_id_permutation(random),
-        .operations = .{
-            .create_accounts = 1 + random.uintLessThan(usize, 10),
-            .create_transfers = 1 + random.uintLessThan(usize, 100),
-            .lookup_accounts = 1 + random.uintLessThan(usize, 20),
-            .lookup_transfers = 1 + random.uintLessThan(usize, 20),
-        },
-        .create_account_invalid_probability = 1,
-        .create_transfer_invalid_probability = 1,
-        .create_transfer_limit_probability = random.uintLessThan(u8, 101),
-        .create_transfer_pending_probability = 1 + random.uintLessThan(u8, 100),
-        .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
-        .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
-        .lookup_account_invalid_probability = 1,
-        .lookup_transfer = .{
-            .delivered = 1 + random.uintLessThan(usize, 10),
-            .sending = 1 + random.uintLessThan(usize, 10),
-        },
-        .lookup_transfer_span_mean = 10 + random.uintLessThan(usize, 1000),
-        .account_limit_probability = random.uintLessThan(u8, 80),
-        .linked_valid_probability = random.uintLessThan(u8, 101),
-        // 100% chance because this only applies to consecutive invalid transfers, which are rare.
-        .linked_invalid_probability = 100,
-        // TODO(Timeouts): When timeouts are implemented in the StateMachine, change this to the
-        // (commented out) value so that timeouts can actually trigger.
-        .pending_timeout_mean = std.math.maxInt(u64) / 2,
-        // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
-        .accounts_batch_size_min = 0,
-        .accounts_batch_size_span = 1 + random.uintLessThan(
-            usize,
-            StateMachine.constants.batch_max.create_accounts,
-        ),
-        .transfers_batch_size_min = 0,
-        .transfers_batch_size_span = 1 + random.uintLessThan(
-            usize,
-            StateMachine.constants.batch_max.create_transfers,
-        ),
-    };
-
     output.info(
         \\
         \\          SEED={}
@@ -266,7 +217,7 @@ pub fn main() !void {
     cluster = try Cluster.create(allocator, random, cluster_options);
     defer cluster.destroy();
 
-    var workload = try Workload.init(allocator, random, workload_options);
+    var workload = try StateMachine.Workload.init(allocator, random, workload_options);
     defer workload.deinit(allocator);
 
     var conductor = try Conductor.init(allocator, random, &workload, .{
@@ -459,16 +410,6 @@ fn random_partition_mode(random: std.rand.Random) PartitionMode {
     var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 2);
     if (enumAsInt >= @enumToInt(PartitionMode.custom)) enumAsInt += 1;
     return @intToEnum(PartitionMode, enumAsInt);
-}
-
-fn random_id_permutation(random: std.rand.Random) IdPermutation {
-    return switch (random.uintLessThan(usize, 4)) {
-        0 => .{ .identity = {} },
-        1 => .{ .inversion = {} },
-        2 => .{ .zigzag = {} },
-        3 => .{ .random = random.int(u64) },
-        else => unreachable,
-    };
 }
 
 pub fn parse_seed(bytes: []const u8) u64 {

@@ -62,6 +62,16 @@ pub const IdPermutation = union(enum) {
             .random => @truncate(usize, id >> 32),
         };
     }
+
+    pub fn generate(random: std.rand.Random) IdPermutation {
+        return switch (random.uintLessThan(usize, 4)) {
+            0 => .{ .identity = {} },
+            1 => .{ .inversion = {} },
+            2 => .{ .zigzag = {} },
+            3 => .{ .random = random.int(u64) },
+            else => unreachable,
+        };
+    }
 };
 
 test "IdPermutation" {
