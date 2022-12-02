@@ -26,13 +26,14 @@ public class JNILoaderTest {
         assertEquals("/lib/aarch64-macos/libtb_jniclient.dylib", JNILoader
                 .getResourcesPath(JNILoader.Arch.aarch64, JNILoader.OS.macos, JNILoader.Abi.none));
 
-        assertEquals("/lib/x86_64-win/tb_jniclient.dll", JNILoader
-                .getResourcesPath(JNILoader.Arch.x86_64, JNILoader.OS.win, JNILoader.Abi.none));
+        assertEquals("/lib/x86_64-windows/tb_jniclient.dll", JNILoader
+                .getResourcesPath(JNILoader.Arch.x86_64, JNILoader.OS.windows, JNILoader.Abi.none));
     }
 
     @Test(expected = AssertionError.class)
     public void testUnsupportedPlatform() {
-        JNILoader.getResourcesPath(JNILoader.Arch.aarch64, JNILoader.OS.win, JNILoader.Abi.none);
+        JNILoader.getResourcesPath(JNILoader.Arch.aarch64, JNILoader.OS.windows,
+                JNILoader.Abi.none);
     }
 
 }

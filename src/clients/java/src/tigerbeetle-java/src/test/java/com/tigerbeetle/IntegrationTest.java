@@ -1227,7 +1227,7 @@ public class IntegrationTest {
 
             String exe;
             switch (JNILoader.OS.getOS()) {
-                case win:
+                case windows:
                     exe = TB_SERVER + ".exe";
                     break;
                 default:
