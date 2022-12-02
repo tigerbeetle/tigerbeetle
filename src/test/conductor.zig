@@ -36,7 +36,6 @@ pub fn ConductorType(
     comptime Client: type,
     comptime MessageBus: type,
     comptime StateMachine: type,
-    comptime Workload: type,
 ) type {
     return struct {
         const Self = @This();
@@ -51,7 +50,7 @@ pub fn ConductorType(
             constants.clients_max * constants.client_request_queue_max * 2;
 
         random: std.rand.Random,
-        workload: *Workload,
+        workload: *StateMachine.Workload,
         options: Options,
         client_id_permutation: IdPermutation,
 
@@ -90,7 +89,7 @@ pub fn ConductorType(
         pub fn init(
             allocator: std.mem.Allocator,
             random: std.rand.Random,
-            workload: *Workload,
+            workload: *StateMachine.Workload,
             options: Options,
         ) !Self {
             assert(options.replica_count >= 1);
