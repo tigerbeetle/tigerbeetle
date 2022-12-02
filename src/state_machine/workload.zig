@@ -264,7 +264,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         /// A client may build multiple requests to queue up while another is in-flight.
-        pub fn build_request(self: *Self, client_index: usize, body: []align(@alignOf(vsr.Header)) u8) struct {
+        pub fn build_request(
+            self: *Self,
+            client_index: usize,
+            body: []align(@alignOf(vsr.Header)) u8,
+        ) struct {
             operation: Operation,
             size: usize,
         } {
