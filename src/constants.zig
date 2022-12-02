@@ -24,7 +24,7 @@ pub const replicas_max = 6;
 pub const state_machine = config.cluster.state_machine;
 pub const StateMachineType = switch (config.cluster.state_machine) {
     .accounting => @import("state_machine.zig").StateMachineType,
-    .@"test" => @import("test/state_machine.zig").StateMachineType,
+    .testing => @import("test/state_machine.zig").StateMachineType,
 };
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
