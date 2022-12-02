@@ -1,10 +1,5 @@
 .vs/
 bin/
 obj/
-zig-cache/
-zig-out/
-src/TigerBeetle/native/**/*.o
-src/TigerBeetle/native/**/*.lib
-src/TigerBeetle/native/**/*.obj
-src/TigerBeetle/native/**/*.pdb
+src/TigerBeetle/native
 *tigerbeetle.benchmark
