@@ -120,7 +120,7 @@ pub const TracerBackend = enum {
 
 pub const StateMachine = enum {
     accounting,
-    @"test",
+    testing,
 };
 
 pub const configs = struct {

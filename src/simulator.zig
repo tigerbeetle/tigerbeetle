@@ -145,7 +145,7 @@ pub fn main() !void {
         },
         // TODO(dj) SimulatorType(StateMachine).init(state_machine_options)
         .state_machine_options = switch (constants.state_machine) {
-            .@"test" => .{},
+            .testing => .{},
             .accounting => .{
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = if (random.boolean()) 0 else 2048,
