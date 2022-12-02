@@ -130,6 +130,12 @@ pub fn build(b: *std.build.Builder) void {
             options,
             tracer_backend,
         );
+        dotnet_client(
+            b,
+            mode,
+            options,
+            tracer_backend,
+        );
     }
 
     {
@@ -409,6 +415,45 @@ fn java_client(
             lib.linkSystemLibrary("advapi32");
         } else {
             lib.linkLibC();
+        }
+
+        set_cache_dir(b, platform);
+
+        lib.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(lib, tracer_backend, cross_target);
+
+        build_step.dependOn(&lib.step);
+    }
+}
+
+fn dotnet_client(
+    b: *std.build.Builder,
+    mode: Mode,
+    options: *std.build.OptionsStep,
+    tracer_backend: config.TracerBackend,
+) void {
+    const build_step = b.step("dotnet_client", "Build dotnet client shared library");
+
+    // Zig cross-targets
+    const platforms = .{
+        "x86_64-linux-gnu",
+        "x86_64-macos",
+        "x86_64-windows",
+    };
+
+    inline for (platforms) |platform| {
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
+
+        const lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
+        lib.setMainPkgPath("src");
+        lib.setOutputDir("src/clients/dotnet/src/TigerBeetle/native/" ++ platform);
+        lib.setTarget(cross_target);
+        lib.setBuildMode(mode);
+        lib.linkLibC();
+
+        if (cross_target.os_tag.? == .windows) {
+            lib.linkSystemLibrary("ws2_32");
+            lib.linkSystemLibrary("advapi32");
         }
 
         set_cache_dir(b, platform);
