@@ -86,8 +86,8 @@ pub fn main() !void {
     const idle_on_probability = random.uintLessThan(u8, 20);
     const idle_off_probability = 10 + random.uintLessThan(u8, 10);
 
-    // TODO: When block recovery and state transfer are implemented, remove this flag to allow
-    // crashes to coexist with WAL wraps.
+    // The maximum number of transitions from calling `client.request()`, not including
+    // `register` messages.
     const requests_committed_max: usize = constants.journal_slot_count * 3;
 
     const cluster_options: ClusterOptions = .{
@@ -143,12 +143,15 @@ pub fn main() !void {
             .restart_probability = 0.0001,
             .restart_stability = random.uintLessThan(u32, 1_000),
         },
-        .state_machine_options = .{
-            // TODO What should these fields be set to? Can they be randomized (and with what constraints)?
-            .lsm_forest_node_count = 4096,
-            .cache_entries_accounts = 2048,
-            .cache_entries_transfers = 2048,
-            .cache_entries_posted = 2048,
+        // TODO(dj) SimulatorType(StateMachine).init(state_machine_options)
+        .state_machine_options = switch (constants.state_machine) {
+            .@"test" => .{},
+            .accounting => .{
+                .lsm_forest_node_count = 4096,
+                .cache_entries_accounts = if (random.boolean()) 0 else 2048,
+                .cache_entries_transfers = 0,
+                .cache_entries_posted = if (random.boolean()) 0 else 2048,
+            },
         },
     };
 
@@ -217,6 +220,11 @@ pub fn main() !void {
     cluster = try Cluster.create(allocator, random, cluster_options);
     defer cluster.destroy();
 
+    const workload_options = StateMachine.Workload.Options.generate(random, .{
+        .client_count = client_count,
+        .in_flight_max = Conductor.stalled_queue_capacity,
+    });
+
     var workload = try StateMachine.Workload.init(allocator, random, workload_options);
     defer workload.deinit(allocator);
 
@@ -269,9 +277,6 @@ pub fn main() !void {
         storage.faulty = replica_normal_min <= i;
     }
 
-    // The maximum number of transitions from calling `client.request()`, not including
-    // `register` messages.
-    // TODO When storage is supported, run more transitions than fit in the journal.
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         const health_options = &cluster.options.health_options;

@@ -24,11 +24,21 @@ pub fn build(b: *std.build.Builder) void {
         b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
     );
 
+    options.addOption(
+        config.StateMachine,
+        "config_cluster_state_machine",
+        b.option(
+            config.StateMachine,
+            "config-cluster-state-machine",
+            "State machine.",
+        ) orelse .accounting,
+    );
+
     const tracer_backend = b.option(
         config.TracerBackend,
         "tracer-backend",
         "Which backend to use for tracing.",
-    ) orelse config.TracerBackend.none;
+    ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
     {
