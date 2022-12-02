@@ -27,8 +27,6 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 }) type {
     return struct {
         const StateMachine = @This();
-        pub const Workload = WorkloadType(StateMachine);
-
         const Grid = @import("lsm/grid.zig").GridType(Storage);
         const GrooveType = @import("lsm/groove.zig").GrooveType;
         const ForestType = @import("lsm/forest.zig").ForestType;
@@ -50,6 +48,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             },
         );
         const PostedGroove = @import("lsm/posted_groove.zig").PostedGrooveType(Storage);
+
+        pub const Workload = WorkloadType(StateMachine);
 
         pub const Forest = ForestType(Storage, .{
             .accounts = AccountsGroove,
@@ -182,13 +182,13 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         /// Returns the header's timestamp.
         pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) u64 {
             switch (operation) {
+                .reserved => unreachable,
                 .root => unreachable,
                 .register => {},
                 .create_accounts => self.prepare_timestamps(.create_accounts, input),
                 .create_transfers => self.prepare_timestamps(.create_transfers, input),
                 .lookup_accounts => {},
                 .lookup_transfers => {},
-                else => unreachable,
             }
             return self.prepare_timestamp;
         }
