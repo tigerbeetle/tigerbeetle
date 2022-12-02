@@ -5,16 +5,17 @@ defaults:
     working-directory: ./src/clients/go
 
 on:
+  # Run CI against any commits pushed to 'main'.
   push:
     branches:
-      - '**'
-    tags:
-      - '*'
-    # paths:
-    #   - src/clients/go/**
+      - 'main'
+  # Run CI for any PRs that target 'main' when they are opened or updated.
   pull_request:
     branches:
       - 'main'
+    types:
+      - opened
+      - synchronize
 
 jobs:
   shellcheck_scripts:
