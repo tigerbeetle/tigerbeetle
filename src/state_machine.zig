@@ -8,6 +8,7 @@ const tracer = @import("tracer.zig");
 
 const tb = @import("tigerbeetle.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
+const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
 
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
@@ -26,6 +27,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 }) type {
     return struct {
         const StateMachine = @This();
+        pub const Workload = WorkloadType(StateMachine);
 
         const Grid = @import("lsm/grid.zig").GridType(Storage);
         const GrooveType = @import("lsm/groove.zig").GrooveType;

@@ -11,6 +11,8 @@ test {
     //_ = @import("vsr/clock.zig");
 
     _ = @import("state_machine.zig");
+    _ = @import("state_machine/auditor.zig");
+    _ = @import("state_machine/workload.zig");
 
     _ = @import("fifo.zig");
     _ = @import("ring_buffer.zig");
@@ -30,8 +32,6 @@ test {
     _ = @import("lsm/segmented_array.zig");
 
     _ = @import("test/id.zig");
-    _ = @import("test/accounting/auditor.zig");
-    _ = @import("test/accounting/workload.zig");
     _ = @import("test/storage.zig");
     _ = @import("test/table.zig");
 }
