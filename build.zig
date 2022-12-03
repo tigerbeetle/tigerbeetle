@@ -363,12 +363,9 @@ fn go_client(
         lib.setMainPkgPath("src");
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
+        lib.linkLibC();
         lib.pie = true;
         lib.bundle_compiler_rt = true;
-
-        if (cross_target.os_tag.? != .windows) {
-            lib.linkLibC();
-        }
 
         lib.setOutputDir("src/clients/go/pkg/native/" ++ platform);
 
@@ -409,12 +406,11 @@ fn java_client(
         lib.setOutputDir("src/clients/java/src/tigerbeetle-java/src/main/resources/lib/" ++ platform);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
+        lib.linkLibC();
 
         if (cross_target.os_tag.? == .windows) {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
-        } else {
-            lib.linkLibC();
         }
 
         set_cache_dir(b, platform);
