@@ -24,7 +24,7 @@
     "src/node.zig",
     "src/test.ts",
     "src/tigerbeetle/src/*.zig",
-    "src/tigerbeetle/src/{c,io,lsm,test,vsr}",
+    "src/tigerbeetle/src/{c,io,lsm,test,vsr,state_machine}",
     "src/tigerbeetle/scripts",
     "src/translate.zig",
     "tsconfig.json"
