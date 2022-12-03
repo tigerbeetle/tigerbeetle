@@ -117,7 +117,7 @@ comptime {
     assert(prepares_size % constants.message_size_max == 0);
 }
 
-pub fn Journal(comptime Replica: type, comptime Storage: type) type {
+pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
     return struct {
         const Self = @This();
 
