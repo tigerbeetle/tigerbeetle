@@ -334,7 +334,7 @@ fn go_client(
     header_generate_step: *std.build.Step,
     mode: Mode,
     options: *std.build.OptionsStep,
-    tracer_backend: TracerBackend,
+    tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("go_client", "Build Go client shared library");
 
@@ -385,7 +385,7 @@ fn java_client(
     b: *std.build.Builder,
     mode: Mode,
     options: *std.build.OptionsStep,
-    tracer_backend: TracerBackend,
+    tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("java_client", "Build Java client shared library");
 

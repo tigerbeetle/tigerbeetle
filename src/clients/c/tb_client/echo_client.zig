@@ -2,8 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
 
-const constants = @import("../../constants.zig");
-const vsr = @import("../../vsr.zig");
+const constants = @import("../../../constants.zig");
+const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 
 const RingBuffer = @import("../../../ring_buffer.zig").RingBuffer;
