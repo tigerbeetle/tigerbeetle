@@ -27,8 +27,10 @@ pub fn build(b: *std.build.Builder) void {
         // This should be removed once the client is built using the root `build.zig`.
         {
             const ConfigBase = enum { production, development, test_min, default };
+            const StateMachine = enum { accounting, testing };
             const TracerBackend = enum { none, perfetto, tracy };
             const dummy_options = b.addOptions();
+            dummy_options.addOption(StateMachine, "config_cluster_state_machine", .accounting);
             dummy_options.addOption(ConfigBase, "config_base", .default);
             dummy_options.addOption(TracerBackend, "tracer_backend", .none);
             var tigerbeetle_build_options = dummy_options.getPackage("tigerbeetle_build_options");
