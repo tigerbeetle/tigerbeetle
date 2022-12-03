@@ -55,6 +55,7 @@ jobs:
           key: go-binaries-${{ github.sha }}
           restore-keys: |
             go-binaries-${{ github.sha }}
+      - run: ./scripts/install.sh
       - run: go test ./...
         working-directory: ./src/clients/go
 
@@ -73,6 +74,7 @@ jobs:
           key: go-binaries-${{ github.sha }}
           restore-keys: |
             go-binaries-${{ github.sha }}
+      - run: ./scripts/install.bat
       - run: ./zgo.bat test ./...
         working-directory: ./src/clients/go
 
