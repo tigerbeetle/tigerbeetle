@@ -91,7 +91,7 @@ pub fn ReplicaType(
     return struct {
         const Self = @This();
 
-        const Journal = vsr.Journal(Self, Storage);
+        const Journal = vsr.JournalType(Self, Storage);
         const Clock = vsr.Clock(Time);
 
         /// We use this allocator during open/init and then disable it.
