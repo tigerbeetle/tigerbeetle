@@ -1891,46 +1891,6 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
     };
 }
 
-pub const BitSet = struct {
-    bits: std.DynamicBitSetUnmanaged,
-
-    /// The number of bits set (updated incrementally as bits are set or cleared):
-    count: u64 = 0,
-
-    fn init(allocator: Allocator, count: usize) !BitSet {
-        const bits = try std.DynamicBitSetUnmanaged.initEmpty(allocator, count);
-        errdefer bits.deinit(allocator);
-
-        return BitSet{ .bits = bits };
-    }
-
-    fn deinit(self: *BitSet, allocator: Allocator) void {
-        self.bits.deinit(allocator);
-    }
-
-    /// Clear the bit for a slot (idempotent):
-    pub fn clear(self: *BitSet, slot: Slot) void {
-        if (self.bits.isSet(slot.index)) {
-            self.bits.unset(slot.index);
-            self.count -= 1;
-        }
-    }
-
-    /// Whether the bit for a slot is set:
-    pub fn bit(self: *const BitSet, slot: Slot) bool {
-        return self.bits.isSet(slot.index);
-    }
-
-    /// Set the bit for a slot (idempotent):
-    pub fn set(self: *BitSet, slot: Slot) void {
-        if (!self.bits.isSet(slot.index)) {
-            self.bits.set(slot.index);
-            self.count += 1;
-            assert(self.count <= self.bits.bit_length);
-        }
-    }
-};
-
 /// @B and @C:
 /// This prepare header is corrupt.
 /// We may have a valid redundant header, but need to recover the full message.
@@ -2210,6 +2170,46 @@ test "recovery_cases" {
         if (case_match == null) @panic("no matching case");
     }
 }
+
+pub const BitSet = struct {
+    bits: std.DynamicBitSetUnmanaged,
+
+    /// The number of bits set (updated incrementally as bits are set or cleared):
+    count: u64 = 0,
+
+    fn init(allocator: Allocator, count: usize) !BitSet {
+        const bits = try std.DynamicBitSetUnmanaged.initEmpty(allocator, count);
+        errdefer bits.deinit(allocator);
+
+        return BitSet{ .bits = bits };
+    }
+
+    fn deinit(self: *BitSet, allocator: Allocator) void {
+        self.bits.deinit(allocator);
+    }
+
+    /// Clear the bit for a slot (idempotent):
+    pub fn clear(self: *BitSet, slot: Slot) void {
+        if (self.bits.isSet(slot.index)) {
+            self.bits.unset(slot.index);
+            self.count -= 1;
+        }
+    }
+
+    /// Whether the bit for a slot is set:
+    pub fn bit(self: *const BitSet, slot: Slot) bool {
+        return self.bits.isSet(slot.index);
+    }
+
+    /// Set the bit for a slot (idempotent):
+    pub fn set(self: *BitSet, slot: Slot) void {
+        if (!self.bits.isSet(slot.index)) {
+            self.bits.set(slot.index);
+            self.count += 1;
+            assert(self.count <= self.bits.bit_length);
+        }
+    }
+};
 
 /// Format part of a new WAL's Zone.wal_headers, writing to `target`.
 ///
