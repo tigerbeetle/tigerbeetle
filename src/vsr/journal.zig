@@ -60,7 +60,7 @@ comptime {
 /// - `journal.faulty`
 ///
 /// A header's slot is `header.op % constants.journal_slot_count`.
-const Slot = struct { index: u64 };
+const Slot = struct { index: usize };
 
 /// An inclusive, non-empty range of slots.
 const SlotRange = struct {
