@@ -11,7 +11,7 @@ echo "Building TigerBeetle..."
 (cd ../../.. && ./zig/zig build -Dcpu=baseline -Drelease-safe)
 (cd ../../.. && mv ./zig-out/bin/tigerbeetle .)
 echo "Building TigerBeetle Java Client"
-(cd src/tigerbeetle-java && mvn -B compile --quiet)
+mvn -B compile --quiet
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -56,7 +56,7 @@ sleep 1
 
 echo ""
 echo "Benchmarking..."
-java -cp ./src/tigerbeetle-java/target/classes benchmark/Benchmark
+java -cp ./target/classes benchmark/Benchmark
 echo ""
 
 for I in 0

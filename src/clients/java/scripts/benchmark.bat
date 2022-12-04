@@ -30,9 +30,7 @@ move .\zig-out\bin\tigerbeetle.exe .
 cd src\clients\java
 
 echo "Building TigerBeetle Java Client"
-cd .\src\tigerbeetle-java
 cmd /d /c "mvn -B compile --quiet"
-cd ..\..
 
 for /l %%i in (0, 1, 0) do (
     echo Initializing replica %%i
@@ -52,5 +50,5 @@ timeout /t 2
 
 echo.
 echo Benchmarking...
-java -cp ./src/tigerbeetle-java/target/classes benchmark/Benchmark
+java -cp ./target/classes benchmark/Benchmark
 exit /b %errorlevel%

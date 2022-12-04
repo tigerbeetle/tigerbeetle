@@ -400,10 +400,10 @@ fn java_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
-        const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/zig/client.zig", .unversioned);
+        const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
-        lib.addPackagePath("jui", "src/clients/java/src/zig//lib/jui/src/jui.zig");
-        lib.setOutputDir("src/clients/java/src/tigerbeetle-java/src/main/resources/lib/" ++ platform);
+        lib.addPackagePath("jui", "src/clients/java/lib/jui/src/jui.zig");
+        lib.setOutputDir("src/clients/java/src/main/resources/lib/" ++ platform);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
         lib.linkLibC();

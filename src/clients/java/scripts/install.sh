@@ -8,4 +8,4 @@ echo "Installing TigerBeetle..."
 (cd ../../.. && ./scripts/install.sh)
 
 echo "Building TigerBeetle Java Client..."
-(cd ./src/tigerbeetle-java && mvn -B package --quiet)
+(cd ./src && mvn -B package --quiet)
