@@ -13,6 +13,4 @@ move .\zig-out\bin\tigerbeetle.exe .
 cd src\clients\java
 
 echo "Building TigerBeetle Java Client..."
-cd .\src
 mvn -B package --quiet
-cd ..
