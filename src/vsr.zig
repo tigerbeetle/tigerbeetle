@@ -135,8 +135,8 @@ pub const Operation = enum(u8) {
 };
 
 /// Network message and journal entry header:
-/// We reuse the same header for both so that prepare messages from the leader can simply be
-/// journalled as is by the followers without requiring any further modification.
+/// We reuse the same header for both so that prepare messages from the primary can simply be
+/// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
     comptime {
         assert(@sizeOf(Header) == 128);
@@ -156,7 +156,7 @@ pub const Header = extern struct {
     /// 1. across our distributed log of prepares, and
     /// 2. across a client's requests and our replies.
     /// This may also be used as the initialization vector for AEAD encryption at rest, provided
-    /// that the leader ratchets the encryption key every view change to ensure that prepares
+    /// that the primary ratchets the encryption key every view change to ensure that prepares
     /// reordered through a view change never repeat the same IV for the same encryption key.
     parent: u128 = 0,
 
@@ -221,7 +221,7 @@ pub const Header = extern struct {
 
     /// This field is used in various ways:
     ///
-    /// * A `prepare` sets this to the leader's state machine `prepare_timestamp`.
+    /// * A `prepare` sets this to the primary's state machine `prepare_timestamp`.
     ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
     /// * A `reply` sets this to the corresponding `prepare`'s timestamp.
     ///   This allows the test workload to verify transfer timeouts.
