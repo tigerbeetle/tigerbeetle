@@ -386,7 +386,7 @@ pub const clock_epoch_max_ms = config.process.clock_epoch_max_ms;
 
 /// The amount of time to wait for enough accurate samples before synchronizing the clock.
 /// The more samples we can take per remote clock source, the more accurate our estimation becomes.
-/// This impacts cluster startup time as the leader must first wait for synchronization to complete.
+/// This impacts cluster startup time as the primary must first wait for synchronization to complete.
 pub const clock_synchronization_window_min_ms = config.process.clock_synchronization_window_min_ms;
 
 /// The amount of time without agreement before the clock window is expired and a new window opened.

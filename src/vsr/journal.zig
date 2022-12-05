@@ -882,7 +882,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
                 // * The prepare was rewritten since the read began.
                 // * Misdirected read/write.
                 // * The combination of:
-                //   * The leader is responding to a `request_prepare`.
+                //   * The primary is responding to a `request_prepare`.
                 //   * The `request_prepare` did not include a checksum.
                 //   * The requested op's slot is faulty, but the prepare is valid. Since the
                 //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on reading
@@ -1445,7 +1445,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
         }
 
         /// Removes entries from `op_min` (inclusive) onwards.
-        /// Used after a view change to remove uncommitted entries discarded by the new leader.
+        /// Used after a view change to remove uncommitted entries discarded by the new primary.
         pub fn remove_entries_from(self: *Self, op_min: u64) void {
             assert(self.status == .recovered);
             assert(op_min > 0);

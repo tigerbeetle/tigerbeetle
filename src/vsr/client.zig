@@ -64,7 +64,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         request_number: u32 = 0,
 
         /// The highest view number seen by the client in messages exchanged with the cluster.
-        /// Used to locate the current leader, and provide more information to a partitioned leader.
+        /// Used to locate the current primary, and provide more information to a partitioned primary.
         view: u32 = 0,
 
         /// A client is allowed at most one inflight request at a time at the protocol layer.
@@ -76,7 +76,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         request_timeout: vsr.Timeout,
 
         /// The number of ticks before the client broadcasts a ping to the cluster.
-        /// Used for end-to-end keepalive, and to discover a new leader between requests.
+        /// Used for end-to-end keepalive, and to discover a new primary between requests.
         ping_timeout: vsr.Timeout,
 
         /// Used to calculate exponential backoff with random jitter.
@@ -407,7 +407,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 message.header.checksum,
             });
 
-            // We assume the leader is down and round-robin through the cluster:
+            // We assume the primary is down and round-robin through the cluster:
             self.send_message_to_replica(
                 @intCast(u8, (self.view + self.request_timeout.attempts) % self.replica_count),
                 message,
@@ -529,8 +529,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(!self.request_timeout.ticking);
             self.request_timeout.start();
 
-            // If our view number is out of date, then the old leader will forward our request.
-            // If the leader is offline, then our request timeout will fire and we will round-robin.
+            // If our view number is out of date, then the old primary will forward our request.
+            // If the primary is offline, then our request timeout will fire and we will round-robin.
             self.send_message_to_replica(@intCast(u8, self.view % self.replica_count), message);
         }
     };
