@@ -62,6 +62,27 @@ jobs:
       - run: zig/zig build test
       - run: ./scripts/install.sh
 
+  benchmark_on_linux:
+    name: Run benchmark on Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/benchmark.sh
+
+  benchmark_on_macos:
+    name: Run benchmark on macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/benchmark.sh
+
+  benchmark_on_windows:
+    name: Run benchmark on Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/benchmark.bat
+
   fuzz_ewah:
     name: 'Fuzz EWAH codec'
     runs-on: ubuntu-latest

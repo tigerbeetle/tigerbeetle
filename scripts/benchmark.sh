@@ -58,7 +58,7 @@ sleep 1
 
 echo ""
 echo "Benchmarking..."
-zig/zig run -OReleaseSafe src/benchmark.zig
+zig/zig build benchmark -Drelease-safe
 echo ""
 
 for I in $REPLICAS
