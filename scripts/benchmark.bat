@@ -1,6 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 
+REM Install Zig if it does not already exist:
+if not exist "zig" (
+    call .\scripts\install_zig.bat
+)
+
 if "%~1" equ ":main" (
     shift /1
     goto main
@@ -43,5 +48,5 @@ timeout /t 2
 
 echo.
 echo Benchmarking...
-zig\zig.exe run -OReleaseSafe src\benchmark.zig
+zig\zig.exe build benchmark -Drelease-safe
 exit /b %errorlevel%
