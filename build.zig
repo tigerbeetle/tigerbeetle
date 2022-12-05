@@ -59,6 +59,21 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const benchmark = b.addExecutable("benchmark", "src/benchmark.zig");
+        benchmark.setTarget(target);
+        benchmark.setBuildMode(mode);
+        benchmark.install();
+        benchmark.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(benchmark, tracer_backend, target);
+
+        const run_cmd = benchmark.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("benchmark", "Run TigerBeetle benchmark");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
         const lint = b.addExecutable("lint", "scripts/lint.zig");
         lint.setTarget(target);
         lint.setBuildMode(mode);
