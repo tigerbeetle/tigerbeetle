@@ -1259,7 +1259,7 @@ pub fn ReplicaType(
             assert(!self.do_view_change_quorum);
             self.do_view_change_quorum = true;
 
-            self.set_log_from_do_view_change_messages();
+            self.primary_set_log_from_do_view_change_messages();
             assert(self.op >= self.commit_max);
             assert(self.state_machine.prepare_timestamp >=
                 self.journal.header_with_op(self.op).?.timestamp);
@@ -1918,7 +1918,7 @@ pub fn ReplicaType(
             assert(!self.nack_prepare_from_other_replicas.isSet(self.replica));
             log.debug("{}: on_nack_prepare: quorum received op={}", .{ self.replica, op });
 
-            self.discard_uncommitted_ops_from(op, checksum);
+            self.primary_discard_uncommitted_ops_from(op, checksum);
             self.reset_quorum_nack_prepare();
             self.repair();
         }
@@ -3098,7 +3098,7 @@ pub fn ReplicaType(
         /// 3. 8b is discarded due to the gap in 7.
         /// 4. To distinguish between 6a and 6b (and safely discard 6a), the new primary trusts ops
         ///    from the DVC(s) with the greatest `view_normal`.
-        fn op_canonical_max(self: *const Self, view_normal_canonical: u64) usize {
+        fn primary_op_canonical_max(self: *const Self, view_normal_canonical: u64) usize {
             assert(self.replica_count > 1);
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
@@ -3141,12 +3141,12 @@ pub fn ReplicaType(
         /// Discards uncommitted ops during a view change from after and including `op`.
         /// This is required to maximize availability in the presence of storage faults.
         /// Refer to the CTRL protocol from Protocol-Aware Recovery for Consensus-Based Storage.
-        fn discard_uncommitted_ops_from(self: *Self, op: u64, checksum: u128) void {
+        fn primary_discard_uncommitted_ops_from(self: *Self, op: u64, checksum: u128) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.repairs_allowed());
 
-            assert(self.valid_hash_chain("discard_uncommitted_ops_from"));
+            assert(self.valid_hash_chain("primary_discard_uncommitted_ops_from"));
 
             const slot = self.journal.slot_with_op(op).?;
             assert(op > self.commit_max);
@@ -3154,7 +3154,7 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op_and_checksum(op, checksum) != null);
             assert(self.journal.dirty.bit(slot));
 
-            log.debug("{}: discard_uncommitted_ops_from: ops={}..{} view={}", .{
+            log.debug("{}: primary_discard_uncommitted_ops_from: ops={}..{} view={}", .{
                 self.replica,
                 op,
                 self.op,
@@ -4003,7 +4003,7 @@ pub fn ReplicaType(
             }
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                if (self.repair_pipeline_op() != null) return self.repair_pipeline();
+                if (self.primary_repair_pipeline_op() != null) return self.primary_repair_pipeline();
                 // Start the view as the new primary:
                 self.start_view_as_the_new_primary();
             }
@@ -4200,28 +4200,28 @@ pub fn ReplicaType(
         }
 
         /// Reads prepares into the pipeline (before we start the view as the new primary).
-        fn repair_pipeline(self: *Self) void {
+        fn primary_repair_pipeline(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.commit_max < self.op);
             assert(self.journal.dirty.count == 0);
 
             if (self.repairing_pipeline) {
-                log.debug("{}: repair_pipeline: already repairing...", .{self.replica});
+                log.debug("{}: primary_repair_pipeline: already repairing...", .{self.replica});
                 return;
             }
 
-            log.debug("{}: repair_pipeline: repairing", .{self.replica});
+            log.debug("{}: primary_repair_pipeline: repairing", .{self.replica});
 
             assert(!self.repairing_pipeline);
             self.repairing_pipeline = true;
 
-            self.repair_pipeline_read();
+            self.primary_repair_pipeline_read();
         }
 
         /// Discard messages from the prepare pipeline.
         /// Retain uncommitted messages that belong in the current view to maximize durability.
-        fn repair_pipeline_diff(self: *Self) void {
+        fn primary_repair_pipeline_diff(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
 
@@ -4251,7 +4251,7 @@ pub fn ReplicaType(
                 self.message_bus.unref(self.pipeline.pop_tail().?.message);
             }
 
-            log.debug("{}: repair_pipeline_diff: {} prepare(s)", .{
+            log.debug("{}: primary_repair_pipeline_diff: {} prepare(s)", .{
                 self.replica,
                 self.pipeline.count,
             });
@@ -4259,16 +4259,16 @@ pub fn ReplicaType(
             self.verify_pipeline();
 
             // Do not reset `repairing_pipeline` here as this must be reset by the read callback.
-            // Otherwise, we would be making `repair_pipeline()` reentrant.
+            // Otherwise, we would be making `primary_repair_pipeline()` reentrant.
         }
 
         /// Returns the next `op` number that needs to be read into the pipeline.
-        fn repair_pipeline_op(self: *Self) ?u64 {
+        fn primary_repair_pipeline_op(self: *Self) ?u64 {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
 
             // We cannot rely on `pipeline.count` below unless the pipeline has first been diffed.
-            self.repair_pipeline_diff();
+            self.primary_repair_pipeline_diff();
 
             const op = self.commit_max + self.pipeline.count + 1;
             if (op <= self.op) return op;
@@ -4277,19 +4277,19 @@ pub fn ReplicaType(
             return null;
         }
 
-        fn repair_pipeline_read(self: *Self) void {
+        fn primary_repair_pipeline_read(self: *Self) void {
             assert(self.repairing_pipeline);
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
 
-            if (self.repair_pipeline_op()) |op| {
+            if (self.primary_repair_pipeline_op()) |op| {
                 assert(op > self.commit_max);
                 assert(op <= self.op);
                 assert(self.commit_max + self.pipeline.count + 1 == op);
 
                 const checksum = self.journal.header_with_op(op).?.checksum;
 
-                log.debug("{}: repair_pipeline_read: op={} checksum={}", .{
+                log.debug("{}: primary_repair_pipeline_read: op={} checksum={}", .{
                     self.replica,
                     op,
                     checksum,
@@ -4297,7 +4297,7 @@ pub fn ReplicaType(
 
                 self.journal.read_prepare(repair_pipeline_push, op, checksum, null);
             } else {
-                log.debug("{}: repair_pipeline_read: repaired", .{self.replica});
+                log.debug("{}: primary_repair_pipeline_read: repaired", .{self.replica});
                 self.repairing_pipeline = false;
                 self.repair();
             }
@@ -4332,7 +4332,7 @@ pub fn ReplicaType(
             }
 
             // We may even be several views ahead and may now have a completely different pipeline.
-            const op = self.repair_pipeline_op() orelse {
+            const op = self.primary_repair_pipeline_op() orelse {
                 log.debug("{}: repair_pipeline_push: pipeline changed", .{self.replica});
                 return;
             };
@@ -4368,7 +4368,7 @@ pub fn ReplicaType(
             assert(self.pipeline.count >= 1);
 
             self.repairing_pipeline = true;
-            self.repair_pipeline_read();
+            self.primary_repair_pipeline_read();
         }
 
         fn repair_prepares(self: *Self) void {
@@ -4576,7 +4576,7 @@ pub fn ReplicaType(
                     // the old primary cannot send a nack_prepare for its faulty copy.
                     // For this to be correct, the recovery protocol must set all headers as faulty,
                     // not only as dirty.
-                    self.discard_uncommitted_ops_from(op, checksum);
+                    self.primary_discard_uncommitted_ops_from(op, checksum);
                     return false;
                 }
 
@@ -5209,7 +5209,7 @@ pub fn ReplicaType(
         /// (If replica 0's view_normal was greater than 1/2's, then replica 0 must have all
         /// headers from previous views. Which means 6,7 are from the current view. But since
         /// replica 0 doesn't have 6/7, then replica 1/2 must share the latest view_normal. ∎)
-        fn set_log_from_do_view_change_messages(self: *Self) void {
+        fn primary_set_log_from_do_view_change_messages(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.replica_count > 1);
@@ -5238,7 +5238,7 @@ pub fn ReplicaType(
             // Don't remove the uncanonical headers yet — even though the removed headers are
             // a subset of the DVC headers, removing and then adding them back would cause clean
             // headers to become dirty.
-            const op_canonical = self.op_canonical_max(view_normal_canonical);
+            const op_canonical = self.primary_op_canonical_max(view_normal_canonical);
             assert(op_canonical <= self.op);
             assert(op_canonical >= self.op -| constants.pipeline_max);
             assert(op_canonical >= self.commit_min);
@@ -5330,7 +5330,7 @@ pub fn ReplicaType(
             assert(op_max <= self.op);
             assert(op_max >= self.commit_min);
             if (op_max != self.op) {
-                log.debug("{}: set_log_from_do_view_change_messages: discard op={}..{}", .{
+                log.debug("{}: primary_set_log_from_do_view_change_messages: discard op={}..{}", .{
                     self.replica,
                     op_max + 1,
                     self.op,
@@ -5537,7 +5537,7 @@ pub fn ReplicaType(
             assert(!self.repairing_pipeline);
 
             assert(self.commit_min == self.commit_max);
-            assert(self.repair_pipeline_op() == null);
+            assert(self.primary_repair_pipeline_op() == null);
             self.verify_pipeline();
             assert(self.commit_max + self.pipeline.count == self.op);
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
