@@ -247,8 +247,8 @@ pub fn Clock(comptime Time: type) type {
             return self.time.realtime();
         }
 
-        /// Called by `StateMachine.prepare_timestamp()` when the leader wants to timestamp a batch.
-        /// If the leader's clock is not synchronized with the cluster, it must wait until it is.
+        /// Called by `StateMachine.prepare_timestamp()` when the primary wants to timestamp a batch.
+        /// If the primary's clock is not synchronized with the cluster, it must wait until it is.
         /// Returns the system time clamped to be within our synchronized lower and upper bounds.
         /// This is complementary to NTP and allows clusters with very accurate time to make use of it,
         /// while providing guard rails for when NTP is partitioned or unable to correct quickly enough.
