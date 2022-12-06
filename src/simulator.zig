@@ -130,11 +130,7 @@ pub fn main() !void {
             .write_latency_mean = 3 + random.uintLessThan(u16, 100),
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
-            // TODO Allow WAL faults on crash when replica_count=1 when redundant-header-repair
-            // is implemented after recovering with decision=fix. Otherwise we can end up with
-            // multiple crashes faulting first a redundant headers, then a prepare, upgrading
-            // a decision=fix to decision=vsr.
-            .crash_fault_probability = if (replica_count == 1) 0 else 80 + random.uintLessThan(u8, 21),
+            .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
             .faulty_superblock = true,
         },
         .health_options = .{
