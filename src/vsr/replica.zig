@@ -5989,6 +5989,7 @@ pub fn ReplicaType(
                 // This is an optimization to eliminate waiting until the next repair timeout.
                 .repair => self.repair(),
                 .pipeline => self.repair(),
+                .fix => unreachable,
             }
         }
     };
