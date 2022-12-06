@@ -120,6 +120,7 @@ comptime {
 pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
     return struct {
         const Journal = @This();
+        const Sector = *align(constants.sector_size) [constants.sector_size]u8;
 
         pub const Read = struct {
             journal: *Journal,
@@ -133,7 +134,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         };
 
         pub const Write = struct {
-            pub const Trigger = enum { append, repair, pipeline };
+            pub const Trigger = enum { append, fix, repair, pipeline };
 
             journal: *Journal,
             callback: fn (replica: *Replica, wrote: ?*Message, trigger: Trigger) void,
@@ -150,19 +151,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             /// This is reset to undefined and reused for each Storage.write_sectors() call.
             range: Range,
-
-            const Sector = *align(constants.sector_size) [constants.sector_size]u8;
-
-            fn header_sector(write: *Journal.Write, journal: *Journal) Sector {
-                assert(journal.writes.items.len == journal.headers_iops.len);
-                const i = @divExact(
-                    @ptrToInt(write) - @ptrToInt(&journal.writes.items),
-                    @sizeOf(Journal.Write),
-                );
-                // TODO The compiler should not need this align cast as the type of `headers_iops`
-                // ensures that each buffer is properly aligned.
-                return @alignCast(constants.sector_size, &journal.headers_iops[i]);
-            }
         };
 
         /// State that needs to be persisted while waiting for an overlapping
@@ -1228,9 +1216,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 journal.faulty.count,
             });
 
-            journal.status = .recovered;
-            journal.assert_recovered();
-            // From here it's over to the Recovery protocol from VRR 2012.
+            journal.recover_fix();
         }
 
         /// Returns a slot that is safe to truncate.
@@ -1358,17 +1344,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .fix => {
                     journal.headers[slot.index] = prepare.?.*;
                     journal.faulty.clear(slot);
+                    assert(journal.dirty.bit(slot));
                     if (replica.replica_count == 1) {
-                        // @D, @E, @F, @G, @H, @K:
-                        journal.dirty.clear(slot);
-                        // TODO Repair header on disk to restore durability.
+                        // @D, @E, @F, @G, @H, @K
                     } else {
                         assert(prepare.?.command == .prepare);
                         assert(journal.prepare_inhabited[slot.index]);
                         assert(journal.prepare_checksums[slot.index] == prepare.?.checksum);
-                        // @F, @H, @K:
-                        // TODO Repair without retrieving remotely (i.e. don't set dirty or faulty).
-                        assert(journal.dirty.bit(slot));
+                        // @F, @H, @K
                     }
                 },
                 .vsr => {
@@ -1407,14 +1390,60 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        fn assert_recovered(journal: *const Journal) void {
+        /// Repair the redundant headers for slots with decision=fix, one sector at a time.
+        fn recover_fix(journal: *Journal) void {
+            assert(journal.status == .recovering);
+            assert(journal.writes.executing() == 0);
+            assert(journal.dirty.count >= journal.faulty.count);
+            assert(journal.dirty.count <= slot_count);
+
+            var fix_sector: ?usize = null;
+            var dirty_iterator = journal.dirty.bits.iterator(.{ .kind = .set });
+            while (dirty_iterator.next()) |dirty_slot| {
+                if (journal.faulty.bit(Slot{ .index = dirty_slot })) continue;
+
+                const dirty_slot_sector = @divFloor(dirty_slot, headers_per_sector);
+                if (fix_sector) |fix_sector_| {
+                    if (fix_sector_ != dirty_slot_sector) break;
+                } else {
+                    fix_sector = dirty_slot_sector;
+                }
+                journal.dirty.clear(Slot{ .index = dirty_slot });
+            }
+
+            if (fix_sector == null) return journal.recover_done();
+
+            const write = journal.writes.acquire().?;
+            write.* = .{
+                .journal = journal,
+                .callback = undefined,
+                .message = undefined,
+                .trigger = .fix,
+                .range = undefined,
+            };
+
+            const buffer: []u8 = journal.header_sector(fix_sector.?, write);
+            const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
+            assert(buffer_headers.len == headers_per_sector);
+
+            const offset = Ring.headers.offset(Slot{ .index = fix_sector.? * headers_per_sector });
+            journal.write_sectors(recover_fix_callback, write, buffer, .headers, offset);
+        }
+
+        fn recover_fix_callback(write: *Journal.Write) void {
+            assert(write.trigger == .fix);
+            write.journal.recover_fix();
+        }
+
+        fn recover_done(journal: *Journal) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
 
-            assert(journal.status == .recovered);
+            assert(journal.status == .recovering);
+            journal.status = .recovered;
 
             assert(journal.dirty.count <= slot_count);
             assert(journal.faulty.count <= slot_count);
-            assert(journal.faulty.count <= journal.dirty.count);
+            assert(journal.faulty.count == journal.dirty.count);
 
             // Abort if all slots are faulty, since something is very wrong.
             if (journal.faulty.count == slot_count) @panic("WAL is completely corrupt");
@@ -1439,6 +1468,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(!journal.faulty.bit(Slot{ .index = index }));
                 }
             }
+
+            // From here it's over to the Recovery protocol from VRR 2012.
         }
 
         /// Removes entries from `op_min` (inclusive) onwards.
@@ -1641,43 +1672,15 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // For this, we'll need to have a way to tweak write_prepare_release() to release locks.
             // At present, we don't return early here simply because it doesn't yet do that.
 
-            const replica = @fieldParentPtr(Replica, "journal", journal);
             const message = write.message;
             const slot_of_message = journal.slot_for_header(message.header);
-            const slot_first = Slot{
-                .index = @divFloor(slot_of_message.index, headers_per_sector) * headers_per_sector,
-            };
-
             const offset = Ring.headers.offset(slot_of_message);
             assert(offset % constants.sector_size == 0);
 
-            const buffer: []u8 = write.header_sector(journal);
-            const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
-            assert(buffer_headers.len == headers_per_sector);
-
-            var i: usize = 0;
-            while (i < headers_per_sector) : (i += 1) {
-                const slot = Slot{ .index = slot_first.index + i };
-
-                if (journal.faulty.bit(slot)) {
-                    // Redundant faulty headers are deliberately written as invalid.
-                    // This ensures that faulty headers are still faulty when they are read back
-                    // from disk during recovery. This prevents faulty entries from changing to
-                    // reserved (and clean) after a crash and restart (e.g. accidentally converting
-                    // a case `@D` to a `@J` after a restart).
-                    buffer_headers[i] = .{
-                        .checksum = 0,
-                        .cluster = replica.cluster,
-                        .command = .reserved,
-                    };
-                    assert(!buffer_headers[i].valid_checksum());
-                } else {
-                    // Write headers from `headers_redundant` instead of `headers` — we need to
-                    // avoid writing (leaking) a redundant header before its corresponding prepare
-                    // is on disk.
-                    buffer_headers[i] = journal.headers_redundant[slot.index];
-                }
-            }
+            const buffer: []u8 = journal.header_sector(
+                @divFloor(slot_of_message.index, headers_per_sector),
+                write,
+            );
 
             log.debug("{}: write_header: op={} sectors[{}..{}]", .{
                 journal.replica,
@@ -1861,6 +1864,58 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             range.callback(write);
         }
 
+        /// Returns a sector of redundant headers, ready to be written to the specified sector.
+        /// `sector_index` is relative to the start of the redundant header zone.
+        fn header_sector(
+            journal: *const Journal,
+            sector_index: usize,
+            write: *const Journal.Write,
+        ) Sector {
+            assert(journal.status != .init);
+            assert(journal.writes.items.len == journal.headers_iops.len);
+            assert(sector_index < @divFloor(slot_count, headers_per_sector));
+
+            const replica = @fieldParentPtr(Replica, "journal", journal);
+            const sector_slot = Slot{ .index = sector_index * headers_per_sector };
+            assert(sector_slot.index < slot_count);
+
+            const write_index = @divExact(
+                @ptrToInt(write) - @ptrToInt(&journal.writes.items),
+                @sizeOf(Journal.Write),
+            );
+
+            // TODO The compiler should not need this align cast as the type of `headers_iops`
+            // ensures that each buffer is properly aligned.
+            const sector = @alignCast(constants.sector_size, &journal.headers_iops[write_index]);
+            const sector_headers = std.mem.bytesAsSlice(Header, sector);
+            assert(sector_headers.len == headers_per_sector);
+
+            var i: usize = 0;
+            while (i < headers_per_sector) : (i += 1) {
+                const slot = Slot{ .index = sector_slot.index + i };
+
+                if (journal.faulty.bit(slot)) {
+                    // Redundant faulty headers are deliberately written as invalid.
+                    // This ensures that faulty headers are still faulty when they are read back
+                    // from disk during recovery. This prevents faulty entries from changing to
+                    // reserved (and clean) after a crash and restart (e.g. accidentally converting
+                    // a case `@D` to a `@J` after a restart).
+                    sector_headers[i] = .{
+                        .checksum = 0,
+                        .cluster = replica.cluster,
+                        .command = .reserved,
+                    };
+                    assert(!sector_headers[i].valid_checksum());
+                } else {
+                    // Write headers from `headers_redundant` instead of `headers` — we need to
+                    // avoid writing (leaking) a redundant header before its corresponding prepare
+                    // is on disk.
+                    sector_headers[i] = journal.headers_redundant[slot.index];
+                }
+            }
+            return sector;
+        }
+
         pub fn writing(journal: *Journal, op: u64, checksum: u128) bool {
             const slot = journal.slot_for_op(op);
             var found: bool = false;
@@ -2014,9 +2069,7 @@ const RecoveryDecision = enum {
     eql,
     /// Reserved; dirty/faulty are clear, no repair necessary.
     nil,
-    /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty, clear faulty.
-    /// If replica_count=1: Use intact prepare. Clear dirty, clear faulty.
-    /// (Don't set faulty, because we have the valid message.)
+    /// Use intact prepare to repair redundant header. Dirty/faulty are clear.
     fix,
     /// If replica_count>1: Repair with VSR `request_prepare`. Mark dirty, mark faulty.
     /// If replica_count=1: Fail; cannot recover safely.
