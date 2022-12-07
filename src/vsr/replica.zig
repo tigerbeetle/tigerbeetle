@@ -371,6 +371,8 @@ pub fn ReplicaType(
                 log.debug("{}: open: empty data file", .{self.replica});
                 self.transition_to_normal_from_recovering_status(0);
                 assert(self.status == .normal);
+            } else if (self.replica_count == 1) {
+                if (self.journal.faulty.count != 0) @panic("journal is corrupt");
             } else {
                 assert(self.status == .recovering);
             }
@@ -639,8 +641,8 @@ pub fn ReplicaType(
                     if (self.recovery_timeout.fired()) self.on_recovery_timeout();
                 } else if (self.replica_count == 1) {
                     // A cluster-of-one does not run the VSR recovery protocol.
-                    if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
+                    assert(self.journal.faulty.count == 0);
                     assert(self.op == 0);
                     // TODO Assert that this path isn't taken more than once.
                     self.op = self.journal.op_maximum();
