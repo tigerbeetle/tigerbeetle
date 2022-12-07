@@ -28,6 +28,7 @@ const Table = @import("table.zig").TableType(
     Key.sentinel_key,
     Key.tombstone,
     Key.tombstone_from_key,
+    .general,
 );
 const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
 

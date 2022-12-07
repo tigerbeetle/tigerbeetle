@@ -14,6 +14,8 @@ pub fn TableMutableType(comptime Table: type) type {
     const compare_keys = Table.compare_keys;
     const key_from_value = Table.key_from_value;
     const tombstone_from_key = Table.tombstone_from_key;
+    const tombstone = Table.tombstone;
+    const usage = Table.usage;
 
     return struct {
         const TableMutable = @This();
@@ -100,7 +102,13 @@ pub fn TableMutableType(comptime Table: type) type {
             // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
             // level getOrPut() API and manually overwrite the old key.
             const upsert = table.values.getOrPutAssumeCapacity(value.*);
-            upsert.key_ptr.* = value.*;
+            if (usage == .secondary_index and upsert.found_existing) {
+                // Put and remove cancel each other out.
+                assert(tombstone(upsert.key_ptr));
+                _ = table.values.remove(value.*);
+            } else {
+                upsert.key_ptr.* = value.*;
+            }
 
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
@@ -111,13 +119,17 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
-            // If the key is already present in the hash map, the old key will not be overwritten
-            // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
-            // level getOrPut() API and manually overwrite the old key.
-            const upsert = table.values.getOrPutAssumeCapacity(value.*);
-            upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+            const existing = table.values.fetchRemove(value.*);
+            if (usage == .secondary_index and existing != null) {
+                // Put and remove cancel each other out.
+                assert(!tombstone(&existing.?.key));
+            } else {
+                table.values.putAssumeCapacityNoClobber(tombstone_from_key(key_from_value(value)), {});
+            }
 
             assert(table.values.count() <= table.value_count_max);
+
+            // TODO Should we remove value from cache?
         }
 
         /// This may return `false` even when committing would succeed — it pessimistically

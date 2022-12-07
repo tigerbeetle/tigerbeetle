@@ -67,6 +67,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             Value.sentinel_key,
             Value.tombstone,
             Value.tombstone_from_key,
+            .general,
         );
 
         const Tree = TreeType(Table, Storage, "posted_groove");
