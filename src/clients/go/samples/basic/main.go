@@ -53,7 +53,7 @@ func main() {
 	batch := make([]tb_types.Transfer, BATCH_SIZE)
 	for i := 0; i < SAMPLES; i += BATCH_SIZE {
 		for j := 0; j < BATCH_SIZE; j++ {
-			batch[i+j] = tb_types.Transfer{
+			batch[j] = tb_types.Transfer{
 				ID:              uint128(fmt.Sprintf("%d", i+j+1)),
 				DebitAccountID:  uint128("1"),
 				CreditAccountID: uint128("2"),
