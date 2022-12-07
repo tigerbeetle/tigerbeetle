@@ -339,7 +339,6 @@ pub const Cluster = struct {
         assert(replica.cluster == cluster.options.cluster);
         assert(replica.replica == replica_index);
         assert(replica.replica_count == cluster.replicas.len);
-        assert(replica.status == .recovering);
 
         replica.on_change_state = cluster.options.on_change_state;
         replica.on_compact = cluster.options.on_compact;
