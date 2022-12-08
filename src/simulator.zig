@@ -94,8 +94,8 @@ pub fn main() !void {
         .cluster = cluster_id,
         .replica_count = replica_count,
         .client_count = client_count,
-        .size_limit = vsr.sector_floor(
-            constants.size_max - random.uintLessThan(u64, constants.size_max / 10),
+        .storage_size_limit = vsr.sector_floor(
+            constants.storage_size_max - random.uintLessThan(u64, constants.storage_size_max / 10),
         ),
         .seed = random.int(u64),
         .on_change_state = on_replica_change_state,

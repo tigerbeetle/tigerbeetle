@@ -123,7 +123,7 @@ fn test_quorums_working(
             .copy = @intCast(u8, i),
             .version = SuperBlockVersion,
             .replica = 1,
-            .size_max = superblock.data_file_size_min,
+            .storage_size_max = superblock.data_file_size_min,
             .sequence = copies[i].sequence,
             .parent = checksums[copies[i].sequence - 1],
         });
@@ -142,7 +142,7 @@ fn test_quorums_working(
                     checksum = random.int(u128);
                 }
             },
-            .invalid_fork => sector.size_max += 1, // Ensure we have a different checksum.
+            .invalid_fork => sector.storage_size_max += 1, // Ensure we have a different checksum.
             .invalid_parent => sector.parent += 1,
             .invalid_misdirect => {
                 if (misdirect) {
@@ -256,7 +256,7 @@ pub fn fuzz_quorum_repairs(
                 .copy = @intCast(u8, i),
                 .version = SuperBlockVersion,
                 .replica = 1,
-                .size_max = superblock.data_file_size_min,
+                .storage_size_max = superblock.data_file_size_min,
                 .sequence = 123,
             });
             sector.set_checksum();

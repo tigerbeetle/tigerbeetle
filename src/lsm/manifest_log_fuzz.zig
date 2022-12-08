@@ -64,10 +64,10 @@ fn run_fuzz(
         .write_latency_mean = 1 + random.uintLessThan(u64, 40),
     };
 
-    var storage = try Storage.init(allocator, constants.size_max, storage_options);
+    var storage = try Storage.init(allocator, constants.storage_size_max, storage_options);
     defer storage.deinit(allocator);
 
-    var storage_verify = try Storage.init(allocator, constants.size_max, storage_options);
+    var storage_verify = try Storage.init(allocator, constants.storage_size_max, storage_options);
     defer storage_verify.deinit(allocator);
 
     // The MessagePool is shared by both superblocks because they will not use it.
@@ -76,15 +76,15 @@ fn run_fuzz(
 
     var superblock = try SuperBlock.init(allocator, .{
         .storage = &storage,
+        .storage_size_limit = constants.storage_size_max,
         .message_pool = &message_pool,
-        .size_limit = constants.size_max,
     });
     defer superblock.deinit(allocator);
 
     var superblock_verify = try SuperBlock.init(allocator, .{
         .storage = &storage_verify,
+        .storage_size_limit = constants.storage_size_max,
         .message_pool = &message_pool,
-        .size_limit = constants.size_max,
     });
     defer superblock_verify.deinit(allocator);
 
@@ -330,7 +330,6 @@ const Environment = struct {
         env.manifest_log.superblock.format(format_superblock_callback, &env.superblock_context, .{
             .cluster = 0,
             .replica = 0,
-            .size_max = constants.size_max,
         });
     }
 
@@ -461,8 +460,8 @@ const Environment = struct {
                 env.allocator,
                 .{
                     .storage = test_storage,
+                    .storage_size_limit = constants.storage_size_max,
                     .message_pool = env.manifest_log.superblock.client_table.message_pool,
-                    .size_limit = constants.size_max,
                 },
             );
 

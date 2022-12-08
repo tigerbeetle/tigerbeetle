@@ -28,8 +28,6 @@ pub fn format(
         .{
             .cluster = cluster,
             .replica = replica,
-            // TODO Convert this to a runtime arg, to cap storage.
-            .size_max = constants.size_max,
         },
     );
 
@@ -176,8 +174,8 @@ test "format" {
 
     var superblock = try SuperBlock.init(allocator, .{
         .storage = &storage,
+        .storage_size_limit = data_file_size_min,
         .message_pool = &message_pool,
-        .size_limit = data_file_size_min,
     });
     defer superblock.deinit(allocator);
 
@@ -191,7 +189,7 @@ test "format" {
         try std.testing.expectEqual(sector.copy, copy);
         try std.testing.expectEqual(sector.replica, replica);
         try std.testing.expectEqual(sector.cluster, cluster);
-        try std.testing.expectEqual(sector.size, storage.size);
+        try std.testing.expectEqual(sector.storage_size, storage.size);
         try std.testing.expectEqual(sector.sequence, 1);
         try std.testing.expectEqual(sector.vsr_state.commit_min, 0);
         try std.testing.expectEqual(sector.vsr_state.commit_max, 0);

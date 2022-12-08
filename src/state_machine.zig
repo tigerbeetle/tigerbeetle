@@ -1152,8 +1152,8 @@ const TestContext = struct {
 
         ctx.superblock = try SuperBlock.init(allocator, .{
             .storage = &ctx.storage,
+            .storage_size_limit = data_file_size_min,
             .message_pool = &ctx.message_pool,
-            .size_limit = data_file_size_min,
         });
         errdefer ctx.superblock.deinit(allocator);
 

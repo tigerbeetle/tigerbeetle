@@ -104,8 +104,8 @@ const Command = struct {
             allocator,
             .{
                 .storage = &command.storage,
+                .storage_size_limit = data_file_size_min,
                 .message_pool = &command.message_pool,
-                .size_limit = data_file_size_min,
             },
         );
         defer superblock.deinit(allocator);
@@ -119,7 +119,7 @@ const Command = struct {
         else
             arena;
 
-        // TODO Panic if the data file's size is larger that args.size_limit.
+        // TODO Panic if the data file's size is larger that args.storage_size_limit.
         // (Here or in Replica.open()?).
 
         const allocator = tracer_allocator.allocator();
@@ -134,7 +134,7 @@ const Command = struct {
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .replica_count = @intCast(u8, args.addresses.len),
-            .size_limit = args.size_limit,
+            .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .message_pool = &command.message_pool,
             .time = .{},
