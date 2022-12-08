@@ -295,7 +295,7 @@ comptime {
 /// * replicated storage overhead, since all data files are mirrored,
 /// * the size of the superblock storage zone, and
 /// * the static memory allocation required for tracking LSM forest metadata in memory.
-pub const size_max = config.cluster.size_max;
+pub const storage_size_max = config.cluster.storage_size_max;
 
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 ///
