@@ -70,15 +70,15 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
 
     var superblock = try SuperBlock.init(allocator, .{
         .storage = &storage,
+        .storage_size_limit = constants.storage_size_max,
         .message_pool = &message_pool,
-        .size_limit = constants.size_max,
     });
     defer superblock.deinit(allocator);
 
     var superblock_verify = try SuperBlock.init(allocator, .{
         .storage = &storage_verify,
+        .storage_size_limit = constants.storage_size_max,
         .message_pool = &message_pool,
-        .size_limit = constants.size_max,
     });
     defer superblock_verify.deinit(allocator);
 
@@ -260,9 +260,6 @@ const Environment = struct {
         env.superblock.format(format_callback, &env.context_format, .{
             .cluster = cluster,
             .replica = 0,
-            // Include extra space (beyond what Storage actually needs) because SuperBlock will
-            // update the sector's size according to the highest FreeSet block allocated.
-            .size_max = data_file_size_min + 1000 * constants.block_size,
         });
 
         assert(env.sequence_states.items.len == 0);

@@ -52,12 +52,12 @@ pub const SuperBlockSector = extern struct {
     cluster: u32,
 
     /// The current size of the data file.
-    size: u64,
+    storage_size: u64,
 
     /// The maximum possible size of the data file.
-    /// The maximum allowed runtime size_limit.
-    /// The FreeSet's on-disk size is a function of size_max.
-    size_max: u64,
+    /// The maximum allowed runtime storage_size_limit.
+    /// The FreeSet's on-disk size is a function of storage_size_max.
+    storage_size_max: u64,
 
     /// A monotonically increasing counter to locate the latest superblock at startup.
     sequence: u64,
@@ -246,8 +246,8 @@ pub const SuperBlockSector = extern struct {
         if (a.version != b.version) return false;
         if (a.replica != b.replica) return false;
         if (a.cluster != b.cluster) return false;
-        if (a.size != b.size) return false;
-        if (a.size_max != b.size_max) return false;
+        if (a.storage_size != b.storage_size) return false;
+        if (a.storage_size_max != b.storage_size_max) return false;
         if (a.sequence != b.sequence) return false;
         if (a.parent != b.parent) return false;
         if (a.manifest_checksum != b.manifest_checksum) return false;
@@ -343,29 +343,29 @@ pub const data_file_size_min = blk: {
 
 /// The maximum number of blocks in the grid.
 const block_count_max = blk: {
-    var size_max = constants.size_max;
-    size_max -= constants.superblock_copies * @sizeOf(SuperBlockSector);
-    size_max -= constants.superblock_copies * superblock_trailer_client_table_size_max;
-    size_max -= constants.superblock_copies * superblock_trailer_manifest_size_max;
-    size_max -= constants.journal_size_max;
-    // At this point, the remainder of size_max is split between the grid and the freeset copies.
+    var size = constants.storage_size_max;
+    size -= constants.superblock_copies * @sizeOf(SuperBlockSector);
+    size -= constants.superblock_copies * superblock_trailer_client_table_size_max;
+    size -= constants.superblock_copies * superblock_trailer_manifest_size_max;
+    size -= constants.journal_size_max;
+    // At this point, the remainder of size is split between the grid and the freeset copies.
     // The size of a freeset is related to the number of blocks it must store.
     // Maximize the number of grid blocks.
 
-    var shard_count = @divFloor(size_max, constants.block_size * SuperBlockFreeSet.shard_size);
+    var shard_count = @divFloor(size, constants.block_size * SuperBlockFreeSet.shard_size);
     while (true) : (shard_count -= 1) {
         const block_count = shard_count * SuperBlockFreeSet.shard_size;
         const grid_size = block_count * constants.block_size;
         const free_set_size = vsr.sector_ceil(SuperBlockFreeSet.encode_size_max(block_count));
         const free_sets_size = constants.superblock_copies * free_set_size;
-        if (free_sets_size + grid_size <= size_max) break;
+        if (free_sets_size + grid_size <= size) break;
     }
     break :blk shard_count * SuperBlockFreeSet.shard_size;
 };
 
 comptime {
     assert(block_count_max > 0);
-    assert(block_count_max * constants.block_size + data_file_size_min <= constants.size_max);
+    assert(block_count_max * constants.block_size + data_file_size_min <= constants.storage_size_max);
 }
 
 /// This table shows the sequence number progression of the SuperBlock's sectors.
@@ -470,7 +470,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// Whether the superblock has been opened. An open superblock may not be formatted.
         opened: bool = false,
         block_count_limit: usize,
-        size_limit: u64,
+        storage_size_limit: u64,
 
         /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
         /// other operations, only the following queue combinations are allowed:
@@ -485,16 +485,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
         pub const Options = struct {
             storage: *Storage,
             message_pool: *MessagePool,
-            size_limit: u64,
+            storage_size_limit: u64,
         };
 
         pub fn init(allocator: mem.Allocator, options: Options) !SuperBlock {
-            assert(options.size_limit >= data_file_size_min);
-            assert(options.size_limit <= constants.size_max);
-            assert(options.size_limit % constants.sector_size == 0);
+            assert(options.storage_size_limit >= data_file_size_min);
+            assert(options.storage_size_limit <= constants.storage_size_max);
+            assert(options.storage_size_limit % constants.sector_size == 0);
 
             const shard_count_limit = @intCast(usize, @divFloor(
-                options.size_limit - data_file_size_min,
+                options.storage_size_limit - data_file_size_min,
                 constants.block_size * FreeSet.shard_size,
             ));
             const block_count_limit = shard_count_limit * FreeSet.shard_size;
@@ -524,7 +524,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
             errdefer manifest.deinit(allocator);
 
-            // TODO Allocate a FreeSet (and write buffer) when size_limit is small.
+            // TODO Allocate a FreeSet (and write buffer) when storage_size_limit is small.
             // Right now we can allocate blocks outside of the limit.
             var free_set = try FreeSet.init(allocator, block_count_max);
             errdefer free_set.deinit(allocator);
@@ -568,7 +568,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .free_set_buffer = free_set_buffer,
                 .client_table_buffer = client_table_buffer,
                 .block_count_limit = block_count_limit,
-                .size_limit = options.size_limit,
+                .storage_size_limit = options.storage_size_limit,
             };
         }
 
@@ -589,9 +589,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
         pub const FormatOptions = struct {
             cluster: u32,
             replica: u8,
-
-            /// The maximum size of the entire data file.
-            size_max: u64,
         };
 
         pub fn format(
@@ -603,8 +600,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(!superblock.opened);
 
             assert(options.replica < constants.replicas_max);
-            assert(options.size_max >= data_file_size_min);
-            assert(options.size_max % constants.sector_size == 0);
 
             // This working copy provides the parent checksum, and will not be written to disk.
             // We therefore use zero values to make this parent checksum as stable as possible.
@@ -614,8 +609,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .sequence = 0,
                 .replica = options.replica,
                 .cluster = options.cluster,
-                .size = 0,
-                .size_max = options.size_max,
+                .storage_size = 0,
+                .storage_size_max = constants.storage_size_max,
                 .parent = 0,
                 .manifest_checksum = 0,
                 .free_set_checksum = 0,
@@ -812,14 +807,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.verify_manifest_blocks_are_acquired_in_free_set();
 
-            staging.size = data_file_size_min;
+            staging.storage_size = data_file_size_min;
 
             if (superblock.free_set.highest_address_acquired()) |address| {
-                staging.size += address * constants.block_size;
+                staging.storage_size += address * constants.block_size;
             }
-            assert(staging.size >= data_file_size_min);
-            assert(staging.size <= staging.size_max);
-            assert(staging.size <= superblock.size_limit);
+            assert(staging.storage_size >= data_file_size_min);
+            assert(staging.storage_size <= staging.storage_size_max);
+            assert(staging.storage_size <= superblock.storage_size_limit);
 
             staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
@@ -978,8 +973,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.cluster == superblock.working.cluster);
             assert(superblock.staging.replica == superblock.working.replica);
 
-            assert(superblock.staging.size >= data_file_size_min);
-            assert(superblock.staging.size <= superblock.staging.size_max);
+            assert(superblock.staging.storage_size >= data_file_size_min);
+            assert(superblock.staging.storage_size <= superblock.staging.storage_size_max);
 
             assert(context.copy.? < constants.superblock_copies);
             superblock.staging.copy = context.copy.?;
@@ -1107,6 +1102,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (superblock.quorums.working(superblock.reading, threshold)) |quorum| {
                 assert(quorum.valid);
                 assert(quorum.copies.count() >= threshold.count());
+                assert(quorum.sector.storage_size_max == constants.storage_size_max);
 
                 const working = quorum.sector;
                 if (threshold == .verify) {
@@ -1118,7 +1114,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 if (context.caller == .format) {
                     assert(working.sequence == 1);
-                    assert(working.size == data_file_size_min);
+                    assert(working.storage_size == data_file_size_min);
                     assert(working.manifest_size == 0);
                     assert(working.free_set_size == 8);
                     assert(working.client_table_size == 4);
@@ -1145,7 +1141,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.sequence,
                         superblock.working.cluster,
                         superblock.working.replica,
-                        superblock.working.size,
+                        superblock.working.storage_size,
                         superblock.working.vsr_state.commit_min_checksum,
                         superblock.working.vsr_state.commit_min,
                         superblock.working.vsr_state.commit_max,
