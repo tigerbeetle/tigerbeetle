@@ -74,15 +74,15 @@ const SlotRange = struct {
     /// * `head < tail` → `  head··tail  `
     /// * `head > tail` → `··tail  head··` (The range wraps around).
     /// * `head = tail` → panic            (Caller must handle this case separately).
-    fn contains(self: *const SlotRange, slot: Slot) bool {
+    fn contains(range: *const SlotRange, slot: Slot) bool {
         // To avoid confusion, the empty range must be checked separately by the caller.
-        assert(self.head.index != self.tail.index);
+        assert(range.head.index != range.tail.index);
 
-        if (self.head.index < self.tail.index) {
-            return self.head.index <= slot.index and slot.index <= self.tail.index;
+        if (range.head.index < range.tail.index) {
+            return range.head.index <= slot.index and slot.index <= range.tail.index;
         }
-        if (self.head.index > self.tail.index) {
-            return slot.index <= self.tail.index or self.head.index <= slot.index;
+        if (range.head.index > range.tail.index) {
+            return slot.index <= range.tail.index or range.head.index <= slot.index;
         }
         unreachable;
     }
@@ -2112,9 +2112,9 @@ const Case = struct {
         };
     }
 
-    fn check(self: *const Case, parameters: [9]bool) !bool {
+    fn check(case: *const Case, parameters: [9]bool) !bool {
         for (parameters) |b, i| {
-            switch (self.pattern[i]) {
+            switch (case.pattern[i]) {
                 .any => {},
                 .is_false => if (b) return false,
                 .is_true => if (!b) return false,
@@ -2125,12 +2125,12 @@ const Case = struct {
         return true;
     }
 
-    fn decision(self: *const Case, replica_count: u8) RecoveryDecision {
+    fn decision(case: *const Case, replica_count: u8) RecoveryDecision {
         assert(replica_count > 0);
         if (replica_count == 1) {
-            return self.decision_single;
+            return case.decision_single;
         } else {
-            return self.decision_multiple;
+            return case.decision_multiple;
         }
     }
 };
@@ -2234,29 +2234,29 @@ pub const BitSet = struct {
         return BitSet{ .bits = bits };
     }
 
-    fn deinit(self: *BitSet, allocator: Allocator) void {
-        self.bits.deinit(allocator);
+    fn deinit(bit_set: *BitSet, allocator: Allocator) void {
+        bit_set.bits.deinit(allocator);
     }
 
     /// Clear the bit for a slot (idempotent):
-    pub fn clear(self: *BitSet, slot: Slot) void {
-        if (self.bits.isSet(slot.index)) {
-            self.bits.unset(slot.index);
-            self.count -= 1;
+    pub fn clear(bit_set: *BitSet, slot: Slot) void {
+        if (bit_set.bits.isSet(slot.index)) {
+            bit_set.bits.unset(slot.index);
+            bit_set.count -= 1;
         }
     }
 
     /// Whether the bit for a slot is set:
-    pub fn bit(self: *const BitSet, slot: Slot) bool {
-        return self.bits.isSet(slot.index);
+    pub fn bit(bit_set: *const BitSet, slot: Slot) bool {
+        return bit_set.bits.isSet(slot.index);
     }
 
     /// Set the bit for a slot (idempotent):
-    pub fn set(self: *BitSet, slot: Slot) void {
-        if (!self.bits.isSet(slot.index)) {
-            self.bits.set(slot.index);
-            self.count += 1;
-            assert(self.count <= self.bits.bit_length);
+    pub fn set(bit_set: *BitSet, slot: Slot) void {
+        if (!bit_set.bits.isSet(slot.index)) {
+            bit_set.bits.set(slot.index);
+            bit_set.count += 1;
+            assert(bit_set.count <= bit_set.bits.bit_length);
         }
     }
 };
