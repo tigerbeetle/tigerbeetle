@@ -84,7 +84,7 @@ pub const Command = union(enum) {
         cache_accounts: u32,
         cache_transfers: u32,
         cache_transfers_posted: u32,
-        size_limit: u64,
+        storage_size_limit: u64,
         path: [:0]const u8,
     };
 
@@ -121,7 +121,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var cache_accounts: ?[]const u8 = null;
     var cache_transfers: ?[]const u8 = null;
     var cache_transfers_posted: ?[]const u8 = null;
-    var size_limit: ?[]const u8 = null;
+    var storage_size_limit: ?[]const u8 = null;
     var verbose: ?bool = null;
 
     var args = try std.process.argsWithAllocator(allocator);
@@ -170,7 +170,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
             cache_transfers_posted = parse_flag("--cache-transfers-posted", arg);
         } else if (mem.startsWith(u8, arg, "--limit-storage")) {
             if (command != .start) fatal("--limit-storage: supported only by 'start' command", .{});
-            size_limit = parse_flag("--limit-storage", arg);
+            storage_size_limit = parse_flag("--limit-storage", arg);
         } else if (mem.eql(u8, arg, "--verbose")) {
             if (command != .version) fatal("--verbose: supported only by 'version' command", .{});
             verbose = true;
@@ -226,7 +226,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                         cache_transfers_posted,
                         constants.cache_transfers_posted_max,
                     ),
-                    .size_limit = parse_storage_size(size_limit, constants.size_max),
+                    .storage_size_limit = parse_storage_size(storage_size_limit),
                     .path = path orelse fatal("required: <path>", .{}),
                 },
             };
@@ -281,11 +281,12 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
     };
 }
 
-fn parse_storage_size(size_string: ?[]const u8, size_max: u64) u64 {
+fn parse_storage_size(size_string: ?[]const u8) u64 {
     const size_min = data_file_size_min;
+    const size_max = constants.storage_size_max;
     const size = if (size_string) |s| parse_size(s) else size_max;
-    if (size > size_max) fatal("size value {} exceeds maximum: {}", .{ size, size_max });
-    if (size < size_min) fatal("size value {} is below minimum: {}", .{ size, size_min });
+    if (size > size_max) fatal("storage size {} exceeds maximum: {}", .{ size, size_max });
+    if (size < size_min) fatal("storage size {} is below minimum: {}", .{ size, size_min });
     if (size % constants.sector_size != 0) {
         fatal("size value {} must be a multiple of sector size ({})", .{
             size,
