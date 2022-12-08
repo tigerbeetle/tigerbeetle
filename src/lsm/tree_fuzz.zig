@@ -85,11 +85,6 @@ const FuzzOpTag = std.meta.Tag(FuzzOp);
 const Environment = struct {
     const cluster = 32;
     const replica = 4;
-    // TODO Is this appropriate for the number of fuzz_ops we want to run?
-    const size_max = vsr.Zone.superblock.size().? +
-        vsr.Zone.wal_headers.size().? +
-        vsr.Zone.wal_prepares.size().? +
-        1024 * 1024 * 1024;
 
     const node_count = 1024;
     const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
@@ -143,7 +138,11 @@ const Environment = struct {
         env.message_pool = try MessagePool.init(allocator, .replica);
         errdefer env.message_pool.deinit(allocator);
 
-        env.superblock = try SuperBlock.init(allocator, env.storage, &env.message_pool);
+        env.superblock = try SuperBlock.init(allocator, .{
+            .storage = env.storage,
+            .message_pool = &env.message_pool,
+            .size_limit = constants.size_max,
+        });
         errdefer env.superblock.deinit(allocator);
 
         env.grid = try Grid.init(allocator, &env.superblock);
@@ -201,7 +200,7 @@ const Environment = struct {
         env.superblock.format(superblock_format_callback, &env.superblock_context, .{
             .cluster = cluster,
             .replica = replica,
-            .size_max = size_max,
+            .size_max = constants.size_max,
         });
         env.tick_until_state_change(.init, .formatted);
     }
@@ -346,7 +345,7 @@ const Environment = struct {
 
 pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) !void {
     // Init mocked storage.
-    var storage = try Storage.init(allocator, Environment.size_max, storage_options);
+    var storage = try Storage.init(allocator, constants.size_max, storage_options);
     defer storage.deinit(allocator);
 
     try Environment.format(&storage);

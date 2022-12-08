@@ -291,6 +291,7 @@ pub fn ReplicaType(
 
         const OpenOptions = struct {
             replica_count: u8,
+            size_limit: u64,
             storage: *Storage,
             message_pool: *MessagePool,
             time: Time,
@@ -300,13 +301,19 @@ pub fn ReplicaType(
 
         /// Initializes and opens the provided replica using the options.
         pub fn open(self: *Self, parent_allocator: std.mem.Allocator, options: OpenOptions) !void {
+            assert(options.size_limit <= constants.size_max);
+            assert(options.size_limit % constants.sector_size == 0);
+
             self.static_allocator = StaticAllocator.init(parent_allocator);
             const allocator = self.static_allocator.allocator();
 
             self.superblock = try SuperBlock.init(
                 allocator,
-                options.storage,
-                options.message_pool,
+                .{
+                    .storage = options.storage,
+                    .message_pool = options.message_pool,
+                    .size_limit = options.size_limit,
+                },
             );
 
             // Once initialzed, the replica is in charge of calling superblock.deinit()
