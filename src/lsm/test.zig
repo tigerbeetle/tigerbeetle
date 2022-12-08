@@ -85,7 +85,11 @@ const Environment = struct {
         env.message_pool = try MessagePool.init(allocator, .replica);
         errdefer env.message_pool.deinit(allocator);
 
-        env.superblock = try SuperBlock.init(allocator, &env.storage, &env.message_pool);
+        env.superblock = try SuperBlock.init(allocator, .{
+            .storage = &env.storage,
+            .message_pool = &env.message_pool,
+            .size_limit = constants.size_max,
+        });
         env.superblock_context = undefined;
         errdefer env.superblock.deinit(allocator);
 

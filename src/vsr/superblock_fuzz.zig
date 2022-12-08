@@ -68,10 +68,18 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     var message_pool = try MessagePool.init(allocator, .replica);
     defer message_pool.deinit(allocator);
 
-    var superblock = try SuperBlock.init(allocator, &storage, &message_pool);
+    var superblock = try SuperBlock.init(allocator, .{
+        .storage = &storage,
+        .message_pool = &message_pool,
+        .size_limit = constants.size_max,
+    });
     defer superblock.deinit(allocator);
 
-    var superblock_verify = try SuperBlock.init(allocator, &storage_verify, &message_pool);
+    var superblock_verify = try SuperBlock.init(allocator, .{
+        .storage = &storage_verify,
+        .message_pool = &message_pool,
+        .size_limit = constants.size_max,
+    });
     defer superblock_verify.deinit(allocator);
 
     var sequence_states = Environment.SequenceStates.init(allocator);

@@ -54,8 +54,9 @@ pub const SuperBlockSector = extern struct {
     /// The current size of the data file.
     size: u64,
 
-    /// The maximum size of the data file.
-    // TODO Actually limit the file to this size.
+    /// The maximum possible size of the data file.
+    /// The maximum allowed runtime size_limit.
+    /// The FreeSet's on-disk size is a function of size_max.
     size_max: u64,
 
     /// A monotonically increasing counter to locate the latest superblock at startup.
@@ -321,7 +322,7 @@ pub const superblock_trailer_manifest_size_max = blk: {
 };
 
 pub const superblock_trailer_free_set_size_max = blk: {
-    const encode_size_max = SuperBlockFreeSet.encode_size_max(constants.block_count_max);
+    const encode_size_max = SuperBlockFreeSet.encode_size_max(block_count_max);
     assert(encode_size_max > 0);
 
     // Round up to the nearest sector:
@@ -339,6 +340,33 @@ pub const superblock_trailer_client_table_size_max = blk: {
 pub const data_file_size_min = blk: {
     break :blk superblock_zone_size + constants.journal_size_max;
 };
+
+/// The maximum number of blocks in the grid.
+const block_count_max = blk: {
+    var size_max = constants.size_max;
+    size_max -= constants.superblock_copies * @sizeOf(SuperBlockSector);
+    size_max -= constants.superblock_copies * superblock_trailer_client_table_size_max;
+    size_max -= constants.superblock_copies * superblock_trailer_manifest_size_max;
+    size_max -= constants.journal_size_max;
+    // At this point, the remainder of size_max is split between the grid and the freeset copies.
+    // The size of a freeset is related to the number of blocks it must store.
+    // Maximize the number of grid blocks.
+
+    var shard_count = @divFloor(size_max, constants.block_size * SuperBlockFreeSet.shard_size);
+    while (true) : (shard_count -= 1) {
+        const block_count = shard_count * SuperBlockFreeSet.shard_size;
+        const grid_size = block_count * constants.block_size;
+        const free_set_size = vsr.sector_ceil(SuperBlockFreeSet.encode_size_max(block_count));
+        const free_sets_size = constants.superblock_copies * free_set_size;
+        if (free_sets_size + grid_size <= size_max) break;
+    }
+    break :blk shard_count * SuperBlockFreeSet.shard_size;
+};
+
+comptime {
+    assert(block_count_max > 0);
+    assert(block_count_max * constants.block_size + data_file_size_min <= constants.size_max);
+}
 
 /// This table shows the sequence number progression of the SuperBlock's sectors.
 ///
@@ -441,6 +469,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         /// Whether the superblock has been opened. An open superblock may not be formatted.
         opened: bool = false,
+        block_count_limit: usize,
+        size_limit: u64,
 
         /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
         /// other operations, only the following queue combinations are allowed:
@@ -452,11 +482,24 @@ pub fn SuperBlockType(comptime Storage: type) type {
         queue_head: ?*Context = null,
         queue_tail: ?*Context = null,
 
-        pub fn init(
-            allocator: mem.Allocator,
+        pub const Options = struct {
             storage: *Storage,
             message_pool: *MessagePool,
-        ) !SuperBlock {
+            size_limit: u64,
+        };
+
+        pub fn init(allocator: mem.Allocator, options: Options) !SuperBlock {
+            assert(options.size_limit >= data_file_size_min);
+            assert(options.size_limit <= constants.size_max);
+            assert(options.size_limit % constants.sector_size == 0);
+
+            const shard_count_limit = @intCast(usize, @divFloor(
+                options.size_limit - data_file_size_min,
+                constants.block_size * FreeSet.shard_size,
+            ));
+            const block_count_limit = shard_count_limit * FreeSet.shard_size;
+            assert(block_count_limit <= block_count_max);
+
             const a = try allocator.allocAdvanced(SuperBlockSector, constants.sector_size, 1, .exact);
             errdefer allocator.free(a);
 
@@ -481,10 +524,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
             errdefer manifest.deinit(allocator);
 
-            var free_set = try FreeSet.init(allocator, constants.block_count_max);
+            // TODO Allocate a FreeSet (and write buffer) when size_limit is small.
+            // Right now we can allocate blocks outside of the limit.
+            var free_set = try FreeSet.init(allocator, block_count_max);
             errdefer free_set.deinit(allocator);
 
-            var client_table = try ClientTable.init(allocator, message_pool);
+            var client_table = try ClientTable.init(allocator, options.message_pool);
             errdefer client_table.deinit(allocator);
 
             const manifest_buffer = try allocator.allocAdvanced(
@@ -512,7 +557,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             errdefer allocator.free(client_table_buffer);
 
             return SuperBlock{
-                .storage = storage,
+                .storage = options.storage,
                 .working = &a[0],
                 .staging = &b[0],
                 .reading = &reading[0],
@@ -522,6 +567,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .manifest_buffer = manifest_buffer,
                 .free_set_buffer = free_set_buffer,
                 .client_table_buffer = client_table_buffer,
+                .block_count_limit = block_count_limit,
+                .size_limit = options.size_limit,
             };
         }
 
@@ -757,7 +804,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn write_staging_encode_free_set(superblock: *SuperBlock) void {
             const staging: *SuperBlockSector = superblock.staging;
-            const encode_size_max = FreeSet.encode_size_max(constants.block_count_max);
+            const encode_size_max = FreeSet.encode_size_max(block_count_max);
             const target = superblock.free_set_buffer[0..encode_size_max];
 
             superblock.free_set.include_staging();
@@ -772,6 +819,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             }
             assert(staging.size >= data_file_size_min);
             assert(staging.size <= staging.size_max);
+            assert(staging.size <= superblock.size_limit);
 
             staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
@@ -1246,9 +1294,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (vsr.checksum(slice) == superblock.working.free_set_checksum) {
                 superblock.free_set.decode(slice);
 
-                log.debug("open: read_free_set: acquired blocks: {}/{}", .{
+                log.debug("open: read_free_set: acquired blocks: {}/{}/{}", .{
                     superblock.free_set.count_acquired(),
-                    constants.block_count_max,
+                    superblock.block_count_limit,
+                    block_count_max,
                 });
 
                 superblock.verify_manifest_blocks_are_acquired_in_free_set();
