@@ -151,6 +151,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
 
 test "format" {
     const superblock_zone_size = @import("./superblock.zig").superblock_zone_size;
+    const data_file_size_min = @import("./superblock.zig").data_file_size_min;
     const MessagePool = @import("../message_pool.zig").MessagePool;
     const Storage = @import("../test/storage.zig").Storage;
     const SuperBlock = vsr.SuperBlockType(Storage);
@@ -173,7 +174,11 @@ test "format" {
     var message_pool = try MessagePool.init(allocator, .replica);
     defer message_pool.deinit(allocator);
 
-    var superblock = try SuperBlock.init(allocator, &storage, &message_pool);
+    var superblock = try SuperBlock.init(allocator, .{
+        .storage = &storage,
+        .message_pool = &message_pool,
+        .size_limit = data_file_size_min,
+    });
     defer superblock.deinit(allocator);
 
     try format(Storage, allocator, cluster, replica, &storage, &superblock);
