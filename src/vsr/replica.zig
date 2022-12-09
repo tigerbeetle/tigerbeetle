@@ -623,6 +623,7 @@ pub fn ReplicaType(
         /// Time is measured in logical ticks that are incremented on every call to tick().
         /// This eliminates a dependency on the system time and enables deterministic testing.
         pub fn tick(self: *Self) void {
+            assert(self.opened);
             // Ensure that all asynchronous IO callbacks flushed the loopback queue as needed.
             // If an IO callback queues a loopback message without flushing the queue then this will
             // delay the delivery of messages (e.g. a prepare_ok from the primary to itself) and
@@ -688,6 +689,7 @@ pub fn ReplicaType(
         }
 
         pub fn on_message(self: *Self, message: *Message) void {
+            assert(self.opened);
             assert(self.loopback_queue == null);
             assert(message.references > 0);
 
