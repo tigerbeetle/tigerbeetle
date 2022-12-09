@@ -26,22 +26,23 @@ pub const Status = enum {
     view_change,
     // Recovery (for replica_count > 1):
     //
-    // 1. At replica start: `status=recovering` and `journal.status=recovering`
-    // 2. Load the WAL. Mark questionable entries as faulty.
-    // 3. If the WAL has no entries (besides the initial commit), skip to step 5 with view 0.
-    // 4. Run VSR recovery protocol:
+    // 1. Open the replica:
+    //    a. At replica start: `status=recovering`.
+    //    b. Recover the WAL. Mark questionable entries as faulty.
+    //    c. If the WAL has no entries (besides the initial commit), skip to step 3 with view 0.
+    // 2. Run VSR recovery protocol:
     //    a. Send a `recovery` message to every replica (except self).
     //    b. Wait for f+1 `recovery_response` messages from replicas in `normal` status.
     //       Each `recovery_response` includes the current view number.
     //       Each `recovery_response` must include a nonce matching the `recovery` message.
     //    c. Wait for a `recovery_response` from the primary of the highest known view.
-    // 5. Transition to `status=normal` with the discovered view number:
+    // 3. Transition to `status=normal` with the discovered view number:
     //    * Set `op` to the highest op in the primary's recovery response.
     //    * Repair faulty messages.
     //    * Commit through to the discovered `commit_max`.
     //    * Set `state_machine.prepare_timeout` to the current op's timestamp.
     //
-    // TODO document snapshot recovery in this progression
+    // TODO Document state transfer in this progression.
     recovering,
 };
 
@@ -290,6 +291,7 @@ pub fn ReplicaType(
 
         const OpenOptions = struct {
             replica_count: u8,
+            storage_size_limit: u64,
             storage: *Storage,
             message_pool: *MessagePool,
             time: Time,
@@ -299,13 +301,19 @@ pub fn ReplicaType(
 
         /// Initializes and opens the provided replica using the options.
         pub fn open(self: *Self, parent_allocator: std.mem.Allocator, options: OpenOptions) !void {
+            assert(options.storage_size_limit <= constants.storage_size_max);
+            assert(options.storage_size_limit % constants.sector_size == 0);
+
             self.static_allocator = StaticAllocator.init(parent_allocator);
             const allocator = self.static_allocator.allocator();
 
             self.superblock = try SuperBlock.init(
                 allocator,
-                options.storage,
-                options.message_pool,
+                .{
+                    .storage = options.storage,
+                    .message_pool = options.message_pool,
+                    .storage_size_limit = options.storage_size_limit,
+                },
             );
 
             // Once initialzed, the replica is in charge of calling superblock.deinit()
@@ -326,7 +334,7 @@ pub fn ReplicaType(
                 return error.NoAddress;
             }
 
-            // Intiaize the replica:
+            // Initialize the replica:
             try self.init(allocator, .{
                 .cluster = self.superblock.working.cluster,
                 .replica_index = self.superblock.working.replica,
@@ -351,6 +359,30 @@ pub fn ReplicaType(
                 self.grid.tick();
                 self.superblock.storage.tick();
             }
+
+            self.opened = false;
+            self.journal.recover(journal_recover_callback);
+            while (!self.opened) self.superblock.storage.tick();
+
+            if (self.journal.is_empty()) {
+                // The data file is brand new — no messages have ever been written.
+                // Transition to normal status; no need to run the VSR recovery protocol.
+                assert(self.journal.dirty.count == 0);
+                assert(self.journal.faulty.count == 0);
+                assert(self.commit_min == 0);
+                assert(self.commit_max == 0);
+                assert(self.op_checkpoint == 0);
+                assert(self.op == 0);
+                assert(self.view == 0);
+
+                log.debug("{}: open: empty data file", .{self.replica});
+                self.transition_to_normal_from_recovering_status(0);
+                assert(self.status == .normal);
+            } else if (self.replica_count == 1) {
+                if (self.journal.faulty.count != 0) @panic("journal is corrupt");
+            } else {
+                assert(self.status == .recovering);
+            }
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -361,6 +393,12 @@ pub fn ReplicaType(
 
         fn state_machine_open_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(!self.opened);
+            self.opened = true;
+        }
+
+        fn journal_recover_callback(journal: *Journal) void {
+            const self = @fieldParentPtr(Self, "journal", journal);
             assert(!self.opened);
             self.opened = true;
         }
@@ -592,6 +630,7 @@ pub fn ReplicaType(
         /// Time is measured in logical ticks that are incremented on every call to tick().
         /// This eliminates a dependency on the system time and enables deterministic testing.
         pub fn tick(self: *Self) void {
+            assert(self.opened);
             // Ensure that all asynchronous IO callbacks flushed the loopback queue as needed.
             // If an IO callback queues a loopback message without flushing the queue then this will
             // delay the delivery of messages (e.g. a prepare_ok from the primary to itself) and
@@ -600,38 +639,18 @@ pub fn ReplicaType(
 
             // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
-
-            // Storage/IO is ticked by top-level in case of multiple replicas sharing the same IO.
-            // self.journal.storage.tick();
-
             self.grid.tick();
             self.message_bus.tick();
-
-            switch (self.journal.status) {
-                .init => return self.journal.recover(),
-                .recovering => return,
-                .recovered => {},
-            }
 
             if (self.status == .recovering) {
                 if (self.recovery_timeout.ticking) {
                     // Continue running the VSR recovery protocol.
                     self.recovery_timeout.tick();
                     if (self.recovery_timeout.fired()) self.on_recovery_timeout();
-                } else if (self.journal.is_empty()) {
-                    // The data file is brand new — no messages have ever been written.
-                    // Transition to normal status; no need to run the VSR recovery protocol.
-                    assert(self.journal.faulty.count == 0);
-                    assert(self.commit_min == 0);
-                    assert(self.commit_max == 0);
-                    assert(self.op_checkpoint == 0);
-                    assert(self.op == 0);
-                    self.transition_to_normal_from_recovering_status(0);
-                    assert(self.status == .normal);
                 } else if (self.replica_count == 1) {
                     // A cluster-of-one does not run the VSR recovery protocol.
-                    if (self.journal.faulty.count != 0) @panic("journal is corrupt");
                     if (self.committing) return;
+                    assert(self.journal.faulty.count == 0);
                     assert(self.op == 0);
                     // TODO Assert that this path isn't taken more than once.
                     self.op = self.journal.op_maximum();
@@ -677,6 +696,7 @@ pub fn ReplicaType(
         }
 
         pub fn on_message(self: *Self, message: *Message) void {
+            assert(self.opened);
             assert(self.loopback_queue == null);
             assert(message.references > 0);
 
@@ -701,11 +721,6 @@ pub fn ReplicaType(
                     self.cluster,
                     message.header.cluster,
                 });
-                return;
-            }
-
-            if (self.journal.status != .recovered) {
-                log.debug("{}: on_message: waiting for journal to recover", .{self.replica});
                 return;
             }
 
@@ -1446,9 +1461,6 @@ pub fn ReplicaType(
                 log.warn("{}: on_recovery_response: ignoring (different nonce)", .{self.replica});
                 return;
             }
-
-            // Recovery messages with our nonce are not sent until after the journal is recovered.
-            assert(self.journal.status == .recovered);
 
             var responses: *QuorumMessages = &self.recovery_response_from_other_replicas;
             if (responses[message.header.replica]) |existing| {
@@ -3666,7 +3678,6 @@ pub fn ReplicaType(
         // learn the op.
         fn op_certain(self: *const Self) bool {
             assert(self.status == .recovering);
-            assert(self.journal.status == .recovered);
             assert(self.op_checkpoint <= self.op);
 
             const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint).index;
@@ -3881,7 +3892,6 @@ pub fn ReplicaType(
         fn recover(self: *Self) void {
             assert(self.status == .recovering);
             assert(self.replica_count > 1);
-            assert(self.journal.status == .recovered);
 
             log.debug("{}: recover: sending recovery messages nonce={}", .{
                 self.replica,
@@ -5121,7 +5131,6 @@ pub fn ReplicaType(
 
         fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
             assert(self.status == .view_change or self.status == .recovering);
-            assert(self.journal.status == .recovered);
 
             switch (self.status) {
                 .normal => unreachable,

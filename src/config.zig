@@ -72,7 +72,7 @@ const ConfigCluster = struct {
     journal_slot_count: usize = 1024,
     message_size_max: usize = 1 * 1024 * 1024,
     superblock_copies: comptime_int = 4,
-    size_max: usize = 16 * 1024 * 1024 * 1024 * 1024,
+    storage_size_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
     block_size: comptime_int = 64 * 1024,
     lsm_levels: u7 = 7,
     lsm_growth_factor: u32 = 8,
@@ -169,6 +169,7 @@ pub const configs = struct {
             .clients_max = 4,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
             .message_size_max = Config.Cluster.message_size_max_min(2),
+            .storage_size_max = 1024 * 1024 * 1024,
 
             .block_size = sector_size,
             .lsm_growth_factor = 4,

@@ -45,18 +45,7 @@ pub fn main() !void {
 
     switch (parse_args) {
         .format => |*args| try Command.format(allocator, args.cluster, args.replica, args.path),
-        .start => |*args| try Command.start(
-            &arena,
-            args.addresses,
-            .{
-                // TODO Tune lsm_forest_node_count better.
-                .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = args.cache_accounts,
-                .cache_entries_transfers = args.cache_transfers,
-                .cache_entries_posted = args.cache_transfers_posted,
-            },
-            args.path,
-        ),
+        .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
     }
 }
@@ -113,24 +102,25 @@ const Command = struct {
 
         var superblock = try SuperBlock.init(
             allocator,
-            &command.storage,
-            &command.message_pool,
+            .{
+                .storage = &command.storage,
+                .storage_size_limit = data_file_size_min,
+                .message_pool = &command.message_pool,
+            },
         );
         defer superblock.deinit(allocator);
 
         try vsr.format(Storage, allocator, cluster, replica, &command.storage, &superblock);
     }
 
-    pub fn start(
-        arena: *std.heap.ArenaAllocator,
-        addresses: []std.net.Address,
-        options: StateMachine.Options,
-        path: [:0]const u8,
-    ) !void {
+    pub fn start(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Start) !void {
         var tracer_allocator = if (constants.tracer_backend == .tracy)
             tracer.TracerAllocator.init(arena.allocator())
         else
             arena;
+
+        // TODO Panic if the data file's size is larger that args.storage_size_limit.
+        // (Here or in Replica.open()?).
 
         const allocator = tracer_allocator.allocator();
 
@@ -138,18 +128,25 @@ const Command = struct {
         defer tracer.deinit(allocator);
 
         var command: Command = undefined;
-        try command.init(allocator, path, false);
+        try command.init(allocator, args.path, false);
         defer command.deinit(allocator);
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
-            .replica_count = @intCast(u8, addresses.len),
+            .replica_count = @intCast(u8, args.addresses.len),
+            .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .message_pool = &command.message_pool,
             .time = .{},
-            .state_machine_options = options,
+            .state_machine_options = .{
+                // TODO Tune lsm_forest_node_count better.
+                .lsm_forest_node_count = 4096,
+                .cache_entries_accounts = args.cache_accounts,
+                .cache_entries_transfers = args.cache_transfers,
+                .cache_entries_posted = args.cache_transfers_posted,
+            },
             .message_bus_options = .{
-                .configuration = addresses,
+                .configuration = args.addresses,
                 .io = &command.io,
             },
         }) catch |err| switch (err) {
@@ -178,7 +175,7 @@ const Command = struct {
         log_main.info("{}: cluster={}: listening on {}", .{
             replica.replica,
             replica.cluster,
-            addresses[replica.replica],
+            args.addresses[replica.replica],
         });
 
         while (true) {

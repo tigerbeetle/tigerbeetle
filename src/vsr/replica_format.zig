@@ -28,8 +28,6 @@ pub fn format(
         .{
             .cluster = cluster,
             .replica = replica,
-            // TODO Convert this to a runtime arg, to cap storage.
-            .size_max = constants.size_max,
         },
     );
 
@@ -151,6 +149,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
 
 test "format" {
     const superblock_zone_size = @import("./superblock.zig").superblock_zone_size;
+    const data_file_size_min = @import("./superblock.zig").data_file_size_min;
     const MessagePool = @import("../message_pool.zig").MessagePool;
     const Storage = @import("../test/storage.zig").Storage;
     const SuperBlock = vsr.SuperBlockType(Storage);
@@ -173,7 +172,11 @@ test "format" {
     var message_pool = try MessagePool.init(allocator, .replica);
     defer message_pool.deinit(allocator);
 
-    var superblock = try SuperBlock.init(allocator, &storage, &message_pool);
+    var superblock = try SuperBlock.init(allocator, .{
+        .storage = &storage,
+        .storage_size_limit = data_file_size_min,
+        .message_pool = &message_pool,
+    });
     defer superblock.deinit(allocator);
 
     try format(Storage, allocator, cluster, replica, &storage, &superblock);
@@ -186,7 +189,7 @@ test "format" {
         try std.testing.expectEqual(sector.copy, copy);
         try std.testing.expectEqual(sector.replica, replica);
         try std.testing.expectEqual(sector.cluster, cluster);
-        try std.testing.expectEqual(sector.size, storage.size);
+        try std.testing.expectEqual(sector.storage_size, storage.size);
         try std.testing.expectEqual(sector.sequence, 1);
         try std.testing.expectEqual(sector.vsr_state.commit_min, 0);
         try std.testing.expectEqual(sector.vsr_state.commit_max, 0);

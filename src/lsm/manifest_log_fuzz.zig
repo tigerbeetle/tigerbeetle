@@ -30,8 +30,6 @@ const fuzz = @import("../test/fuzz.zig");
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
-const storage_size_max = data_file_size_min + constants.block_size * 1024;
-
 const entries_max_block = ManifestLog.Block.entry_count_max;
 const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).field_type.count_max;
@@ -66,20 +64,28 @@ fn run_fuzz(
         .write_latency_mean = 1 + random.uintLessThan(u64, 40),
     };
 
-    var storage = try Storage.init(allocator, storage_size_max, storage_options);
+    var storage = try Storage.init(allocator, constants.storage_size_max, storage_options);
     defer storage.deinit(allocator);
 
-    var storage_verify = try Storage.init(allocator, storage_size_max, storage_options);
+    var storage_verify = try Storage.init(allocator, constants.storage_size_max, storage_options);
     defer storage_verify.deinit(allocator);
 
     // The MessagePool is shared by both superblocks because they will not use it.
     var message_pool = try MessagePool.init(allocator, .replica);
     defer message_pool.deinit(allocator);
 
-    var superblock = try SuperBlock.init(allocator, &storage, &message_pool);
+    var superblock = try SuperBlock.init(allocator, .{
+        .storage = &storage,
+        .storage_size_limit = constants.storage_size_max,
+        .message_pool = &message_pool,
+    });
     defer superblock.deinit(allocator);
 
-    var superblock_verify = try SuperBlock.init(allocator, &storage_verify, &message_pool);
+    var superblock_verify = try SuperBlock.init(allocator, .{
+        .storage = &storage_verify,
+        .storage_size_limit = constants.storage_size_max,
+        .message_pool = &message_pool,
+    });
     defer superblock_verify.deinit(allocator);
 
     var grid = try Grid.init(allocator, &superblock);
@@ -324,7 +330,6 @@ const Environment = struct {
         env.manifest_log.superblock.format(format_superblock_callback, &env.superblock_context, .{
             .cluster = 0,
             .replica = 0,
-            .size_max = storage_size_max,
         });
     }
 
@@ -453,8 +458,11 @@ const Environment = struct {
             test_superblock.deinit(env.allocator);
             test_superblock.* = try SuperBlock.init(
                 env.allocator,
-                test_storage,
-                env.manifest_log.superblock.client_table.message_pool,
+                .{
+                    .storage = test_storage,
+                    .storage_size_limit = constants.storage_size_max,
+                    .message_pool = env.manifest_log.superblock.client_table.message_pool,
+                },
             );
 
             test_grid.deinit(env.allocator);
