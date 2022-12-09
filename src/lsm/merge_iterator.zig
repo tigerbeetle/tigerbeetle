@@ -1,9 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const math = std.math;
-const mem = std.mem;
 
-const Direction = @import("direction.zig").Direction;
+const util = @import("../util.zig");
 
 const k_max = 2;
 
@@ -93,7 +91,7 @@ pub fn MergeIteratorType(
                             .general => return value_a,
                             .secondary_index => {
                                 // In secondary indexes, puts and removes alternate and can be safely cancelled out.
-                                assert(Table.tombstone(&value_a) or Table.tombstone(&value_b));
+                                assert(util.xor(Table.tombstone(&value_a), Table.tombstone(&value_b)));
                                 continue;
                             },
                         }
