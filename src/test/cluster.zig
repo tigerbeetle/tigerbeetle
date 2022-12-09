@@ -29,7 +29,7 @@ pub const ClusterOptions = struct {
     cluster: u32,
     replica_count: u8,
     client_count: u8,
-    grid_size_max: usize,
+    storage_size_limit: u64,
 
     seed: u64,
     on_change_state: fn (replica: *const Replica) void,
@@ -76,8 +76,8 @@ pub const Cluster = struct {
     pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
         assert(options.replica_count > 0);
         assert(options.client_count > 0);
-        assert(options.grid_size_max > 0);
-        assert(options.grid_size_max % constants.sector_size == 0);
+        assert(options.storage_size_limit % constants.sector_size == 0);
+        assert(options.storage_size_limit <= constants.storage_size_max);
         assert(options.health_options.crash_probability < 1.0);
         assert(options.health_options.crash_probability >= 0.0);
         assert(options.health_options.restart_probability < 1.0);
@@ -136,17 +136,17 @@ pub const Cluster = struct {
             var storage_options = options.storage_options;
             storage_options.replica_index = @intCast(u8, replica_index);
             storage_options.faulty_wal_areas = faulty_wal_areas[replica_index];
-            storage.* = try Storage.init(
-                allocator,
-                superblock_zone_size + constants.journal_size_max + options.grid_size_max,
-                storage_options,
-            );
+            storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
         }
         errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
 
         // Format each replica's storage (equivalent to "tigerbeetle format ...").
         for (cluster.storages) |*storage, replica_index| {
-            var superblock = try SuperBlock.init(allocator, storage, &cluster.pools[replica_index]);
+            var superblock = try SuperBlock.init(allocator, .{
+                .storage = storage,
+                .message_pool = &cluster.pools[replica_index],
+                .storage_size_limit = options.storage_size_limit,
+            });
             defer superblock.deinit(allocator);
 
             try vsr.format(
@@ -330,6 +330,7 @@ pub const Cluster = struct {
             .{
                 .replica_count = @intCast(u8, cluster.replicas.len),
                 .storage = &cluster.storages[replica_index],
+                .storage_size_limit = cluster.options.storage_size_limit,
                 .message_pool = &cluster.pools[replica_index],
                 .time = time,
                 .state_machine_options = cluster.options.state_machine_options,
@@ -339,7 +340,6 @@ pub const Cluster = struct {
         assert(replica.cluster == cluster.options.cluster);
         assert(replica.replica == replica_index);
         assert(replica.replica_count == cluster.replicas.len);
-        assert(replica.status == .recovering);
 
         replica.on_change_state = cluster.options.on_change_state;
         replica.on_compact = cluster.options.on_compact;

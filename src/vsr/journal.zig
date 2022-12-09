@@ -88,12 +88,6 @@ const SlotRange = struct {
     }
 };
 
-const Status = enum {
-    init,
-    recovering,
-    recovered,
-};
-
 const slot_count = constants.journal_slot_count;
 const headers_size = constants.journal_size_headers;
 const prepares_size = constants.journal_size_prepares;
@@ -121,6 +115,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
     return struct {
         const Journal = @This();
         const Sector = *align(constants.sector_size) [constants.sector_size]u8;
+
+        const Status = union(enum) {
+            init: void,
+            recovering: fn (journal: *Journal) void,
+            recovered: void,
+        };
 
         pub const Read = struct {
             journal: *Journal,
@@ -911,12 +911,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             );
         }
 
-        pub fn recover(journal: *Journal) void {
+        pub fn recover(journal: *Journal, callback: fn (journal: *Journal) void) void {
             assert(journal.status == .init);
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
 
-            journal.status = .recovering;
+            journal.status = .{ .recovering = callback };
 
             log.debug("{}: recover: recovering", .{journal.replica});
 
@@ -1438,7 +1438,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn recover_done(journal: *Journal) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
 
-            assert(journal.status == .recovering);
+            const callback = journal.status.recovering;
             journal.status = .recovered;
 
             assert(journal.dirty.count <= slot_count);
@@ -1470,6 +1470,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
 
             // From here it's over to the Recovery protocol from VRR 2012.
+            callback(journal);
         }
 
         /// Removes entries from `op_min` (inclusive) onwards.

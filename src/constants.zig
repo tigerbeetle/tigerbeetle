@@ -295,16 +295,13 @@ comptime {
 /// * replicated storage overhead, since all data files are mirrored,
 /// * the size of the superblock storage zone, and
 /// * the static memory allocation required for tracking LSM forest metadata in memory.
-// TODO Remove, now that we have block_count_max.
-pub const size_max = config.cluster.size_max;
+pub const storage_size_max = config.cluster.storage_size_max;
 
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 ///
 /// - A lower block size increases the memory overhead of table metadata, due to smaller/more tables.
 /// - A higher block size increases space amplification due to partially-filled blocks.
 pub const block_size = config.cluster.block_size;
-
-pub const block_count_max = @divExact(16 * 1024 * 1024 * 1024 * 1024, block_size);
 
 comptime {
     assert(block_size % sector_size == 0);

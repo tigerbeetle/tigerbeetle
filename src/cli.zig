@@ -11,8 +11,9 @@ const constants = @import("constants.zig");
 const tigerbeetle = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
 const IO = @import("io.zig").IO;
+const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
 
-// TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted
+// TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage
 const usage = fmt.comptimePrint(
     \\Usage:
     \\
@@ -77,20 +78,23 @@ const usage = fmt.comptimePrint(
 });
 
 pub const Command = union(enum) {
+    pub const Start = struct {
+        args_allocated: std.ArrayList([:0]const u8),
+        addresses: []net.Address,
+        cache_accounts: u32,
+        cache_transfers: u32,
+        cache_transfers_posted: u32,
+        storage_size_limit: u64,
+        path: [:0]const u8,
+    };
+
     format: struct {
         args_allocated: std.ArrayList([:0]const u8),
         cluster: u32,
         replica: u8,
         path: [:0]const u8,
     },
-    start: struct {
-        args_allocated: std.ArrayList([:0]const u8),
-        addresses: []net.Address,
-        cache_accounts: u32,
-        cache_transfers: u32,
-        cache_transfers_posted: u32,
-        path: [:0]const u8,
-    },
+    start: Start,
     version: struct {
         verbose: bool,
     },
@@ -117,6 +121,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var cache_accounts: ?[]const u8 = null;
     var cache_transfers: ?[]const u8 = null;
     var cache_transfers_posted: ?[]const u8 = null;
+    var storage_size_limit: ?[]const u8 = null;
     var verbose: ?bool = null;
 
     var args = try std.process.argsWithAllocator(allocator);
@@ -163,6 +168,9 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         } else if (mem.startsWith(u8, arg, "--cache-transfers-posted")) {
             if (command != .start) fatal("--cache-transfers-posted: supported only by 'start' command", .{});
             cache_transfers_posted = parse_flag("--cache-transfers-posted", arg);
+        } else if (mem.startsWith(u8, arg, "--limit-storage")) {
+            if (command != .start) fatal("--limit-storage: supported only by 'start' command", .{});
+            storage_size_limit = parse_flag("--limit-storage", arg);
         } else if (mem.eql(u8, arg, "--verbose")) {
             if (command != .version) fatal("--verbose: supported only by 'version' command", .{});
             verbose = true;
@@ -218,6 +226,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                         cache_transfers_posted,
                         constants.cache_transfers_posted_max,
                     ),
+                    .storage_size_limit = parse_storage_size(storage_size_limit),
                     .path = path orelse fatal("required: <path>", .{}),
                 },
             };
@@ -270,6 +279,21 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
         error.AddressInvalid => fatal("--addresses: invalid IPv4 address", .{}),
         error.OutOfMemory => fatal("out of memory", .{}),
     };
+}
+
+fn parse_storage_size(size_string: ?[]const u8) u64 {
+    const size_min = data_file_size_min;
+    const size_max = constants.storage_size_max;
+    const size = if (size_string) |s| parse_size(s) else size_max;
+    if (size > size_max) fatal("storage size {} exceeds maximum: {}", .{ size, size_max });
+    if (size < size_min) fatal("storage size {} is below minimum: {}", .{ size, size_min });
+    if (size % constants.sector_size != 0) {
+        fatal("size value {} must be a multiple of sector size ({})", .{
+            size,
+            constants.sector_size,
+        });
+    }
+    return size;
 }
 
 fn parse_size(string: []const u8) u64 {

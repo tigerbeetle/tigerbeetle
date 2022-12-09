@@ -1115,6 +1115,7 @@ test "sum_overflows" {
 const TestContext = struct {
     const Storage = @import("test/storage.zig").Storage;
     const MessagePool = @import("message_pool.zig").MessagePool;
+    const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("lsm/grid.zig").GridType(Storage);
     const StateMachine = StateMachineType(Storage, .{
@@ -1149,7 +1150,11 @@ const TestContext = struct {
         };
         errdefer ctx.message_pool.deinit(allocator);
 
-        ctx.superblock = try SuperBlock.init(allocator, &ctx.storage, &ctx.message_pool);
+        ctx.superblock = try SuperBlock.init(allocator, .{
+            .storage = &ctx.storage,
+            .storage_size_limit = data_file_size_min,
+            .message_pool = &ctx.message_pool,
+        });
         errdefer ctx.superblock.deinit(allocator);
 
         // Pretend that the superblock is open so that the Forest can initialize.

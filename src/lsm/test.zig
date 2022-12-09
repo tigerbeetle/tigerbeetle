@@ -27,7 +27,7 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const Environment = struct {
     const cluster = 32;
     const replica = 4;
-    const size_max = vsr.Zone.superblock.size().? +
+    const storage_size_max = vsr.Zone.superblock.size().? +
         vsr.Zone.wal_headers.size().? +
         vsr.Zone.wal_prepares.size().? +
         (512 + 64) * 1024 * 1024;
@@ -73,7 +73,7 @@ const Environment = struct {
         env.dir_fd = try IO.open_dir(dir_path);
         errdefer std.os.close(env.dir_fd);
 
-        env.fd = try IO.open_file(env.dir_fd, "test_forest", size_max, must_create);
+        env.fd = try IO.open_file(env.dir_fd, "test_forest", storage_size_max, must_create);
         errdefer std.os.close(env.fd);
 
         env.io = try IO.init(128, 0);
@@ -85,7 +85,11 @@ const Environment = struct {
         env.message_pool = try MessagePool.init(allocator, .replica);
         errdefer env.message_pool.deinit(allocator);
 
-        env.superblock = try SuperBlock.init(allocator, &env.storage, &env.message_pool);
+        env.superblock = try SuperBlock.init(allocator, .{
+            .storage = &env.storage,
+            .storage_size_limit = constants.storage_size_max,
+            .message_pool = &env.message_pool,
+        });
         env.superblock_context = undefined;
         errdefer env.superblock.deinit(allocator);
 
@@ -132,7 +136,7 @@ const Environment = struct {
         env.superblock.format(superblock_format_callback, &env.superblock_context, .{
             .cluster = cluster,
             .replica = replica,
-            .size_max = size_max,
+            .storage_size_max = storage_size_max,
         });
 
         while (true) {

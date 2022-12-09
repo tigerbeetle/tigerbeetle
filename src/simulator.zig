@@ -94,8 +94,9 @@ pub fn main() !void {
         .cluster = cluster_id,
         .replica_count = replica_count,
         .client_count = client_count,
-        // TODO Compute an upper-bound for this based on requests_committed_max.
-        .grid_size_max = 1024 * 1024 * 256,
+        .storage_size_limit = vsr.sector_floor(
+            constants.storage_size_max - random.uintLessThan(u64, constants.storage_size_max / 10),
+        ),
         .seed = random.int(u64),
         .on_change_state = on_replica_change_state,
         .on_compact = on_replica_compact,

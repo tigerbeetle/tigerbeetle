@@ -41,11 +41,6 @@ const FuzzOpTag = std.meta.Tag(FuzzOp);
 const Environment = struct {
     const cluster = 32;
     const replica = 4;
-    // TODO Is this appropriate for the number of fuzz_ops we want to run?
-    const size_max = vsr.Zone.superblock.size().? +
-        vsr.Zone.wal_headers.size().? +
-        vsr.Zone.wal_prepares.size().? +
-        1024 * 1024 * 1024;
 
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
@@ -152,7 +147,7 @@ const Environment = struct {
         env.superblock.format(superblock_format_callback, &env.superblock_context, .{
             .cluster = cluster,
             .replica = replica,
-            .size_max = size_max,
+            .storage_size_max = constants.storage_size_max,
         });
         env.tick_until_state_change(.init, .formatted);
     }
@@ -292,7 +287,7 @@ const Environment = struct {
 
 pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) !void {
     // Init mocked storage.
-    var storage = try Storage.init(allocator, Environment.size_max, storage_options);
+    var storage = try Storage.init(allocator, constants.storage_size_max, storage_options);
     defer storage.deinit(allocator);
 
     try Environment.format(&storage);
