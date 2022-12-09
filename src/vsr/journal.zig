@@ -46,8 +46,10 @@ const Ring = enum {
 };
 
 const headers_per_sector = @divExact(constants.sector_size, @sizeOf(Header));
+const headers_per_message = @divExact(constants.message_size_max, @sizeOf(Header));
 comptime {
     assert(headers_per_sector > 0);
+    assert(headers_per_message > 0);
 }
 
 /// A slot is an index within:
@@ -180,6 +182,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
         };
 
+        const HeaderChunks = std.StaticBitSet(util.div_ceil(slot_count, headers_per_message));
+
         storage: *Storage,
         replica: u8,
 
@@ -211,6 +215,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// We copy-on-write to these buffers, as the in-memory headers may change while writing.
         /// The buffers belong to the IOP at the corresponding index in IOPS.
         headers_iops: *align(constants.sector_size) [constants.journal_iops_write_max][constants.sector_size]u8,
+
+        /// A set bit indicates a chunk of redundant headers that no read has been issued to yet.
+        header_chunks_requested: HeaderChunks = HeaderChunks.initFull(),
+        /// A set bit indicates a chunk of redundant headers that has been recovered.
+        header_chunks_recovered: HeaderChunks = HeaderChunks.initEmpty(),
 
         /// Statically allocated read IO operation context data.
         reads: IOPS(Read, constants.journal_iops_read_max) = .{},
@@ -272,13 +281,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             errdefer allocator.free(headers_redundant);
             for (headers_redundant) |*header| header.* = undefined;
 
-            var dirty = try BitSet.init(allocator, slot_count);
+            var dirty = try BitSet.init_full(allocator, slot_count);
             errdefer dirty.deinit(allocator);
-            for (headers) |_, index| dirty.set(Slot{ .index = index });
 
-            var faulty = try BitSet.init(allocator, slot_count);
+            var faulty = try BitSet.init_full(allocator, slot_count);
             errdefer faulty.deinit(allocator);
-            for (headers) |_, index| faulty.set(Slot{ .index = index });
 
             var prepare_checksums = try allocator.alloc(u128, slot_count);
             errdefer allocator.free(prepare_checksums);
@@ -915,47 +922,58 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.status == .init);
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
+            assert(journal.reads.executing() == 0);
+            assert(journal.writes.executing() == 0);
+            assert(journal.header_chunks_requested.count() == HeaderChunks.bit_length);
+            assert(journal.header_chunks_recovered.count() == 0);
 
             journal.status = .{ .recovering = callback };
-
             log.debug("{}: recover: recovering", .{journal.replica});
 
-            journal.recover_headers(0);
+            var available: usize = journal.reads.available();
+            while (available > 0) : (available -= 1) journal.recover_headers();
+
+            assert(journal.header_chunks_recovered.count() == 0);
+            assert(journal.header_chunks_requested.count() ==
+                HeaderChunks.bit_length - journal.reads.executing());
         }
 
-        fn recover_headers(journal: *Journal, offset: u64) void {
+        fn recover_headers(journal: *Journal) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
-
             assert(journal.status == .recovering);
-            assert(journal.dirty.count == slot_count);
-            assert(journal.faulty.count == slot_count);
+            assert(journal.reads.available() > 0);
 
-            if (offset == headers_size) {
+            if (journal.header_chunks_recovered.count() == HeaderChunks.bit_length) {
+                assert(journal.header_chunks_requested.count() == 0);
                 log.debug("{}: recover_headers: complete", .{journal.replica});
-                journal.recover_prepares(Slot{ .index = 0 });
+                journal.recover_prepares();
                 return;
             }
-            assert(offset < headers_size);
+
+            const chunk_index = journal.header_chunks_requested.findFirstSet() orelse return;
+            assert(!journal.header_chunks_recovered.isSet(chunk_index));
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
-            // We expect that no other process is issuing reads while we are recovering.
-            assert(journal.reads.executing() == 0);
-
-            const read = journal.reads.acquire() orelse unreachable;
-            read.* = .{
+            const chunk_read = journal.reads.acquire() orelse unreachable;
+            chunk_read.* = .{
                 .journal = journal,
                 .completion = undefined,
                 .message = message.ref(),
                 .callback = undefined,
-                .op = undefined,
-                .checksum = offset,
+                .op = chunk_index,
+                .checksum = undefined,
                 .destination_replica = null,
             };
 
+            const offset = constants.message_size_max * chunk_index;
+            assert(offset < headers_size);
+
             const buffer = recover_headers_buffer(message, offset);
             assert(buffer.len > 0);
+            assert(buffer.len <= constants.message_size_max);
+            assert(buffer.len + offset <= headers_size);
 
             log.debug("{}: recover_headers: offset={} size={} recovering", .{
                 journal.replica,
@@ -963,9 +981,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 buffer.len,
             });
 
+            journal.header_chunks_requested.unset(chunk_index);
             journal.storage.read_sectors(
                 recover_headers_callback,
-                &read.completion,
+                &chunk_read.completion,
                 buffer,
                 .wal_headers,
                 offset,
@@ -973,69 +992,94 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_headers_callback(completion: *Storage.Read) void {
-            const read = @fieldParentPtr(Journal.Read, "completion", completion);
-            const journal = read.journal;
+            const chunk_read = @fieldParentPtr(Journal.Read, "completion", completion);
+            const journal = chunk_read.journal;
             const replica = @fieldParentPtr(Replica, "journal", journal);
-            const message = read.message;
+            assert(journal.status == .recovering);
+            assert(chunk_read.destination_replica == null);
 
-            const offset = @intCast(u64, read.checksum);
-            const buffer = recover_headers_buffer(message, offset);
+            const chunk_index = chunk_read.op;
+            assert(!journal.header_chunks_requested.isSet(chunk_index));
+            assert(!journal.header_chunks_recovered.isSet(chunk_index));
+
+            const chunk_buffer = recover_headers_buffer(
+                chunk_read.message,
+                chunk_index * constants.message_size_max,
+            );
+            assert(chunk_buffer.len >= @sizeOf(Header));
+            assert(chunk_buffer.len % @sizeOf(Header) == 0);
 
             log.debug("{}: recover_headers: offset={} size={} recovered", .{
                 journal.replica,
-                offset,
-                buffer.len,
+                chunk_index * constants.message_size_max,
+                chunk_buffer.len,
             });
-
-            assert(journal.status == .recovering);
-            assert(offset % @sizeOf(Header) == 0);
-            assert(buffer.len >= @sizeOf(Header));
-            assert(buffer.len % @sizeOf(Header) == 0);
-            assert(read.destination_replica == null);
-            assert(journal.dirty.count == slot_count);
-            assert(journal.faulty.count == slot_count);
 
             // Directly store all the redundant headers in `journal.headers_redundant` (including any
             // that are invalid or corrupt). As the prepares are recovered, these will be replaced
             // or removed as necessary.
-            const buffer_headers = std.mem.bytesAsSlice(Header, buffer);
+            const chunk_headers = std.mem.bytesAsSlice(Header, chunk_buffer);
             util.copy_disjoint(
                 .exact,
                 Header,
-                journal.headers_redundant[@divExact(offset, @sizeOf(Header))..][0..buffer_headers.len],
-                buffer_headers,
+                journal.headers_redundant[chunk_index * headers_per_message ..][0..chunk_headers.len],
+                chunk_headers,
             );
 
-            const offset_next = offset + buffer.len;
             // We must release before we call `recover_headers()` in case Storage is synchronous.
             // Otherwise, we would run out of messages and reads.
-            replica.message_bus.unref(read.message);
-            journal.reads.release(read);
+            replica.message_bus.unref(chunk_read.message);
+            journal.reads.release(chunk_read);
 
-            journal.recover_headers(offset_next);
+            journal.header_chunks_recovered.set(chunk_index);
+            journal.recover_headers();
         }
 
         fn recover_headers_buffer(message: *Message, offset: u64) []align(@alignOf(Header)) u8 {
-            const max = std.math.min(message.buffer.len, headers_size - offset);
+            const max = std.math.min(constants.message_size_max, headers_size - offset);
             assert(max % constants.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
             return message.buffer[0..max];
         }
 
-        fn recover_prepares(journal: *Journal, slot: Slot) void {
-            const replica = @fieldParentPtr(Replica, "journal", journal);
+        /// Recover the prepares ring. Reads are issued concurrently.
+        /// - `dirty` is initially full.
+        ///   Bits are cleared when a read is issued to the slot.
+        ///   All bits are set again before recover_slots() is called.
+        /// - `faulty` is initially full.
+        ///   Bits are cleared when the slot's read finishes.
+        ///   All bits are set again before recover_slots() is called.
+        /// - The prepare's headers are loaded into `journal.headers`.
+        fn recover_prepares(journal: *Journal) void {
             assert(journal.status == .recovering);
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
-            // We expect that no other process is issuing reads while we are recovering.
             assert(journal.reads.executing() == 0);
+            assert(journal.writes.executing() == 0);
 
-            if (slot.index == slot_count) {
-                journal.recover_slots();
-                return;
+            var available: usize = journal.reads.available();
+            while (available > 0) : (available -= 1) journal.recover_prepare();
+
+            assert(journal.writes.executing() == 0);
+            assert(journal.reads.executing() > 0);
+            assert(journal.reads.executing() + journal.dirty.count == slot_count);
+            assert(journal.faulty.count == slot_count);
+        }
+
+        fn recover_prepare(journal: *Journal) void {
+            const replica = @fieldParentPtr(Replica, "journal", journal);
+            assert(journal.status == .recovering);
+            assert(journal.reads.available() > 0);
+            assert(journal.dirty.count <= journal.faulty.count);
+
+            if (journal.faulty.count == 0) {
+                for (journal.headers) |_, index| journal.dirty.set(Slot{ .index = index });
+                for (journal.headers) |_, index| journal.faulty.set(Slot{ .index = index });
+                return journal.recover_slots();
             }
-            assert(slot.index < slot_count);
 
+            const slot_index = journal.dirty.bits.findFirstSet() orelse return;
+            const slot = Slot{ .index = slot_index };
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
@@ -1045,18 +1089,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .completion = undefined,
                 .message = message.ref(),
                 .callback = undefined,
-                .op = undefined,
-                .checksum = slot.index,
+                .op = slot.index,
+                .checksum = undefined,
                 .destination_replica = null,
             };
 
-            log.debug("{}: recover_prepares: recovering slot={}", .{
+            log.debug("{}: recover_prepare: recovering slot={}", .{
                 journal.replica,
                 slot.index,
             });
 
+            journal.dirty.clear(slot);
             journal.storage.read_sectors(
-                recover_prepares_callback,
+                recover_prepare_callback,
                 &read.completion,
                 // We load the entire message to verify that it isn't torn or corrupt.
                 // We don't know the message's size, so use the entire buffer.
@@ -1066,18 +1111,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             );
         }
 
-        fn recover_prepares_callback(completion: *Storage.Read) void {
+        fn recover_prepare_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(Journal.Read, "completion", completion);
             const journal = read.journal;
             const replica = @fieldParentPtr(Replica, "journal", journal);
 
             assert(journal.status == .recovering);
-            assert(journal.dirty.count == slot_count);
-            assert(journal.faulty.count == slot_count);
+            assert(journal.dirty.count <= journal.faulty.count);
             assert(read.destination_replica == null);
 
-            const slot = Slot{ .index = @intCast(u64, read.checksum) };
+            const slot = Slot{ .index = @intCast(u64, read.op) };
             assert(slot.index < slot_count);
+            assert(!journal.dirty.bit(slot));
+            assert(journal.faulty.bit(slot));
 
             // Check `valid_checksum_body` here rather than in `recover_done` so that we don't need
             // to hold onto the whole message (just the header).
@@ -1090,7 +1136,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             replica.message_bus.unref(read.message);
             journal.reads.release(read);
 
-            journal.recover_prepares(Slot{ .index = slot.index + 1 });
+            journal.faulty.clear(slot);
+            journal.recover_prepare();
         }
 
         /// When in doubt about whether a particular message was received, it must be marked as
@@ -1436,14 +1483,18 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_done(journal: *Journal) void {
-            const replica = @fieldParentPtr(Replica, "journal", journal);
-
-            const callback = journal.status.recovering;
-            journal.status = .recovered;
-
+            assert(journal.status == .recovering);
+            assert(journal.reads.executing() == 0);
+            assert(journal.writes.executing() == 0);
             assert(journal.dirty.count <= slot_count);
             assert(journal.faulty.count <= slot_count);
             assert(journal.faulty.count == journal.dirty.count);
+            assert(journal.header_chunks_requested.count() == 0);
+            assert(journal.header_chunks_recovered.count() == HeaderChunks.bit_length);
+
+            const replica = @fieldParentPtr(Replica, "journal", journal);
+            const callback = journal.status.recovering;
+            journal.status = .recovered;
 
             // Abort if all slots are faulty, since something is very wrong.
             if (journal.faulty.count == slot_count) @panic("WAL is completely corrupt");
@@ -2227,14 +2278,19 @@ pub const BitSet = struct {
     /// The number of bits set (updated incrementally as bits are set or cleared):
     count: u64 = 0,
 
-    fn init(allocator: Allocator, count: usize) !BitSet {
-        const bits = try std.DynamicBitSetUnmanaged.initEmpty(allocator, count);
+    fn init_full(allocator: Allocator, count: usize) !BitSet {
+        const bits = try std.DynamicBitSetUnmanaged.initFull(allocator, count);
         errdefer bits.deinit(allocator);
 
-        return BitSet{ .bits = bits };
+        return BitSet{
+            .bits = bits,
+            .count = count,
+        };
     }
 
     fn deinit(bit_set: *BitSet, allocator: Allocator) void {
+        assert(bit_set.count == bit_set.bits.count());
+
         bit_set.bits.deinit(allocator);
     }
 
