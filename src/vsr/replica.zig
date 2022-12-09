@@ -311,8 +311,8 @@ pub fn ReplicaType(
                 allocator,
                 .{
                     .storage = options.storage,
-                    .message_pool = options.message_pool,
                     .storage_size_limit = options.storage_size_limit,
+                    .message_pool = options.message_pool,
                 },
             );
 
