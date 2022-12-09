@@ -16,6 +16,17 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 const BlockType = @import("grid.zig").BlockType;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 
+pub const TableUsage = enum {
+    /// General purpose table.
+    general,
+    /// If your usage fits this pattern:
+    /// * Only put keys which are not present.
+    /// * Only remove keys which are present.
+    /// * TableKey == TableValue (modulo padding, eg CompositeKey)
+    /// Then we can unlock additional optimizations.
+    secondary_index,
+};
+
 /// A table is a set of blocks:
 ///
 /// * Index block (exactly 1)
@@ -69,16 +80,7 @@ pub fn TableType(
     comptime table_tombstone: fn (*const TableValue) callconv(.Inline) bool,
     /// Returns a tombstone value representation for a key.
     comptime table_tombstone_from_key: fn (TableKey) callconv(.Inline) TableValue,
-    comptime usage: enum {
-        /// General purpose table.
-        general,
-        /// If your usage fits this pattern:
-        /// * Only put keys which are not present.
-        /// * Only remove keys which are present.
-        /// * TableKey == TableValue (modulo padding, eg CompositeKey)
-        /// Then we can unlock additional optimizations.
-        secondary_index,
-    },
+    comptime usage: TableUsage,
 ) type {
     return struct {
         const Table = @This();
