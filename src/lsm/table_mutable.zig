@@ -129,7 +129,10 @@ pub fn TableMutableType(comptime Table: type) type {
 
             assert(table.values.count() <= table.value_count_max);
 
-            // TODO Should we remove value from cache?
+            if (table.values_cache) |cache| {
+                cache.insert(key_from_value(value)).* =
+                    tombstone_from_key(key_from_value(value));
+            }
         }
 
         /// This may return `false` even when committing would succeed — it pessimistically
