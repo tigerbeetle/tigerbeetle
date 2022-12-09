@@ -1,15 +1,41 @@
 # tigerbeetle-go
 
-[TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) client for Go.
+The TigerBeetle client for Go.
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/tigerbeetledb/tigerbeetle-go.svg)](https://pkg.go.dev/github.com/tigerbeetledb/tigerbeetle-go)
 
-## Basic example
+Make sure to import `github.com/tigerbeetledb/tigerbeetle-go`, not
+this repo and subdirectory.
 
-See [./samples/basic](./samples/basic) for a minimal Go project
-showing most features of the client.
+For example:
+
+```bash
+$ cat test.go
+package main
+
+import _ "github.com/tigerbeetledb/tigerbeetle-go"
+import "fmt"
+
+func main() {
+  fmt.Println("Import ok!")
+}
+
+$ go mod init tigerbeetle-test
+$ go mod tidy
+$ go build
+$ ./tigerbeetle-test
+Import ok!
+```
+
+## A more real example
+
+See [./samples/basic](./samples/basic) for a Go project
+showing many features of the client.
 
 ## Development Setup
+
+This section is only relevant to folks modifying the Go client code
+itself. If you are just using the client, you can ignore this.
 
 *Prerequisites:*
 - go 1.17+
