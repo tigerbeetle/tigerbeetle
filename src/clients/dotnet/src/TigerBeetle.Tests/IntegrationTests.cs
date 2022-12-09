@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 namespace TigerBeetle.Tests
 {
     [TestClass]
-    public class AccountTests
+    public class IntegrationTests
     {
         #region Fields
 
