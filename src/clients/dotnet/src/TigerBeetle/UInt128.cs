@@ -101,17 +101,17 @@ namespace TigerBeetle
         public bool Equals(UInt128 other) => _0 == other._0 && _1 == other._1;
 
         public override int GetHashCode() => HashCode.Combine(_0, _1);
-        
+
         public override string ToString() => ToGuid().ToString();
-        
+
         public static bool operator ==(UInt128 left, UInt128 right) => left.Equals(right);
-        
+
         public static bool operator !=(UInt128 left, UInt128 right) => !left.Equals(right);
 
         public static implicit operator Guid(UInt128 value) => value.ToGuid();
-        
+
         public static implicit operator UInt128(Guid guid) => new UInt128(guid);
-        
+
         public static implicit operator UInt128(long value)
         {
             unchecked
@@ -119,7 +119,7 @@ namespace TigerBeetle
                 return new UInt128((ulong)value, 0LU);
             }
         }
-        
+
         public static implicit operator UInt128(ulong value) => new UInt128(value, 0LU);
 
         public static implicit operator UInt128(int value)
@@ -128,8 +128,8 @@ namespace TigerBeetle
             {
                 return new UInt128((ulong)value, 0LU);
             }
-        } 
-        
+        }
+
         public static implicit operator UInt128(uint value) => new UInt128((ulong)value, 0LU);
 
         public ReadOnlySpan<byte> AsReadOnlySpan()

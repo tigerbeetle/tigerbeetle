@@ -24,7 +24,7 @@ namespace TigerBeetle.Tests
 
             Assert.AreEqual(i64a, -1L);
             Assert.AreEqual(i64b, -2L);
-        } 
+        }
 
         [TestMethod]
         public void U64Constructors()
@@ -34,6 +34,6 @@ namespace TigerBeetle.Tests
 
             Assert.AreEqual(u64a, 1LU);
             Assert.AreEqual(u64b, 2LU);
-        }                
+        }
     }
 }

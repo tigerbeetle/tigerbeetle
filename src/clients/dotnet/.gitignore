@@ -1,5 +1,5 @@
 .vs/
 bin/
 obj/
-src/TigerBeetle/native
+src/TigerBeetle/native/
 *tigerbeetle.benchmark

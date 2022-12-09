@@ -12,7 +12,7 @@
 	<OS Condition="$([MSBuild]::IsOSPlatform('OSX'))">OSX</OS>			
   </PropertyGroup>
 	<Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="'$(OS)'=='Windows'">
-		<Exec Command=".\zig\zig.exe build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../../../../" />
+		<Exec Command=".\zig\zig.exe build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)\..\..\..\..\.." />
 	</Target>
 	<Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="'$(OS)'!='Windows'">
 		<Exec Command="zig/zig build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../../../../" />

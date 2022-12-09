@@ -12,232 +12,180 @@ using static TigerBeetle.TBClient;
 
 namespace TigerBeetle
 {
-	public sealed class Client : IDisposable
-	{
-		#region Fields
+    public sealed class Client : IDisposable
+    {
+        #region Fields
 
-		private const int DEFAULT_MAX_CONCURRENCY = 32;
+        private const int DEFAULT_MAX_CONCURRENCY = 32;
 
-		private readonly uint clusterID;
-		private readonly PacketList packets;
+        private readonly uint clusterID;
+        private readonly NativeClient nativeClient;
 
-		#endregion Fields
+        #endregion Fields
 
-		#region Constructor
+        #region Constructor
 
-		public Client(uint clusterID, int[] replicaPorts, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
-		: this(clusterID, replicaPorts.Select(x => x.ToString()), maxConcurrency)
-		{
-		}
+        public Client(uint clusterID, int[] replicaPorts, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
+        : this(clusterID, replicaPorts.Select(x => x.ToString()), maxConcurrency)
+        {
+        }
 
-		public Client(uint clusterID, string[] replicaAddresses, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
-		: this(clusterID, replicaAddresses.Select(x => x), maxConcurrency)
-		{
-		}
+        public Client(uint clusterID, string[] replicaAddresses, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
+        : this(clusterID, replicaAddresses.Select(x => x), maxConcurrency)
+        {
+        }
 
-		public Client(uint clusterID, IPEndPoint[] replicaEndpoints, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
-		: this(clusterID, replicaEndpoints.Select(x => x.ToString()), maxConcurrency)
-		{
-		}
+        public Client(uint clusterID, IPEndPoint[] replicaEndpoints, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
+        : this(clusterID, replicaEndpoints.Select(x => x.ToString()), maxConcurrency)
+        {
+        }
 
-		private Client(uint clusterID, IEnumerable<string> configuration, int maxConcurrency)
-		{
-			if (configuration == null || !configuration.Any()) throw new ArgumentException("Invalid replica addresses");
+        private Client(uint clusterID, IEnumerable<string> configuration, int maxConcurrency)
+        {
+            if (configuration == null || !configuration.Any()) throw new ArgumentException("Invalid replica addresses");
+            if (maxConcurrency <= 0) throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
 
-			// Cap the maximum amount of packets
-			if (maxConcurrency <= 0) throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
-			if (maxConcurrency > 4096) maxConcurrency = 4096;
+            this.clusterID = clusterID;
+            this.nativeClient = NativeClient.init(clusterID, string.Join(',', configuration), maxConcurrency);
+        }
 
-			this.clusterID = clusterID;
+        ~Client()
+        {
+            Dispose(disposing: false);
+        }
 
-			var addresses_byte = Encoding.UTF8.GetBytes(string.Join(',', configuration) + "\0");
-			unsafe
-			{
-				fixed (byte* addressPtr = addresses_byte)
-				{
-					IntPtr handle;
-					TBPacketList packetList;
+        #endregion Constructor
 
-#if NETSTANDARD
-					var status = tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, OnCompletionHandler);
-#else
-					var status = tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, &OnCompletionCallback);
-#endif
+        #region Properties
 
-					if (status != TBStatus.Success) throw new Exception($"Result {status}");
+        public uint ClusterID => clusterID;
 
-					this.packets = new PacketList(handle, packetList, maxConcurrency);
-				}
-			}
-		}
+        #endregion Properties
 
-		~Client()
-		{
-			Dispose(disposing: false);
-		}
+        #region Methods
 
-		#endregion Constructor
+        public CreateAccountResult CreateAccount(Account account)
+        {
+            var ret = CallRequest<CreateAccountsResult, Account>(TBOperation.CreateAccounts, new[] { account });
+            return ret.Length == 0 ? CreateAccountResult.Ok : ret[0].Result;
+        }
 
-		#region Properties
+        public CreateAccountsResult[] CreateAccounts(Account[] batch)
+        {
+            return CallRequest<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
+        }
 
-		public uint ClusterID => clusterID;
+        public Task<CreateAccountResult> CreateAccountAsync(Account account)
+        {
+            return CallRequestAsync<CreateAccountsResult, Account>(TBOperation.CreateAccounts, new[] { account })
+            .ContinueWith(x => x.Result.Length == 0 ? CreateAccountResult.Ok : x.Result[0].Result);
+        }
 
-		internal PacketList Packets => packets;
+        public Task<CreateAccountsResult[]> CreateAccountsAsync(Account[] batch)
+        {
+            return CallRequestAsync<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
+        }
 
-		#endregion Properties
+        public CreateTransferResult CreateTransfer(Transfer transfer)
+        {
+            var ret = CallRequest<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, new[] { transfer });
+            return ret.Length == 0 ? CreateTransferResult.Ok : ret[0].Result;
+        }
 
-		#region Methods
+        public CreateTransfersResult[] CreateTransfers(Transfer[] batch)
+        {
+            return CallRequest<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
+        }
 
-		public CreateAccountResult CreateAccount(Account account)
-		{
-			var ret = CallRequest<CreateAccountsResult, Account>(Operation.CreateAccounts, new[] { account });
-			return ret.Length == 0 ? CreateAccountResult.Ok : ret[0].Result;
-		}
+        public Task<CreateTransferResult> CreateTransferAsync(Transfer transfer)
+        {
+            return CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, new[] { transfer })
+            .ContinueWith(x => x.Result.Length == 0 ? CreateTransferResult.Ok : x.Result[0].Result);
+        }
 
-		public CreateAccountsResult[] CreateAccounts(Account[] batch)
-		{
-			return CallRequest<CreateAccountsResult, Account>(Operation.CreateAccounts, batch);
-		}
+        public Task<CreateTransfersResult[]> CreateTransfersAsync(Transfer[] batch)
+        {
+            return CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
+        }
 
-		public Task<CreateAccountResult> CreateAccountAsync(Account account)
-		{
-			return CallRequestAsync<CreateAccountsResult, Account>(Operation.CreateAccounts, new[] { account })
-			.ContinueWith(x => x.Result.Length == 0 ? CreateAccountResult.Ok : x.Result[0].Result);
-		}
+        public Account? LookupAccount(UInt128 id)
+        {
+            var ret = CallRequest<Account, UInt128>(TBOperation.LookupAccounts, new[] { id });
+            return ret.Length == 0 ? null : ret[0];
+        }
 
-		public Task<CreateAccountsResult[]> CreateAccountsAsync(Account[] batch)
-		{
-			return CallRequestAsync<CreateAccountsResult, Account>(Operation.CreateAccounts, batch);
-		}
+        public Account[] LookupAccounts(UInt128[] ids)
+        {
+            return CallRequest<Account, UInt128>(TBOperation.LookupAccounts, ids);
+        }
 
-		public CreateTransferResult CreateTransfer(Transfer transfer)
-		{
-			var ret = CallRequest<CreateTransfersResult, Transfer>(Operation.CreateTransfers, new[] { transfer });
-			return ret.Length == 0 ? CreateTransferResult.Ok : ret[0].Result;
-		}
+        public Task<Account?> LookupAccountAsync(UInt128 id)
+        {
+            return CallRequestAsync<Account, UInt128>(TBOperation.LookupAccounts, new[] { id })
+            .ContinueWith(x => x.Result.Length == 0 ? (Account?)null : x.Result[0]);
+        }
 
-		public CreateTransfersResult[] CreateTransfers(Transfer[] batch)
-		{
-			return CallRequest<CreateTransfersResult, Transfer>(Operation.CreateTransfers, batch);
-		}
+        public Task<Account[]> LookupAccountsAsync(UInt128[] ids)
+        {
+            return CallRequestAsync<Account, UInt128>(TBOperation.LookupAccounts, ids);
+        }
 
-		public Task<CreateTransferResult> CreateTransferAsync(Transfer transfer)
-		{
-			return CallRequestAsync<CreateTransfersResult, Transfer>(Operation.CreateTransfers, new[] { transfer })
-			.ContinueWith(x => x.Result.Length == 0 ? CreateTransferResult.Ok : x.Result[0].Result);
-		}
+        public Transfer? LookupTransfer(UInt128 id)
+        {
+            var ret = CallRequest<Transfer, UInt128>(TBOperation.LookupTransfers, new[] { id });
+            return ret.Length == 0 ? null : ret[0];
+        }
 
-		public Task<CreateTransfersResult[]> CreateTransfersAsync(Transfer[] batch)
-		{
-			return CallRequestAsync<CreateTransfersResult, Transfer>(Operation.CreateTransfers, batch);
-		}
+        public Transfer[] LookupTransfers(UInt128[] ids)
+        {
+            return CallRequest<Transfer, UInt128>(TBOperation.LookupTransfers, ids);
+        }
 
-		public Account? LookupAccount(UInt128 id)
-		{
-			var ret = CallRequest<Account, UInt128>(Operation.LookupAccounts, new[] { id });
-			return ret.Length == 0 ? null : ret[0];
-		}
+        public Task<Transfer?> LookupTransferAsync(UInt128 id)
+        {
+            return CallRequestAsync<Transfer, UInt128>(TBOperation.LookupTransfers, new[] { id })
+            .ContinueWith(x => x.Result.Length == 0 ? (Transfer?)null : x.Result[0]);
+        }
 
-		public Account[] LookupAccounts(UInt128[] ids)
-		{
-			return CallRequest<Account, UInt128>(Operation.LookupAccounts, ids);
-		}
+        public Task<Transfer[]> LookupTransfersAsync(UInt128[] ids)
+        {
+            return CallRequestAsync<Transfer, UInt128>(TBOperation.LookupTransfers, ids);
+        }
 
-		public Task<Account?> LookupAccountAsync(UInt128 id)
-		{
-			return CallRequestAsync<Account, UInt128>(Operation.LookupAccounts, new[] { id })
-			.ContinueWith(x => x.Result.Length == 0 ? (Account?)null : x.Result[0]);
-		}
+        private TResult[] CallRequest<TResult, TBody>(TBOperation operation, TBody[] batch)
+            where TResult : unmanaged
+            where TBody : unmanaged
+        {
+            var packet = nativeClient.Rent();
+            var blockingRequest = new BlockingRequest<TResult, TBody>(this.nativeClient, packet);
 
-		public Task<Account[]> LookupAccountsAsync(UInt128[] ids)
-		{
-			return CallRequestAsync<Account, UInt128>(Operation.LookupAccounts, ids);
-		}
+            blockingRequest.Submit(operation, batch);
+            return blockingRequest.Wait();
+        }
 
-		public Transfer? LookupTransfer(UInt128 id)
-		{
-			var ret = CallRequest<Transfer, UInt128>(Operation.LookupTransfers, new[] { id });
-			return ret.Length == 0 ? null : ret[0];
-		}
+        private async Task<TResult[]> CallRequestAsync<TResult, TBody>(TBOperation operation, TBody[] batch)
+            where TResult : unmanaged
+            where TBody : unmanaged
+        {
+            var packet = await nativeClient.RentAsync();
+            var asyncRequest = new AsyncRequest<TResult, TBody>(this.nativeClient, packet);
 
-		public Transfer[] LookupTransfers(UInt128[] ids)
-		{
-			return CallRequest<Transfer, UInt128>(Operation.LookupTransfers, ids);
-		}
+            asyncRequest.Submit(operation, batch);
+            return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
+        }
 
-		public Task<Transfer?> LookupTransferAsync(UInt128 id)
-		{
-			return CallRequestAsync<Transfer, UInt128>(Operation.LookupTransfers, new[] { id })
-			.ContinueWith(x => x.Result.Length == 0 ? (Transfer?)null : x.Result[0]);
-		}
+        public void Dispose()
+        {
+            GC.SuppressFinalize(this);
+            Dispose(disposing: true);
+        }
 
-		public Task<Transfer[]> LookupTransfersAsync(UInt128[] ids)
-		{
-			return CallRequestAsync<Transfer, UInt128>(Operation.LookupTransfers, ids);
-		}
+        private void Dispose(bool disposing)
+        {
+            _ = disposing;
+            nativeClient.Dispose();
+        }
 
-		private TResult[] CallRequest<TResult, TBody>(Operation operation, TBody[] batch)
-			where TResult : unmanaged
-			where TBody : unmanaged
-		{
-			var packet = packets.Rent();
-			var blockingRequest = new BlockingRequest<TResult, TBody>(this.packets, packet);
-
-			blockingRequest.Submit(operation, batch);
-			return blockingRequest.Wait();
-		}
-
-		private async Task<TResult[]> CallRequestAsync<TResult, TBody>(Operation operation, TBody[] batch)
-			where TResult : unmanaged
-			where TBody : unmanaged
-		{
-			var packet = await packets.RentAsync();
-			var asyncRequest = new AsyncRequest<TResult, TBody>(this.packets, packet);
-
-			asyncRequest.Submit(operation, batch);
-			return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
-		}
-
-		public void Dispose()
-		{
-			GC.SuppressFinalize(this);
-			Dispose(disposing: true);
-		}
-
-		private void Dispose(bool disposing)
-		{
-			_ = disposing;
-			packets.Dispose();
-		}
-
-		#endregion Methods
-
-		#region TBClient callback
-
-		#region Comments
-
-		// Uses either the new function pointer by value, or the old managed delegate in .Net standard
-		// Using managed delegate, the instance must be referenced to prevents GC
-
-		#endregion Comments
-
-#if NETSTANDARD
-		private static readonly OnCompletionFn OnCompletionHandler = new OnCompletionFn(OnCompletionCallback);
-		[AllowReversePInvokeCalls]
-#else
-
-		[UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-#endif
-		private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
-		{
-			var request = IRequest.FromUserData(packet->user_data);
-			if (request != null)
-			{
-				var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
-				request.Complete(packet->operation, packet->status, span);
-			}
-		}
-
-		#endregion TBClient callback
-	}
+        #endregion Methods
+    }
 }

@@ -466,7 +466,12 @@ fn dotnet_client(
         build_step.dependOn(dependency);
     }
 
-    // Zig cross-targets:
+    const dotnet_interop = b.addExecutable("dotnet_interop", "src/clients/dotnet/src/dotnet_interop.zig");
+    dotnet_interop.addOptions("tigerbeetle_build_options", options);
+    dotnet_interop.setMainPkgPath("src");
+    const dotnet_interop_step = dotnet_interop.run();
+
+    // Zig cross-targets
     const platforms = .{
         "x86_64-linux-gnu",
         "x86_64-macos",
@@ -491,6 +496,7 @@ fn dotnet_client(
         lib.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
+        lib.step.dependOn(&dotnet_interop_step.step);
         build_step.dependOn(&lib.step);
     }
 }
