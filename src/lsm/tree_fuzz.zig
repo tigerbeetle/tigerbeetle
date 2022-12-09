@@ -100,280 +100,280 @@ const compacts_per_checkpoint = std.math.divCeil(
     constants.lsm_batch_multiple,
 ) catch unreachable;
 
-fn EnvironmentType(comptime table_usage: TableUsage) type {
-    return struct {
-        const Environment = @This();
+//fn EnvironmentType(comptime table_usage: TableUsage) type {
+//return
+const EnvironmentType = struct {
+    const Environment = @This();
 
-        const Table = TableType(
-            Key,
-            Key.Value,
-            Key.compare_keys,
-            Key.key_from_value,
-            Key.sentinel_key,
-            Key.tombstone,
-            Key.tombstone_from_key,
-            table_usage,
-        );
-        const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
+    const Table = TableType(
+        Key,
+        Key.Value,
+        Key.compare_keys,
+        Key.key_from_value,
+        Key.sentinel_key,
+        Key.tombstone,
+        Key.tombstone_from_key,
+        table_usage,
+    );
+    const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
 
-        const State = enum {
-            uninit,
-            init,
-            formatted,
-            superblock_open,
-            tree_open,
-            tree_compacting,
-            tree_checkpointing,
-            superblock_checkpointing,
-            tree_lookup,
-        };
-
-        state: State,
-        storage: *Storage,
-        message_pool: MessagePool,
-        superblock: SuperBlock,
-        superblock_context: SuperBlock.Context = undefined,
-        grid: Grid,
-        node_pool: NodePool,
-        tree: Tree,
-        // We need @fieldParentPtr() of tree, so we can't use an optional Tree.
-        tree_exists: bool,
-        lookup_context: Tree.LookupContext = undefined,
-        lookup_value: ?*const Key.Value = null,
-        checkpoint_op: ?u64 = null,
-
-        fn init(env: *Environment, storage: *Storage) !void {
-            env.state = .uninit;
-
-            env.storage = storage;
-            errdefer env.storage.deinit(allocator);
-
-            env.message_pool = try MessagePool.init(allocator, .replica);
-            errdefer env.message_pool.deinit(allocator);
-
-            env.superblock = try SuperBlock.init(allocator, env.storage, &env.message_pool);
-            errdefer env.superblock.deinit(allocator);
-
-            env.grid = try Grid.init(allocator, &env.superblock);
-            errdefer env.grid.deinit(allocator);
-
-            env.node_pool = try NodePool.init(allocator, node_count);
-            errdefer env.node_pool.deinit(allocator);
-
-            // Tree must be initialized with an open superblock.
-            env.tree = undefined;
-            env.tree_exists = false;
-
-            env.state = .init;
-        }
-
-        fn deinit(env: *Environment) void {
-            assert(env.state != .uninit);
-
-            if (env.tree_exists) {
-                env.tree.deinit(allocator);
-                env.tree_exists = false;
-            }
-            env.node_pool.deinit(allocator);
-            env.grid.deinit(allocator);
-            env.superblock.deinit(allocator);
-            env.message_pool.deinit(allocator);
-
-            env.state = .uninit;
-        }
-
-        fn tick(env: *Environment) void {
-            env.grid.tick();
-            env.storage.tick();
-        }
-
-        fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
-            // Sometimes IO completes synchronously (eg if cached), so we might already be in next_state before ticking.
-            assert(env.state == current_state or env.state == next_state);
-            while (env.state == current_state) env.tick();
-            assert(env.state == next_state);
-        }
-
-        fn change_state(env: *Environment, current_state: State, next_state: State) void {
-            assert(env.state == current_state);
-            env.state = next_state;
-        }
-
-        pub fn format(storage: *Storage) !void {
-            var env: Environment = undefined;
-
-            try env.init(storage);
-            defer env.deinit();
-
-            assert(env.state == .init);
-            env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-                .cluster = cluster,
-                .replica = replica,
-                .size_max = size_max,
-            });
-            env.tick_until_state_change(.init, .formatted);
-        }
-
-        fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-            const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-            env.change_state(.init, .formatted);
-        }
-
-        pub fn open(env: *Environment) void {
-            assert(env.state == .init);
-            env.superblock.open(superblock_open_callback, &env.superblock_context);
-            env.tick_until_state_change(.init, .tree_open);
-        }
-
-        fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-            const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-            env.change_state(.init, .superblock_open);
-            env.tree = Tree.init(allocator, &env.node_pool, &env.grid, tree_options) catch unreachable;
-            env.tree_exists = true;
-            env.tree.open(tree_open_callback);
-        }
-
-        fn tree_open_callback(tree: *Tree) void {
-            const env = @fieldParentPtr(@This(), "tree", tree);
-            env.change_state(.superblock_open, .tree_open);
-        }
-
-        pub fn compact(env: *Environment, op: u64) void {
-            env.change_state(.tree_open, .tree_compacting);
-            env.tree.compact(tree_compact_callback, op);
-            env.tick_until_state_change(.tree_compacting, .tree_open);
-        }
-
-        fn tree_compact_callback(tree: *Tree) void {
-            const env = @fieldParentPtr(@This(), "tree", tree);
-            env.change_state(.tree_compacting, .tree_open);
-        }
-
-        pub fn checkpoint(env: *Environment, op: u64) void {
-            env.checkpoint_op = op - constants.lsm_batch_multiple;
-            env.change_state(.tree_open, .tree_checkpointing);
-            env.tree.checkpoint(tree_checkpoint_callback);
-            env.tick_until_state_change(.tree_checkpointing, .superblock_checkpointing);
-            env.tick_until_state_change(.superblock_checkpointing, .tree_open);
-        }
-
-        fn tree_checkpoint_callback(tree: *Tree) void {
-            const env = @fieldParentPtr(@This(), "tree", tree);
-            env.change_state(.tree_checkpointing, .superblock_checkpointing);
-            env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
-                .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
-                .commit_min = env.checkpoint_op.?,
-                .commit_max = env.checkpoint_op.? + 1,
-                .view_normal = 0,
-                .view = 0,
-            });
-            env.checkpoint_op = null;
-        }
-
-        fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
-            const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-            env.change_state(.superblock_checkpointing, .tree_open);
-        }
-
-        fn get(env: *Environment, key: Key) ?*const Key.Value {
-            if (env.tree.lookup_from_memory(env.tree.lookup_snapshot_max, key)) |value| {
-                return Tree.unwrap_tombstone(value);
-            } else {
-                env.change_state(.tree_open, .tree_lookup);
-                env.lookup_context = undefined;
-                env.lookup_value = null;
-                env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max, key);
-                env.tick_until_state_change(.tree_lookup, .tree_open);
-                return env.lookup_value;
-            }
-        }
-
-        fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Key.Value) void {
-            const env = @fieldParentPtr(Environment, "lookup_context", lookup_context);
-            assert(env.lookup_value == null);
-            env.lookup_value = value;
-            env.change_state(.tree_lookup, .tree_open);
-        }
-
-        fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
-            var env: Environment = undefined;
-
-            try env.init(storage);
-            defer env.deinit();
-
-            // Open the superblock then tree.
-            env.open();
-
-            // The tree should behave like a simple key-value data-structure.
-            // We'll compare it to a hash map.
-            var model = std.hash_map.AutoHashMap(Key, Key.Value).init(allocator);
-            defer model.deinit();
-
-            for (fuzz_ops) |fuzz_op, fuzz_op_index| {
-                log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
-                const storage_size_used = storage.size_used();
-                log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
-                const model_size = model.count() * @sizeOf(Key.Value);
-                log.debug("space_amplification = {d:.2}", .{
-                    @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
-                });
-                // Apply fuzz_op to the tree and the model.
-                switch (fuzz_op) {
-                    .compact => |compact| {
-                        env.compact(compact.op);
-                        if (compact.checkpoint) env.checkpoint(compact.op);
-                    },
-                    .put => |value| {
-                        if (table_usage == .secondary_index) {
-                            if (model.get(Key.key_from_value(&value))) |old_value| {
-                                // Not allowed to put a present key without removing the old value first.
-                                env.tree.remove(&old_value);
-                            }
-                        }
-                        env.tree.put(&value);
-                        try model.put(Key.key_from_value(&value), value);
-                    },
-                    .remove => |value| {
-                        if (table_usage == .secondary_index and !model.contains((Key.key_from_value(&value)))) {
-                            // Not allowed to remove non-present keys
-                        } else {
-                            env.tree.remove(&value);
-                        }
-                        _ = model.remove(Key.key_from_value(&value));
-                    },
-                    .get => |key| {
-                        // Get account from lsm.
-                        const tree_value = env.get(key);
-
-                        // Compare result to model.
-                        const model_value = model.get(key);
-                        if (model_value == null) {
-                            assert(tree_value == null);
-                        } else {
-                            switch (table_usage) {
-                                .general => {
-                                    assert(std.mem.eql(
-                                        u8,
-                                        std.mem.asBytes(&model_value.?),
-                                        std.mem.asBytes(tree_value.?),
-                                    ));
-                                },
-                                .secondary_index => {
-                                    // secondary_index only preserves keys - may return old values
-                                    assert(std.mem.eql(
-                                        u8,
-                                        std.mem.asBytes(&Key.key_from_value(&model_value.?)),
-                                        std.mem.asBytes(&Key.key_from_value(tree_value.?)),
-                                    ));
-                                },
-                            }
-                        }
-                    },
-                }
-            }
-        }
+    const State = enum {
+        uninit,
+        init,
+        formatted,
+        superblock_open,
+        tree_open,
+        tree_compacting,
+        tree_checkpointing,
+        superblock_checkpointing,
+        tree_lookup,
     };
-}
+
+    state: State,
+    storage: *Storage,
+    message_pool: MessagePool,
+    superblock: SuperBlock,
+    superblock_context: SuperBlock.Context = undefined,
+    grid: Grid,
+    node_pool: NodePool,
+    tree: Tree,
+    // We need @fieldParentPtr() of tree, so we can't use an optional Tree.
+    tree_exists: bool,
+    lookup_context: Tree.LookupContext = undefined,
+    lookup_value: ?*const Key.Value = null,
+    checkpoint_op: ?u64 = null,
+
+    fn init(env: *Environment, storage: *Storage) !void {
+        env.state = .uninit;
+
+        env.storage = storage;
+        errdefer env.storage.deinit(allocator);
+
+        env.message_pool = try MessagePool.init(allocator, .replica);
+        errdefer env.message_pool.deinit(allocator);
+
+        env.superblock = try SuperBlock.init(allocator, env.storage, &env.message_pool);
+        errdefer env.superblock.deinit(allocator);
+
+        env.grid = try Grid.init(allocator, &env.superblock);
+        errdefer env.grid.deinit(allocator);
+
+        env.node_pool = try NodePool.init(allocator, node_count);
+        errdefer env.node_pool.deinit(allocator);
+
+        // Tree must be initialized with an open superblock.
+        env.tree = undefined;
+        env.tree_exists = false;
+
+        env.state = .init;
+    }
+
+    fn deinit(env: *Environment) void {
+        assert(env.state != .uninit);
+
+        if (env.tree_exists) {
+            env.tree.deinit(allocator);
+            env.tree_exists = false;
+        }
+        env.node_pool.deinit(allocator);
+        env.grid.deinit(allocator);
+        env.superblock.deinit(allocator);
+        env.message_pool.deinit(allocator);
+
+        env.state = .uninit;
+    }
+
+    fn tick(env: *Environment) void {
+        env.grid.tick();
+        env.storage.tick();
+    }
+
+    fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
+        // Sometimes IO completes synchronously (eg if cached), so we might already be in next_state before ticking.
+        assert(env.state == current_state or env.state == next_state);
+        while (env.state == current_state) env.tick();
+        assert(env.state == next_state);
+    }
+
+    fn change_state(env: *Environment, current_state: State, next_state: State) void {
+        assert(env.state == current_state);
+        env.state = next_state;
+    }
+
+    pub fn format(storage: *Storage) !void {
+        var env: Environment = undefined;
+
+        try env.init(storage);
+        defer env.deinit();
+
+        assert(env.state == .init);
+        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
+            .cluster = cluster,
+            .replica = replica,
+            .size_max = size_max,
+        });
+        env.tick_until_state_change(.init, .formatted);
+    }
+
+    fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
+        const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+        env.change_state(.init, .formatted);
+    }
+
+    pub fn open(env: *Environment) void {
+        assert(env.state == .init);
+        env.superblock.open(superblock_open_callback, &env.superblock_context);
+        env.tick_until_state_change(.init, .tree_open);
+    }
+
+    fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
+        const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+        env.change_state(.init, .superblock_open);
+        env.tree = Tree.init(allocator, &env.node_pool, &env.grid, tree_options) catch unreachable;
+        env.tree_exists = true;
+        env.tree.open(tree_open_callback);
+    }
+
+    fn tree_open_callback(tree: *Tree) void {
+        const env = @fieldParentPtr(@This(), "tree", tree);
+        env.change_state(.superblock_open, .tree_open);
+    }
+
+    pub fn compact(env: *Environment, op: u64) void {
+        env.change_state(.tree_open, .tree_compacting);
+        env.tree.compact(tree_compact_callback, op);
+        env.tick_until_state_change(.tree_compacting, .tree_open);
+    }
+
+    fn tree_compact_callback(tree: *Tree) void {
+        const env = @fieldParentPtr(@This(), "tree", tree);
+        env.change_state(.tree_compacting, .tree_open);
+    }
+
+    pub fn checkpoint(env: *Environment, op: u64) void {
+        env.checkpoint_op = op - constants.lsm_batch_multiple;
+        env.change_state(.tree_open, .tree_checkpointing);
+        env.tree.checkpoint(tree_checkpoint_callback);
+        env.tick_until_state_change(.tree_checkpointing, .superblock_checkpointing);
+        env.tick_until_state_change(.superblock_checkpointing, .tree_open);
+    }
+
+    fn tree_checkpoint_callback(tree: *Tree) void {
+        const env = @fieldParentPtr(@This(), "tree", tree);
+        env.change_state(.tree_checkpointing, .superblock_checkpointing);
+        env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
+            .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
+            .commit_min = env.checkpoint_op.?,
+            .commit_max = env.checkpoint_op.? + 1,
+            .view_normal = 0,
+            .view = 0,
+        });
+        env.checkpoint_op = null;
+    }
+
+    fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
+        const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
+        env.change_state(.superblock_checkpointing, .tree_open);
+    }
+
+    fn get(env: *Environment, key: Key) ?*const Key.Value {
+        if (env.tree.lookup_from_memory(env.tree.lookup_snapshot_max, key)) |value| {
+            return Tree.unwrap_tombstone(value);
+        } else {
+            env.change_state(.tree_open, .tree_lookup);
+            env.lookup_context = undefined;
+            env.lookup_value = null;
+            env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max, key);
+            env.tick_until_state_change(.tree_lookup, .tree_open);
+            return env.lookup_value;
+        }
+    }
+
+    fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Key.Value) void {
+        const env = @fieldParentPtr(Environment, "lookup_context", lookup_context);
+        assert(env.lookup_value == null);
+        env.lookup_value = value;
+        env.change_state(.tree_lookup, .tree_open);
+    }
+
+    fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
+        var env: Environment = undefined;
+
+        try env.init(storage);
+        defer env.deinit();
+
+        // Open the superblock then tree.
+        env.open();
+
+        // The tree should behave like a simple key-value data-structure.
+        // We'll compare it to a hash map.
+        var model = std.hash_map.AutoHashMap(Key, Key.Value).init(allocator);
+        defer model.deinit();
+
+        for (fuzz_ops) |fuzz_op, fuzz_op_index| {
+            log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
+            const storage_size_used = storage.size_used();
+            log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
+            const model_size = model.count() * @sizeOf(Key.Value);
+            log.debug("space_amplification = {d:.2}", .{
+                @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
+            });
+            // Apply fuzz_op to the tree and the model.
+            switch (fuzz_op) {
+                .compact => |compact| {
+                    env.compact(compact.op);
+                    if (compact.checkpoint) env.checkpoint(compact.op);
+                },
+                .put => |value| {
+                    if (table_usage == .secondary_index) {
+                        if (model.get(Key.key_from_value(&value))) |old_value| {
+                            // Not allowed to put a present key without removing the old value first.
+                            env.tree.remove(&old_value);
+                        }
+                    }
+                    env.tree.put(&value);
+                    try model.put(Key.key_from_value(&value), value);
+                },
+                .remove => |value| {
+                    if (table_usage == .secondary_index and !model.contains((Key.key_from_value(&value)))) {
+                        // Not allowed to remove non-present keys
+                    } else {
+                        env.tree.remove(&value);
+                    }
+                    _ = model.remove(Key.key_from_value(&value));
+                },
+                .get => |key| {
+                    // Get account from lsm.
+                    const tree_value = env.get(key);
+
+                    // Compare result to model.
+                    const model_value = model.get(key);
+                    if (model_value == null) {
+                        assert(tree_value == null);
+                    } else {
+                        switch (table_usage) {
+                            .general => {
+                                assert(std.mem.eql(
+                                    u8,
+                                    std.mem.asBytes(&model_value.?),
+                                    std.mem.asBytes(tree_value.?),
+                                ));
+                            },
+                            .secondary_index => {
+                                // secondary_index only preserves keys - may return old values
+                                assert(std.mem.eql(
+                                    u8,
+                                    std.mem.asBytes(&Key.key_from_value(&model_value.?)),
+                                    std.mem.asBytes(&Key.key_from_value(tree_value.?)),
+                                ));
+                            },
+                        }
+                    }
+                },
+            }
+        }
+    }
+};
 
 fn random_id(random: std.rand.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
