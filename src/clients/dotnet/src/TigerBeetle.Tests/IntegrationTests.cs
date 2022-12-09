@@ -12,8 +12,6 @@ namespace TigerBeetle.Tests
     [TestClass]
     public class IntegrationTests
     {
-        #region Fields
-
         private static Client GetClient(int maxConcurrency = 32) => new(0, new IPEndPoint[] { IPEndPoint.Parse($"127.0.0.1:{TBServer.TB_PORT}") }, maxConcurrency);
 
         private static readonly Account[] accounts = new[]
@@ -31,8 +29,6 @@ namespace TigerBeetle.Tests
                 Code = 2,
             }
         };
-
-        #endregion Fields
 
         [TestMethod]
         [DoNotParallelize]
@@ -615,8 +611,6 @@ namespace TigerBeetle.Tests
 
     internal class TBServer : IDisposable
     {
-        #region Fields
-
         public const string TB_EXE = "tigerbeetle";
         public const string TB_PATH = "../../../../../../../..";
         public static readonly string TB_SERVER = $"{TB_PATH}/{TB_EXE}";
@@ -626,10 +620,6 @@ namespace TigerBeetle.Tests
         public static readonly string START = $"start --addresses={TB_PORT} ./{TB_FILE}";
 
         private readonly Process process;
-
-        #endregion Fields
-
-        #region Constructor
 
         public TBServer()
         {
@@ -642,10 +632,6 @@ namespace TigerBeetle.Tests
             process = Process.Start(TB_SERVER, START);
             if (process.WaitForExit(100)) throw new InvalidOperationException("Tigerbeetle server failed to start");
         }
-
-        #endregion Constructor
-
-        #region Methods
 
         public void Dispose()
         {
@@ -678,7 +664,5 @@ namespace TigerBeetle.Tests
             }
             catch { }
         }
-
-        #endregion Methods
     }
 }

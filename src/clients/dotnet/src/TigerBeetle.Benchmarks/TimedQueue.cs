@@ -7,23 +7,13 @@ namespace TigerBeetle.Benchmarks
 {
     internal class TimedQueue
     {
-        #region Fields
-
         private Stopwatch timer = new Stopwatch();
-
-        #endregion Fields
-
-        #region Properties
 
         public Queue<Delegate> Batches { get; } = new();
 
         public long MaxTransfersLatency { get; private set; }
 
         public long TotalTime { get; private set; }
-
-        #endregion Properties
-
-        #region Methods
 
         public async Task ExecuteAsync()
         {
@@ -67,8 +57,6 @@ namespace TigerBeetle.Benchmarks
             timer.Reset();
             Batches.Clear();
         }
-
-        #endregion Methods
     }
 
 }

@@ -20,28 +20,18 @@ namespace TigerBeetle
 
     internal struct Packet
     {
-        #region Fields
-
         public readonly unsafe TBPacket* Data;
-
-        #endregion Fields
-
-        #region Constructor
 
         public unsafe Packet(TBPacket* data)
         {
             Data = data;
         }
-
-        #endregion Constructor
     }
 
     internal abstract class Request<TResult, TBody> : IRequest
         where TResult : unmanaged
         where TBody : unmanaged
     {
-        #region Fields
-
         private static readonly unsafe int RESULT_SIZE = sizeof(TResult);
         private static readonly unsafe int BODY_SIZE = sizeof(TBody);
 
@@ -50,10 +40,6 @@ namespace TigerBeetle
         private readonly GCHandle handle;
         private GCHandle bodyPinnedHandle;
 
-        #endregion Fields
-
-        #region Constructor
-
         public Request(NativeClient nativeClient, Packet packet)
         {
             handle = GCHandle.Alloc(this, GCHandleType.Normal);
@@ -61,10 +47,6 @@ namespace TigerBeetle
             this.nativeClient = nativeClient;
             this.packet = packet;
         }
-
-        #endregion Constructor
-
-        #region Methods
 
         public IntPtr Pin(TBody[] body, out int size)
         {
@@ -145,36 +127,19 @@ namespace TigerBeetle
         protected abstract void SetResult(TResult[] result);
 
         protected abstract void SetException(Exception exception);
-
-        #endregion Methods
     }
 
     internal sealed class AsyncRequest<TResult, TBody> : Request<TResult, TBody>, IRequest
         where TResult : unmanaged
         where TBody : unmanaged
     {
-        #region Fields
-
         private readonly TaskCompletionSource<TResult[]> completionSource;
-
-        #endregion Fields
-
-        #region Constructor
 
         public AsyncRequest(NativeClient nativeClient, Packet packet) : base(nativeClient, packet)
         {
-            #region Comments
-
-            // Hints the TPL to execute the continuation on its own thread pool thread, instead of the unamaged's callback thread
-
-            #endregion Comments
-
+            // Hints the TPL to execute the continuation on its own thread pool thread, instead of the unamaged's callback thread:
             this.completionSource = new TaskCompletionSource<TResult[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
-
-        #endregion Constructor
-
-        #region Methods
 
         public Task<TResult[]> Wait() => completionSource.Task;
 
@@ -182,29 +147,18 @@ namespace TigerBeetle
 
         protected override void SetException(Exception exception) => completionSource.SetException(exception);
 
-        #endregion Methods
     }
 
     internal sealed class BlockingRequest<TResult, TBody> : Request<TResult, TBody>, IRequest
         where TResult : unmanaged
         where TBody : unmanaged
     {
-        #region Fields
-
         private TResult[]? result = null;
         private Exception? exception;
-
-        #endregion Fields
-
-        #region Constructor
 
         public BlockingRequest(NativeClient nativeClient, Packet packet) : base(nativeClient, packet)
         {
         }
-
-        #endregion Constructor
-
-        #region Methods
 
         protected override void SetResult(TResult[] result)
         {
@@ -234,7 +188,5 @@ namespace TigerBeetle
                 Monitor.Pulse(this);
             }
         }
-
-        #endregion Methods
     }
 }

@@ -466,7 +466,7 @@ fn dotnet_client(
         build_step.dependOn(dependency);
     }
 
-    const dotnet_interop = b.addExecutable("dotnet_interop", "src/clients/dotnet/src/dotnet_interop.zig");
+    const dotnet_interop = b.addExecutable("dotnet_interop", "src/clients/dotnet/src/dotnet_bindings.zig");
     dotnet_interop.addOptions("tigerbeetle_build_options", options);
     dotnet_interop.setMainPkgPath("src");
     const dotnet_interop_step = dotnet_interop.run();

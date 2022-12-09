@@ -5,13 +5,7 @@ namespace TigerBeetle
 {
     internal sealed class EchoClient : IDisposable
     {
-        #region Fields
-
         private readonly NativeClient nativeClient;
-
-        #endregion Fields
-
-        #region Constructor
 
         public EchoClient(uint clusterID, string addresses, int maxConcurrency)
         {
@@ -25,10 +19,6 @@ namespace TigerBeetle
         {
             Dispose(disposing: false);
         }
-
-        #endregion Constructor
-
-        #region Methods
 
         public Account[] Echo(Account[] batch)
         {
@@ -83,7 +73,5 @@ namespace TigerBeetle
             _ = disposing;
             nativeClient.Dispose();
         }
-
-        #endregion Methods
     }
 }

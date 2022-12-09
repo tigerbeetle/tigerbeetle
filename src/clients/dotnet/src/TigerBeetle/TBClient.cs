@@ -5,13 +5,7 @@ namespace TigerBeetle
 {
     internal static class TBClient
     {
-        #region Fields
-
         private const string LIB_NAME = "tb_client";
-
-        #endregion Fields
-
-        #region Methods
 
 #if NETSTANDARD
 
@@ -84,7 +78,5 @@ namespace TigerBeetle
         public static unsafe extern void tb_client_deinit(
             IntPtr client
         );
-
-        #endregion Methods
     }
 }

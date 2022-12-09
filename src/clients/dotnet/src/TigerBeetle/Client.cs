@@ -14,16 +14,10 @@ namespace TigerBeetle
 {
     public sealed class Client : IDisposable
     {
-        #region Fields
-
         private const int DEFAULT_MAX_CONCURRENCY = 32;
 
         private readonly uint clusterID;
         private readonly NativeClient nativeClient;
-
-        #endregion Fields
-
-        #region Constructor
 
         public Client(uint clusterID, int[] replicaPorts, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
         : this(clusterID, replicaPorts.Select(x => x.ToString()), maxConcurrency)
@@ -54,15 +48,7 @@ namespace TigerBeetle
             Dispose(disposing: false);
         }
 
-        #endregion Constructor
-
-        #region Properties
-
         public uint ClusterID => clusterID;
-
-        #endregion Properties
-
-        #region Methods
 
         public CreateAccountResult CreateAccount(Account account)
         {
@@ -185,7 +171,5 @@ namespace TigerBeetle
             _ = disposing;
             nativeClient.Dispose();
         }
-
-        #endregion Methods
     }
 }

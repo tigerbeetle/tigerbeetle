@@ -7,8 +7,6 @@ namespace TigerBeetle
     [StructLayout(LayoutKind.Explicit, Size = SIZE)]
     public struct UInt128 : IEquatable<UInt128>
     {
-        #region Fields
-
         public const int SIZE = 16;
 
         public static readonly UInt128 Zero = new UInt128();
@@ -18,10 +16,6 @@ namespace TigerBeetle
 
         [FieldOffset(8)]
         private readonly ulong _1;
-
-        #endregion Fields
-
-        #region Constructor
 
         public UInt128(ReadOnlySpan<byte> bytes)
         {
@@ -54,10 +48,6 @@ namespace TigerBeetle
             _0 = a;
             _1 = b;
         }
-
-        #endregion Constructor
-
-        #region Methods
 
         public Guid ToGuid() => new(AsReadOnlySpan<byte>());
 
@@ -148,7 +138,5 @@ namespace TigerBeetle
         {
             return MemoryMarshal.Cast<byte, T>(AsReadOnlySpan());
         }
-
-        #endregion Methods
     }
 }
