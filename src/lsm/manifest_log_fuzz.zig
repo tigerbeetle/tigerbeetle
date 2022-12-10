@@ -635,7 +635,7 @@ fn verify_manifest_compaction_set(
     var compact_blocks_checked: u32 = 0;
 
     // This test doesn't include any actual table blocks, so all blocks are manifest blocks.
-    var blocks = superblock.free_set.blocks.iterator(.{ .kind = .unset });
+    var blocks = superblock.free_set.blocks.iterator(.{ .kind = .set });
     while (blocks.next()) |block_index| {
         const block_address = block_index + 1;
         const block = superblock.storage.grid_block(block_address);

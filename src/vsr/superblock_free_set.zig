@@ -24,8 +24,6 @@ pub const Reservation = struct {
 
 /// The 0 address is reserved for usage as a sentinel and will never be returned by acquire().
 ///
-/// Set bits indicate free blocks, unset bits are allocated.
-///
 /// Concurrent callers must reserve free blocks before acquiring them to ensure that
 /// acquisition order is deterministic despite concurrent jobs acquiring blocks in
 /// nondeterministic order.
@@ -41,9 +39,11 @@ pub const Reservation = struct {
 ///      is reclaimed.
 ///
 pub const FreeSet = struct {
-    /// Each bit of `index` is the OR of `shard_size` bits of `blocks`.
-    /// That is, if a shard has any free blocks, the corresponding index bit is set.
+    /// If a shard has any free blocks, the corresponding index bit is zero.
+    /// If a shard has no free blocks, the corresponding index bit is one.
     index: DynamicBitSetUnmanaged,
+
+    /// Set bits indicate allocated blocks; unset bits indicate free blocks.
     blocks: DynamicBitSetUnmanaged,
 
     /// Set bits indicate blocks to be released at the next checkpoint.
@@ -89,17 +89,17 @@ pub const FreeSet = struct {
 
         // Every block bit is covered by exactly one index bit.
         const shards_count = @divExact(blocks_count, shard_size);
-        var index = try DynamicBitSetUnmanaged.initFull(allocator, shards_count);
+        var index = try DynamicBitSetUnmanaged.initEmpty(allocator, shards_count);
         errdefer index.deinit(allocator);
 
-        var blocks = try DynamicBitSetUnmanaged.initFull(allocator, blocks_count);
+        var blocks = try DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
         errdefer blocks.deinit(allocator);
 
         var staging = try DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
         errdefer staging.deinit(allocator);
 
-        assert(index.count() == shards_count);
-        assert(blocks.count() == blocks_count);
+        assert(index.count() == 0);
+        assert(blocks.count() == 0);
         assert(staging.count() == 0);
 
         return FreeSet{
@@ -122,7 +122,7 @@ pub const FreeSet = struct {
 
     /// Returns the number of free blocks.
     pub fn count_free(set: FreeSet) usize {
-        return set.blocks.count();
+        return set.blocks.capacity() - set.blocks.count();
     }
 
     /// Returns the number of free blocks in the reservation.
@@ -135,20 +135,20 @@ pub const FreeSet = struct {
         var count: u64 = 0;
         var i: u64 = 0;
         while (i < reservation.block_count) : (i += 1) {
-            if (set.blocks.isSet(reservation.block_base + i)) count += 1;
+            if (!set.blocks.isSet(reservation.block_base + i)) count += 1;
         }
         return count;
     }
 
     /// Returns the number of acquired blocks.
     pub fn count_acquired(set: FreeSet) usize {
-        return set.blocks.capacity() - set.blocks.count();
+        return set.blocks.count();
     }
 
     /// Returns the address of the highest acquired block.
     pub fn highest_address_acquired(set: FreeSet) ?u64 {
         var it = set.blocks.iterator(.{
-            .kind = .unset,
+            .kind = .set,
             .direction = .reverse,
         });
 
@@ -157,7 +157,7 @@ pub const FreeSet = struct {
             return address;
         } else {
             // All blocks are free.
-            assert(set.blocks.count() == set.blocks.bit_length);
+            assert(set.blocks.count() == 0);
             return null;
         }
     }
@@ -184,7 +184,7 @@ pub const FreeSet = struct {
             set.index,
             @divFloor(set.reservation_blocks, shard_size),
             set.index.bit_length,
-            .set,
+            .unset,
         ) orelse return null;
 
         // The reservation may cover (and ignore) already-acquired blocks due to fragmentation.
@@ -195,7 +195,7 @@ pub const FreeSet = struct {
                 set.blocks,
                 block,
                 set.blocks.bit_length,
-                .set,
+                .unset,
             ) orelse return null);
         }
 
@@ -247,9 +247,9 @@ pub const FreeSet = struct {
             set.index,
             @divFloor(reservation.block_base, shard_size),
             div_ceil(reservation.block_base + reservation.block_count, shard_size),
-            .set,
+            .unset,
         ) orelse return null;
-        assert(set.index.isSet(shard));
+        assert(!set.index.isSet(shard));
 
         const reservation_start = std.math.max(
             shard * shard_size,
@@ -260,16 +260,16 @@ pub const FreeSet = struct {
             set.blocks,
             reservation_start,
             reservation_end,
-            .set,
+            .unset,
         ) orelse return null;
         assert(block >= reservation.block_base);
         assert(block <= reservation.block_base + reservation.block_count);
-        assert(set.blocks.isSet(block));
+        assert(!set.blocks.isSet(block));
         assert(!set.staging.isSet(block));
 
-        set.blocks.unset(block);
+        set.blocks.set(block);
         // Update the index when every block in the shard is allocated.
-        if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
+        if (set.find_free_block_in_shard(shard) == null) set.index.set(shard);
 
         const address = block + 1;
         return address;
@@ -280,12 +280,12 @@ pub const FreeSet = struct {
         const shard_end = shard_start + shard_size;
         assert(shard_start < set.blocks.bit_length);
 
-        return find_bit(set.blocks, shard_start, shard_end, .set);
+        return find_bit(set.blocks, shard_start, shard_end, .unset);
     }
 
     pub fn is_free(set: FreeSet, address: u64) bool {
         const block = address - 1;
-        return set.blocks.isSet(block);
+        return !set.blocks.isSet(block);
     }
 
     /// Leave the address allocated for now, but free it at the next checkpoint.
@@ -297,7 +297,7 @@ pub const FreeSet = struct {
     ///        to avoid making the reservation's acquire()s nondeterministic).
     pub fn release(set: *FreeSet, address: u64) void {
         const block = address - 1;
-        assert(!set.blocks.isSet(block));
+        assert(set.blocks.isSet(block));
         assert(!set.staging.isSet(block));
 
         set.staging.set(block);
@@ -306,13 +306,13 @@ pub const FreeSet = struct {
     /// Given the address, marks an allocated block as free.
     fn release_now(set: *FreeSet, address: u64) void {
         const block = address - 1;
-        assert(!set.blocks.isSet(block));
+        assert(set.blocks.isSet(block));
         assert(!set.staging.isSet(block));
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
 
-        set.index.set(@divFloor(block, shard_size));
-        set.blocks.set(block);
+        set.index.unset(@divFloor(block, shard_size));
+        set.blocks.unset(block);
     }
 
     /// Free all staged blocks.
@@ -334,28 +334,30 @@ pub const FreeSet = struct {
     /// Amortizes the cost of toggling staged blocks when encoding and getting the highest address.
     /// Does not update the index and MUST therefore be paired immediately with exclude_staging().
     pub fn include_staging(set: *FreeSet) void {
-        const free = set.blocks.count();
+        const free = set.count_free();
 
         set.blocks.toggleSet(set.staging);
 
         // We expect the free count to increase now that staging has been included:
-        assert(set.blocks.count() == free + set.staging.count());
+        assert(set.count_free() == free + set.staging.count());
     }
 
     pub fn exclude_staging(set: *FreeSet) void {
-        const free = set.blocks.count();
+        const free = set.count_free();
 
         set.blocks.toggleSet(set.staging);
 
         // We expect the free count to decrease now that staging has been excluded:
-        assert(set.blocks.count() == free - set.staging.count());
+        assert(set.count_free() == free - set.staging.count());
     }
 
     /// Decodes the compressed bitset in `source` into `set`.
     /// Panics if the `source` encoding is invalid.
     pub fn decode(set: *FreeSet, source: []align(@alignOf(usize)) const u8) void {
         // Verify that this FreeSet is entirely unallocated.
-        assert(set.index.count() == set.index.bit_length);
+        assert(set.index.count() == 0);
+        assert(set.blocks.count() == 0);
+        assert(set.staging.count() == 0);
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
 
@@ -364,7 +366,7 @@ pub const FreeSet = struct {
 
         var shard: usize = 0;
         while (shard < set.index.bit_length) : (shard += 1) {
-            if (set.find_free_block_in_shard(shard) == null) set.index.unset(shard);
+            if (set.find_free_block_in_shard(shard) == null) set.index.set(shard);
         }
     }
 
@@ -402,7 +404,7 @@ pub const FreeSet = struct {
     }
 };
 
-fn bit_set_masks(bit_set: DynamicBitSetUnmanaged) []usize {
+fn bit_set_masks(bit_set: DynamicBitSetUnmanaged) []MaskInt {
     const len = div_ceil(bit_set.bit_length, @bitSizeOf(MaskInt));
     return bit_set.masks[0..len];
 }
@@ -717,10 +719,11 @@ fn test_encode(patterns: []const TestPattern) !void {
     defer decoded_expect.deinit(std.testing.allocator);
 
     {
-        // The `index` will start out zero-filled. Every non-zero pattern will update the
-        // corresponding index bit with a one (probably many times) to ensure it ends up synced
+        // The `index` will start out one-filled. Every pattern containing a zero will update the
+        // corresponding index bit with a zero (probably multiple times) to ensure it ends up synced
         // with `blocks`.
-        std.mem.set(usize, bit_set_masks(decoded_expect.index), 0);
+        decoded_expect.index.toggleAll();
+        assert(decoded_expect.index.count() == decoded_expect.index.capacity());
 
         // Fill the bitset according to the patterns.
         var blocks = bit_set_masks(decoded_expect.blocks);
@@ -734,7 +737,7 @@ fn test_encode(patterns: []const TestPattern) !void {
                     .literal => random.intRangeLessThan(usize, 1, std.math.maxInt(usize)),
                 };
                 const index_bit = blocks_offset * @bitSizeOf(usize) / FreeSet.shard_size;
-                if (pattern.fill != .uniform_zeros) decoded_expect.index.set(index_bit);
+                if (pattern.fill != .uniform_ones) decoded_expect.index.unset(index_bit);
                 blocks_offset += 1;
             }
         }
