@@ -196,9 +196,7 @@ const Environment = struct {
         {
             // Reset `superblock_verify` so that it can be reused.
             env.superblock_verify.opened = false;
-            var free_set_iterator = env.superblock_verify.free_set.blocks.iterator(.{
-                .kind = .unset,
-            });
+            var free_set_iterator = env.superblock_verify.free_set.blocks.iterator(.{});
             while (free_set_iterator.next()) |block_bit| {
                 const block_address = block_bit + 1;
                 env.superblock_verify.free_set.release(block_address);
