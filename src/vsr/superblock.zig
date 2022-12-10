@@ -352,15 +352,15 @@ const block_count_max = blk: {
     // The size of a freeset is related to the number of blocks it must store.
     // Maximize the number of grid blocks.
 
-    var shard_count = @divFloor(size, constants.block_size * SuperBlockFreeSet.shard_size);
+    var shard_count = @divFloor(size, constants.block_size * SuperBlockFreeSet.shard_bits);
     while (true) : (shard_count -= 1) {
-        const block_count = shard_count * SuperBlockFreeSet.shard_size;
+        const block_count = shard_count * SuperBlockFreeSet.shard_bits;
         const grid_size = block_count * constants.block_size;
         const free_set_size = vsr.sector_ceil(SuperBlockFreeSet.encode_size_max(block_count));
         const free_sets_size = constants.superblock_copies * free_set_size;
         if (free_sets_size + grid_size <= size) break;
     }
-    break :blk shard_count * SuperBlockFreeSet.shard_size;
+    break :blk shard_count * SuperBlockFreeSet.shard_bits;
 };
 
 comptime {
@@ -495,9 +495,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const shard_count_limit = @intCast(usize, @divFloor(
                 options.storage_size_limit - data_file_size_min,
-                constants.block_size * FreeSet.shard_size,
+                constants.block_size * FreeSet.shard_bits,
             ));
-            const block_count_limit = shard_count_limit * FreeSet.shard_size;
+            const block_count_limit = shard_count_limit * FreeSet.shard_bits;
             assert(block_count_limit <= block_count_max);
 
             const a = try allocator.allocAdvanced(SuperBlockSector, constants.sector_size, 1, .exact);
