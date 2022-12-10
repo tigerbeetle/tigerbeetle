@@ -74,21 +74,21 @@ pub const FreeSet = struct {
     //
     // e.g. 10TiB disk ÷ 64KiB/block ÷ 512*8 blocks/shard ÷ 8 shards/byte = 5120B index
     const shard_cache_lines = 8;
-    pub const shard_size = shard_cache_lines * constants.cache_line_size * @bitSizeOf(u8);
+    pub const shard_bits = shard_cache_lines * constants.cache_line_size * @bitSizeOf(u8);
     comptime {
-        assert(shard_size == 4096);
+        assert(shard_bits == 4096);
         assert(@bitSizeOf(MaskInt) == 64);
         // Ensure there are no wasted padding bits at the end of the index.
-        assert(shard_size % @bitSizeOf(MaskInt) == 0);
+        assert(shard_bits % @bitSizeOf(MaskInt) == 0);
     }
 
     pub fn init(allocator: mem.Allocator, blocks_count: usize) !FreeSet {
-        assert(shard_size <= blocks_count);
-        assert(blocks_count % shard_size == 0);
+        assert(shard_bits <= blocks_count);
+        assert(blocks_count % shard_bits == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
 
         // Every block bit is covered by exactly one index bit.
-        const shards_count = @divExact(blocks_count, shard_size);
+        const shards_count = @divExact(blocks_count, shard_bits);
         var index = try DynamicBitSetUnmanaged.initEmpty(allocator, shards_count);
         errdefer index.deinit(allocator);
 
@@ -182,13 +182,13 @@ pub const FreeSet = struct {
 
         var shard_start = find_bit(
             set.index,
-            @divFloor(set.reservation_blocks, shard_size),
+            @divFloor(set.reservation_blocks, shard_bits),
             set.index.bit_length,
             .unset,
         ) orelse return null;
 
         // The reservation may cover (and ignore) already-acquired blocks due to fragmentation.
-        var block = std.math.max(shard_start * shard_size, set.reservation_blocks);
+        var block = std.math.max(shard_start * shard_bits, set.reservation_blocks);
         var reserved: usize = 0;
         while (reserved < reserve_count) : (reserved += 1) {
             block = 1 + (find_bit(
@@ -245,14 +245,14 @@ pub const FreeSet = struct {
 
         const shard = find_bit(
             set.index,
-            @divFloor(reservation.block_base, shard_size),
-            div_ceil(reservation.block_base + reservation.block_count, shard_size),
+            @divFloor(reservation.block_base, shard_bits),
+            div_ceil(reservation.block_base + reservation.block_count, shard_bits),
             .unset,
         ) orelse return null;
         assert(!set.index.isSet(shard));
 
         const reservation_start = std.math.max(
-            shard * shard_size,
+            shard * shard_bits,
             reservation.block_base,
         );
         const reservation_end = reservation.block_base + reservation.block_count;
@@ -276,8 +276,8 @@ pub const FreeSet = struct {
     }
 
     fn find_free_block_in_shard(set: FreeSet, shard: usize) ?usize {
-        const shard_start = shard * shard_size;
-        const shard_end = shard_start + shard_size;
+        const shard_start = shard * shard_bits;
+        const shard_end = shard_start + shard_bits;
         assert(shard_start < set.blocks.bit_length);
 
         return find_bit(set.blocks, shard_start, shard_end, .unset);
@@ -311,7 +311,7 @@ pub const FreeSet = struct {
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
 
-        set.index.unset(@divFloor(block, shard_size));
+        set.index.unset(@divFloor(block, shard_bits));
         set.blocks.unset(block);
     }
 
@@ -372,8 +372,8 @@ pub const FreeSet = struct {
 
     /// Returns the maximum number of bytes that `blocks_count` blocks need to be encoded.
     pub fn encode_size_max(blocks_count: usize) usize {
-        assert(shard_size <= blocks_count);
-        assert(blocks_count % shard_size == 0);
+        assert(shard_bits <= blocks_count);
+        assert(blocks_count % shard_bits == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
 
         return ewah.encode_size_max(@divExact(blocks_count, @bitSizeOf(usize)));
@@ -393,11 +393,11 @@ pub const FreeSet = struct {
     /// Ensures that the result is acceptable to `FreeSet.init()`.
     pub fn blocks_count_floor(blocks_count: usize) usize {
         assert(blocks_count > 0);
-        assert(blocks_count >= shard_size);
+        assert(blocks_count >= shard_bits);
 
-        const floor = @divFloor(blocks_count, shard_size) * shard_size;
+        const floor = @divFloor(blocks_count, shard_bits) * shard_bits;
 
-        // We assume that shard_size is itself a multiple of word bit count.
+        // We assume that shard_bits is itself a multiple of word bit count.
         assert(floor % @bitSizeOf(usize) == 0);
 
         return floor;
@@ -413,8 +413,8 @@ test "FreeSet block shard count" {
     if (constants.block_size != 64 * 1024) return;
     const blocks_in_tb = @divExact(1 << 40, constants.block_size);
     try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
-    try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - FreeSet.shard_size);
-    try test_block_shards_count(1, FreeSet.shard_size); // Must be at least one index bit.
+    try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - FreeSet.shard_bits);
+    try test_block_shards_count(1, FreeSet.shard_bits); // Must be at least one index bit.
 }
 
 fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !void {
@@ -426,7 +426,7 @@ fn test_block_shards_count(expect_shards_count: usize, blocks_count: usize) !voi
 
 test "FreeSet highest_address_acquired" {
     const expectEqual = std.testing.expectEqual;
-    const blocks_count = FreeSet.shard_size;
+    const blocks_count = FreeSet.shard_bits;
     var set = try FreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
@@ -472,11 +472,11 @@ test "FreeSet highest_address_acquired" {
 }
 
 test "FreeSet acquire/release" {
-    try test_acquire_release(FreeSet.shard_size);
-    try test_acquire_release(2 * FreeSet.shard_size);
-    try test_acquire_release(63 * FreeSet.shard_size);
-    try test_acquire_release(64 * FreeSet.shard_size);
-    try test_acquire_release(65 * FreeSet.shard_size);
+    try test_acquire_release(FreeSet.shard_bits);
+    try test_acquire_release(2 * FreeSet.shard_bits);
+    try test_acquire_release(63 * FreeSet.shard_bits);
+    try test_acquire_release(64 * FreeSet.shard_bits);
+    try test_acquire_release(65 * FreeSet.shard_bits);
 }
 
 fn test_acquire_release(blocks_count: usize) !void {
@@ -569,7 +569,7 @@ test "FreeSet.reserve/acquire" {
 
 test "FreeSet checkpoint" {
     const expectEqual = std.testing.expectEqual;
-    const blocks_count = FreeSet.shard_size;
+    const blocks_count = FreeSet.shard_bits;
     var set = try FreeSet.init(std.testing.allocator, blocks_count);
     defer set.deinit(std.testing.allocator);
 
@@ -659,19 +659,19 @@ test "FreeSet checkpoint" {
 }
 
 test "FreeSet encode, decode, encode" {
-    const shard_size = FreeSet.shard_size / @bitSizeOf(usize);
+    const shard_bits = FreeSet.shard_bits / @bitSizeOf(usize);
     // Uniform.
-    try test_encode(&.{.{ .fill = .uniform_ones, .words = shard_size }});
-    try test_encode(&.{.{ .fill = .uniform_zeros, .words = shard_size }});
-    try test_encode(&.{.{ .fill = .literal, .words = shard_size }});
+    try test_encode(&.{.{ .fill = .uniform_ones, .words = shard_bits }});
+    try test_encode(&.{.{ .fill = .uniform_zeros, .words = shard_bits }});
+    try test_encode(&.{.{ .fill = .literal, .words = shard_bits }});
     try test_encode(&.{.{ .fill = .uniform_ones, .words = std.math.maxInt(u16) + 1 }});
 
     // Mixed.
     try test_encode(&.{
-        .{ .fill = .uniform_ones, .words = shard_size / 4 },
-        .{ .fill = .uniform_zeros, .words = shard_size / 4 },
-        .{ .fill = .literal, .words = shard_size / 4 },
-        .{ .fill = .uniform_ones, .words = shard_size / 4 },
+        .{ .fill = .uniform_ones, .words = shard_bits / 4 },
+        .{ .fill = .uniform_zeros, .words = shard_bits / 4 },
+        .{ .fill = .literal, .words = shard_bits / 4 },
+        .{ .fill = .uniform_ones, .words = shard_bits / 4 },
     });
 
     // Random.
@@ -688,7 +688,7 @@ test "FreeSet encode, decode, encode" {
         defer patterns.deinit();
 
         var i: usize = 0;
-        while (i < shard_size) : (i += 1) {
+        while (i < shard_bits) : (i += 1) {
             try patterns.append(.{
                 .fill = fills[random.uintLessThan(usize, fills.len)],
                 .words = 1,
@@ -736,7 +736,7 @@ fn test_encode(patterns: []const TestPattern) !void {
                     .uniform_zeros => 0,
                     .literal => random.intRangeLessThan(usize, 1, std.math.maxInt(usize)),
                 };
-                const index_bit = blocks_offset * @bitSizeOf(usize) / FreeSet.shard_size;
+                const index_bit = blocks_offset * @bitSizeOf(usize) / FreeSet.shard_bits;
                 if (pattern.fill != .uniform_ones) decoded_expect.index.unset(index_bit);
                 blocks_offset += 1;
             }
@@ -774,12 +774,12 @@ fn expect_bit_set_equal(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !v
 }
 
 test "FreeSet decode small bitset into large bitset" {
-    const shard_size = FreeSet.shard_size;
-    var small_set = try FreeSet.init(std.testing.allocator, shard_size);
+    const shard_bits = FreeSet.shard_bits;
+    var small_set = try FreeSet.init(std.testing.allocator, shard_bits);
     defer small_set.deinit(std.testing.allocator);
 
     {
-        // Set up a small bitset (with blocks_count==shard_size) with no free blocks.
+        // Set up a small bitset (with blocks_count==shard_bits) with no free blocks.
         const reservation = small_set.reserve(small_set.blocks.bit_length).?;
         defer small_set.forfeit(reservation);
 
@@ -795,16 +795,16 @@ test "FreeSet decode small bitset into large bitset" {
     defer std.testing.allocator.free(small_buffer);
 
     const small_buffer_written = small_set.encode(small_buffer);
-    // Decode the serialized small bitset into a larger bitset (with blocks_count==2*shard_size).
-    var big_set = try FreeSet.init(std.testing.allocator, 2 * shard_size);
+    // Decode the serialized small bitset into a larger bitset (with blocks_count==2*shard_bits).
+    var big_set = try FreeSet.init(std.testing.allocator, 2 * shard_bits);
     defer big_set.deinit(std.testing.allocator);
 
     big_set.decode(small_buffer[0..small_buffer_written]);
 
     var block: usize = 0;
-    while (block < 2 * shard_size) : (block += 1) {
+    while (block < 2 * shard_bits) : (block += 1) {
         const address = block + 1;
-        try std.testing.expectEqual(shard_size <= block, big_set.is_free(address));
+        try std.testing.expectEqual(shard_bits <= block, big_set.is_free(address));
     }
 }
 
@@ -818,7 +818,7 @@ test "FreeSet encode/decode manual" {
         // Mask 2: run of 59 words of 1s, then 0 literals
         //
         // 59 is chosen so that because the blocks_count must be a multiple of the shard size:
-        // shard_size = 4096 bits = 64 words × 64 bits/word = (2+3+59)*64
+        // shard_bits = 4096 bits = 64 words × 64 bits/word = (2+3+59)*64
         1 | ((64 - 5) << 1),
     });
     const decoded_expect = [_]usize{
