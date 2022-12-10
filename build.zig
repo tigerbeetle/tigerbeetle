@@ -343,9 +343,7 @@ fn go_client(
         .{ .path = "src/clients/c/tb_client.h" },
         "../src/clients/go/pkg/native/tb_client.h",
     );
-
-    build_step.dependOn(header_generate_step);
-    build_step.dependOn(&install_header.step);
+    install_header.step.dependOn(header_generate_step);
 
     // Zig cross-targets
     const platforms = .{
@@ -374,6 +372,7 @@ fn go_client(
         lib.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
+        lib.step.dependOn(&install_header.step);
         build_step.dependOn(&lib.step);
     }
 }
