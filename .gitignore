@@ -5,8 +5,8 @@ dist/
 journal
 main
 simulator
-tigerbeetle
-tigerbeetle.exe
+/tigerbeetle
+/tigerbeetle.exe
 *_*.tigerbeetle
 zig/
 zig-cache/
