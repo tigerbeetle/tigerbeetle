@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.Serialization;
 using System.Threading.Tasks;
 
 namespace TigerBeetle
@@ -7,16 +8,18 @@ namespace TigerBeetle
     {
         private readonly NativeClient nativeClient;
 
-        public EchoClient(uint clusterID, string addresses, int maxConcurrency)
+        public EchoClient(uint clusterID, string[] addresses, int maxConcurrency)
         {
-            if (maxConcurrency <= 0) throw new ArgumentOutOfRangeException(nameof(maxConcurrency));
-
-            this.nativeClient = NativeClient.initEcho(clusterID, addresses, maxConcurrency);
+            this.nativeClient = NativeClient.InitEcho(clusterID, addresses, maxConcurrency);
         }
 
         ~EchoClient()
         {
-            Dispose(disposing: false);
+            // NativeClient can be null if the constructor threw an exception.
+            if (nativeClient != null)
+            {
+                Dispose(disposing: false);
+            }
         }
 
         public Account[] Echo(Account[] batch)

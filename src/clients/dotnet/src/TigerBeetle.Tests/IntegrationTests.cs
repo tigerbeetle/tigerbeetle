@@ -31,106 +31,6 @@ namespace TigerBeetle.Tests
         };
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentNullException))]
-        [DoNotParallelize]
-        public void ConstructorWithNullReplicaAddresses()
-        {
-            using var client = new Client(0, null!, 1);
-        }
-
-		[TestMethod]
-		[DoNotParallelize]
-		public void ConstructorWithNullReplicaAddress()
-		{
-			try
-			{
-				using var client = new Client(0, new string[] { "3000", null! }, 1);
-				Assert.IsTrue(false);
-			}
-			catch (InitializationException exception)
-			{
-				Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
-			}
-		}
-
-		[TestMethod]
-		[DoNotParallelize]
-		public void ConstructorWithEmptyReplicaAddresses()
-		{
-			try
-			{
-				using var client = new Client(0, Array.Empty<string>(), 1);
-				Assert.IsTrue(false);
-			}
-			catch (InitializationException exception)
-			{
-				Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
-			}
-		}
-
-		[TestMethod]
-		[DoNotParallelize]
-		public void ConstructorWithEmptyReplicaAddress()
-		{
-			try
-			{
-				using var client = new Client(0, new string[] { "" }, 1);
-				Assert.IsTrue(false);
-			}
-			catch (InitializationException exception)
-			{
-				Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
-			}
-		}
-
-		[TestMethod]
-		[DoNotParallelize]
-		public void ConstructorWithInvalidReplicaAddresses()
-		{
-            try
-            {
-                var addresses = Enumerable.Range(3000, 3100).Select(x => x.ToString()).ToArray();
-                using var client = new Client(0, addresses, 1);
-                Assert.IsTrue(false);
-            }
-            catch (InitializationException exception)
-            {
-                Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
-            }
-		}
-
-		[TestMethod]
-		[ExpectedException(typeof(ArgumentException))]
-		[DoNotParallelize]
-		public void ConstructorWithZeroMaxConcurrency()
-		{
-			using var client = new Client(0, new string[] { "3000" }, 0);
-		}
-
-		[TestMethod]
-		[ExpectedException(typeof(ArgumentException))]
-		[DoNotParallelize]
-		public void ConstructorWithNegativeMaxConcurrency()
-		{
-			using var client = new Client(0, new string[] { "3000" }, -1);
-		}
-
-		[TestMethod]
-		[DoNotParallelize]
-		public void ConstructorWithInvalidMaxConcurrency()
-		{
-			try
-			{
-				using var client = new Client(0, new string[] { "3000" }, 99_999);
-				Assert.IsTrue(false);
-			}
-			catch (InitializationException exception)
-			{
-				Assert.AreEqual(InitializationStatus.PacketsCountInvalid, exception.Status);
-			}
-		}
-
-		[TestMethod]
         [DoNotParallelize]
         public void CreateAccounts()
         {
@@ -506,7 +406,7 @@ namespace TigerBeetle.Tests
 
         [TestMethod]
         [DoNotParallelize]
-        public void CreateLikedTransfers()
+        public void CreateLinkedTransfers()
         {
             using var server = new TBServer();
             using var client = GetClient();
@@ -555,7 +455,7 @@ namespace TigerBeetle.Tests
 
         [TestMethod]
         [DoNotParallelize]
-        public async Task CreateLikedTransfersAsync()
+        public async Task CreateLinkedTransfersAsync()
         {
             using var server = new TBServer();
             using var client = GetClient();

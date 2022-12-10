@@ -17,10 +17,104 @@ namespace TigerBeetle.Tests
         private static readonly int ITEMS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;
 
         [TestMethod]
+        [ExpectedException(typeof(ArgumentNullException))]
+        public void ConstructorWithNullReplicaAddresses()
+        {
+            string[]? addresses = null;
+            _ = new EchoClient(0, addresses!, 1);
+        }
+
+        [TestMethod]
+        public void ConstructorWithNullReplicaAddressElement()
+        {
+            try
+            {
+                var addresses = new string?[] { "3000", null };
+                _ = new EchoClient(0, addresses!, 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        public void ConstructorWithEmptyReplicaAddresses()
+        {
+            try
+            {
+                _ = new EchoClient(0, Array.Empty<string>(), 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        public void ConstructorWithEmptyReplicaAddressElement()
+        {
+            try
+            {
+                _ = new EchoClient(0, new string[] { "" }, 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        public void ConstructorWithInvalidReplicaAddresses()
+        {
+            try
+            {
+                var addresses = Enumerable.Range(3000, 3100).Select(x => x.ToString()).ToArray();
+                _ = new EchoClient(0, addresses, 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void ConstructorWithZeroMaxConcurrency()
+        {
+            _ = new EchoClient(0, new string[] { "3000" }, 0);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void ConstructorWithNegativeMaxConcurrency()
+        {
+            _ = new EchoClient(0, new string[] { "3000" }, -1);
+        }
+
+        [TestMethod]
+        public void ConstructorWithInvalidMaxConcurrency()
+        {
+            try
+            {
+                using var client = new EchoClient(0, new string[] { "3000" }, 99_999);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.PacketsCountInvalid, exception.Status);
+            }
+        }
+
+        [TestMethod]
         public void Accounts()
         {
             var rnd = new Random(1);
-            using var client = new EchoClient(0, "3000", 32);
+            using var client = new EchoClient(0, new[] { "3000" }, 32);
 
             var batch = GetRandom<Account>(rnd);
             var reply = client.Echo(batch);
@@ -31,7 +125,7 @@ namespace TigerBeetle.Tests
         public async Task AccountsAsync()
         {
             var rnd = new Random(2);
-            using var client = new EchoClient(0, "3000", 32);
+            using var client = new EchoClient(0, new[] { "3000" }, 32);
 
             var batch = GetRandom<Account>(rnd);
             var reply = await client.EchoAsync(batch);
@@ -42,7 +136,7 @@ namespace TigerBeetle.Tests
         public void Transfers()
         {
             var rnd = new Random(3);
-            using var client = new EchoClient(0, "3000", 32);
+            using var client = new EchoClient(0, new[] { "3000" }, 32);
 
             var batch = GetRandom<Transfer>(rnd);
             var reply = client.Echo(batch);
@@ -53,7 +147,7 @@ namespace TigerBeetle.Tests
         public async Task TransfersAsync()
         {
             var rnd = new Random(4);
-            using var client = new EchoClient(0, "3000", 32);
+            using var client = new EchoClient(0, new[] { "3000" }, 32);
 
             var batch = GetRandom<Transfer>(rnd);
             var reply = await client.EchoAsync(batch);
@@ -65,7 +159,7 @@ namespace TigerBeetle.Tests
         {
             const int MAX_CONCURRENCY = 64;
             var rnd = new Random(5);
-            using var client = new EchoClient(0, "3000", MAX_CONCURRENCY);
+            using var client = new EchoClient(0, new[] { "3000" }, MAX_CONCURRENCY);
 
             const int MAX_REPETITIONS = 5;
             for (int repetition = 0; repetition < MAX_REPETITIONS; repetition++)
@@ -79,10 +173,10 @@ namespace TigerBeetle.Tests
                     list.Add((batch, task));
                 }
 
-                foreach (var item in list)
+                foreach (var (batch, task) in list)
                 {
-                    var reply = await item.task;
-                    Assert.IsTrue(item.batch.SequenceEqual(reply));
+                    var reply = await task;
+                    Assert.IsTrue(batch.SequenceEqual(reply));
                 }
             }
         }
@@ -92,12 +186,12 @@ namespace TigerBeetle.Tests
         {
             const int MAX_CONCURRENCY = 64;
             var rnd = new Random(6);
-            using var client = new EchoClient(0, "3000", MAX_CONCURRENCY);
+            using var client = new EchoClient(0, new[] { "3000" }, MAX_CONCURRENCY);
 
             const int MAX_REPETITIONS = 5;
             for (int repetition = 0; repetition < MAX_REPETITIONS; repetition++)
             {
-                Barrier barrier = new Barrier(MAX_CONCURRENCY);
+                var barrier = new Barrier(MAX_CONCURRENCY);
                 var list = new List<ThreadContext>();
 
                 for (int i = 0; i < MAX_CONCURRENCY; i++)
@@ -151,7 +245,7 @@ namespace TigerBeetle.Tests
             }
         }
 
-        private T[] GetRandom<T>(Random rnd)
+        private static T[] GetRandom<T>(Random rnd)
             where T : unmanaged
         {
             var size = rnd.Next(1, ITEMS_PER_BATCH);

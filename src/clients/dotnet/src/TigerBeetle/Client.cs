@@ -16,16 +16,17 @@ namespace TigerBeetle
 
         public Client(uint clusterID, string[] addresses, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
         {
-			if (addresses == null) throw new ArgumentNullException(nameof(addresses));
-			if (maxConcurrency <= 0) throw new ArgumentException(nameof(maxConcurrency));
-
-			this.nativeClient = NativeClient.init(clusterID, string.Join(',', addresses), maxConcurrency);
-			this.clusterID = clusterID;
-		}
+            this.nativeClient = NativeClient.Init(clusterID, addresses, maxConcurrency);
+            this.clusterID = clusterID;
+        }
 
         ~Client()
         {
-            Dispose(disposing: false);
+            // NativeClient can be null if the constructor threw an exception.
+            if (nativeClient != null)
+            {
+                Dispose(disposing: false);
+            }
         }
 
         public uint ClusterID => clusterID;

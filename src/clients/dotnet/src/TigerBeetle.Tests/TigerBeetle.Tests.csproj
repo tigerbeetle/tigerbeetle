@@ -2,9 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
-
+    <DebugType>Full</DebugType>
     <IsPackable>false</IsPackable>
-
     <Nullable>enable</Nullable>
   </PropertyGroup>
 

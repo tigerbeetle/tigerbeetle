@@ -16,6 +16,26 @@ namespace TigerBeetle
         private readonly int maxConcurrency;
         private readonly SemaphoreSlim maxConcurrencySemaphore;
 
+        private unsafe delegate InitializationStatus InitFunction(
+                    IntPtr* out_client,
+                    TBPacketList* out_packets,
+                    uint cluster_id,
+                    byte* address_ptr,
+                    uint address_len,
+                    uint num_packets,
+                    IntPtr on_completion_ctx,
+
+                    // Uses either the new function pointer by value, or the old managed delegate in .Net standard
+                    // https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/function-pointers
+#if NETSTANDARD
+                    [MarshalAs(UnmanagedType.FunctionPtr)]
+                    OnCompletionFn on_completion_fn
+#else
+                    delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+#endif
+                );
+
+
         private unsafe NativeClient(IntPtr client, TBPacketList packetList, int maxConcurrency)
         {
             this.client = client;
@@ -24,9 +44,33 @@ namespace TigerBeetle
             this.maxConcurrencySemaphore = new(maxConcurrency, maxConcurrency);
         }
 
-        public static NativeClient init(uint clusterID, string addresses, int maxConcurrency)
+        private static byte[] GetBytes(string[] addresses)
         {
-            var addresses_byte = Encoding.UTF8.GetBytes(addresses + "\0");
+            if (addresses == null) throw new ArgumentNullException(nameof(addresses));
+            return Encoding.UTF8.GetBytes(string.Join(',', addresses) + "\0");
+        }
+
+        public static NativeClient Init(uint clusterID, string[] addresses, int maxConcurrency)
+        {
+            unsafe
+            {
+                return CallInit(tb_client_init, clusterID, addresses, maxConcurrency);
+            }
+        }
+
+        public static NativeClient InitEcho(uint clusterID, string[] addresses, int maxConcurrency)
+        {
+            unsafe
+            {
+                return CallInit(tb_client_init_echo, clusterID, addresses, maxConcurrency);
+            }
+        }
+
+        private static NativeClient CallInit(InitFunction initFunction, uint clusterID, string[] addresses, int maxConcurrency)
+        {
+            if (maxConcurrency <= 0) throw new ArgumentException("Max concurrency must be positive", nameof(maxConcurrency));
+
+            var addresses_byte = GetBytes(addresses);
             unsafe
             {
                 fixed (byte* addressPtr = addresses_byte)
@@ -34,7 +78,7 @@ namespace TigerBeetle
                     IntPtr handle;
                     TBPacketList packetList;
 
-                    var status = tb_client_init(
+                    var status = initFunction(
                         &handle,
                         &packetList,
                         clusterID,
@@ -42,38 +86,12 @@ namespace TigerBeetle
                         (uint)addresses_byte.Length - 1,
                         (uint)maxConcurrency,
                         IntPtr.Zero,
-
-                        // Uses either the new function pointer by value, or the old managed delegate in .Net standard
-                        // https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/function-pointers
 #if NETSTANDARD
 					    OnCompletionHandler
 #else
                         &OnCompletionCallback
 #endif
                     );
-
-
-                    if (status != InitializationStatus.Success) throw new InitializationException(status);
-                    return new NativeClient(handle, packetList, maxConcurrency);
-                }
-            }
-        }
-
-        public static NativeClient initEcho(uint clusterID, string addresses, int maxConcurrency)
-        {
-            var addresses_byte = Encoding.UTF8.GetBytes(addresses + "\0");
-            unsafe
-            {
-                fixed (byte* addressPtr = addresses_byte)
-                {
-                    IntPtr handle;
-                    TBPacketList packetList;
-
-#if NETSTANDARD
-					var status = tb_client_init_echo(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, OnCompletionHandler);
-#else
-                    var status = tb_client_init_echo(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, &OnCompletionCallback);
-#endif
 
                     if (status != InitializationStatus.Success) throw new InitializationException(status);
                     return new NativeClient(handle, packetList, maxConcurrency);

@@ -118,15 +118,15 @@ namespace TigerBeetle
 
         public static bool operator !=(UInt128 left, UInt128 right) => !left.Equals(right);
 
-		public static implicit operator UInt128(Guid guid) => new(guid);
+        public static implicit operator UInt128(Guid guid) => new(guid);
 
-		public static implicit operator Guid(UInt128 value) => value.ToGuid();
+        public static implicit operator Guid(UInt128 value) => value.ToGuid();
 
-		public static implicit operator UInt128(byte[] array) => new(array);
+        public static implicit operator UInt128(byte[] array) => new(array);
 
-		public static implicit operator byte[](UInt128 value) => value.ToArray();
+        public static implicit operator byte[](UInt128 value) => value.ToArray();
 
-		public static implicit operator UInt128(long value)
+        public static implicit operator UInt128(long value)
         {
             unchecked
             {
