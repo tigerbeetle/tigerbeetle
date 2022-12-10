@@ -176,6 +176,14 @@ pub fn TableMutableType(comptime Table: type) type {
             assert(values.len == table.count());
             std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
 
+            if (constants.verify and i > 0) {
+                var a = values[0];
+                for (values[1..]) |b| {
+                    assert(compare_keys(key_from_value(&a), key_from_value(&b)) == .lt);
+                    a = b;
+                }
+            }
+
             table.clear();
             assert(table.count() == 0);
 
