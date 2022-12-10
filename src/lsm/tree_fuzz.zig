@@ -314,6 +314,10 @@ const Environment = struct {
                     if (compact.checkpoint) env.checkpoint(compact.op);
                 },
                 .put => |value| {
+                    if (model.get(Key.key_from_value(&value))) |old_value| {
+                        // Not allowed to put a present key without removing the old value first.
+                        env.tree.remove(&old_value);
+                    }
                     env.tree.put(&value);
                     try model.put(Key.key_from_value(&value), value);
                 },
@@ -441,13 +445,7 @@ pub fn main() !void {
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
-    const fuzz_op_count = @minimum(
-        fuzz_args.events_max orelse @as(usize, 1E7),
-        fuzz.random_int_exponential(random, usize, 1E6),
-    );
-
-    const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
-    defer allocator.free(fuzz_ops);
+    _ = random.boolean();
 
     const storage_options = .{
         .seed = random.int(u64),
@@ -456,6 +454,14 @@ pub fn main() !void {
         .write_latency_min = 0,
         .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
     };
+
+    const fuzz_op_count = @minimum(
+        fuzz_args.events_max orelse @as(usize, 1E7),
+        fuzz.random_int_exponential(random, usize, 1E6),
+    );
+
+    const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
+    defer allocator.free(fuzz_ops);
 
     try run_fuzz_ops(storage_options, fuzz_ops);
 
