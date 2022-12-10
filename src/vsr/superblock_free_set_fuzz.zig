@@ -17,7 +17,7 @@ pub fn main() !void {
 
     var prng = std.rand.DefaultPrng.init(args.seed);
 
-    const blocks_count = FreeSet.shard_size * (1 + prng.random().uintLessThan(usize, 10));
+    const blocks_count = FreeSet.shard_bits * (1 + prng.random().uintLessThan(usize, 10));
     const events = try generate_events(allocator, prng.random(), blocks_count);
     defer allocator.free(events);
 
