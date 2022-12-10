@@ -414,6 +414,65 @@ pub fn main() !void {
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     // Zig 0.9.1 has `decl.data.Fn.arg_names` but it's currently/incorrectly a zero-sized slice.
     try buffer.writer().print(
+        \\    internal static class TBClient
+        \\    {{
+        \\        private const string LIB_NAME = "tb_client";
+        \\
+        \\        // Uses either the new function pointer by value, or the old managed delegate in .Net standard
+        \\        // https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/function-pointers
+        \\
+        \\#if NETSTANDARD
+        \\        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        \\        public unsafe delegate void OnCompletionFn(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len);
+        \\#endif
+        \\
+        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\        public static unsafe extern InitializationStatus tb_client_init(
+        \\            IntPtr* out_client,
+        \\            TBPacketList* out_packets,
+        \\            uint cluster_id,
+        \\            byte* address_ptr,
+        \\            uint address_len,
+        \\            uint num_packets,
+        \\            IntPtr on_completion_ctx,
+        \\
+        \\#if NETSTANDARD
+        \\            [MarshalAs(UnmanagedType.FunctionPtr)]
+        \\            OnCompletionFn on_completion_fn
+        \\#else
+        \\            delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+        \\#endif
+        \\        );
+        \\
+        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\        public static unsafe extern InitializationStatus tb_client_init_echo(
+        \\            IntPtr* out_client,
+        \\            TBPacketList* out_packets,
+        \\            uint cluster_id,
+        \\            byte* address_ptr,
+        \\            uint address_len,
+        \\            uint num_packets,
+        \\            IntPtr on_completion_ctx,
+        \\
+        \\#if NETSTANDARD
+        \\            [MarshalAs(UnmanagedType.FunctionPtr)]
+        \\            OnCompletionFn on_completion_fn
+        \\#else
+        \\            delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+        \\#endif
+        \\        );
+        \\
+        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\        public static unsafe extern void tb_client_submit(
+        \\            IntPtr client,
+        \\            TBPacketList* packets
+        \\        );
+        \\
+        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\        public static unsafe extern void tb_client_deinit(
+        \\            IntPtr client
+        \\        );
+        \\    }}
         \\}}
         \\
         \\

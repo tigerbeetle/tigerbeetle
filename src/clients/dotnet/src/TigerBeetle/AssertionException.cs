@@ -4,6 +4,8 @@ namespace TigerBeetle
 {
     public sealed class AssertionException : Exception
     {
+        internal AssertionException() { }
+
         internal AssertionException(string format, params object[] args) : base(string.Format(format, args)) { }
 
         internal AssertionException(Exception innerException, string format, params object[] args) : base(string.Format(format, args), innerException) { }
@@ -13,6 +15,14 @@ namespace TigerBeetle
             if (!condition)
             {
                 throw new AssertionException(format, args);
+            }
+        }
+
+        internal static void AssertTrue(bool condition)
+        {
+            if (!condition)
+            {
+                throw new AssertionException();
             }
         }
     }

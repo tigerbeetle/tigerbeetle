@@ -2,7 +2,6 @@
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using static TigerBeetle.TBClient;
 using static TigerBeetle.AssertionException;
 
 namespace TigerBeetle
@@ -50,6 +49,7 @@ namespace TigerBeetle
 
         public IntPtr Pin(TBody[] body, out int size)
         {
+            AssertTrue(body.Length > 0, "Message body cannot be empty");
             AssertTrue(!bodyPinnedHandle.IsAllocated, "Request data is already pinned");
             bodyPinnedHandle = GCHandle.Alloc(body, GCHandleType.Pinned);
 
@@ -90,6 +90,13 @@ namespace TigerBeetle
 
                 if (status == PacketStatus.Ok && result.Length > 0)
                 {
+                    AssertTrue(result.Length % RESULT_SIZE == 0,
+                        "Invalid received data: result.Length={0}, SizeOf({1})={2}",
+                        result.Length,
+                        typeof(TResult).Name,
+                        RESULT_SIZE
+                    );
+
                     array = new TResult[result.Length / RESULT_SIZE];
 
                     var span = MemoryMarshal.Cast<byte, TResult>(result);
@@ -153,11 +160,29 @@ namespace TigerBeetle
         where TResult : unmanaged
         where TBody : unmanaged
     {
-        private TResult[]? result = null;
-        private Exception? exception;
+        private volatile TResult[]? result = null;
+        private volatile Exception? exception = null;
+
+        private bool Completed => result != null || exception != null;
 
         public BlockingRequest(NativeClient nativeClient, Packet packet) : base(nativeClient, packet)
         {
+        }
+
+        public TResult[] Wait()
+        {
+            if (!Completed)
+            {
+                lock (this)
+                {
+                    if (!Completed)
+                    {
+                        Monitor.Wait(this);
+                    }
+                }
+            }
+
+            return result ?? throw exception!;
         }
 
         protected override void SetResult(TResult[] result)
@@ -167,15 +192,6 @@ namespace TigerBeetle
                 this.result = result;
                 this.exception = null;
                 Monitor.Pulse(this);
-            }
-        }
-
-        public TResult[] Wait()
-        {
-            lock (this)
-            {
-                Monitor.Wait(this);
-                return result ?? throw exception!;
             }
         }
 

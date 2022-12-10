@@ -1,12 +1,11 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-
-using static TigerBeetle.TBClient;
 using static TigerBeetle.AssertionException;
+using static TigerBeetle.TBClient;
 
 namespace TigerBeetle
 {
@@ -35,11 +34,24 @@ namespace TigerBeetle
                     IntPtr handle;
                     TBPacketList packetList;
 
+                    var status = tb_client_init(
+                        &handle,
+                        &packetList,
+                        clusterID,
+                        addressPtr,
+                        (uint)addresses_byte.Length - 1,
+                        (uint)maxConcurrency,
+                        IntPtr.Zero,
+
+                        // Uses either the new function pointer by value, or the old managed delegate in .Net standard
+                        // https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/function-pointers
 #if NETSTANDARD
-					var status = tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, OnCompletionHandler);
+					    OnCompletionHandler
 #else
-                    var status = tb_client_init(&handle, &packetList, clusterID, addressPtr, (uint)addresses_byte.Length - 1, (uint)maxConcurrency, IntPtr.Zero, &OnCompletionCallback);
+                        &OnCompletionCallback
 #endif
+                    );
+
 
                     if (status != InitializationStatus.Success) throw new InitializationException(status);
                     return new NativeClient(handle, packetList, maxConcurrency);
@@ -69,34 +81,30 @@ namespace TigerBeetle
             }
         }
 
-        public Packet Rent()
+        public TResult[] CallRequest<TResult, TBody>(TBOperation operation, TBody[] batch)
+            where TResult : unmanaged
+            where TBody : unmanaged
         {
-            do
-            {
-                // This client can be disposed
-                if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(client));
-            } while (!maxConcurrencySemaphore.Wait(millisecondsTimeout: 5));
+            if (batch.Length == 0) return Array.Empty<TResult>();
 
-            unsafe
-            {
-                var packet = AcquirePacket();
-                return new Packet(packet);
-            }
+            var packet = Rent();
+            var blockingRequest = new BlockingRequest<TResult, TBody>(this, packet);
+
+            blockingRequest.Submit(operation, batch);
+            return blockingRequest.Wait();
         }
 
-        public async ValueTask<Packet> RentAsync()
+        public async Task<TResult[]> CallRequestAsync<TResult, TBody>(TBOperation operation, TBody[] batch)
+            where TResult : unmanaged
+            where TBody : unmanaged
         {
-            do
-            {
-                // This client can be disposed
-                if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(client));
-            } while (!await maxConcurrencySemaphore.WaitAsync(millisecondsTimeout: 5));
+            if (batch.Length == 0) return Array.Empty<TResult>();
 
-            unsafe
-            {
-                var packet = AcquirePacket();
-                return new Packet(packet);
-            }
+            var packet = await RentAsync();
+            var asyncRequest = new AsyncRequest<TResult, TBody>(this, packet);
+
+            asyncRequest.Submit(operation, batch);
+            return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
         }
 
         public void Return(Packet packet)
@@ -125,6 +133,36 @@ namespace TigerBeetle
                 };
 
                 tb_client_submit(client, &packetList);
+            }
+        }
+
+        private Packet Rent()
+        {
+            do
+            {
+                // This client can be disposed
+                if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(client));
+            } while (!maxConcurrencySemaphore.Wait(millisecondsTimeout: 5));
+
+            unsafe
+            {
+                var packet = AcquirePacket();
+                return new Packet(packet);
+            }
+        }
+
+        private async ValueTask<Packet> RentAsync()
+        {
+            do
+            {
+                // This client can be disposed
+                if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(client));
+            } while (!await maxConcurrencySemaphore.WaitAsync(millisecondsTimeout: 5));
+
+            unsafe
+            {
+                var packet = AcquirePacket();
+                return new Packet(packet);
             }
         }
 
@@ -186,7 +224,7 @@ namespace TigerBeetle
         }
 
         // Uses either the new function pointer by value, or the old managed delegate in .Net standard
-        // Using managed delegate, the instance must be referenced to prevents GC
+        // Using managed delegate, the instance must be referenced to prevents GC.
 
 #if NETSTANDARD
 		private static readonly OnCompletionFn OnCompletionHandler = new OnCompletionFn(OnCompletionCallback);

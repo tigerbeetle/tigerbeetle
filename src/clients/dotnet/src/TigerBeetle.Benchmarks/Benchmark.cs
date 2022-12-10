@@ -21,7 +21,7 @@ namespace TigerBeetle.Benchmarks
             Console.WriteLine($"Benchmarking dotnet");
 
             var queue = new TimedQueue();
-            using var client = new Client(0, new IPEndPoint[] { IPEndPoint.Parse("127.0.0.1:3001") });
+            using var client = new Client(0, new string[] { "3001" });
 
             var accounts = new[] {
                 new Account

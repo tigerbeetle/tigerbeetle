@@ -12,7 +12,7 @@ namespace TigerBeetle.Tests
     [TestClass]
     public class IntegrationTests
     {
-        private static Client GetClient(int maxConcurrency = 32) => new(0, new IPEndPoint[] { IPEndPoint.Parse($"127.0.0.1:{TBServer.TB_PORT}") }, maxConcurrency);
+        private static Client GetClient(int maxConcurrency = 32) => new(0, new string[] { TBServer.TB_PORT }, maxConcurrency);
 
         private static readonly Account[] accounts = new[]
         {
@@ -31,6 +31,106 @@ namespace TigerBeetle.Tests
         };
 
         [TestMethod]
+        [ExpectedException(typeof(ArgumentNullException))]
+        [DoNotParallelize]
+        public void ConstructorWithNullReplicaAddresses()
+        {
+            using var client = new Client(0, null!, 1);
+        }
+
+		[TestMethod]
+		[DoNotParallelize]
+		public void ConstructorWithNullReplicaAddress()
+		{
+			try
+			{
+				using var client = new Client(0, new string[] { "3000", null! }, 1);
+				Assert.IsTrue(false);
+			}
+			catch (InitializationException exception)
+			{
+				Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+			}
+		}
+
+		[TestMethod]
+		[DoNotParallelize]
+		public void ConstructorWithEmptyReplicaAddresses()
+		{
+			try
+			{
+				using var client = new Client(0, Array.Empty<string>(), 1);
+				Assert.IsTrue(false);
+			}
+			catch (InitializationException exception)
+			{
+				Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+			}
+		}
+
+		[TestMethod]
+		[DoNotParallelize]
+		public void ConstructorWithEmptyReplicaAddress()
+		{
+			try
+			{
+				using var client = new Client(0, new string[] { "" }, 1);
+				Assert.IsTrue(false);
+			}
+			catch (InitializationException exception)
+			{
+				Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+			}
+		}
+
+		[TestMethod]
+		[DoNotParallelize]
+		public void ConstructorWithInvalidReplicaAddresses()
+		{
+            try
+            {
+                var addresses = Enumerable.Range(3000, 3100).Select(x => x.ToString()).ToArray();
+                using var client = new Client(0, addresses, 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
+            }
+		}
+
+		[TestMethod]
+		[ExpectedException(typeof(ArgumentException))]
+		[DoNotParallelize]
+		public void ConstructorWithZeroMaxConcurrency()
+		{
+			using var client = new Client(0, new string[] { "3000" }, 0);
+		}
+
+		[TestMethod]
+		[ExpectedException(typeof(ArgumentException))]
+		[DoNotParallelize]
+		public void ConstructorWithNegativeMaxConcurrency()
+		{
+			using var client = new Client(0, new string[] { "3000" }, -1);
+		}
+
+		[TestMethod]
+		[DoNotParallelize]
+		public void ConstructorWithInvalidMaxConcurrency()
+		{
+			try
+			{
+				using var client = new Client(0, new string[] { "3000" }, 99_999);
+				Assert.IsTrue(false);
+			}
+			catch (InitializationException exception)
+			{
+				Assert.AreEqual(InitializationStatus.PacketsCountInvalid, exception.Status);
+			}
+		}
+
+		[TestMethod]
         [DoNotParallelize]
         public void CreateAccounts()
         {
@@ -614,7 +714,7 @@ namespace TigerBeetle.Tests
         public const string TB_EXE = "tigerbeetle";
         public const string TB_PATH = "../../../../../../../..";
         public static readonly string TB_SERVER = $"{TB_PATH}/{TB_EXE}";
-        public const int TB_PORT = 3001;
+        public const string TB_PORT = "3001";
         public const string TB_FILE = "dotnet-tests.tigerbeetle";
         public static readonly string FORMAT = $"format --cluster=0 --replica=0 ./{TB_FILE}";
         public static readonly string START = $"start --addresses={TB_PORT} ./{TB_FILE}";
