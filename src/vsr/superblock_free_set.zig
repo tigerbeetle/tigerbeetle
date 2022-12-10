@@ -180,20 +180,22 @@ pub const FreeSet = struct {
         assert(set.reservation_state == .reserving);
         assert(reserve_count > 0);
 
-        var shard_start = find_first_set_bit(
+        var shard_start = find_bit(
             set.index,
             @divFloor(set.reservation_blocks, shard_size),
             set.index.bit_length,
+            .set,
         ) orelse return null;
 
         // The reservation may cover (and ignore) already-acquired blocks due to fragmentation.
         var block = std.math.max(shard_start * shard_size, set.reservation_blocks);
         var reserved: usize = 0;
         while (reserved < reserve_count) : (reserved += 1) {
-            block = 1 + (find_first_set_bit(
+            block = 1 + (find_bit(
                 set.blocks,
                 block,
                 set.blocks.bit_length,
+                .set,
             ) orelse return null);
         }
 
@@ -241,10 +243,11 @@ pub const FreeSet = struct {
         assert(reservation.block_base + reservation.block_count <= set.reservation_blocks);
         assert(reservation.session == set.reservation_session);
 
-        const shard = find_first_set_bit(
+        const shard = find_bit(
             set.index,
             @divFloor(reservation.block_base, shard_size),
             div_ceil(reservation.block_base + reservation.block_count, shard_size),
+            .set,
         ) orelse return null;
         assert(set.index.isSet(shard));
 
@@ -253,10 +256,11 @@ pub const FreeSet = struct {
             reservation.block_base,
         );
         const reservation_end = reservation.block_base + reservation.block_count;
-        const block = find_first_set_bit(
+        const block = find_bit(
             set.blocks,
             reservation_start,
             reservation_end,
+            .set,
         ) orelse return null;
         assert(block >= reservation.block_base);
         assert(block <= reservation.block_base + reservation.block_count);
@@ -276,7 +280,7 @@ pub const FreeSet = struct {
         const shard_end = shard_start + shard_size;
         assert(shard_start < set.blocks.bit_length);
 
-        return find_first_set_bit(set.blocks, shard_start, shard_end);
+        return find_bit(set.blocks, shard_start, shard_end, .set);
     }
 
     pub fn is_free(set: FreeSet, address: u64) bool {
@@ -843,29 +847,40 @@ test "FreeSet encode/decode manual" {
     try std.testing.expectEqual(encoded_expect.len, encoded_actual_length);
 }
 
-/// Returns the index of this first set bit (relative to the start of the bitset) within
+/// Returns the index of the first set/unset bit (relative to the start of the bitset) within
 /// the range bit_min…bit_max (inclusive…exclusive).
-fn find_first_set_bit(bit_set: DynamicBitSetUnmanaged, bit_min: usize, bit_max: usize) ?usize {
+fn find_bit(
+    bit_set: DynamicBitSetUnmanaged,
+    bit_min: usize,
+    bit_max: usize,
+    comptime bit_kind: std.bit_set.IteratorOptions.Type,
+) ?usize {
     assert(bit_max >= bit_min);
     assert(bit_max <= bit_set.bit_length);
 
     const word_start = @divFloor(bit_min, @bitSizeOf(MaskInt)); // Inclusive.
     const word_offset = @mod(bit_min, @bitSizeOf(MaskInt));
     const word_end = div_ceil(bit_max, @bitSizeOf(MaskInt)); // Exclusive.
+    const words_total = div_ceil(bit_set.bit_length, @bitSizeOf(MaskInt));
     if (word_end == word_start) return null;
     assert(word_end > word_start);
 
     // Only iterate over the subset of bits that were requested.
-    var iterator = bit_set.iterator(.{});
+    var iterator = bit_set.iterator(.{ .kind = bit_kind });
     iterator.words_remain = bit_set.masks[word_start + 1 .. word_end];
+
     const mask = ~@as(MaskInt, 0);
-    iterator.bits_remain = bit_set.masks[word_start] & std.math.shl(MaskInt, mask, word_offset);
+    var word = bit_set.masks[word_start];
+    if (bit_kind == .unset) word = ~word;
+    iterator.bits_remain = word & std.math.shl(MaskInt, mask, word_offset);
+
+    if (word_end != words_total) iterator.last_word_mask = mask;
 
     const b = bit_min - word_offset + (iterator.next() orelse return null);
     return if (b < bit_max) b else null;
 }
 
-test "find_first_set_bit" {
+test "find_bit" {
     var prng = std.rand.DefaultPrng.init(123);
     const random = prng.random();
 
@@ -879,24 +894,29 @@ test "find_first_set_bit" {
         while (b < bit_length) : (b += 1) bit_set.setValue(b, p < random.uintLessThan(usize, 100));
 
         var i: usize = 0;
-        while (i < 20) : (i += 1) try test_find_first_set_bit(random, bit_set);
+        while (i < 20) : (i += 1) try test_find_bit(random, bit_set, .set);
+        while (i < 40) : (i += 1) try test_find_bit(random, bit_set, .unset);
     }
 }
 
-fn test_find_first_set_bit(random: std.rand.Random, bit_set: DynamicBitSetUnmanaged) !void {
+fn test_find_bit(
+    random: std.rand.Random,
+    bit_set: DynamicBitSetUnmanaged,
+    comptime bit_kind: std.bit_set.IteratorOptions.Type,
+) !void {
     const bit_min = random.uintLessThan(usize, bit_set.bit_length);
     const bit_max = random.uintLessThan(usize, bit_set.bit_length - bit_min) + bit_min;
     assert(bit_max >= bit_min);
     assert(bit_max <= bit_set.bit_length);
 
-    const bit_actual = find_first_set_bit(bit_set, bit_min, bit_max);
+    const bit_actual = find_bit(bit_set, bit_min, bit_max, bit_kind);
     if (bit_actual) |bit| {
-        assert(bit_set.isSet(bit));
+        assert(bit_set.isSet(bit) == (bit_kind == .set));
         assert(bit >= bit_min);
         assert(bit < bit_max);
     }
 
-    var iterator = bit_set.iterator(.{ .kind = .set });
+    var iterator = bit_set.iterator(.{ .kind = bit_kind });
     while (iterator.next()) |bit| {
         if (bit_min <= bit and bit < bit_max) {
             try std.testing.expectEqual(bit_actual, bit);
