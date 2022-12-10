@@ -99,8 +99,15 @@ pub fn TableMutableType(comptime Table: type) type {
             // If the key is already present in the hash map, the old key will not be overwritten
             // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
             // level getOrPut() API and manually overwrite the old key.
+            //const upsert = table.values.getOrPutAssumeCapacity(value.*);
+            //upsert.key_ptr.* = value.*;
             const upsert = table.values.getOrPutAssumeCapacity(value.*);
-            upsert.key_ptr.* = value.*;
+            if (upsert.found_existing) {
+                assert(Table.tombstone(upsert.key_ptr));
+                _ = table.values.remove(value.*);
+            } else {
+                upsert.key_ptr.* = value.*;
+            }
 
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
@@ -114,8 +121,16 @@ pub fn TableMutableType(comptime Table: type) type {
             // If the key is already present in the hash map, the old key will not be overwritten
             // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
             // level getOrPut() API and manually overwrite the old key.
-            const upsert = table.values.getOrPutAssumeCapacity(value.*);
-            upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+            //const upsert = table.values.getOrPutAssumeCapacity(value.*);
+            //upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+            const existing = table.values.fetchRemove(value.*);
+            if (existing != null) {
+                // Put and remove cancel each other out.
+                assert(!Table.tombstone(&existing.?.key));
+            } else {
+                const upsert = table.values.getOrPutAssumeCapacity(value.*);
+                upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+            }
 
             assert(table.values.count() <= table.value_count_max);
         }
