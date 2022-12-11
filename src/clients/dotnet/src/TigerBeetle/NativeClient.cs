@@ -173,14 +173,14 @@ namespace TigerBeetle
 
         private Packet AcquirePacket()
         {
-            unsafe 
+            unsafe
             {
                 var headPtr = packetListHead;
                 while (true)
                 {
                     // It is unexpected to be null here,
                     // since the semaphore restricts how many threads can acquire a packet.
-                    AssertTrue(headPtr != IntPtr.Zero);                    
+                    AssertTrue(headPtr != IntPtr.Zero);
 
                     var head = (TBPacket*)headPtr.ToPointer();
                     var nextPtr = new IntPtr(head->next);

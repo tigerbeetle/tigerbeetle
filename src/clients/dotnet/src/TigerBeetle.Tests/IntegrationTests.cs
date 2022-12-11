@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Threading.Tasks;
 
 namespace TigerBeetle.Tests
@@ -18,13 +17,17 @@ namespace TigerBeetle.Tests
         {
             new Account
             {
-                Id = Guid.NewGuid(),
+                Id = 100,
+                UserData = 1000,
+                Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 1,
             },
             new Account
             {
-                Id = Guid.NewGuid(),
+                Id = 101,
+                UserData = 1001,
+                Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 2,
             }
@@ -125,10 +128,47 @@ namespace TigerBeetle.Tests
         }
 
         [TestMethod]
-        public void ValidConstructor()
+        public void ConstructorAndFinalizer()
         {
-            _ = new Client(0, new string[] { "3000" }, 32);
-            Assert.IsTrue(true);
+            // No using here, we want to test the finalizer
+            var client = new Client(1, new string[] { "3000" }, 32);
+            Assert.IsTrue(client.ClusterID == 1);
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void CreateAccount()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            var okResult = client.CreateAccount(accounts[0]);
+            Assert.IsTrue(okResult == CreateAccountResult.Ok);
+
+            var lookupAccount = client.LookupAccount(accounts[0].Id);
+            Assert.IsNotNull(lookupAccount);
+            AssertAccount(accounts[0], lookupAccount!.Value);
+
+            var existsResult = client.CreateAccount(accounts[0]);
+            Assert.IsTrue(existsResult == CreateAccountResult.Exists);
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public async Task CreateAccountAsync()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            var okResult = await client.CreateAccountAsync(accounts[0]);
+            Assert.IsTrue(okResult == CreateAccountResult.Ok);
+
+            var lookupAccount = await client.LookupAccountAsync(accounts[0].Id);
+            Assert.IsNotNull(lookupAccount);
+            AssertAccount(accounts[0], lookupAccount!.Value);
+
+            var existsResult = await client.CreateAccountAsync(accounts[0]);
+            Assert.IsTrue(existsResult == CreateAccountResult.Exists);
         }
 
         [TestMethod]
@@ -161,14 +201,34 @@ namespace TigerBeetle.Tests
 
         private static void AssertAccounts(Account[] lookupAccounts)
         {
-            Assert.IsTrue(lookupAccounts.Length == 2);
-            Assert.AreEqual(lookupAccounts[0].Id, accounts[0].Id);
-            Assert.AreEqual(lookupAccounts[0].Code, accounts[0].Code);
-            Assert.AreEqual(lookupAccounts[0].Ledger, accounts[0].Ledger);
+            Assert.IsTrue(lookupAccounts.Length == accounts.Length);
+            for (int i = 0; i < accounts.Length; i++)
+            {
+                AssertAccount(accounts[i], lookupAccounts[i]);
+            }
+        }
 
-            Assert.AreEqual(lookupAccounts[1].Id, accounts[1].Id);
-            Assert.AreEqual(lookupAccounts[1].Code, accounts[1].Code);
-            Assert.AreEqual(lookupAccounts[1].Ledger, accounts[1].Ledger);
+        private static void AssertAccount(Account a, Account b)
+        {
+            Assert.AreEqual(a.Id, b.Id);
+            Assert.AreEqual(a.UserData, b.UserData);
+            Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.Code, b.Code);
+            Assert.AreEqual(a.Ledger, b.Ledger);
+        }
+
+        private static void AssertTransfer(Transfer a, Transfer b)
+        {
+            Assert.AreEqual(a.Id, b.Id);
+            Assert.AreEqual(a.DebitAccountId, b.DebitAccountId);
+            Assert.AreEqual(a.CreditAccountId, b.CreditAccountId);
+            Assert.AreEqual(a.UserData, b.UserData);
+            Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.Code, b.Code);
+            Assert.AreEqual(a.Ledger, b.Ledger);
+            Assert.AreEqual(a.Amount, b.Amount);
+            Assert.AreEqual(a.PendingId, b.PendingId);
+            Assert.AreEqual(a.Timeout, b.Timeout);
         }
 
         [TestMethod]
@@ -178,12 +238,12 @@ namespace TigerBeetle.Tests
             using var server = new TBServer();
             using var client = GetClient();
 
-            var results = client.CreateAccounts(accounts);
-            Assert.IsTrue(results.Length == 0);
+            var accountResults = client.CreateAccounts(accounts);
+            Assert.IsTrue(accountResults.Length == 0);
 
             var transfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -191,11 +251,15 @@ namespace TigerBeetle.Tests
                 Amount = 100,
             };
 
-            var result = client.CreateTransfer(transfer);
-            Assert.IsTrue(result == CreateTransferResult.Ok);
+            var transferResults = client.CreateTransfers(new Transfer[] { transfer });
+            Assert.IsTrue(transferResults.Length == 0);
 
             var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
             AssertAccounts(lookupAccounts);
+
+            var lookupTransfers = client.LookupTransfers(new UInt128[] { transfer.Id });
+            Assert.IsTrue(lookupTransfers.Length == 1);
+            AssertTransfer(transfer, lookupTransfers[0]);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
             Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
@@ -211,12 +275,12 @@ namespace TigerBeetle.Tests
             using var server = new TBServer();
             using var client = GetClient();
 
-            var results = await client.CreateAccountsAsync(accounts);
-            Assert.IsTrue(results.Length == 0);
+            var accountResults = await client.CreateAccountsAsync(accounts);
+            Assert.IsTrue(accountResults.Length == 0);
 
             var transfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -224,17 +288,83 @@ namespace TigerBeetle.Tests
                 Amount = 100,
             };
 
-            var result = await client.CreateTransferAsync(transfer);
-            Assert.IsTrue(result == CreateTransferResult.Ok);
+            var transferResults = await client.CreateTransfersAsync(new Transfer[] { transfer });
+            Assert.IsTrue(transferResults.Length == 0);
 
             var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
             AssertAccounts(lookupAccounts);
+
+            var lookupTransfers = await client.LookupTransfersAsync(new UInt128[] { transfer.Id });
+            Assert.IsTrue(lookupTransfers.Length == 1);
+            AssertTransfer(transfer, lookupTransfers[0]);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
             Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
 
             Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void CreateTransfer()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            var results = client.CreateAccounts(accounts);
+            Assert.IsTrue(results.Length == 0);
+
+            var transfer = new Transfer
+            {
+                Id = 1,
+                CreditAccountId = accounts[0].Id,
+                DebitAccountId = accounts[1].Id,
+                Ledger = 1,
+                Code = 1,
+                Amount = 100,
+            };
+
+            var successResult = client.CreateTransfer(transfer);
+            Assert.IsTrue(successResult == CreateTransferResult.Ok);
+
+            var lookupTransfer = client.LookupTransfer(transfer.Id);
+            Assert.IsTrue(lookupTransfer != null);
+            AssertTransfer(transfer, lookupTransfer!.Value);
+
+            var existsResult = client.CreateTransfer(transfer);
+            Assert.IsTrue(existsResult == CreateTransferResult.Exists);
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public async Task CreateTransferAsync()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            var results = await client.CreateAccountsAsync(accounts);
+            Assert.IsTrue(results.Length == 0);
+
+            var transfer = new Transfer
+            {
+                Id = 1,
+                CreditAccountId = accounts[0].Id,
+                DebitAccountId = accounts[1].Id,
+                Ledger = 1,
+                Code = 1,
+                Amount = 100,
+            };
+
+            var successResult = await client.CreateTransferAsync(transfer);
+            Assert.IsTrue(successResult == CreateTransferResult.Ok);
+
+            var lookupTransfer = await client.LookupTransferAsync(transfer.Id);
+            Assert.IsTrue(lookupTransfer != null);
+            AssertTransfer(transfer, lookupTransfer!.Value);
+
+            var existsResult = await client.CreateTransferAsync(transfer);
+            Assert.IsTrue(existsResult == CreateTransferResult.Exists);
         }
 
         [TestMethod]
@@ -249,7 +379,7 @@ namespace TigerBeetle.Tests
 
             var transfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -277,7 +407,7 @@ namespace TigerBeetle.Tests
 
             var postTransfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -316,7 +446,7 @@ namespace TigerBeetle.Tests
 
             var transfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -344,7 +474,7 @@ namespace TigerBeetle.Tests
 
             var postTransfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -383,7 +513,7 @@ namespace TigerBeetle.Tests
 
             var transfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -411,7 +541,7 @@ namespace TigerBeetle.Tests
 
             var postTransfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -450,7 +580,7 @@ namespace TigerBeetle.Tests
 
             var transfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -478,7 +608,7 @@ namespace TigerBeetle.Tests
 
             var postTransfer = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -517,7 +647,7 @@ namespace TigerBeetle.Tests
 
             var transfer1 = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -528,7 +658,7 @@ namespace TigerBeetle.Tests
 
             var transfer2 = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 2,
                 CreditAccountId = accounts[1].Id,
                 DebitAccountId = accounts[0].Id,
                 Ledger = 1,
@@ -542,6 +672,11 @@ namespace TigerBeetle.Tests
 
             var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
             AssertAccounts(lookupAccounts);
+
+            var lookupTransfers = client.LookupTransfers(new UInt128[] { transfer1.Id, transfer2.Id });
+            Assert.IsTrue(lookupTransfers.Length == 2);
+            AssertTransfer(transfer1, lookupTransfers[0]);
+            AssertTransfer(transfer2, lookupTransfers[1]);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer1.Amount);
@@ -566,7 +701,7 @@ namespace TigerBeetle.Tests
 
             var transfer1 = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
                 Ledger = 1,
@@ -577,7 +712,7 @@ namespace TigerBeetle.Tests
 
             var transfer2 = new Transfer
             {
-                Id = Guid.NewGuid(),
+                Id = 2,
                 CreditAccountId = accounts[1].Id,
                 DebitAccountId = accounts[0].Id,
                 Ledger = 1,
@@ -591,6 +726,11 @@ namespace TigerBeetle.Tests
 
             var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
             AssertAccounts(lookupAccounts);
+
+            var lookupTransfers = await client.LookupTransfersAsync(new UInt128[] { transfer1.Id, transfer2.Id });
+            Assert.IsTrue(lookupTransfers.Length == 2);
+            AssertTransfer(transfer1, lookupTransfers[0]);
+            AssertTransfer(transfer2, lookupTransfers[1]);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer1.Amount);
@@ -612,8 +752,8 @@ namespace TigerBeetle.Tests
         [DoNotParallelize]
         public void ConcurrentTasksTest()
         {
-            const int TASKS_QTY = 12;
-            int MAX_CONCURRENCY = new Random().Next(1, TASKS_QTY / 2);
+            const int TASKS_QTY = 24;
+            int MAX_CONCURRENCY = TASKS_QTY / 4;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
@@ -627,7 +767,7 @@ namespace TigerBeetle.Tests
             {
                 var transfer = new Transfer
                 {
-                    Id = Guid.NewGuid(),
+                    Id = i + 1,
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
                     Ledger = 1,
@@ -664,8 +804,8 @@ namespace TigerBeetle.Tests
         [DoNotParallelize]
         public void ConcurrentTasksDispose()
         {
-            const int TASKS_QTY = 12;
-            int MAX_CONCURRENCY = new Random().Next(1, TASKS_QTY / 4);
+            const int TASKS_QTY = 24;
+            int MAX_CONCURRENCY = TASKS_QTY / 4;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
@@ -679,7 +819,7 @@ namespace TigerBeetle.Tests
             {
                 var transfer = new Transfer
                 {
-                    Id = Guid.NewGuid(),
+                    Id = i + 1,
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
                     Ledger = 1,

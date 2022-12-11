@@ -1,8 +1,7 @@
 ﻿using System;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
+using System.Numerics;
 using System.Runtime.InteropServices;
-using static TigerBeetle.AssertionException;
 
 namespace TigerBeetle
 {
@@ -30,7 +29,15 @@ namespace TigerBeetle
             _0 = 0LU;
             _1 = 0LU;
 
-            FromGuid(guid);
+            if (!TryWriteBytes(guid)) throw new ArgumentException(nameof(guid));
+        }
+
+        public UInt128(BigInteger bigInteger)
+        {
+            _0 = 0LU;
+            _1 = 0LU;
+
+            if (!TryWriteBytes(bigInteger)) throw new ArgumentException(nameof(bigInteger));
         }
 
         public UInt128(long a, long b = 0L)
@@ -71,6 +78,18 @@ namespace TigerBeetle
             }
         }
 
+        public BigInteger ToBigInteger()
+        {
+            unsafe
+            {
+                fixed (void* ptr = &this)
+                {
+                    var span = new ReadOnlySpan<byte>(ptr, SIZE);
+                    return new BigInteger(span, isUnsigned: true, isBigEndian: false);
+                }
+            }
+        }
+
         public (long, long) ToInt64()
         {
             unchecked
@@ -81,38 +100,68 @@ namespace TigerBeetle
 
         public (ulong, ulong) ToUInt64() => (_0, _1);
 
-        internal void FromGuid(Guid guid)
-        {
-            unsafe
-            {
-                fixed (void* ptr = &this)
-                {
-                    var span = new Span<byte>(ptr, SIZE);
-                    AssertTrue(guid.TryWriteBytes(span));
-                }
-            }
-        }
-
         public override bool Equals([NotNullWhen(true)] object? obj)
         {
             return obj switch
             {
                 UInt128 _uint128 => Equals(_uint128),
-                Guid _guid => Equals((UInt128)_guid),
+                Guid _guid => Equals(_guid),
+                BigInteger _bigInteger => Equals(_bigInteger),
+                byte[] array => Equals(array),
                 long _long => Equals((UInt128)_long),
                 ulong _ulong => Equals((UInt128)_ulong),
                 int _int => Equals((UInt128)_int),
                 uint _uint => Equals((UInt128)_uint),
-                byte[] array => array.Length == SIZE && Equals(new UInt128(array)),
                 _ => false,
             };
+        }
+
+        public bool Equals(byte[] array)
+        {
+            return array != null && array.Length == SIZE && this.Equals(new UInt128(array));
+        }
+
+        public bool Equals(Guid guid)
+        {
+            var other = new UInt128();
+            return other.TryWriteBytes(guid) && this.Equals(other);
+        }
+
+        public bool Equals(BigInteger bigInteger)
+        {
+            var other = new UInt128();
+            return other.TryWriteBytes(bigInteger) && this.Equals(other);
         }
 
         public bool Equals(UInt128 other) => _0 == other._0 && _1 == other._1;
 
         public override int GetHashCode() => HashCode.Combine(_0, _1);
 
-        public override string ToString() => ToGuid().ToString();
+        public override string ToString() => ToBigInteger().ToString();
+
+        private bool TryWriteBytes(Guid guid)
+        {
+            unsafe
+            {
+                fixed (void* ptr = &this)
+                {
+                    var span = new Span<byte>(ptr, SIZE);
+                    return guid.TryWriteBytes(span);
+                }
+            }
+        }
+
+        private bool TryWriteBytes(BigInteger bigInteger)
+        {
+            unsafe
+            {
+                fixed (void* ptr = &this)
+                {
+                    var span = new Span<byte>(ptr, SIZE);
+                    return bigInteger.TryWriteBytes(span, out int _, isUnsigned: true, isBigEndian: false);
+                }
+            }
+        }
 
         public static bool operator ==(UInt128 left, UInt128 right) => left.Equals(right);
 
@@ -121,6 +170,10 @@ namespace TigerBeetle
         public static implicit operator UInt128(Guid guid) => new(guid);
 
         public static implicit operator Guid(UInt128 value) => value.ToGuid();
+
+        public static implicit operator UInt128(BigInteger bigInteger) => new(bigInteger);
+
+        public static implicit operator BigInteger(UInt128 value) => value.ToBigInteger();
 
         public static implicit operator UInt128(byte[] array) => new(array);
 

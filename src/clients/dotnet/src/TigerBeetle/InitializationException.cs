@@ -11,16 +11,22 @@ namespace TigerBeetle
             Status = status;
         }
 
-        public override string Message => Status switch
+        public override string Message
         {
-            InitializationStatus.Unexpected => "Unexpected internal error",
-            InitializationStatus.OutOfMemory => "Internal client ran out of memory",
-            InitializationStatus.AddressInvalid => "Replica addresses format is invalid",
-            InitializationStatus.AddressLimitExceeded => "Replica addresses limit exceeded",
-            InitializationStatus.PacketsCountInvalid => "Invalid maxConcurrency",
-            InitializationStatus.SystemResources => "Internal client ran out of system resources",
-            InitializationStatus.NetworkSubsystem => "Internal client had unexpected networking issues",
-            _ => "Error status " + Status,
-        };
+            get
+            {
+                switch (Status)
+                {
+                    case InitializationStatus.Unexpected: return "Unexpected internal error";
+                    case InitializationStatus.OutOfMemory: return "Internal client ran out of memory";
+                    case InitializationStatus.AddressInvalid: return "Replica addresses format is invalid";
+                    case InitializationStatus.AddressLimitExceeded: return "Replica addresses limit exceeded";
+                    case InitializationStatus.PacketsCountInvalid: return "Invalid maxConcurrency";
+                    case InitializationStatus.SystemResources: return "Internal client ran out of system resources";
+                    case InitializationStatus.NetworkSubsystem: return "Internal client had unexpected networking issues";
+                    default: return "Unknown error status " + Status;
+                }
+            }
+        }
     }
 }

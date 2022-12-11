@@ -1,7 +1,8 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.IO;
 using System.Linq;
-using TigerBeetle;
+using System.Runtime.InteropServices;
 
 namespace TigerBeetle.Tests
 {
@@ -49,6 +50,66 @@ namespace TigerBeetle.Tests
         }
 
         [TestMethod]
+        public void AccountsDefault()
+        {
+            var account = new Account(); ;
+            Assert.AreEqual(account.Id, UInt128.Zero);
+            Assert.AreEqual(account.UserData, UInt128.Zero);
+            Assert.IsTrue(new byte[48].SequenceEqual(account.Reserved));
+            Assert.AreEqual(account.Ledger, (uint)0);
+            Assert.AreEqual(account.Code, (ushort)0);
+            Assert.AreEqual(account.Flags, AccountFlags.None);
+            Assert.AreEqual(account.DebitsPending, (ulong)0);
+            Assert.AreEqual(account.CreditsPending, (ulong)0);
+            Assert.AreEqual(account.DebitsPosted, (ulong)0);
+            Assert.AreEqual(account.CreditsPosted, (ulong)0);
+            Assert.AreEqual(account.Timestamp, (ulong)0);
+        }
+
+        [TestMethod]
+        public void AccountsSerialize()
+        {
+            var x = BitConverter.GetBytes(10L);
+            var y = BitConverter.GetBytes(100L);
+
+            var expected = new byte[Account.SIZE];
+            using (var writer = new BinaryWriter(new MemoryStream(expected)))
+            {
+                writer.Write(10L); // Id (lsb)
+                writer.Write(100L); // Id (msb)
+                writer.Write(1000L); // UserData (lsb)
+                writer.Write(1100L); // UserData (msb)
+                writer.Write(new byte[48]); // Reserved
+                writer.Write(720); // Ledger
+                writer.Write((short)1); // Code
+                writer.Write((short)1); // Flags
+                writer.Write(100L); // DebitsPending
+                writer.Write(200L); // DebitsPosted
+                writer.Write(300L); // CreditPending
+                writer.Write(400L); // CreditsPosted
+                writer.Write(999L); // Timestamp
+            }
+
+            var account = new Account
+            {
+                Id = new UInt128(10L, 100L),
+                UserData = new UInt128(1000L, 1100L),
+                Ledger = 720,
+                Code = 1,
+                Flags = AccountFlags.Linked,
+                DebitsPending = 100,
+                DebitsPosted = 200,
+                CreditsPending = 300,
+                CreditsPosted = 400,
+                Timestamp = 999,
+            };
+
+            var serialized = MemoryMarshal.AsBytes<Account>(new Account[] { account }).ToArray();
+            Assert.IsTrue(expected.SequenceEqual(serialized));
+        }
+
+
+        [TestMethod]
         public void InvalidAccountReservedValues()
         {
             var account = new Account();
@@ -56,7 +117,7 @@ namespace TigerBeetle.Tests
             Assert.ThrowsException<ArgumentException>(() => account.Reserved = new byte[0]);
             Assert.ThrowsException<ArgumentException>(() => account.Reserved = new byte[47]);
             Assert.ThrowsException<ArgumentException>(() => account.Reserved = new byte[49]);
-        }        
+        }
 
         [TestMethod]
         public void CreateAccountsResults()
@@ -111,6 +172,24 @@ namespace TigerBeetle.Tests
 
             transfer.Timestamp = 99_999;
             Assert.AreEqual(transfer.Timestamp, (ulong)99_999);
+        }
+
+        [TestMethod]
+        public void TransferDefault()
+        {
+            var transfer = new Transfer();
+            Assert.AreEqual(transfer.Id, UInt128.Zero);
+            Assert.AreEqual(transfer.DebitAccountId, UInt128.Zero);
+            Assert.AreEqual(transfer.CreditAccountId, UInt128.Zero);
+            Assert.AreEqual(transfer.UserData, UInt128.Zero);
+            Assert.AreEqual(transfer.Reserved, UInt128.Zero);
+            Assert.AreEqual(transfer.PendingId, UInt128.Zero);
+            Assert.AreEqual(transfer.Timeout, (ulong)0);
+            Assert.AreEqual(transfer.Ledger, (uint)0);
+            Assert.AreEqual(transfer.Code, (ushort)0);
+            Assert.AreEqual(transfer.Flags, TransferFlags.None);
+            Assert.AreEqual(transfer.Amount, (ulong)0);
+            Assert.AreEqual(transfer.Timestamp, (ulong)0);
         }
 
         [TestMethod]
