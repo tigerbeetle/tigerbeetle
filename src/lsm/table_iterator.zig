@@ -52,6 +52,9 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
         /// This field is only used for safety checks, it does not affect the behavior.
         read_pending: bool = false,
 
+        // Used for verifying key order when constants.verify == true.
+        key_prev: ?Table.Key,
+
         pub fn init(allocator: mem.Allocator) !TableIterator {
             const index_block = try allocator.alignedAlloc(
                 u8,
@@ -95,6 +98,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
                     },
                 },
                 .value = undefined,
+                .key_prev = null,
             };
         }
 
@@ -132,6 +136,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
                 .values = .{ .buffer = it.values.buffer },
                 .data_blocks = .{ .buffer = it.data_blocks.buffer },
                 .value = 0,
+                .key_prev = null,
             };
 
             assert(it.values.empty());
@@ -291,6 +296,18 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
         /// This may only be called after peek() returns a Key (and not Empty or Drained)
         pub fn pop(it: *TableIterator) Table.Value {
+            const value = it.pop_internal();
+
+            if (constants.verify) {
+                const key = Table.key_from_value(&value);
+                if (it.key_prev) |k| assert(Table.compare_keys(k, key) == .lt);
+                it.key_prev = key;
+            }
+
+            return value;
+        }
+
+        fn pop_internal(it: *TableIterator) Table.Value {
             assert(!it.read_pending);
             assert(!it.read_table_index);
 
