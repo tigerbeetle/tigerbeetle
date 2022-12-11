@@ -589,19 +589,45 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn verify(manifest: *Manifest, snapshot: u64) void {
             for (manifest.levels) |*level| {
                 var key_max_prev: ?Key = null;
-                var iter = level.iterator(
+                var table_info_iter = level.iterator(
                     .visible,
                     &.{snapshot},
                     .ascending,
                     null,
                 );
-                while (iter.next()) |table_info| {
+                while (table_info_iter.next()) |table_info| {
                     if (key_max_prev) |k| {
                         assert(compare_keys(k, table_info.key_min) == .lt);
                     }
                     // We could have key_min == key_max if there is only one value.
                     assert(compare_keys(table_info.key_min, table_info.key_max) != .gt);
                     key_max_prev = table_info.key_max;
+
+                    if (Storage == @import("../test/storage.zig").Storage) {
+                        const storage = manifest.manifest_log.grid.superblock.storage;
+                        const index_block = storage.grid_block(table_info.address);
+                        const addresses = Table.index_data_addresses(index_block);
+                        const data_blocks_used = Table.index_data_blocks_used(index_block);
+                        var data_block_index: usize = 0;
+                        while (data_block_index < data_blocks_used) : (data_block_index += 1) {
+                            const address = addresses[data_block_index];
+                            const data_block = storage.grid_block(address);
+                            const values = Table.data_block_values_used(data_block);
+                            if (values.len > 0) {
+                                if (data_block_index == 0) {
+                                    assert(Table.compare_keys(table_info.key_min, Table.key_from_value(&values[0])) == .eq);
+                                }
+                                if (data_block_index == data_blocks_used - 1) {
+                                    assert(Table.compare_keys(Table.key_from_value(&values[values.len - 1]), table_info.key_max) == .eq);
+                                }
+                                var a = &values[0];
+                                for (values[1..]) |*b| {
+                                    assert(Table.compare_keys(Table.key_from_value(a), Table.key_from_value(b)) == .lt);
+                                    a = b;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
