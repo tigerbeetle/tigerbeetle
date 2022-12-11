@@ -31,6 +31,107 @@ namespace TigerBeetle.Tests
         };
 
         [TestMethod]
+        [ExpectedException(typeof(ArgumentNullException))]
+        public void ConstructorWithNullReplicaAddresses()
+        {
+            string[]? addresses = null;
+            _ = new Client(0, addresses!, 1);
+        }
+
+        [TestMethod]
+        public void ConstructorWithNullReplicaAddressElement()
+        {
+            try
+            {
+                var addresses = new string?[] { "3000", null };
+                _ = new Client(0, addresses!, 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        public void ConstructorWithEmptyReplicaAddresses()
+        {
+            try
+            {
+                _ = new Client(0, Array.Empty<string>(), 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        public void ConstructorWithEmptyReplicaAddressElement()
+        {
+            try
+            {
+                _ = new Client(0, new string[] { "" }, 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressInvalid, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        public void ConstructorWithInvalidReplicaAddresses()
+        {
+            try
+            {
+                var addresses = Enumerable.Range(3000, 3100).Select(x => x.ToString()).ToArray();
+                _ = new Client(0, addresses, 1);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.AddressLimitExceeded, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void ConstructorWithZeroMaxConcurrency()
+        {
+            _ = new Client(0, new string[] { "3000" }, 0);
+        }
+
+        [TestMethod]
+        [ExpectedException(typeof(ArgumentException))]
+        public void ConstructorWithNegativeMaxConcurrency()
+        {
+            _ = new Client(0, new string[] { "3000" }, -1);
+        }
+
+        [TestMethod]
+        public void ConstructorWithInvalidMaxConcurrency()
+        {
+            try
+            {
+                _ = new Client(0, new string[] { "3000" }, 99_999);
+                Assert.IsTrue(false);
+            }
+            catch (InitializationException exception)
+            {
+                Assert.AreEqual(InitializationStatus.PacketsCountInvalid, exception.Status);
+            }
+        }
+
+        [TestMethod]
+        public void ValidConstructor()
+        {
+            _ = new Client(0, new string[] { "3000" }, 32);
+            Assert.IsTrue(true);
+        }
+
+        [TestMethod]
         [DoNotParallelize]
         public void CreateAccounts()
         {

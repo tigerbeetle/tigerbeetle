@@ -127,11 +127,7 @@ namespace TigerBeetle
 
         public void Return(Packet packet)
         {
-            unsafe
-            {
-                ReleasePacket(packet.Data);
-            }
-
+            ReleasePacket(packet);
             maxConcurrencySemaphore.Release();
         }
 
@@ -140,14 +136,13 @@ namespace TigerBeetle
             unsafe
             {
                 // It is unexpected for the client to be disposed here
-                // Since we wait for all acquired packets to be submited and returned before disposing
+                // Since we wait for all acquired packets to be submitted and returned before disposing
                 AssertTrue(client != IntPtr.Zero, "Client is closed");
 
-                var data = packet.Data;
                 var packetList = new TBPacketList
                 {
-                    head = data,
-                    tail = data,
+                    head = packet.Pointer,
+                    tail = packet.Pointer,
                 };
 
                 tb_client_submit(client, &packetList);
@@ -162,11 +157,7 @@ namespace TigerBeetle
                 if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(client));
             } while (!maxConcurrencySemaphore.Wait(millisecondsTimeout: 5));
 
-            unsafe
-            {
-                var packet = AcquirePacket();
-                return new Packet(packet);
-            }
+            return AcquirePacket();
         }
 
         private async ValueTask<Packet> RentAsync()
@@ -177,49 +168,53 @@ namespace TigerBeetle
                 if (client == IntPtr.Zero) throw new ObjectDisposedException(nameof(client));
             } while (!await maxConcurrencySemaphore.WaitAsync(millisecondsTimeout: 5));
 
+            return AcquirePacket();
+        }
+
+        private Packet AcquirePacket()
+        {
+            unsafe 
+            {
+                var headPtr = packetListHead;
+                while (true)
+                {
+                    // It is unexpected to be null here,
+                    // since the semaphore restricts how many threads can acquire a packet.
+                    AssertTrue(headPtr != IntPtr.Zero);                    
+
+                    var head = (TBPacket*)headPtr.ToPointer();
+                    var nextPtr = new IntPtr(head->next);
+                    var currentPtr = Interlocked.CompareExchange(ref packetListHead, nextPtr, headPtr);
+                    if (currentPtr == headPtr)
+                    {
+                        head->next = null;
+                        return new Packet(head);
+                    }
+                    else
+                    {
+                        headPtr = currentPtr;
+                    }
+                }
+            }
+        }
+
+        private void ReleasePacket(Packet packet)
+        {
             unsafe
             {
-                var packet = AcquirePacket();
-                return new Packet(packet);
-            }
-        }
-
-        private unsafe TBPacket* AcquirePacket()
-        {
-            var headPtr = packetListHead;
-            while (true)
-            {
-                if (headPtr == IntPtr.Zero) return null;
-
-                var head = (TBPacket*)headPtr.ToPointer();
-                var nextPtr = new IntPtr(head->next);
-                var currentPtr = Interlocked.CompareExchange(ref packetListHead, nextPtr, headPtr);
-                if (currentPtr == headPtr)
+                var headPtr = packetListHead;
+                while (true)
                 {
-                    head->next = null;
-                    return head;
-                }
-                else
-                {
-                    headPtr = currentPtr;
-                }
-            }
-        }
-
-        private unsafe void ReleasePacket(TBPacket* packet)
-        {
-            var headPtr = packetListHead;
-            while (true)
-            {
-                packet->next = (TBPacket*)headPtr.ToPointer();
-                var currentPtr = Interlocked.CompareExchange(ref packetListHead, new IntPtr(packet), headPtr);
-                if (currentPtr == headPtr)
-                {
-                    break;
-                }
-                else
-                {
-                    headPtr = currentPtr;
+                    packet.Pointer->next = (TBPacket*)headPtr.ToPointer();
+                    var currentPtr = Interlocked.CompareExchange(ref packetListHead, new IntPtr(packet.Pointer), headPtr);
+                    if (currentPtr == headPtr)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        headPtr = currentPtr;
+                    }
                 }
             }
         }

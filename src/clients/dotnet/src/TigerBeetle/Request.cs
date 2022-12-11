@@ -6,6 +6,16 @@ using static TigerBeetle.AssertionException;
 
 namespace TigerBeetle
 {
+    internal struct Packet
+    {
+        public readonly unsafe TBPacket* Pointer;
+
+        public unsafe Packet(TBPacket* pointer)
+        {
+            Pointer = pointer;
+        }
+    }
+
     internal interface IRequest
     {
         public static IRequest? FromUserData(IntPtr userData)
@@ -15,16 +25,6 @@ namespace TigerBeetle
         }
 
         void Complete(TBOperation operation, PacketStatus status, ReadOnlySpan<byte> result);
-    }
-
-    internal struct Packet
-    {
-        public readonly unsafe TBPacket* Data;
-
-        public unsafe Packet(TBPacket* data)
-        {
-            Data = data;
-        }
     }
 
     internal abstract class Request<TResult, TBody> : IRequest
@@ -47,13 +47,13 @@ namespace TigerBeetle
             this.packet = packet;
         }
 
-        public IntPtr Pin(TBody[] body, out int size)
+        public IntPtr Pin(TBody[] body, out uint size)
         {
             AssertTrue(body.Length > 0, "Message body cannot be empty");
             AssertTrue(!bodyPinnedHandle.IsAllocated, "Request data is already pinned");
             bodyPinnedHandle = GCHandle.Alloc(body, GCHandleType.Pinned);
 
-            size = body.Length * BODY_SIZE;
+            size = (uint)(body.Length * BODY_SIZE);
             return bodyPinnedHandle.AddrOfPinnedObject();
         }
 
@@ -63,13 +63,13 @@ namespace TigerBeetle
 
             unsafe
             {
-                var data = packet.Data;
-                data->next = null;
-                data->userData = (IntPtr)handle;
-                data->operation = (byte)operation;
-                data->data = Pin(batch, out int size);
-                data->dataSize = size;
-                data->status = PacketStatus.Ok;
+                var ptr = packet.Pointer;
+                ptr->next = null;
+                ptr->userData = (IntPtr)handle;
+                ptr->operation = (byte)operation;
+                ptr->data = Pin(batch, out uint size);
+                ptr->dataSize = size;
+                ptr->status = PacketStatus.Ok;
 
                 this.nativeClient.Submit(packet);
             }

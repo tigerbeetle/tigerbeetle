@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 
 namespace TigerBeetle
 {
-    public enum AccountFlags : short
+    public enum AccountFlags : ushort
     {
         None = 0,
 
@@ -29,7 +29,7 @@ namespace TigerBeetle
 
     }
 
-    public enum TransferFlags : short
+    public enum TransferFlags : ushort
     {
         None = 0,
 
@@ -78,7 +78,7 @@ namespace TigerBeetle
             public void SetData(byte[] value)
             {
                 if (value == null) throw new ArgumentNullException(nameof(value));
-                if (value.Length != SIZE) throw new ArgumentOutOfRangeException(nameof(value));
+                if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
 
                 fixed (void* ptr = raw)
                 {
@@ -93,9 +93,9 @@ namespace TigerBeetle
 
         private ReservedData reserved;
 
-        private int ledger;
+        private uint ledger;
 
-        private short code;
+        private ushort code;
 
         private AccountFlags flags;
 
@@ -127,12 +127,12 @@ namespace TigerBeetle
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/accounts/#ledger
         /// </summary>
-        public int Ledger { get => ledger; set => ledger = value; }
+        public uint Ledger { get => ledger; set => ledger = value; }
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/accounts/#code
         /// </summary>
-        public short Code { get => code; set => code = value; }
+        public ushort Code { get => code; set => code = value; }
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/accounts/#flags
@@ -185,9 +185,9 @@ namespace TigerBeetle
 
         private ulong timeout;
 
-        private int ledger;
+        private uint ledger;
 
-        private short code;
+        private ushort code;
 
         private TransferFlags flags;
 
@@ -233,12 +233,12 @@ namespace TigerBeetle
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/transfers/#ledger
         /// </summary>
-        public int Ledger { get => ledger; set => ledger = value; }
+        public uint Ledger { get => ledger; set => ledger = value; }
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/transfers/#code
         /// </summary>
-        public short Code { get => code; set => code = value; }
+        public ushort Code { get => code; set => code = value; }
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/transfers/#flags
@@ -257,7 +257,7 @@ namespace TigerBeetle
 
     }
 
-    public enum CreateAccountResult : int
+    public enum CreateAccountResult : uint
     {
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_accounts#ok
@@ -356,7 +356,7 @@ namespace TigerBeetle
 
     }
 
-    public enum CreateTransferResult : int
+    public enum CreateTransferResult : uint
     {
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#ok
@@ -645,11 +645,11 @@ namespace TigerBeetle
     {
         public const int SIZE = 8;
 
-        private int index;
+        private uint index;
 
         private CreateAccountResult result;
 
-        public int Index { get => index; set => index = value; }
+        public uint Index { get => index; set => index = value; }
 
         public CreateAccountResult Result { get => result; set => result = value; }
 
@@ -660,17 +660,17 @@ namespace TigerBeetle
     {
         public const int SIZE = 8;
 
-        private int index;
+        private uint index;
 
         private CreateTransferResult result;
 
-        public int Index { get => index; set => index = value; }
+        public uint Index { get => index; set => index = value; }
 
         public CreateTransferResult Result { get => result; set => result = value; }
 
     }
 
-    public enum InitializationStatus : int
+    public enum InitializationStatus : uint
     {
         Success = 0,
 
@@ -727,7 +727,7 @@ namespace TigerBeetle
 
         public PacketStatus status;
 
-        public int dataSize;
+        public uint dataSize;
 
         public IntPtr data;
 

@@ -103,8 +103,8 @@ fn dotnet_type(comptime Type: type) []const u8 {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "byte",
-                16 => "short",
-                32 => "int",
+                16 => "ushort",
+                32 => "uint",
                 64 => "ulong",
                 128 => "UInt128",
                 else => @compileError("invalid int type"),
@@ -249,7 +249,7 @@ fn emit_struct(
                     \\            public void SetData(byte[] value)
                     \\            {{
                     \\                if (value == null) throw new ArgumentNullException(nameof(value));
-                    \\                if (value.Length != SIZE) throw new ArgumentOutOfRangeException(nameof(value));
+                    \\                if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
                     \\
                     \\                fixed (void* ptr = raw)
                     \\                {{

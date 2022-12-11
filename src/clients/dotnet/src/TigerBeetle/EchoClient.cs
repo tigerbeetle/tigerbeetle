@@ -13,15 +13,6 @@ namespace TigerBeetle
             this.nativeClient = NativeClient.InitEcho(clusterID, addresses, maxConcurrency);
         }
 
-        ~EchoClient()
-        {
-            // NativeClient can be null if the constructor threw an exception.
-            if (nativeClient != null)
-            {
-                Dispose(disposing: false);
-            }
-        }
-
         public Account[] Echo(Account[] batch)
         {
             return nativeClient.CallRequest<Account, Account>(TBOperation.CreateAccounts, batch);

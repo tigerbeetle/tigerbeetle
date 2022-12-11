@@ -10,8 +10,8 @@ namespace TigerBeetle.Benchmarks
 {
     public static partial class Benchmark
     {
-        private const bool IS_ASYNC = true;
-        private const int BATCHES_COUNT = 5;
+        private const bool IS_ASYNC = false;
+        private const int BATCHES_COUNT = 100;
         private const int MAX_MESSAGE_SIZE = (1024 * 1024) - 128; // config.message_size_max - @sizeOf(vsr.Header)
         private const int TRANSFERS_PER_BATCH = (MAX_MESSAGE_SIZE / Transfer.SIZE);
         private const int MAX_TRANSFERS = BATCHES_COUNT * TRANSFERS_PER_BATCH;
