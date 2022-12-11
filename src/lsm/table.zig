@@ -629,6 +629,11 @@ pub fn TableType(
                     assert(compare_keys(builder.key_min, builder.key_max) == .lt);
                 }
 
+                if (current > 0) {
+                    const key_max_prev = index_data_keys(builder.index_block)[current - 1];
+                    assert(compare_keys(key_max_prev, key_from_value(&values[0])) == .lt);
+                }
+
                 builder.data_block_count += 1;
                 builder.value = 0;
 
