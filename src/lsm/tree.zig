@@ -593,6 +593,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == null);
 
+            if (constants.verify) {
+                tree.manifest.verify(tree.compaction_op);
+            }
+
             tracer.start(
                 &tree.tracer_slot,
                 .{ .tree = .{ .tree_name = tree_name } },
@@ -974,6 +978,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .{ .tree = .{ .tree_name = tree_name } },
                 .tree_compaction_beat,
             );
+
+            if (constants.verify) {
+                tree.manifest.verify(tree.compaction_op);
+            }
 
             // Invoke the compact() callback after the manifest compacts at the end of the beat.
             const callback = tree.compaction_callback.?;
