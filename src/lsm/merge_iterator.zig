@@ -34,10 +34,13 @@ pub fn MergeIteratorType(
             };
         }
 
+        /// Returns `true` once both `iterator_a` and `iterator_b` have raised `error.Empty`.
         pub fn empty(it: Self) bool {
             return it.empty_a and it.empty_b;
         }
 
+        /// Returns `null` if either `iterator_a` or `iterator_b` return `error.Empty` or `error.Drained`.
+        /// Check `it.empty()` to disambiguate.
         pub fn pop(it: *Self) ?Table.Value {
             while (true) {
                 if (it.empty_a and it.empty_b) {
