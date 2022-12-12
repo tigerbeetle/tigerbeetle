@@ -73,15 +73,11 @@ pub const Event = union(enum) {
     state_machine_prefetch,
     state_machine_commit,
     state_machine_compact,
-    tree_compaction_beat: struct {
-        tree_name: []const u8,
-    },
+    tree_compaction_beat,
     tree_compaction_tick: struct {
-        tree_name: []const u8,
         level_b: u8,
     },
     tree_compaction_merge: struct {
-        tree_name: []const u8,
         level_b: u8,
     },
 
@@ -95,24 +91,50 @@ pub const Event = union(enum) {
         _ = options;
 
         switch (event) {
-            .tracer_flush => try writer.print("tracer_flush", .{}),
+            .tracer_flush,
+            .checkpoint,
+            .state_machine_prefetch,
+            .state_machine_commit,
+            .state_machine_compact,
+            .tree_compaction_beat,
+            => try writer.writeAll(@tagName(event)),
             .commit => |commit| try writer.print("commit({})", .{commit.op}),
-            .checkpoint => try writer.print("checkpoint", .{}),
-            .state_machine_prefetch => try writer.print("state_machine_prefetch", .{}),
-            .state_machine_commit => try writer.print("state_machine_commit", .{}),
-            .state_machine_compact => try writer.print("state_machine_compact", .{}),
-            .tree_compaction_beat => |tree_compaction_tick| try writer.print(
-                "tree_compaction_beat({s})",
-                .{tree_compaction_tick.tree_name},
-            ),
-            .tree_compaction_tick => |tree_compaction_tick| try writer.print(
-                "tree_compaction_tick({s}, {})",
-                .{ tree_compaction_tick.tree_name, tree_compaction_tick.level_b },
-            ),
-            .tree_compaction_merge => |tree_compaction_merge| try writer.print(
-                "tree_compaction_merge({s}, {})",
-                .{ tree_compaction_merge.tree_name, tree_compaction_merge.level_b },
-            ),
+            .tree_compaction_tick => |args| {
+                if (args.level_b == 0)
+                    try writer.print(
+                        "tree_compaction_tick({s}->{})",
+                        .{
+                            "immutable",
+                            args.level_b,
+                        },
+                    )
+                else
+                    try writer.print(
+                        "tree_compaction_tick({}->{})",
+                        .{
+                            args.level_b - 1,
+                            args.level_b,
+                        },
+                    );
+            },
+            .tree_compaction_merge => |args| {
+                if (args.level_b == 0)
+                    try writer.print(
+                        "tree_compaction_merge({s}->{})",
+                        .{
+                            "immutable",
+                            args.level_b,
+                        },
+                    )
+                else
+                    try writer.print(
+                        "tree_compaction_merge({}->{})",
+                        .{
+                            args.level_b - 1,
+                            args.level_b,
+                        },
+                    );
+            },
         }
     }
 };
@@ -124,12 +146,16 @@ pub const EventGroup = union(enum) {
     tree: struct {
         tree_name: [:0]const u8,
     },
+    tree_compaction: struct {
+        compaction_name: [:0]const u8,
+    },
 
     fn name(event_group: EventGroup) [:0]const u8 {
         return switch (event_group) {
             .main => "main",
             .tracer => "tracer",
-            .tree => |tree| tree.tree_name,
+            .tree => |args| args.tree_name,
+            .tree_compaction => |args| args.compaction_name,
         };
     }
 };
@@ -317,11 +343,7 @@ pub const TracerPerfetto = struct {
                 },
             };
 
-            const tid_64 = switch (span.group) {
-                .main => 0,
-                .tracer => 1,
-                .tree => |tree| std.hash_map.hashString(tree.tree_name),
-            };
+            const tid_64 = std.hash_map.hashString(span.group.name());
             const tid = @truncate(u32, tid_64) ^ @truncate(u32, tid_64 >> 32);
 
             var buffered_writer = std.io.bufferedWriter(log_file.writer());
