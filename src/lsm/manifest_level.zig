@@ -417,6 +417,7 @@ pub fn TestContext(
             std.math.maxInt(Key),
             tombstone,
             tombstone_from_key,
+            .general,
         );
 
         const TableInfo = @import("manifest.zig").TableInfoType(Table);

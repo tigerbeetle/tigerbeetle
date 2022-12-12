@@ -1241,6 +1241,7 @@ pub fn run_tests(seed: u64, comptime options: Options) !void {
         Key.sentinel_key,
         Key.tombstone,
         Key.tombstone_from_key,
+        .general,
     ));
 
     const CompareInt = struct {

@@ -14,6 +14,8 @@ pub fn TableMutableType(comptime Table: type) type {
     const compare_keys = Table.compare_keys;
     const key_from_value = Table.key_from_value;
     const tombstone_from_key = Table.tombstone_from_key;
+    const tombstone = Table.tombstone;
+    const usage = Table.usage;
 
     return struct {
         const TableMutable = @This();
@@ -96,26 +98,52 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn put(table: *TableMutable, value: *const Value) void {
-            // If the key is already present in the hash map, the old key will not be overwritten
-            // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
-            // level getOrPut() API and manually overwrite the old key.
-            const upsert = table.values.getOrPutAssumeCapacity(value.*);
-            upsert.key_ptr.* = value.*;
+            switch (usage) {
+                .secondary_index => {
+                    const existing = table.values.fetchRemove(value.*);
+                    if (existing) |kv| {
+                        // If there was a previous operation on this key then it must have been a remove.
+                        // The put and remove cancel out.
+                        assert(tombstone(&kv.key));
+                    } else {
+                        table.values.putAssumeCapacityNoClobber(value.*, {});
+                    }
+                },
+                .general => {
+                    // If the key is already present in the hash map, the old key will not be overwritten
+                    // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
+                    // level getOrPut() API and manually overwrite the old key.
+                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
+                    upsert.key_ptr.* = value.*;
+                },
+            }
 
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
-
-            if (table.values_cache) |cache| {
-                cache.insert(key_from_value(value)).* = value.*;
-            }
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
-            // If the key is already present in the hash map, the old key will not be overwritten
-            // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
-            // level getOrPut() API and manually overwrite the old key.
-            const upsert = table.values.getOrPutAssumeCapacity(value.*);
-            upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+            switch (usage) {
+                .secondary_index => {
+                    const existing = table.values.fetchRemove(value.*);
+                    if (existing) |kv| {
+                        // The previous operation on this key then it must have been a put.
+                        // The put and remove cancel out.
+                        assert(!tombstone(&kv.key));
+                    } else {
+                        // If the put is already on-disk, then we need to follow it with a tombstone.
+                        // The put and the tombstone may cancel each other out later during compaction.
+                        table.values.putAssumeCapacityNoClobber(tombstone_from_key(key_from_value(value)), {});
+                    }
+                },
+                .general => {
+                    // If the key is already present in the hash map, the old key will not be overwritten
+                    // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
+                    // level getOrPut() API and manually overwrite the old key.
+                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
+                    upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+                },
+            }
 
             assert(table.values.count() <= table.value_count_max);
         }
@@ -154,7 +182,13 @@ pub fn TableMutableType(comptime Table: type) type {
             while (it.next()) |value| : (i += 1) {
                 values_max[i] = value.*;
 
-                if (table.values_cache) |cache| cache.insert(key_from_value(value)).* = value.*;
+                if (table.values_cache) |cache| {
+                    if (tombstone(value)) {
+                        cache.remove(key_from_value(value));
+                    } else {
+                        cache.insert(key_from_value(value)).* = value.*;
+                    }
+                }
             }
 
             const values = values_max[0..i];
