@@ -83,7 +83,6 @@ pub const FreeSet = struct {
     }
 
     pub fn init(allocator: mem.Allocator, blocks_count: usize) !FreeSet {
-        assert(shard_bits <= blocks_count);
         assert(blocks_count % shard_bits == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
 
@@ -372,7 +371,6 @@ pub const FreeSet = struct {
 
     /// Returns the maximum number of bytes that `blocks_count` blocks need to be encoded.
     pub fn encode_size_max(blocks_count: usize) usize {
-        assert(shard_bits <= blocks_count);
         assert(blocks_count % shard_bits == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
 

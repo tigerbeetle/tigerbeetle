@@ -17,7 +17,7 @@ pub fn main() !void {
         const random = prng.random();
 
         const decoded_size_max = @divExact(1024 * 1024, @sizeOf(Word));
-        const decoded_size = 1 + random.uintLessThan(usize, decoded_size_max);
+        const decoded_size = random.uintLessThan(usize, 1 + decoded_size_max);
         const decoded = try allocator.alloc(Word, decoded_size);
         defer allocator.free(decoded);
 
