@@ -3,8 +3,7 @@ name: "Release (weekly)"
 on:
   schedule:
     # Every Monday at 14:00
-    # TODO: temporarily once per hour until I get this correct
-    - cron: "0 * * * 1"
+    - cron: "0 14 * * 1"
 
 jobs:
   scheduled_release:
