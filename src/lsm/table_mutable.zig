@@ -98,16 +98,24 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn put(table: *TableMutable, value: *const Value) void {
-            // If the key is already present in the hash map, the old key will not be overwritten
-            // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
-            // level getOrPut() API and manually overwrite the old key.
-            const upsert = table.values.getOrPutAssumeCapacity(value.*);
-            if (usage == .secondary_index and upsert.found_existing) {
-                // Put and remove cancel each other out.
-                assert(tombstone(upsert.key_ptr));
-                _ = table.values.remove(value.*);
-            } else {
-                upsert.key_ptr.* = value.*;
+            switch (usage) {
+                .secondary_index => {
+                    const existing = table.values.fetchRemove(value.*);
+                    if (existing) |kv| {
+                        // If there was a previous operation on this key then it must have been a remove.
+                        // The put and remove cancel out.
+                        assert(tombstone(&kv.key));
+                    } else {
+                        table.values.putAssumeCapacityNoClobber(value.*, {});
+                    }
+                },
+                .general => {
+                    // If the key is already present in the hash map, the old key will not be overwritten
+                    // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
+                    // level getOrPut() API and manually overwrite the old key.
+                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
+                    upsert.key_ptr.* = value.*;
+                },
             }
 
             // The hash map's load factor may allow for more capacity because of rounding:
@@ -119,12 +127,26 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
-            const existing = table.values.fetchRemove(value.*);
-            if (usage == .secondary_index and existing != null) {
-                // Put and remove cancel each other out.
-                assert(!tombstone(&existing.?.key));
-            } else {
-                table.values.putAssumeCapacityNoClobber(tombstone_from_key(key_from_value(value)), {});
+            switch (usage) {
+                .secondary_index => {
+                    const existing = table.values.fetchRemove(value.*);
+                    if (existing) |kv| {
+                        // The previous operation on this key then it must have been a put.
+                        // The put and remove cancel out.
+                        assert(!tombstone(&kv.key));
+                    } else {
+                        // If the put is already on-disk, then we need to follow it with a tombstone.
+                        // The put and the tombstone may cancel each other out later during compaction.
+                        table.values.putAssumeCapacityNoClobber(tombstone_from_key(key_from_value(value)), {});
+                    }
+                },
+                .general => {
+                    // If the key is already present in the hash map, the old key will not be overwritten
+                    // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
+                    // level getOrPut() API and manually overwrite the old key.
+                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
+                    upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+                },
             }
 
             assert(table.values.count() <= table.value_count_max);
