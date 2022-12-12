@@ -212,13 +212,26 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             var manifest = try Manifest.init(allocator, node_pool, grid, tree_hash);
             errdefer manifest.deinit(allocator);
 
-            var compaction_table_immutable = try CompactionTableImmutable.init(allocator, tree_name);
+            var compaction_table_immutable = try CompactionTableImmutable.init(
+                allocator,
+                std.fmt.comptimePrint("{s}(immutable->0)", .{tree_name}),
+            );
             errdefer compaction_table_immutable.deinit(allocator);
 
             var compaction_table: [@divFloor(constants.lsm_levels, 2)]CompactionTable = undefined;
-            for (compaction_table) |*compaction, i| {
-                errdefer for (compaction_table[0..i]) |*c| c.deinit(allocator);
-                compaction.* = try CompactionTable.init(allocator, tree_name);
+            {
+                comptime var i: usize = 0;
+                inline while (i < compaction_table.len) : (i += 1) {
+                    errdefer for (compaction_table[0..i]) |*c| c.deinit(allocator);
+                    const compaction_name = std.fmt.comptimePrint("{s}({}->{}/{}->{})", .{
+                        tree_name,
+                        2 * i,
+                        2 * i + 1,
+                        2 * i + 1,
+                        2 * i + 2,
+                    });
+                    compaction_table[i] = try CompactionTable.init(allocator, compaction_name);
+                }
             }
             errdefer for (compaction_table) |*c| c.deinit(allocator);
 
@@ -583,7 +596,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tracer.start(
                 &tree.tracer_slot,
                 .{ .tree = .{ .tree_name = tree_name } },
-                .{ .tree_compaction_beat = .{ .tree_name = tree_name } },
+                .tree_compaction_beat,
                 @src(),
             );
 
@@ -959,7 +972,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tracer.end(
                 &tree.tracer_slot,
                 .{ .tree = .{ .tree_name = tree_name } },
-                .{ .tree_compaction_beat = .{ .tree_name = tree_name } },
+                .tree_compaction_beat,
             );
 
             // Invoke the compact() callback after the manifest compacts at the end of the beat.
