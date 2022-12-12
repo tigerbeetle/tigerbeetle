@@ -91,7 +91,7 @@ pub fn MergeIteratorType(
                             .general => return value_a,
                             .secondary_index => {
                                 // In secondary indexes, puts and removes alternate and can be safely cancelled out.
-                                assert(util.xor(Table.tombstone(&value_a), Table.tombstone(&value_b)));
+                                assert(Table.tombstone(&value_a) != Table.tombstone(&value_b));
                                 continue;
                             },
                         }

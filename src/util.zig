@@ -135,7 +135,3 @@ test "disjoint_slices" {
     try std.testing.expectEqual(false, disjoint_slices(u8, u32, a, std.mem.bytesAsSlice(u32, a)));
     try std.testing.expectEqual(false, disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
 }
-
-pub fn xor(a: bool, b: bool) bool {
-    return (a or b) and !(a and b);
-}
