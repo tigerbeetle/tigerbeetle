@@ -63,14 +63,12 @@ and recovery mechanisms that surpass most databases today.
 Additionally, TigerBeetle was designed precisely for high performance
 accounting. We've seen teams struggle to reach on the order of 1,000s
 of transfers per second when they've built on PostgreSQL and
-MongoDB. The reason is that the nature of double-entry is contention
-on either the debit or credit side. For example, a business may have a
-few million customers but only a few bank accounts. You can imagine
-that processing transactions for these customers will contend for row
-locks when touching these bank accounts and deoptimize the ability of
-group commit to amortize disk flushes. With these challenges in mind,
-we've designed TigerBeetle to achieve 1,000,000 transfers per second
-on commodity hardware.
+MongoDB. The comes down to contention. For example, a business may
+have a few million customers but only a few bank accounts which will
+contend for row locks and become the bottleneck (as transfers are
+serialized through them). With this challenge in mind, we're designing
+TigerBeetle to achieve 1,000,000 transfers per second on commodity
+hardware.
 
 With financial data, it's also important not to lump it together with
 general purpose data. The risk profile is different: retention
