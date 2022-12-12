@@ -64,7 +64,6 @@ pub fn ewah(comptime Word: type) type {
         // so that we can test invalid encodings.
         pub fn decode(source: []align(@alignOf(Word)) const u8, target_words: []Word) usize {
             assert(source.len % @sizeOf(Word) == 0);
-            assert(source.len >= @sizeOf(Marker));
             assert(disjoint_slices(u8, Word, source, target_words));
 
             const source_words = mem.bytesAsSlice(Word, source);
@@ -95,7 +94,6 @@ pub fn ewah(comptime Word: type) type {
 
         // Returns the number of bytes written to `target`.
         pub fn encode(source_words: []const Word, target: []align(@alignOf(Word)) u8) usize {
-            assert(target.len >= @sizeOf(Marker));
             assert(target.len == encode_size_max(source_words.len));
             assert(disjoint_slices(Word, u8, source_words, target));
 
@@ -149,8 +147,6 @@ pub fn ewah(comptime Word: type) type {
         /// Assumes (pessimistically) that every word will be encoded as a literal.
         pub fn encode_size_max(word_count: usize) usize {
             const marker_count = div_ceil(word_count, marker_literal_word_count_max);
-            assert(marker_count != 0);
-
             return marker_count * @sizeOf(Marker) + word_count * @sizeOf(Word);
         }
 
@@ -178,7 +174,7 @@ test "ewah encode→decode cycle" {
     }
 }
 
-test "ewah Word=u8 decode→encode→decode" {
+test "ewah Word=u8" {
     try test_decode_with_word(u8);
 
     const codec = ewah(u8);
@@ -195,6 +191,9 @@ test "ewah Word=u8 decode→encode→decode" {
             56,
         });
     }
+
+    try std.testing.expectEqual(codec.encode_size_max(0), 0);
+    try std.testing.expectEqual(codec.encode(&.{}, &.{}), 0);
 }
 
 test "ewah Word=u16" {
@@ -205,6 +204,8 @@ test "ewah Word=u16" {
 fn test_decode_with_word(comptime Word: type) !void {
     const codec = ewah(Word);
 
+    // No set bits.
+    try test_decode(Word, &.{});
     // Alternating runs, no literals.
     try test_decode(Word, &.{
         codec.marker_word(.{ .uniform_bit = 0, .uniform_word_count = 2, .literal_word_count = 0 }),

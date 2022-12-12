@@ -330,6 +330,7 @@ pub const Cluster = struct {
             .{
                 .replica_count = @intCast(u8, cluster.replicas.len),
                 .storage = &cluster.storages[replica_index],
+                // TODO Test restarting with a higher storage limit.
                 .storage_size_limit = cluster.options.storage_size_limit,
                 .message_pool = &cluster.pools[replica_index],
                 .time = time,
