@@ -63,7 +63,7 @@ and recovery mechanisms that surpass most databases today.
 Additionally, TigerBeetle was designed precisely for high performance
 accounting. We've seen teams struggle to reach on the order of 1,000s
 of transfers per second when they've built on PostgreSQL and
-MongoDB. The comes down to contention. For example, a business may
+MongoDB. It comes down to contention. For example, a business may
 have a few million customers but only a few bank accounts which will
 contend for row locks and become the bottleneck (as transfers are
 serialized through them). With this challenge in mind, we're designing
