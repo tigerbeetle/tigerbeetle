@@ -182,7 +182,13 @@ pub fn TableMutableType(comptime Table: type) type {
             while (it.next()) |value| : (i += 1) {
                 values_max[i] = value.*;
 
-                if (table.values_cache) |cache| cache.insert(key_from_value(value)).* = value.*;
+                if (table.values_cache) |cache| {
+                    if (tombstone(value)) {
+                        cache.remove(key_from_value(value));
+                    } else {
+                        cache.insert(key_from_value(value)).* = value.*;
+                    }
+                }
             }
 
             const values = values_max[0..i];
