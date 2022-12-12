@@ -42,7 +42,7 @@ const constants = @import("../constants.zig");
 
 const GridType = @import("grid.zig").GridType;
 const ManifestType = @import("manifest.zig").ManifestType;
-const KWayMergeIterator = @import("k_way_merge.zig").KWayMergeIterator;
+const MergeIteratorType = @import("merge_iterator.zig").MergeIteratorType;
 const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
 const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
 
@@ -51,8 +51,6 @@ pub fn CompactionType(
     comptime Storage: type,
     comptime IteratorAType: anytype,
 ) type {
-    const Key = Table.Key;
-    const Value = Table.Value;
     const tombstone = Table.tombstone;
 
     return struct {
@@ -73,46 +71,11 @@ pub fn CompactionType(
         const IteratorA = IteratorAType(Table, Storage);
         const IteratorB = LevelIteratorType(Table, Storage);
 
-        const k = 2;
-        const MergeIterator = KWayMergeIterator(
-            Compaction,
-            Table.Key,
-            Table.Value,
-            Table.key_from_value,
-            Table.compare_keys,
-            k,
-            MergeStreamSelector.peek,
-            MergeStreamSelector.pop,
-            MergeStreamSelector.precedence,
+        const MergeIterator = MergeIteratorType(
+            Table,
+            IteratorA,
+            IteratorB,
         );
-
-        const MergeStreamSelector = struct {
-            fn peek(compaction: *const Compaction, stream_id: u32) error{ Empty, Drained }!Key {
-                return switch (stream_id) {
-                    0 => compaction.iterator_a.peek(),
-                    1 => compaction.iterator_b.peek(),
-                    else => unreachable,
-                };
-            }
-
-            fn pop(compaction: *Compaction, stream_id: u32) Value {
-                return switch (stream_id) {
-                    0 => compaction.iterator_a.pop(),
-                    1 => compaction.iterator_b.pop(),
-                    else => unreachable,
-                };
-            }
-
-            /// Returns true if stream A has higher precedence than stream B.
-            /// This is used to deduplicate values across streams.
-            fn precedence(compaction: *const Compaction, stream_a: u32, stream_b: u32) bool {
-                _ = compaction;
-                assert(stream_a + stream_b == 1);
-
-                // All tables in iterator_a (stream=0) have a higher precedence.
-                return stream_a == 0;
-            }
-        };
 
         pub const Callback = fn (it: *Compaction) void;
 
@@ -440,7 +403,10 @@ pub fn CompactionType(
             // Create the merge iterator only when we can peek() from the read iterators.
             // This happens after IO for the first reads complete.
             if (compaction.merge_iterator == null) {
-                compaction.merge_iterator = MergeIterator.init(compaction, k, .ascending);
+                compaction.merge_iterator = MergeIterator.init(
+                    &compaction.iterator_a,
+                    &compaction.iterator_b,
+                );
                 assert(!compaction.merge_iterator.?.empty());
             }
 

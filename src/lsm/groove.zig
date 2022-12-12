@@ -131,6 +131,7 @@ fn IndexTreeType(
         Key.sentinel_key,
         Key.tombstone,
         Key.tombstone_from_key,
+        .secondary_index,
     );
 
     return TreeType(Table, Storage, tree_name);
@@ -254,6 +255,7 @@ pub fn GrooveType(
             ObjectTreeHelpers(Object).sentinel_key,
             ObjectTreeHelpers(Object).tombstone,
             ObjectTreeHelpers(Object).tombstone_from_key,
+            .general,
         );
 
         const tree_name = @typeName(Object);
@@ -269,6 +271,7 @@ pub fn GrooveType(
             IdTreeValue.sentinel_key,
             IdTreeValue.tombstone,
             IdTreeValue.tombstone_from_key,
+            .general,
         );
 
         const tree_name = @typeName(Object) ++ ".id";
