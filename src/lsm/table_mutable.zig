@@ -120,10 +120,6 @@ pub fn TableMutableType(comptime Table: type) type {
 
             // The hash map's load factor may allow for more capacity because of rounding:
             assert(table.values.count() <= table.value_count_max);
-
-            if (table.values_cache) |cache| {
-                cache.insert(key_from_value(value)).* = value.*;
-            }
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
@@ -150,11 +146,6 @@ pub fn TableMutableType(comptime Table: type) type {
             }
 
             assert(table.values.count() <= table.value_count_max);
-
-            if (table.values_cache) |cache| {
-                cache.insert(key_from_value(value)).* =
-                    tombstone_from_key(key_from_value(value));
-            }
         }
 
         /// This may return `false` even when committing would succeed — it pessimistically
