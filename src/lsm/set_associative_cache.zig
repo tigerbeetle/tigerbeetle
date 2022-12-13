@@ -188,7 +188,7 @@ pub fn SetAssociativeCache(
             mem.set(u64, self.clocks.words, 0);
         }
 
-        /// Returns whether an entry with the given key is cached, 
+        /// Returns whether an entry with the given key is cached,
         /// without modifying the entry's counter.
         pub fn exists(self: *Self, key: Key) bool {
             const set = self.associate(key);
@@ -262,6 +262,7 @@ pub fn SetAssociativeCache(
         }
 
         /// Add a key, evicting an older entry if needed, and return a pointer to the value.
+        /// The caller must immediately initialize the value such that `equal(key_from_value(value), key)`.
         /// The key must not already be in the cache.
         /// Never evicts keys for which locked() returns true.
         /// The caller must guarantee that locked() returns true for less than layout.ways keys.
