@@ -182,6 +182,7 @@ pub fn GridType(comptime Storage: type) type {
             var retry_max: u32 = 100_000;
             while (grid.read_cached_queue.pop()) |read| {
                 if (grid.cache.get(read.address)) |block| {
+                    if (constants.verify) grid.verify_cached_read(read.address, block);
                     read.callback(read, block);
                 } else {
                     grid.start_read(read);
@@ -562,6 +563,15 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
 
             return (address - 1) * block_size;
+        }
+
+        fn verify_cached_read(grid: *Grid, address: u64, cached_block: BlockPtrConst) void {
+            if (Storage != @import("../test/storage.zig").Storage)
+                // Too complicated to do async verification
+                return;
+
+            const actual_block = grid.superblock.storage.grid_block(address);
+            assert(std.mem.eql(u8, cached_block, actual_block));
         }
     };
 }
