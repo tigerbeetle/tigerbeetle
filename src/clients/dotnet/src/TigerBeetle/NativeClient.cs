@@ -103,12 +103,10 @@ namespace TigerBeetle
             where TResult : unmanaged
             where TBody : unmanaged
         {
-            if (batch.Length == 0) return Array.Empty<TResult>();
-
             var packet = Rent();
-            var blockingRequest = new BlockingRequest<TResult, TBody>(this, packet);
+            var blockingRequest = new BlockingRequest<TResult, TBody>(this, operation);
 
-            blockingRequest.Submit(operation, batch);
+            blockingRequest.Submit(batch, packet);
             return blockingRequest.Wait();
         }
 
@@ -116,12 +114,10 @@ namespace TigerBeetle
             where TResult : unmanaged
             where TBody : unmanaged
         {
-            if (batch.Length == 0) return Array.Empty<TResult>();
-
             var packet = await RentAsync();
-            var asyncRequest = new AsyncRequest<TResult, TBody>(this, packet);
+            var asyncRequest = new AsyncRequest<TResult, TBody>(this, operation);
 
-            asyncRequest.Submit(operation, batch);
+            asyncRequest.Submit(batch, packet);
             return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
         }
 
@@ -149,7 +145,7 @@ namespace TigerBeetle
             }
         }
 
-        private Packet Rent()
+        public Packet Rent()
         {
             do
             {
@@ -160,7 +156,7 @@ namespace TigerBeetle
             return AcquirePacket();
         }
 
-        private async ValueTask<Packet> RentAsync()
+        public async ValueTask<Packet> RentAsync()
         {
             do
             {
@@ -202,6 +198,8 @@ namespace TigerBeetle
         {
             unsafe
             {
+                AssertTrue(packet.Pointer != null, "Null packet pointer");
+
                 var headPtr = packetListHead;
                 while (true)
                 {
@@ -251,7 +249,7 @@ namespace TigerBeetle
             if (request != null)
             {
                 var span = result_len > 0 ? new ReadOnlySpan<byte>(result, (int)result_len) : ReadOnlySpan<byte>.Empty;
-                request.Complete((TBOperation)packet->operation, packet->status, span);
+                request.Complete(new Packet(packet), span);
             }
         }
     }

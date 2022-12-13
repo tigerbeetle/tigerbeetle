@@ -24,7 +24,7 @@ namespace TigerBeetle
             return handle.IsAllocated ? handle.Target as IRequest : null;
         }
 
-        void Complete(TBOperation operation, PacketStatus status, ReadOnlySpan<byte> result);
+        void Complete(Packet packet, ReadOnlySpan<byte> result);
     }
 
     internal abstract class Request<TResult, TBody> : IRequest
@@ -35,37 +35,42 @@ namespace TigerBeetle
         private static readonly unsafe int BODY_SIZE = sizeof(TBody);
 
         private readonly NativeClient nativeClient;
-        private readonly Packet packet;
-        private readonly GCHandle handle;
-        private GCHandle bodyPinnedHandle;
+        private readonly TBOperation operation;
+        private readonly GCHandle requestGCHandle;
+        private GCHandle bodyGCHandle;
 
-        public Request(NativeClient nativeClient, Packet packet)
+        public Request(NativeClient nativeClient, TBOperation operation)
         {
-            handle = GCHandle.Alloc(this, GCHandleType.Normal);
+            requestGCHandle = GCHandle.Alloc(this, GCHandleType.Normal);
 
             this.nativeClient = nativeClient;
-            this.packet = packet;
+            this.operation = operation;
         }
 
-        public IntPtr Pin(TBody[] body, out uint size)
+        private IntPtr Pin(TBody[] body, out uint size)
         {
             AssertTrue(body.Length > 0, "Message body cannot be empty");
-            AssertTrue(!bodyPinnedHandle.IsAllocated, "Request data is already pinned");
-            bodyPinnedHandle = GCHandle.Alloc(body, GCHandleType.Pinned);
+            AssertTrue(!bodyGCHandle.IsAllocated, "Request body GCHandle is already allocated");
+            bodyGCHandle = GCHandle.Alloc(body, GCHandleType.Pinned);
 
             size = (uint)(body.Length * BODY_SIZE);
-            return bodyPinnedHandle.AddrOfPinnedObject();
+            return bodyGCHandle.AddrOfPinnedObject();
         }
 
-        public void Submit(TBOperation operation, TBody[] batch)
+        public void Submit(TBody[] batch, Packet packet)
         {
-            AssertTrue(handle.IsAllocated, "Request handle not allocated");
+            if (batch == null) throw new ArgumentNullException(nameof(batch));
+            if (batch.Length == 0) throw new ArgumentException("Batch cannot be empty", nameof(batch));
+
+            AssertTrue(requestGCHandle.IsAllocated, "Request GCHandle not allocated");
 
             unsafe
             {
+                AssertTrue(packet.Pointer != null, "Null packet pointer");
+
                 var ptr = packet.Pointer;
                 ptr->next = null;
-                ptr->userData = (IntPtr)handle;
+                ptr->userData = (IntPtr)requestGCHandle;
                 ptr->operation = (byte)operation;
                 ptr->data = Pin(batch, out uint size);
                 ptr->dataSize = size;
@@ -75,58 +80,67 @@ namespace TigerBeetle
             }
         }
 
-        public void Complete(TBOperation operation, PacketStatus status, ReadOnlySpan<byte> result)
+        public void Complete(Packet packet, ReadOnlySpan<byte> result)
         {
-            TResult[]? array = null;
-            Exception? exception = null;
-
-            try
+            unsafe
             {
-                AssertTrue(handle.IsAllocated, "Request handle not allocated");
-                handle.Free();
+                TResult[]? array = null;
+                Exception? exception = null;
 
-                AssertTrue(bodyPinnedHandle.IsAllocated, "Request body not allocated");
-                bodyPinnedHandle.Free();
-
-                if (status == PacketStatus.Ok && result.Length > 0)
+                try
                 {
-                    AssertTrue(result.Length % RESULT_SIZE == 0,
-                        "Invalid received data: result.Length={0}, SizeOf({1})={2}",
-                        result.Length,
-                        typeof(TResult).Name,
-                        RESULT_SIZE
-                    );
+                    AssertTrue(packet.Pointer != null, "Null callback packet pointer");
 
-                    array = new TResult[result.Length / RESULT_SIZE];
+                    try
+                    {
+                        AssertTrue((byte)operation == packet.Pointer->operation, "Unexpected callback operation: expected={0}, actual={1}", (byte)operation, packet.Pointer->operation);
 
-                    var span = MemoryMarshal.Cast<byte, TResult>(result);
-                    span.CopyTo(array);
+                        if (packet.Pointer->status == PacketStatus.Ok && result.Length > 0)
+                        {
+                            AssertTrue(result.Length % RESULT_SIZE == 0,
+                                "Invalid received data: result.Length={0}, SizeOf({1})={2}",
+                                result.Length,
+                                typeof(TResult).Name,
+                                RESULT_SIZE
+                            );
+
+                            array = new TResult[result.Length / RESULT_SIZE];
+
+                            var span = MemoryMarshal.Cast<byte, TResult>(result);
+                            span.CopyTo(array);
+                        }
+                        else
+                        {
+                            array = Array.Empty<TResult>();
+                        }
+                    }
+                    finally
+                    {
+                        nativeClient.Return(packet);
+                    }
+
+                    if (requestGCHandle.IsAllocated) requestGCHandle.Free();
+                    if (bodyGCHandle.IsAllocated) bodyGCHandle.Free();
+                }
+                catch (Exception any)
+                {
+                    exception = any;
+                }
+
+                if (exception != null)
+                {
+                    SetException(exception);
                 }
                 else
                 {
-                    array = Array.Empty<TResult>();
-                }
-            }
-            catch (Exception any)
-            {
-                exception = any;
-            }
-
-            nativeClient.Return(packet);
-
-            if (exception != null)
-            {
-                SetException(exception);
-            }
-            else
-            {
-                if (status == PacketStatus.Ok)
-                {
-                    SetResult(array!);
-                }
-                else
-                {
-                    SetException(new RequestException(status));
+                    if (packet.Pointer->status == PacketStatus.Ok)
+                    {
+                        SetResult(array!);
+                    }
+                    else
+                    {
+                        SetException(new RequestException(packet.Pointer->status));
+                    }
                 }
             }
         }
@@ -142,7 +156,7 @@ namespace TigerBeetle
     {
         private readonly TaskCompletionSource<TResult[]> completionSource;
 
-        public AsyncRequest(NativeClient nativeClient, Packet packet) : base(nativeClient, packet)
+        public AsyncRequest(NativeClient nativeClient, TBOperation operation) : base(nativeClient, operation)
         {
             // Hints the TPL to execute the continuation on its own thread pool thread, instead of the unamaged's callback thread:
             this.completionSource = new TaskCompletionSource<TResult[]>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -165,7 +179,7 @@ namespace TigerBeetle
 
         private bool Completed => result != null || exception != null;
 
-        public BlockingRequest(NativeClient nativeClient, Packet packet) : base(nativeClient, packet)
+        public BlockingRequest(NativeClient nativeClient, TBOperation operation) : base(nativeClient, operation)
         {
         }
 

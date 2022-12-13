@@ -199,38 +199,6 @@ namespace TigerBeetle.Tests
             AssertAccounts(lookupAccounts);
         }
 
-        private static void AssertAccounts(Account[] lookupAccounts)
-        {
-            Assert.IsTrue(lookupAccounts.Length == accounts.Length);
-            for (int i = 0; i < accounts.Length; i++)
-            {
-                AssertAccount(accounts[i], lookupAccounts[i]);
-            }
-        }
-
-        private static void AssertAccount(Account a, Account b)
-        {
-            Assert.AreEqual(a.Id, b.Id);
-            Assert.AreEqual(a.UserData, b.UserData);
-            Assert.AreEqual(a.Flags, b.Flags);
-            Assert.AreEqual(a.Code, b.Code);
-            Assert.AreEqual(a.Ledger, b.Ledger);
-        }
-
-        private static void AssertTransfer(Transfer a, Transfer b)
-        {
-            Assert.AreEqual(a.Id, b.Id);
-            Assert.AreEqual(a.DebitAccountId, b.DebitAccountId);
-            Assert.AreEqual(a.CreditAccountId, b.CreditAccountId);
-            Assert.AreEqual(a.UserData, b.UserData);
-            Assert.AreEqual(a.Flags, b.Flags);
-            Assert.AreEqual(a.Code, b.Code);
-            Assert.AreEqual(a.Ledger, b.Ledger);
-            Assert.AreEqual(a.Amount, b.Amount);
-            Assert.AreEqual(a.PendingId, b.PendingId);
-            Assert.AreEqual(a.Timeout, b.Timeout);
-        }
-
         [TestMethod]
         [DoNotParallelize]
         public void CreateTransfers()
@@ -752,8 +720,8 @@ namespace TigerBeetle.Tests
         [DoNotParallelize]
         public void ConcurrentTasksTest()
         {
-            const int TASKS_QTY = 24;
-            int MAX_CONCURRENCY = TASKS_QTY / 4;
+            const int TASKS_QTY = 20;
+            int MAX_CONCURRENCY = TASKS_QTY / 2;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
@@ -802,10 +770,16 @@ namespace TigerBeetle.Tests
 
         [TestMethod]
         [DoNotParallelize]
-        public void ConcurrentTasksDispose()
+        public void ConcurrentTasksDispose() => ConcurrentTasksDispose(isAsync: false);
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void ConcurrentTasksDisposeAsync() => ConcurrentTasksDispose(isAsync: true);
+
+        private void ConcurrentTasksDispose(bool isAsync)
         {
-            const int TASKS_QTY = 24;
-            int MAX_CONCURRENCY = TASKS_QTY / 4;
+            const int TASKS_QTY = 20;
+            int MAX_CONCURRENCY = 2;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
@@ -828,7 +802,7 @@ namespace TigerBeetle.Tests
                 };
 
                 /// Starts multiple tasks using a client with a limited maxConcurrency
-                var task = Task.Run(() => client.CreateTransfer(transfer));
+                var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
                 list.Add(task);
             }
 
@@ -846,7 +820,39 @@ namespace TigerBeetle.Tests
             catch { }
 
             // Asserting that either the task failed or succeeded
-            Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
+            Assert.IsTrue(list.Any(x => x.IsFaulted) && list.Any(x => x.Result == CreateTransferResult.Ok));
+        }
+
+        private static void AssertAccounts(Account[] lookupAccounts)
+        {
+            Assert.IsTrue(lookupAccounts.Length == accounts.Length);
+            for (int i = 0; i < accounts.Length; i++)
+            {
+                AssertAccount(accounts[i], lookupAccounts[i]);
+            }
+        }
+
+        private static void AssertAccount(Account a, Account b)
+        {
+            Assert.AreEqual(a.Id, b.Id);
+            Assert.AreEqual(a.UserData, b.UserData);
+            Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.Code, b.Code);
+            Assert.AreEqual(a.Ledger, b.Ledger);
+        }
+
+        private static void AssertTransfer(Transfer a, Transfer b)
+        {
+            Assert.AreEqual(a.Id, b.Id);
+            Assert.AreEqual(a.DebitAccountId, b.DebitAccountId);
+            Assert.AreEqual(a.CreditAccountId, b.CreditAccountId);
+            Assert.AreEqual(a.UserData, b.UserData);
+            Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.Code, b.Code);
+            Assert.AreEqual(a.Ledger, b.Ledger);
+            Assert.AreEqual(a.Amount, b.Amount);
+            Assert.AreEqual(a.PendingId, b.PendingId);
+            Assert.AreEqual(a.Timeout, b.Timeout);
         }
     }
 
