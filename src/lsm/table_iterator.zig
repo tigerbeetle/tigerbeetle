@@ -141,6 +141,16 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             assert(it.values.empty());
             assert(it.data_blocks.empty());
+
+            if (constants.verify) {
+                Table.verify(
+                    Storage,
+                    context.grid.superblock.storage,
+                    context.address,
+                    null,
+                    null,
+                );
+            }
         }
 
         /// Try to buffer at least a full block of values to be peek()'d.
