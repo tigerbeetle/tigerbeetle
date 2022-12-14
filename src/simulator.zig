@@ -269,11 +269,6 @@ pub fn main() !void {
         }
     };
 
-    // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
-    for (cluster.storages) |*storage, i| {
-        storage.faulty = replica_normal_min <= i;
-    }
-
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         const health_options = &cluster.options.health_options;
