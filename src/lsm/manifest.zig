@@ -585,5 +585,33 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.checkpoint_callback = null;
             callback(manifest);
         }
+
+        pub fn verify(manifest: *Manifest, snapshot: u64) void {
+            for (manifest.levels) |*level| {
+                var key_max_prev: ?Key = null;
+                var table_info_iter = level.iterator(
+                    .visible,
+                    &.{snapshot},
+                    .ascending,
+                    null,
+                );
+                while (table_info_iter.next()) |table_info| {
+                    if (key_max_prev) |k| {
+                        assert(compare_keys(k, table_info.key_min) == .lt);
+                    }
+                    // We could have key_min == key_max if there is only one value.
+                    assert(compare_keys(table_info.key_min, table_info.key_max) != .gt);
+                    key_max_prev = table_info.key_max;
+
+                    Table.verify(
+                        Storage,
+                        manifest.manifest_log.grid.superblock.storage,
+                        table_info.address,
+                        table_info.key_min,
+                        table_info.key_max,
+                    );
+                }
+            }
+        }
     };
 }

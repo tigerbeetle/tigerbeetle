@@ -53,6 +53,16 @@ pub fn GridType(comptime Storage: type) type {
             return address;
         }
 
+        inline fn set_address(block: *[block_size]u8, address: u64) void {
+            const header = mem.toBytes(vsr.Header{
+                .op = address,
+                .cluster = undefined,
+                .command = undefined,
+            });
+            const header_bytes = block[0..@sizeOf(vsr.Header)];
+            header_bytes.* = header;
+        }
+
         inline fn hash_address(address: u64) u64 {
             assert(address > 0);
             return std.hash.Wyhash.hash(0, mem.asBytes(&address));
@@ -182,6 +192,7 @@ pub fn GridType(comptime Storage: type) type {
             var retry_max: u32 = 100_000;
             while (grid.read_cached_queue.pop()) |read| {
                 if (grid.cache.get(read.address)) |block| {
+                    if (constants.verify) grid.verify_cached_read(read.address, block);
                     read.callback(read, block);
                 } else {
                     grid.start_read(read);
@@ -427,7 +438,8 @@ pub fn GridType(comptime Storage: type) type {
             // If the block is already in the cache, queue up the read to be resolved
             // from the cache on the next tick. This keeps start_read() asynchronous.
             // Note that this must be called after we have checked for an in
-            // progress read targeting the same address.
+            // progress read targeting the same address, otherwise we may read an
+            // unininitialized block.
             if (grid.cache.exists(read.address)) {
                 grid.read_cached_queue.push(read);
                 return;
@@ -444,6 +456,12 @@ pub fn GridType(comptime Storage: type) type {
                 grid,
                 read.address,
             );
+            // `block` will be initialized later when the read completes.
+            // This is safe because we will never attempt to lookup an address in the cache
+            // while a read is pending.
+            // However, we do have to immediately set the cache key to uphold the
+            // invariants of `SetAssociativeCache`.
+            cache_interface.set_address(block, read.address);
 
             iop.* = .{
                 .grid = grid,
@@ -562,6 +580,15 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
 
             return (address - 1) * block_size;
+        }
+
+        fn verify_cached_read(grid: *Grid, address: u64, cached_block: BlockPtrConst) void {
+            if (Storage != @import("../test/storage.zig").Storage)
+                // Too complicated to do async verification
+                return;
+
+            const actual_block = grid.superblock.storage.grid_block(address);
+            assert(std.mem.eql(u8, cached_block, actual_block));
         }
     };
 }
