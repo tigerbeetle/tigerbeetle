@@ -137,6 +137,8 @@ pub const Cluster = struct {
             storage_options.replica_index = @intCast(u8, replica_index);
             storage_options.faulty_wal_areas = faulty_wal_areas[replica_index];
             storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
+            // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
+            storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
         }
         errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
 

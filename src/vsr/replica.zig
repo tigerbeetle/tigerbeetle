@@ -427,22 +427,12 @@ pub fn ReplicaType(
             assert(self.superblock.opened);
             assert(self.superblock.working.vsr_state.internally_consistent());
 
-            const majority = (replica_count / 2) + 1;
-            assert(majority <= replica_count);
-
-            assert(constants.quorum_replication_max >= 2);
-            const quorum_replication = std.math.min(constants.quorum_replication_max, majority);
-            assert(quorum_replication >= 2 or quorum_replication == replica_count);
-
-            const quorum_view_change = std.math.max(
-                replica_count - quorum_replication + 1,
-                majority,
-            );
-            // The view change quorum may be more expensive to make the replication quorum cheaper.
-            // The insight is that the replication phase is by far more common than the view change.
-            // This trade-off allows us to optimize for the common case.
-            // See the comments in `constants.zig` for further explanation.
-            assert(quorum_view_change >= majority);
+            const quorums = vsr.quorums(replica_count);
+            const quorum_replication = quorums.replication;
+            const quorum_view_change = quorums.view_change;
+            assert(quorum_replication <= replica_count);
+            assert(quorum_view_change <= replica_count);
+            assert(quorum_view_change + quorum_replication >= replica_count);
 
             if (replica_count <= 2) {
                 assert(quorum_replication == replica_count);
@@ -4440,7 +4430,7 @@ pub fn ReplicaType(
                         // - or (indistinguishably) this might originally have been an op greater
                         //   than replica.op, which was truncated, but is now corrupt.
                         //
-                        // we don't try to repair this op because the slot belongs (or will soon
+                        // We don't try to repair this op because the slot belongs (or will soon
                         // belong) to a newer op, from the new WAL wrap. Additionally, we may not
                         // still have access to its surrounding commits to verify the hash chain.
                         assert(op <= self.commit_min);
