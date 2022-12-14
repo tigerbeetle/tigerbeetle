@@ -206,11 +206,13 @@ pub fn SetAssociativeCache(
         }
 
         /// Remove a key from the set associative cache if present.
-        pub fn remove(self: *Self, key: Key) void {
+        /// Returns the corresponding value.
+        pub fn remove(self: *Self, key: Key) ?Value {
             const set = self.associate(key);
-            const way = self.search(set, key) orelse return;
+            const way = self.search(set, key) orelse return null;
 
             self.counts.set(set.offset + way, 0);
+            return set.values[way];
         }
 
         /// Hint that the key is less likely to be accessed in the future, without actually removing
@@ -248,40 +250,18 @@ pub fn SetAssociativeCache(
             return @ptrCast(*const Ways, &result).*;
         }
 
-        pub fn insert(self: *Self, key: Key) *align(value_alignment) Value {
-            return self.insert_preserve_locked(
-                void,
-                struct {
-                    inline fn locked(_: void, _: *const Value) bool {
-                        return false;
-                    }
-                }.locked,
-                {},
-                key,
-            );
-        }
+        /// Add a value.
+        /// Return evicted values, if any.
+        pub fn insert(self: *Self, value: *const Value) [2]?Value {
+            var evicted_values: [2]?Value = .{ null, null };
 
-        /// Add a key, evicting an older entry if needed, and return a pointer to the value.
-        /// The caller must immediately initialize the value such that `equal(key_from_value(value), key)`.
-        /// The key must not already be in the cache.
-        /// Never evicts keys for which locked() returns true.
-        /// The caller must guarantee that locked() returns true for less than layout.ways keys.
-        pub fn insert_preserve_locked(
-            self: *Self,
-            comptime Context: type,
-            comptime locked: fn (
-                Context,
-                *align(value_alignment) const Value,
-            ) callconv(.Inline) bool,
-            context: Context,
-            key: Key,
-        ) *align(value_alignment) Value {
+            const key = key_from_value(value);
             const set = self.associate(key);
+
             if (self.search(set, key)) |way| {
                 // Remove the old entry for this key.
-                // It should be a different value, but since we are returning a value pointer we
-                // can't check against the new one.
                 self.counts.set(set.offset + way, 0);
+                evicted_values[0] = set.values[way];
             }
 
             const clock_index = @divExact(set.offset, layout.ways);
@@ -300,27 +280,32 @@ pub fn SetAssociativeCache(
                 safety_count += 1;
                 way +%= 1;
             }) {
-                // We pass a value pointer to the callback here so that a cache miss
-                // can be avoided if the caller is able to determine if the value is
-                // locked by comparing pointers directly.
-                if (locked(context, @alignCast(value_alignment, &set.values[way]))) continue;
-
                 var count = self.counts.get(set.offset + way);
-                if (count == 0) break; // Way is already free.
+                if (count == 0) {
+                    // Way is already free.
+                    break;
+                }
 
                 count -= 1;
                 self.counts.set(set.offset + way, count);
-                if (count == 0) break; // Way has become free.
+
+                if (count == 0) {
+                    // Way has become free.
+                    evicted_values[1] = set.values[way];
+                    break;
+                }
             } else {
                 unreachable;
             }
+
             assert(self.counts.get(set.offset + way) == 0);
 
             set.tags[way] = set.tag;
+            set.values[way] = value.*;
             self.counts.set(set.offset + way, 1);
             self.clocks.set(clock_index, way +% 1);
 
-            return @alignCast(value_alignment, &set.values[way]);
+            return evicted_values;
         }
 
         const Set = struct {
@@ -431,7 +416,7 @@ fn set_associative_cache_test(
                     try expectEqual(i, sac.clocks.get(0));
 
                     const key = i * sac.sets;
-                    sac.insert(key).* = key;
+                    _ = sac.insert(&key);
                     try expect(sac.counts.get(i) == 1);
                     try expectEqual(key, sac.get(key).?.*);
                     try expect(sac.counts.get(i) == 2);
@@ -444,7 +429,7 @@ fn set_associative_cache_test(
             // Insert another element into the first set, causing key 0 to be evicted.
             {
                 const key = layout.ways * sac.sets;
-                sac.insert(key).* = key;
+                _ = sac.insert(&key);
                 try expect(sac.counts.get(0) == 1);
                 try expectEqual(key, sac.get(key).?.*);
                 try expect(sac.counts.get(0) == 2);
@@ -457,34 +442,6 @@ fn set_associative_cache_test(
                         try expect(sac.counts.get(i) == 1);
                     }
                 }
-            }
-
-            if (log) sac.associate(0).inspect(sac);
-
-            // Lock all other slots, causing key layout.ways * sac.sets to be evicted despite having the
-            // highest count.
-            {
-                {
-                    assert(sac.counts.get(0) == 2);
-                    var i: usize = 1;
-                    while (i < layout.ways) : (i += 1) assert(sac.counts.get(i) == 1);
-                }
-
-                const key = (layout.ways + 1) * sac.sets;
-                const expect_evicted = layout.ways * sac.sets;
-
-                sac.insert_preserve_locked(
-                    u64,
-                    struct {
-                        inline fn locked(only_unlocked: u64, value: *const Value) bool {
-                            return value.* != only_unlocked;
-                        }
-                    }.locked,
-                    expect_evicted,
-                    key,
-                ).* = key;
-
-                try expectEqual(@as(?*Value, null), sac.get(expect_evicted));
             }
 
             if (log) sac.associate(0).inspect(sac);
@@ -513,7 +470,7 @@ fn set_associative_cache_test(
                     try expectEqual(i, sac.clocks.get(0));
 
                     const key = i * sac.sets;
-                    sac.insert(key).* = key;
+                    _ = sac.insert(&key);
                     try expect(sac.counts.get(i) == 1);
                     var j: usize = 2;
                     while (j <= math.maxInt(SAC.Count)) : (j += 1) {
@@ -531,7 +488,7 @@ fn set_associative_cache_test(
             // Insert another element into the first set, causing key 0 to be evicted.
             {
                 const key = layout.ways * sac.sets;
-                sac.insert(key).* = key;
+                _ = sac.insert(&key);
                 try expect(sac.counts.get(0) == 1);
                 try expectEqual(key, sac.get(key).?.*);
                 try expect(sac.counts.get(0) == 2);

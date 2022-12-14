@@ -9,6 +9,7 @@ const free_set = @import("../vsr/superblock_free_set.zig");
 const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
+const NodePool = @import("node_pool.zig").NodePool;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 const util = @import("../util.zig");
 
@@ -45,22 +46,12 @@ pub fn GridType(comptime Storage: type) type {
     const SuperBlock = SuperBlockType(Storage);
 
     const cache_interface = struct {
-        inline fn address_from_block(block: *const [block_size]u8) u64 {
-            const header_bytes = block[0..@sizeOf(vsr.Header)];
+        inline fn address_from_block(block: *const *const [block_size]u8) u64 {
+            const header_bytes = block.*[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
             const address = header.op;
             assert(address > 0);
             return address;
-        }
-
-        inline fn set_address(block: *[block_size]u8, address: u64) void {
-            const header = mem.toBytes(vsr.Header{
-                .op = address,
-                .cluster = undefined,
-                .command = undefined,
-            });
-            const header_bytes = block[0..@sizeOf(vsr.Header)];
-            header_bytes.* = header;
         }
 
         inline fn hash_address(address: u64) u64 {
@@ -73,29 +64,10 @@ pub fn GridType(comptime Storage: type) type {
         }
     };
 
-    const set_associative_cache_ways = 16;
-    const Cache = SetAssociativeCache(
-        u64,
-        [block_size]u8,
-        cache_interface.address_from_block,
-        cache_interface.hash_address,
-        cache_interface.equal_addresses,
-        .{
-            .ways = set_associative_cache_ways,
-            .value_alignment = constants.sector_size,
-        },
-    );
-
     return struct {
         const Grid = @This();
 
         pub const read_iops_max = 15;
-        comptime {
-            // This + 1 ensures that it is always possible for writes to add the written block
-            // to the cache on completion, even if the maximum number of concurrent reads are in
-            // progress and have locked all but one way in the target set.
-            assert(read_iops_max + 1 <= set_associative_cache_ways);
-        }
 
         // TODO put more thought into how low/high this limit should be.
         pub const write_iops_max = 16;
@@ -137,7 +109,24 @@ pub fn GridType(comptime Storage: type) type {
             block: BlockPtr,
         };
 
+        const CacheBlocks = NodePool(block_size, constants.sector_size);
+
+        const set_associative_cache_ways = 16;
+        const Cache = SetAssociativeCache(
+            u64,
+            BlockPtr,
+            cache_interface.address_from_block,
+            cache_interface.hash_address,
+            cache_interface.equal_addresses,
+            .{
+                .ways = set_associative_cache_ways,
+                .value_alignment = @alignOf(BlockPtrConst),
+            },
+        );
+
         superblock: *SuperBlock,
+
+        cache_blocks: CacheBlocks,
         cache: Cache,
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
@@ -163,17 +152,31 @@ pub fn GridType(comptime Storage: type) type {
             // memory usage of tigerbeetle.
             const blocks_in_cache = 2048;
 
+            var cache_blocks = try CacheBlocks.init(
+                allocator,
+                blocks_in_cache +
+                    // Additional blocks for in-flight reads that have not yet been added to the cache.
+                    read_iops_max +
+                    // We acquire a block, evict a cache entry and release the evicted block.
+                    // So we need 1 extra block to cover that period.
+                    // TODO This could be avoided by tweaking the cache interface to evict first.
+                    1,
+            );
+            errdefer cache_blocks.deinit(allocator);
+
             var cache = try Cache.init(allocator, blocks_in_cache);
             errdefer cache.deinit(allocator);
 
             return Grid{
                 .superblock = superblock,
+                .cache_blocks = cache_blocks,
                 .cache = cache,
             };
         }
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
             grid.cache.deinit(allocator);
+            grid.cache_blocks.release_all_and_deinit(allocator);
 
             grid.* = undefined;
         }
@@ -192,8 +195,8 @@ pub fn GridType(comptime Storage: type) type {
             var retry_max: u32 = 100_000;
             while (grid.read_cached_queue.pop()) |read| {
                 if (grid.cache.get(read.address)) |block| {
-                    if (constants.verify) grid.verify_cached_read(read.address, block);
-                    read.callback(read, block);
+                    if (constants.verify) grid.verify_cached_read(read.address, block.*);
+                    read.callback(read, block.*);
                 } else {
                     grid.start_read(read);
                 }
@@ -343,13 +346,15 @@ pub fn GridType(comptime Storage: type) type {
             const grid = iop.grid;
             const completed_write = iop.write;
 
-            const cached_block = grid.cache.insert_preserve_locked(
-                *Grid,
-                block_locked,
-                grid,
-                completed_write.address,
-            );
+            const cached_block = grid.cache_blocks.acquire();
             util.copy_disjoint(.exact, u8, cached_block, completed_write.block);
+            assert(cache_interface.address_from_block(&cached_block) == completed_write.address);
+            const evicted_blocks = grid.cache.insert(&cached_block);
+            for (evicted_blocks) |evicted_block| {
+                if (evicted_block) |block_ptr| {
+                    grid.cache_blocks.release(block_ptr);
+                }
+            }
 
             grid.write_iops.release(iop);
 
@@ -450,18 +455,7 @@ pub fn GridType(comptime Storage: type) type {
                 return;
             };
 
-            const block = grid.cache.insert_preserve_locked(
-                *Grid,
-                block_locked,
-                grid,
-                read.address,
-            );
-            // `block` will be initialized later when the read completes.
-            // This is safe because we will never attempt to lookup an address in the cache
-            // while a read is pending.
-            // However, we do have to immediately set the cache key to uphold the
-            // invariants of `SetAssociativeCache`.
-            cache_interface.set_address(block, read.address);
+            const block = grid.cache_blocks.acquire();
 
             iop.* = .{
                 .grid = grid,
@@ -509,12 +503,20 @@ pub fn GridType(comptime Storage: type) type {
             const iop = @fieldParentPtr(ReadIOP, "completion", completion);
             const grid = iop.grid;
 
-            const header_bytes = iop.block[0..@sizeOf(vsr.Header)];
-            const header = mem.bytesAsValue(vsr.Header, header_bytes);
-
             const address = iop.reads.peek().?.address;
             const checksum = iop.reads.peek().?.checksum;
             const block_type = iop.reads.peek().?.block_type;
+
+            assert(cache_interface.address_from_block(&iop.block) == address);
+            const evicted_blocks = grid.cache.insert(&iop.block);
+            for (evicted_blocks) |evicted_block| {
+                if (evicted_block) |block_ptr| {
+                    grid.cache_blocks.release(block_ptr);
+                }
+            }
+
+            const header_bytes = iop.block[0..@sizeOf(vsr.Header)];
+            const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
             const checksum_valid = header.valid_checksum();
             const checksum_body_valid = checksum_valid and
