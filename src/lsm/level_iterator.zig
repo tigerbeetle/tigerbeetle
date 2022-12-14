@@ -68,6 +68,9 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         values: ValuesRingBuffer,
         tables: TablesRingBuffer,
 
+        // Used for verifying key order when constants.verify == true.
+        key_prev: ?Key,
+
         pub fn init(allocator: mem.Allocator) !LevelIterator {
             var values = try ValuesRingBuffer.init(allocator);
             errdefer values.deinit(allocator);
@@ -96,6 +99,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                         .{ .table_iterator = table_b },
                     },
                 },
+                .key_prev = null,
             };
         }
 
@@ -138,6 +142,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                 .direction = context.direction,
                 .values = .{ .buffer = it.values.buffer },
                 .tables = .{ .buffer = it.tables.buffer },
+                .key_prev = null,
             };
 
             assert(it.key_exclusive == null);
@@ -281,7 +286,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         /// Returns either:
         /// - the next Key, if available.
         /// - error.Empty when there are no values remaining to iterate.
-        /// - error.Drained when the iterator isn't empty, but the values 
+        /// - error.Drained when the iterator isn't empty, but the values
         ///   still need to be buffered into memory via tick().
         pub fn peek(it: LevelIterator) error{ Empty, Drained }!Key {
             if (it.values.head_ptr_const()) |value| return key_from_value(value);
@@ -299,6 +304,18 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         /// This may only be called after peek() returns a Key (and not Empty or Drained)
         pub fn pop(it: *LevelIterator) Value {
+            const value = it.pop_internal();
+
+            if (constants.verify) {
+                const key = Table.key_from_value(&value);
+                if (it.key_prev) |k| assert(Table.compare_keys(k, key) == .lt);
+                it.key_prev = key;
+            }
+
+            return value;
+        }
+
+        fn pop_internal(it: *LevelIterator) Value {
             if (it.values.pop()) |value| return value;
 
             const table_iterator = &it.tables.head_ptr().?.table_iterator;

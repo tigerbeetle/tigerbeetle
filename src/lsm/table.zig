@@ -629,6 +629,11 @@ pub fn TableType(
                     assert(compare_keys(builder.key_min, builder.key_max) == .lt);
                 }
 
+                if (current > 0) {
+                    const key_max_prev = index_data_keys(builder.index_block)[current - 1];
+                    assert(compare_keys(key_max_prev, key_from_value(&values[0])) == .lt);
+                }
+
                 builder.data_block_count += 1;
                 builder.value = 0;
 
@@ -978,6 +983,43 @@ pub fn TableType(
             }
 
             return null;
+        }
+
+        pub fn verify(
+            comptime Storage: type,
+            storage: *Storage,
+            index_address: u64,
+            key_min: ?Key,
+            key_max: ?Key,
+        ) void {
+            if (Storage != @import("../test/storage.zig").Storage)
+                // Too complicated to do async verification
+                return;
+
+            const index_block = storage.grid_block(index_address);
+            const addresses = index_data_addresses(index_block);
+            const data_blocks_used = index_data_blocks_used(index_block);
+            var data_block_index: usize = 0;
+            while (data_block_index < data_blocks_used) : (data_block_index += 1) {
+                const address = addresses[data_block_index];
+                const data_block = storage.grid_block(address);
+                const values = data_block_values_used(data_block);
+                if (values.len > 0) {
+                    if (data_block_index == 0) {
+                        assert(key_min == null or
+                            compare_keys(key_min.?, key_from_value(&values[0])) == .eq);
+                    }
+                    if (data_block_index == data_blocks_used - 1) {
+                        assert(key_max == null or
+                            compare_keys(key_from_value(&values[values.len - 1]), key_max.?) == .eq);
+                    }
+                    var a = &values[0];
+                    for (values[1..]) |*b| {
+                        assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
+                        a = b;
+                    }
+                }
+            }
         }
     };
 }

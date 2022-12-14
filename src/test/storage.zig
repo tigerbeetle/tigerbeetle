@@ -787,7 +787,7 @@ pub const Storage = struct {
     pub fn grid_block(
         storage: *const Storage,
         address: u64,
-    ) *align(constants.sector_size) const [constants.block_size]u8 {
+    ) *align(constants.sector_size) [constants.block_size]u8 {
         assert(address > 0);
 
         const block_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
