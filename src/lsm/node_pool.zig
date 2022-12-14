@@ -45,6 +45,10 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             // released to the pool.
             assert(pool.free.count() == pool.free.bit_length);
 
+            pool.release_all_and_deinit(allocator);
+        }
+
+        pub fn release_all_and_deinit(pool: *Self, allocator: mem.Allocator) void {
             allocator.free(pool.buffer);
             pool.free.deinit(allocator);
         }
