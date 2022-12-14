@@ -977,3 +977,30 @@ pub fn checksum(source: []const u8) u128 {
     std.crypto.hash.Blake3.hash(source, target[0..], .{});
     return @bitCast(u128, target[0..@sizeOf(u128)].*);
 }
+
+pub fn quorums(replica_count: u8) struct {
+    replication: u8,
+    view_change: u8,
+} {
+    const majority = @divFloor(replica_count, 2) + 1;
+    assert(majority <= replica_count);
+
+    assert(constants.quorum_replication_max >= 2);
+    const quorum_replication = std.math.min(constants.quorum_replication_max, majority);
+    assert(quorum_replication >= 2 or quorum_replication == replica_count);
+
+    const quorum_view_change = std.math.max(
+        replica_count - quorum_replication + 1,
+        majority,
+    );
+    // The view change quorum may be more expensive to make the replication quorum cheaper.
+    // The insight is that the replication phase is by far more common than the view change.
+    // This trade-off allows us to optimize for the common case.
+    // See the comments in `constants.zig` for further explanation.
+    assert(quorum_view_change >= majority);
+
+    return .{
+        .replication = quorum_replication,
+        .view_change = quorum_view_change,
+    };
+}
