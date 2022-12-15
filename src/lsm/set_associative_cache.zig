@@ -251,17 +251,53 @@ pub fn SetAssociativeCache(
         }
 
         /// Add a value.
-        /// Return evicted values, if any.
-        pub fn insert(self: *Self, value: *const Value) [2]?Value {
-            var evicted_values: [2]?Value = .{ null, null };
-
+        /// If this requires evicting a value, return the evicted value.
+        pub fn insert(self: *Self, value: *const Value) ?Value {
             const key = key_from_value(value);
+            const entry = self.get_entry(key);
+            const evicted_value = if (entry.evicted)
+                entry.value_ptr.*
+            else
+                null;
+            entry.value_ptr.* = value.*;
+            return evicted_value;
+        }
+
+        /// Make space for `key` without inserting it.
+        /// If this requires evicting a value, return the evicted value.
+        pub fn evict(self: *Self, key: Key) ?Value {
+            const entry = self.get_entry(key);
+            const evicted_value = if (entry.evicted)
+                entry.value_ptr.*
+            else
+                null;
+            self.counts.set(entry.index, 0);
+            return evicted_value;
+        }
+
+        pub const Entry = struct {
+            /// Did we have to evict a previous value to get this entry.
+            evicted: bool,
+            /// Pointer to the value.
+            value_ptr: *Value,
+            /// For internal use only.
+            index: usize,
+        };
+
+        /// Insert `key` into the cache but leave the corresponding `value` unitialized.
+        /// The caller is responsible for initializing `entry.value_ptr.*` before
+        /// calling any other methods on `self`.
+        pub fn get_entry(self: *Self, key: Key) Entry {
             const set = self.associate(key);
 
             if (self.search(set, key)) |way| {
-                // Remove the old entry for this key.
-                self.counts.set(set.offset + way, 0);
-                evicted_values[0] = set.values[way];
+                // Overwrite the old entry for this key.
+                self.counts.set(set.offset + way, 1);
+                return Entry{
+                    .evicted = true,
+                    .value_ptr = &set.values[way],
+                    .index = set.offset + way,
+                };
             }
 
             const clock_index = @divExact(set.offset, layout.ways);
@@ -276,36 +312,40 @@ pub fn SetAssociativeCache(
             const clock_iterations_max = layout.ways * (math.maxInt(Count) - 1);
 
             var safety_count: usize = 0;
-            while (safety_count <= clock_iterations_max) : ({
-                safety_count += 1;
-                way +%= 1;
-            }) {
-                var count = self.counts.get(set.offset + way);
-                if (count == 0) {
-                    // Way is already free.
-                    break;
-                }
+            const evicted = evicted: {
+                while (safety_count <= clock_iterations_max) : ({
+                    safety_count += 1;
+                    way +%= 1;
+                }) {
+                    var count = self.counts.get(set.offset + way);
+                    if (count == 0) {
+                        // Way is already free.
+                        break :evicted false;
+                    }
 
-                count -= 1;
-                self.counts.set(set.offset + way, count);
+                    count -= 1;
+                    self.counts.set(set.offset + way, count);
 
-                if (count == 0) {
-                    // Way has become free.
-                    evicted_values[1] = set.values[way];
-                    break;
+                    if (count == 0) {
+                        // Way has become free.
+                        break :evicted true;
+                    }
+                } else {
+                    unreachable;
                 }
-            } else {
-                unreachable;
-            }
+            };
 
             assert(self.counts.get(set.offset + way) == 0);
 
             set.tags[way] = set.tag;
-            set.values[way] = value.*;
             self.counts.set(set.offset + way, 1);
             self.clocks.set(clock_index, way +% 1);
 
-            return evicted_values;
+            return Entry{
+                .evicted = evicted,
+                .value_ptr = &set.values[way],
+                .index = set.offset + way,
+            };
         }
 
         const Set = struct {

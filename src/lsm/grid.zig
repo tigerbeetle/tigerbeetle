@@ -152,16 +152,7 @@ pub fn GridType(comptime Storage: type) type {
             // memory usage of tigerbeetle.
             const blocks_in_cache = 2048;
 
-            var cache_blocks = try CacheBlocks.init(
-                allocator,
-                blocks_in_cache +
-                    // Additional blocks for in-flight reads that have not yet been added to the cache.
-                    read_iops_max +
-                    // We acquire a block, evict a cache entry and release the evicted block.
-                    // So we need 1 extra block to cover that period.
-                    // TODO This could be avoided by tweaking the cache interface to evict first.
-                    1,
-            );
+            var cache_blocks = try CacheBlocks.init(allocator, blocks_in_cache);
             errdefer cache_blocks.deinit(allocator);
 
             var cache = try Cache.init(allocator, blocks_in_cache);
@@ -325,17 +316,14 @@ pub fn GridType(comptime Storage: type) type {
             const grid = iop.grid;
             const completed_write = iop.write;
 
-            const cached_block = grid.cache_blocks.acquire();
-            util.copy_disjoint(.exact, u8, cached_block, completed_write.block);
-            assert(cache_interface.address_from_block(&cached_block) == completed_write.address);
-            const evicted_blocks = grid.cache.insert(&cached_block);
-            for (evicted_blocks) |evicted_block| {
-                if (evicted_block) |block_ptr| {
-                    grid.cache_blocks.release(block_ptr);
-                }
-            }
-
             grid.write_iops.release(iop);
+
+            const entry = grid.cache.get_entry(completed_write.address);
+            if (!entry.evicted) {
+                // If there was space in the cache then we must have at least one block free.
+                entry.value_ptr.* = grid.cache_blocks.acquire();
+            }
+            util.copy_disjoint(.exact, u8, entry.value_ptr.*, completed_write.block);
 
             // Start a queued write if possible *before* calling the completed
             // write's callback. This ensures that if the callback calls
@@ -442,7 +430,9 @@ pub fn GridType(comptime Storage: type) type {
                 return;
             };
 
-            const block = grid.cache_blocks.acquire();
+            const block = grid.cache_blocks.acquire_if_free() orelse
+                // The cache is full so we must be able to evict a block
+                grid.cache.evict(read.address).?;
 
             iop.* = .{
                 .grid = grid,
@@ -495,11 +485,9 @@ pub fn GridType(comptime Storage: type) type {
             const block_type = iop.reads.peek().?.block_type;
 
             assert(cache_interface.address_from_block(&iop.block) == address);
-            const evicted_blocks = grid.cache.insert(&iop.block);
-            for (evicted_blocks) |evicted_block| {
-                if (evicted_block) |block_ptr| {
-                    grid.cache_blocks.release(block_ptr);
-                }
+            const evicted = grid.cache.insert(&iop.block);
+            if (evicted) |block| {
+                grid.cache_blocks.release(block);
             }
 
             const header_bytes = iop.block[0..@sizeOf(vsr.Header)];

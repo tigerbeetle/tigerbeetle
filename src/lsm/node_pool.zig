@@ -56,7 +56,11 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
         pub fn acquire(pool: *Self) Node {
             // TODO: To ensure this "unreachable" is never reached, the primary must reject
             // new requests when storage space is too low to fulfill them.
-            const node_index = pool.free.findFirstSet() orelse unreachable;
+            return pool.acquire_if_free() orelse unreachable;
+        }
+
+        pub fn acquire_if_free(pool: *Self) ?Node {
+            const node_index = pool.free.findFirstSet() orelse return null;
             assert(pool.free.isSet(node_index));
             pool.free.unset(node_index);
 
