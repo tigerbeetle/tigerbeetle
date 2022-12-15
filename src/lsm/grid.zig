@@ -425,6 +425,13 @@ pub fn GridType(comptime Storage: type) type {
                 unreachable;
             }
 
+            // If the block is already in the cache, queue up the read to be resolved
+            // from the cache on the next tick. This keeps start_read() asynchronous.
+            if (grid.cache.exists(read.address)) {
+                grid.read_cached_queue.push(read);
+                return;
+            }
+
             // Check if a read is already in progress for the target address.
             {
                 var it = grid.read_iops.iterate();
@@ -436,16 +443,6 @@ pub fn GridType(comptime Storage: type) type {
                         return;
                     }
                 }
-            }
-
-            // If the block is already in the cache, queue up the read to be resolved
-            // from the cache on the next tick. This keeps start_read() asynchronous.
-            // Note that this must be called after we have checked for an in
-            // progress read targeting the same address, otherwise we may read an
-            // unininitialized block.
-            if (grid.cache.exists(read.address)) {
-                grid.read_cached_queue.push(read);
-                return;
             }
 
             const iop = grid.read_iops.acquire() orelse {
