@@ -87,6 +87,8 @@ pub fn SetAssociativeCache(
         const Count = meta.Int(.unsigned, layout.clock_bits);
         const Clock = meta.Int(.unsigned, clock_hand_bits);
 
+        value_count: usize,
+
         sets: u64,
 
         /// A short, partial hash of a Key, corresponding to a Value.
@@ -160,6 +162,7 @@ pub fn SetAssociativeCache(
             errdefer allocator.free(clocks);
 
             var self = Self{
+                .value_count = 0,
                 .sets = sets,
                 .tags = tags,
                 .values = values,
@@ -183,12 +186,13 @@ pub fn SetAssociativeCache(
         }
 
         pub fn reset(self: *Self) void {
+            self.value_count = 0;
             mem.set(Tag, self.tags, 0);
             mem.set(u64, self.counts.words, 0);
             mem.set(u64, self.clocks.words, 0);
         }
 
-        /// Returns whether an entry with the given key is cached, 
+        /// Returns whether an entry with the given key is cached,
         /// without modifying the entry's counter.
         pub fn exists(self: *Self, key: Key) bool {
             const set = self.associate(key);
@@ -211,6 +215,7 @@ pub fn SetAssociativeCache(
             const way = self.search(set, key) orelse return;
 
             self.counts.set(set.offset + way, 0);
+            self.value_count -= 1;
         }
 
         /// Hint that the key is less likely to be accessed in the future, without actually removing
@@ -281,6 +286,7 @@ pub fn SetAssociativeCache(
                 // It should be a different value, but since we are returning a value pointer we
                 // can't check against the new one.
                 self.counts.set(set.offset + way, 0);
+                self.value_count -= 1;
             }
 
             const clock_index = @divExact(set.offset, layout.ways);
@@ -309,7 +315,10 @@ pub fn SetAssociativeCache(
 
                 count -= 1;
                 self.counts.set(set.offset + way, count);
-                if (count == 0) break; // Way has become free.
+                if (count == 0) {
+                    self.value_count -= 1;
+                    break; // Way has become free.
+                }
             } else {
                 unreachable;
             }
@@ -318,6 +327,7 @@ pub fn SetAssociativeCache(
             set.tags[way] = set.tag;
             self.counts.set(set.offset + way, 1);
             self.clocks.set(clock_index, way +% 1);
+            self.value_count += 1;
 
             return @alignCast(value_alignment, &set.values[way]);
         }

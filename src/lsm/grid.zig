@@ -190,6 +190,7 @@ pub fn GridType(comptime Storage: type) type {
                 retry_max -= 1;
                 if (retry_max == 0) break;
             }
+            std.debug.print("Cached: {}\n", .{grid.cache.value_count});
         }
 
         /// Returning null indicates that there are not enough free blocks to fill the reservation.
