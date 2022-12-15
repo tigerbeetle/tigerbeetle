@@ -349,11 +349,9 @@ pub fn GridType(comptime Storage: type) type {
             const cached_block = grid.cache_blocks.acquire();
             util.copy_disjoint(.exact, u8, cached_block, completed_write.block);
             assert(cache_interface.address_from_block(&cached_block) == completed_write.address);
-            const evicted_blocks = grid.cache.insert(&cached_block);
-            for (evicted_blocks) |evicted_block| {
-                if (evicted_block) |block_ptr| {
-                    grid.cache_blocks.release(block_ptr);
-                }
+            const evicted = grid.cache.insert(&cached_block);
+            if (evicted) |block| {
+                grid.cache_blocks.release(block);
             }
 
             grid.write_iops.release(iop);
@@ -508,11 +506,9 @@ pub fn GridType(comptime Storage: type) type {
             const block_type = iop.reads.peek().?.block_type;
 
             assert(cache_interface.address_from_block(&iop.block) == address);
-            const evicted_blocks = grid.cache.insert(&iop.block);
-            for (evicted_blocks) |evicted_block| {
-                if (evicted_block) |block_ptr| {
-                    grid.cache_blocks.release(block_ptr);
-                }
+            const evicted = grid.cache.insert(&iop.block);
+            if (evicted) |block| {
+                grid.cache_blocks.release(block);
             }
 
             const header_bytes = iop.block[0..@sizeOf(vsr.Header)];
