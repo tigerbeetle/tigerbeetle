@@ -282,11 +282,9 @@ pub fn SetAssociativeCache(
         ) *align(value_alignment) Value {
             const set = self.associate(key);
             if (self.search(set, key)) |way| {
-                // Remove the old entry for this key.
-                // It should be a different value, but since we are returning a value pointer we
-                // can't check against the new one.
-                self.counts.set(set.offset + way, 0);
-                self.value_count -= 1;
+                // Overwrite the old entry for this key.
+                self.counts.set(set.offset + way, 1);
+                return @alignCast(value_alignment, &set.values[way]);
             }
 
             const clock_index = @divExact(set.offset, layout.ways);
