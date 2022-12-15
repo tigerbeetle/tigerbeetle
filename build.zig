@@ -103,6 +103,11 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests.setBuildMode(mode);
         unit_tests.addOptions("tigerbeetle_build_options", options);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
+        unit_tests.setFilter(b.option(
+            []const u8,
+            "test-filter",
+            "Skip tests that do not match filter",
+        ));
         link_tracer_backend(unit_tests, tracer_backend, target);
 
         // for src/c/tb_client_header_test.zig to use cImport on tb_client.h
