@@ -1431,8 +1431,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_fix_callback(write: *Journal.Write) void {
+            const journal = write.journal;
+            assert(journal.status == .recovering);
             assert(write.trigger == .fix);
-            write.journal.recover_fix();
+
+            journal.writes.release(write);
+            journal.recover_fix();
         }
 
         fn recover_done(journal: *Journal) void {
