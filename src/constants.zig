@@ -395,3 +395,17 @@ pub const clock_synchronization_window_max_ms = config.process.clock_synchroniza
 
 /// Whether to perform intensive online verification.
 pub const verify = config.process.verify;
+
+/// AOF (Append Only File) allows logging all transactions synchronously to disk, before returning
+/// anything to the client. The logic behind this code has been kept as simple as possible -
+/// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple log
+/// consisting of logged requests. Much like a redis AOF with fsync=on.
+/// Enabling this will have performance implications.
+pub const aof = config.process.aof;
+
+/// Path to the AOF, if enabled
+pub const aof_path = config.process.aof_path;
+
+/// Place us in a special recovery state, where we accept timestamps passed in to us. Used to
+/// replay our AOF.
+pub const aof_recovery = config.process.aof_recovery;

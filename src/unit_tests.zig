@@ -23,6 +23,8 @@ test {
     _ = @import("ewah.zig");
     _ = @import("util.zig");
 
+    _ = @import("aof.zig");
+
     _ = @import("c/test.zig");
     _ = @import("c/tb_client_header_test.zig");
 

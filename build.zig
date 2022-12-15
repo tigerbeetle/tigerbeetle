@@ -41,6 +41,11 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
+    const aof_override = b.option(bool, "aof", "Override AOF mode.");
+    const aof_recovery_override = b.option(bool, "aof_recovery", "Override AOF Recovery mode.");
+    options.addOption(?bool, "aof", aof_override);
+    options.addOption(?bool, "aof_recovery", aof_recovery_override);
+
     {
         const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
         tigerbeetle.setTarget(target);
@@ -70,6 +75,21 @@ pub fn build(b: *std.build.Builder) void {
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("benchmark", "Run TigerBeetle benchmark");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const aof = b.addExecutable("aof", "src/aof.zig");
+        aof.setTarget(target);
+        aof.setBuildMode(mode);
+        aof.install();
+        aof.addOptions("tigerbeetle_build_options", options);
+        link_tracer_backend(aof, tracer_backend, target);
+
+        const run_cmd = aof.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("aof", "Run TigerBeetle AOF");
         run_step.dependOn(&run_cmd.step);
     }
 

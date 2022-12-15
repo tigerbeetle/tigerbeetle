@@ -6,6 +6,7 @@ const mem = std.mem;
 const log = std.log.scoped(.state_machine);
 const tracer = @import("tracer.zig");
 
+const global_constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
@@ -198,17 +199,20 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             comptime operation: Operation,
             input: []u8,
         ) void {
-            var sum_reserved_timestamps: usize = 0;
+            var sum_reserved_timestamps: u128 = 0;
             var events = mem.bytesAsSlice(Event(operation), input);
             for (events) |*event| {
                 sum_reserved_timestamps += event.timestamp;
                 self.prepare_timestamp += 1;
-                event.timestamp = self.prepare_timestamp;
+                if (!global_constants.aof_recovery) {
+                    event.timestamp = self.prepare_timestamp;
+                }
             }
             // The client is responsible for ensuring that timestamps are reserved:
             // Use a single branch condition to detect non-zero reserved timestamps.
             // Summing then branching once is faster than branching every iteration of the loop.
-            assert(sum_reserved_timestamps == 0);
+            // TODO: This still allows a bad client to crash the server :)
+            assert(global_constants.aof_recovery or sum_reserved_timestamps == 0);
         }
 
         pub fn prefetch(
@@ -601,7 +605,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
-            assert(a.timestamp > self.commit_timestamp);
+            assert(global_constants.aof_recovery or a.timestamp > self.commit_timestamp);
 
             if (a.flags.padding != 0) return .reserved_flag;
             if (!zeroed_48_bytes(a.reserved)) return .reserved_field;
@@ -643,7 +647,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         }
 
         fn create_transfer(self: *StateMachine, t: *const Transfer) CreateTransferResult {
-            assert(t.timestamp > self.commit_timestamp);
+            assert(global_constants.aof_recovery or t.timestamp > self.commit_timestamp);
 
             if (t.flags.padding != 0) return .reserved_flag;
             if (t.reserved != 0) return .reserved_field;
