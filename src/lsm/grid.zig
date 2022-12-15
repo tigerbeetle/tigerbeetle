@@ -132,6 +132,9 @@ pub fn GridType(comptime Storage: type) type {
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_queue: FIFO(Write) = .{},
 
+        /// Reads that should be started as soon as the current callback completes.
+        read_start_queue: FIFO(Read) = .{},
+
         /// `read_iops` maintains a list of ReadIOPs currently performing storage.read_sector() on
         /// a unique address.
         ///
@@ -141,9 +144,6 @@ pub fn GridType(comptime Storage: type) type {
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
         read_queue: FIFO(Read) = .{},
 
-        /// Reads that were found to be in the cache on start_read() and queued to be resolved on
-        /// the next tick(). This keeps read_block() always asynchronous to the caller.
-        read_cached_queue: FIFO(Read) = .{},
         // TODO interrogate this list and do recovery in Replica.tick().
         read_recovery_queue: FIFO(Read) = .{},
 
@@ -193,14 +193,8 @@ pub fn GridType(comptime Storage: type) type {
             // Even still, we cap the reads processed to prevent going over
             // any implicit time slice expected of Grid.tick(). This limit is fairly arbitrary.
             var retry_max: u32 = 100_000;
-            while (grid.read_cached_queue.pop()) |read| {
-                if (grid.cache.get(read.address)) |block| {
-                    if (constants.verify) grid.verify_cached_read(read.address, block.*);
-                    read.callback(read, block.*);
-                } else {
-                    grid.start_read(read);
-                }
-
+            while (grid.read_start_queue.pop()) |read| {
+                grid.start_read(read);
                 retry_max -= 1;
                 if (retry_max == 0) break;
             }
@@ -265,7 +259,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
             for ([_]FIFO(Read){
                 grid.read_queue,
-                grid.read_cached_queue,
+                grid.read_start_queue,
                 grid.read_recovery_queue,
             }) |queue| {
                 var it = queue.peek();
@@ -400,7 +394,7 @@ pub fn GridType(comptime Storage: type) type {
                 .block_type = block_type,
             };
 
-            grid.start_read(read);
+            grid.read_start_queue.push(read);
         }
 
         fn start_read(grid: *Grid, read: *Grid.Read) void {
@@ -440,13 +434,10 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            // If the block is already in the cache, queue up the read to be resolved
-            // from the cache on the next tick. This keeps start_read() asynchronous.
-            // Note that this must be called after we have checked for an in
-            // progress read targeting the same address, otherwise we may read an
-            // unininitialized block.
-            if (grid.cache.exists(read.address)) {
-                grid.read_cached_queue.push(read);
+            // If the block is already in the cache, run the callback immediately.
+            if (grid.cache.get(read.address)) |block| {
+                if (constants.verify) grid.verify_cached_read(read.address, block.*);
+                read.callback(read, block.*);
                 return;
             }
 
