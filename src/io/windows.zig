@@ -941,7 +941,7 @@ pub const IO = struct {
         must_create: bool,
     ) !os.fd_t {
         assert(relative_path.len > 0);
-        assert(size >= constants.sector_size);
+        assert(size == 0 or size >= constants.sector_size);
         assert(size % constants.sector_size == 0);
 
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);

@@ -56,6 +56,9 @@ const ConfigProcess = struct {
     clock_epoch_max_ms: u64 = 60000,
     clock_synchronization_window_min_ms: u64 = 2000,
     clock_synchronization_window_max_ms: u64 = 20000,
+    aof: bool = false,
+    aof_path: []const u8 = "./tigerbeetle.aof",
+    aof_recovery: bool = false,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -213,6 +216,17 @@ pub const configs = struct {
             // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
             // but a different type from a nominal typing perspective.
             @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
+
+        // Allow overriding AOF here, to make for easier tests
+        base.process.aof = if (@hasDecl(root, "aof"))
+            root.aof orelse base.process.aof
+        else
+            build_options.aof orelse base.process.aof;
+
+        base.process.aof_recovery = if (@hasDecl(root, "aof_recovery"))
+            root.aof_recovery orelse base.process.aof_recovery
+        else
+            build_options.aof_recovery orelse base.process.aof_recovery;
 
         break :current base;
     };

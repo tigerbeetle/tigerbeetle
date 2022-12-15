@@ -178,6 +178,11 @@ const Command = struct {
             args.addresses[replica.replica],
         });
 
+        if (constants.aof_recovery) {
+            log_main.warn("{}: started in AOF recovery mode. This is potentially dangerous - " ++
+                "if it's unexpected, please exit tigerbeetle and change config.zig immediately.", .{replica.replica});
+        }
+
         while (true) {
             replica.tick();
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);

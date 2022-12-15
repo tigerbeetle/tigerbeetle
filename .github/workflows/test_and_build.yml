@@ -69,6 +69,13 @@ jobs:
       - uses: actions/checkout@v2
       - run: ./scripts/benchmark.sh
 
+  aof_on_linux:
+    name: Run AOF test on Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/aof.sh
+
   benchmark_on_macos:
     name: Run benchmark on macOS
     runs-on: macos-latest

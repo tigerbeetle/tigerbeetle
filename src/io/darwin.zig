@@ -658,7 +658,7 @@ pub const IO = struct {
         must_create: bool,
     ) !os.fd_t {
         assert(relative_path.len > 0);
-        assert(size >= constants.sector_size);
+        assert(size == 0 or size >= constants.sector_size);
         assert(size % constants.sector_size == 0);
 
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
