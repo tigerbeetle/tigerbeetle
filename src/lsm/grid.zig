@@ -182,22 +182,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn tick(grid: *Grid) void {
-            // Resolve reads that were seen in the cache during start_read()
-            // but deferred to be asynchronously resolved on the next tick.
-            //
-            // Drain directly from the queue so that new cache reads (added upon completion of old
-            // cache reads) that can be serviced immediately aren't deferred until the next tick
-            // (which may be milliseconds later due to IO.run_for_ns). This is necessary to ensure
-            // that groove prefetch completes promptly.
-            //
-            // Even still, we cap the reads processed to prevent going over
-            // any implicit time slice expected of Grid.tick(). This limit is fairly arbitrary.
-            var retry_max: u32 = 100_000;
-            while (grid.read_start_queue.pop()) |read| {
-                grid.start_read(read);
-                retry_max -= 1;
-                if (retry_max == 0) break;
-            }
+            grid.start_reads();
         }
 
         /// Returning null indicates that there are not enough free blocks to fill the reservation.
@@ -366,6 +351,7 @@ pub fn GridType(comptime Storage: type) type {
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
             completed_write.callback(completed_write);
+            grid.start_reads();
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -394,7 +380,14 @@ pub fn GridType(comptime Storage: type) type {
                 .block_type = block_type,
             };
 
+            // Queue read to be handled when the current callback completes.
             grid.read_start_queue.push(read);
+        }
+
+        fn start_reads(grid: *Grid) void {
+            while (grid.read_start_queue.pop()) |read| {
+                grid.start_read(read);
+            }
         }
 
         fn start_read(grid: *Grid, read: *Grid.Read) void {
@@ -438,6 +431,9 @@ pub fn GridType(comptime Storage: type) type {
             if (grid.cache.get(read.address)) |block| {
                 if (constants.verify) grid.verify_cached_read(read.address, block.*);
                 read.callback(read, block.*);
+                // Don't need to call `start_reads` here because we came here from
+                // either `start_reads` or `read_block_callback` (which will call
+                // `start_reads` when we return).
                 return;
             }
 
@@ -567,6 +563,7 @@ pub fn GridType(comptime Storage: type) type {
                 assert(read.address != address);
                 grid.start_read(read);
             }
+            grid.start_reads();
         }
 
         fn block_offset(address: u64) u64 {
