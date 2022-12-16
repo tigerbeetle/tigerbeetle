@@ -467,19 +467,19 @@ pub fn GridType(comptime Storage: type) type {
             const read = iop.read;
             const grid = read.grid;
 
-            // Either reoslve all reads on the address or send them all to recovery.
-            if (read_block_valid(read, block)) {
-                grid.read_block_resolve(read, block);
-            } else {
-                grid.read_recovery_queue.push(read);
-            }
-
-            // Handoff the iop to a pending read or release it
+            // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {
                 const queued_read = @fieldParentPtr(Read, "pending", pending);
                 grid.read_block_with(iop, queued_read);
             } else {
                 grid.read_iops.release(iop);
+            }
+
+            // Either reoslve all reads on the address or send them all to recovery.
+            if (read_block_valid(read, block)) {
+                grid.read_block_resolve(read, block);
+            } else {
+                grid.read_recovery_queue.push(read);
             }
         }
 
