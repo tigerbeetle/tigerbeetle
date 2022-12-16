@@ -70,7 +70,7 @@ pub const StateChecker = struct {
     }
 
     pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
-        const replica = state_checker.replicas[replica_index];
+        const replica = &state_checker.replicas[replica_index];
         const commit_header = header: {
             if (replica.journal.status == .recovered) {
                 const commit_header = replica.journal.header_with_op(replica.commit_min);
