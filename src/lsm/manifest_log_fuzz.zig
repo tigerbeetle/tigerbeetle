@@ -319,7 +319,7 @@ const Environment = struct {
 
     fn wait(env: *Environment, manifest_log: *ManifestLog) void {
         while (env.pending > 0) {
-            manifest_log.grid.tick();
+            // manifest_log.grid.tick();
             manifest_log.superblock.storage.tick();
         }
     }
