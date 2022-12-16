@@ -132,7 +132,6 @@ pub fn GridType(comptime Storage: type) type {
             resolves: FIFO(ReadPending) = .{},
 
             grid: *Grid,
-            block: ?BlockPtrConst = null,
             next_tick: Grid.NextTick = undefined,
 
             /// Link for Grid.read_queue/Grid.read_recovery_queue linked lists.
@@ -147,6 +146,7 @@ pub fn GridType(comptime Storage: type) type {
         const ReadIOP = struct {
             completion: Storage.Read,
             read: *Read,
+            block: BlockPtr,
         };
 
         superblock: *SuperBlock,
@@ -162,6 +162,8 @@ pub fn GridType(comptime Storage: type) type {
         read_pending_queue: FIFO(ReadPending) = .{},
         // TODO interrogate this list and do recovery in Replica.tick().
         read_recovery_queue: FIFO(Read) = .{},
+        // True if there's a read thats resolving callbacks. If so, the read cache must not be invalidated.
+        read_resolving: bool = false,
 
         pub fn init(allocator: mem.Allocator, superblock: *SuperBlock) !Grid {
             // TODO Determine this at runtime based on runtime configured maximum
@@ -254,7 +256,13 @@ pub fn GridType(comptime Storage: type) type {
                 var it = queue.peek();
                 while (it) |queued_read| : (it = queued_read.next) {
                     assert(address != queued_read.address);
-                    assert(block != queued_read.block);
+                }
+            }
+            {
+                var it = grid.read_iops.iterate();
+                while (it.next()) |iop| {
+                    assert(address != iop.read.address);
+                    assert(block != iop.block);
                 }
             }
         }
@@ -378,12 +386,19 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // Become the "root" read thats fetching the block for the given address.
+            // The fetch happens asynchronously to avoid stack-overflow and nested cache invalidation.
             grid.read_queue.push(read);
+            grid.on_next_tick(read_block_tick_callback, &read.next_tick);
+        }
 
-            // Try to resolve the block from the cache
-            if (grid.cache.get(address)) |block| {
-                read.block = block;
-                grid.on_next_tick(read_block_tick_callback, &read.next_tick);
+        fn read_block_tick_callback(next_tick: *Storage.NextTick) void {
+            const read = @fieldParentPtr(Grid.Read, "next_tick", next_tick);
+            const grid = read.grid;
+
+            // Try to resolve the read from the cache.
+            if (grid.cache.get(read.address)) |block| {
+                if (constants.verify) grid.verify_cached_read(read.address, block);
+                grid.read_block_resolve(read, block);
                 return;
             }
 
@@ -401,6 +416,9 @@ pub fn GridType(comptime Storage: type) type {
             const address = read.address;
             assert(address > 0);
 
+            // We can only update the cache if the Grid is not resolving callbacks with a cache block.
+            assert(!grid.read_resolving);
+
             // Grab a block from the cache to read with.
             // This also inserts the block into the cache at the address.
             const block = grid.cache.insert_preserve_locked(
@@ -417,10 +435,10 @@ pub fn GridType(comptime Storage: type) type {
             // invariants of `SetAssociativeCache`.
             cache_interface.set_address(block, address);
             
-            read.block = block;
             iop.* = .{
                 .completion = undefined,
                 .read = read,
+                .block = block,
             };
 
             grid.superblock.storage.read_sectors(
@@ -433,20 +451,21 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         inline fn block_locked(grid: *Grid, block: BlockPtrConst) bool {
-            var it = grid.read_queue.peek();
-            while (it) |pending_read| : (it = pending_read.next) {
-                if (pending_read.block == block) return true;
+            var it = grid.read_iops.iterate();
+            while (it.next()) |iop| {
+                if (block == iop.block) return true;
             }
             return false;
         }
 
         fn read_block_callback(completion: *Storage.Read) void {
             const iop = @fieldParentPtr(ReadIOP, "completion", completion);
+            const block = iop.block;
             const read = iop.read;
             const grid = read.grid;
             
             // Either reoslve all reads on the address or send them all to recovery.
-            if (read_block_validate(read)) |block| {
+            if (read_block_valid(read, block)) {
                 grid.read_block_resolve(read, block);
             } else {
                 grid.read_recovery_queue.push(read);
@@ -461,23 +480,22 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        fn read_block_validate(read: *Grid.Read) ?BlockPtrConst {
+        fn read_block_valid(read: *Grid.Read, block: BlockPtrConst) bool {
             const address = read.address;
             const checksum = read.checksum;
             const block_type = read.block_type;
-            const block = read.block orelse unreachable;
 
             const header_bytes = block[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
             
             if (!header.valid_checksum()) {
                 log.err("invalid checksum at address {}", .{address});
-                return null;
+                return false;
             }
 
             if (!header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size])) {
                 log.err("invalid checksum body at address {}", .{address});
-                return null;
+                return false;
             }
 
             if (header.checksum != checksum) {
@@ -493,34 +511,27 @@ pub fn GridType(comptime Storage: type) type {
                         @enumToInt(header.operation),
                     },
                 );
-                return null;
+                return false;
             }
 
             assert(header.op == address);
             assert(header.operation == block_type.operation());
-            return block;
-        }
-
-        fn read_block_tick_callback(next_tick: *Storage.NextTick) void {
-            const read = @fieldParentPtr(Grid.Read, "next_tick", next_tick);
-            const grid = read.grid;
-
-            // The block comes from grid.cache.get() and was deferred to be handled later
-            // via Grid.on_next_tick to avoid resolving the read inline and risking stack overflow.
-            const cached_block = read.block orelse unreachable;
-            if (constants.verify) {
-                grid.verify_cached_read(read.address, cached_block);
-            }
-
-            grid.read_block_resolve(read, cached_block);
+            return true;
         }
 
         fn read_block_resolve(grid: *Grid, read: *Grid.Read, block: BlockPtrConst) void {
-            // Resolve all reads queued to the address with the block.
-            // Callbacks may queue more to read.resolves so it must drain any new/existing pendings.
-            while (read.resolves.pop()) |pending| {
-                const pending_read = @fieldParentPtr(Read, "pending", pending);
-                pending_read.callback(pending_read, block);
+            {
+                // Guard to make sure the cache cannot be updated by pending_read.callbacks()
+                assert(!grid.read_resolving);
+                grid.read_resolving = true;
+                defer grid.read_resolving = false;
+
+                // Resolve all reads queued to the address with the block.
+                // Callbacks may queue more to read.resolves so it must drain any new/existing pendings.
+                while (read.resolves.pop()) |pending| {
+                    const pending_read = @fieldParentPtr(Read, "pending", pending);
+                    pending_read.callback(pending_read, block);
+                }
             }
             
             // Remove the "root" read so that the address is no longer actively reading / locked.
