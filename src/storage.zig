@@ -78,7 +78,7 @@ pub const Storage = struct {
     fd: os.fd_t,
 
     next_tick_queue: FIFO(NextTick) = .{},
-    next_tick_completion: IO.Completion = undefined, 
+    next_tick_completion: IO.Completion = undefined,
 
     pub fn init(io: *IO, fd: os.fd_t) !Storage {
         return Storage{
@@ -118,7 +118,7 @@ pub const Storage = struct {
                 &storage.next_tick_completion,
                 0, // 0ns timeout means to resolve as soon as possible - like a yield
             );
-        } 
+        }
     }
 
     fn timeout_callback(
@@ -131,7 +131,7 @@ pub const Storage = struct {
             error.Canceled => unreachable,
             error.Unexpected => unreachable,
         };
-        
+
         var queue = storage.next_tick_queue;
         storage.next_tick_queue = .{};
         while (queue.pop()) |next_tick| next_tick.callback(next_tick);
@@ -173,7 +173,7 @@ pub const Storage = struct {
 
         const target = read.target();
         if (target.len == 0) {
-            // Resolving the read inline means start_read() must not have been called from 
+            // Resolving the read inline means start_read() must not have been called from
             // read_sectors(). If it was, this is a synchronous callback resolution and should
             // be reported.
             assert(bytes_read != null);

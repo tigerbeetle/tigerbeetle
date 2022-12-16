@@ -103,7 +103,7 @@ pub fn GridType(comptime Storage: type) type {
         pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
         pub const Reservation = free_set.Reservation;
-        
+
         // Grid just reuses the Storage's NextTick abstraction for simplicity.
         pub const NextTick = Storage.NextTick;
 
@@ -437,7 +437,7 @@ pub fn GridType(comptime Storage: type) type {
             // However, we do have to immediately set the cache key to uphold the
             // invariants of `SetAssociativeCache`.
             cache_interface.set_address(block, address);
-            
+
             iop.* = .{
                 .completion = undefined,
                 .read = read,
@@ -466,7 +466,7 @@ pub fn GridType(comptime Storage: type) type {
             const block = iop.block;
             const read = iop.read;
             const grid = read.grid;
-            
+
             // Either reoslve all reads on the address or send them all to recovery.
             if (read_block_valid(read, block)) {
                 grid.read_block_resolve(read, block);
@@ -490,7 +490,7 @@ pub fn GridType(comptime Storage: type) type {
 
             const header_bytes = block[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
-            
+
             if (!header.valid_checksum()) {
                 log.err("invalid checksum at address {}", .{address});
                 return false;
@@ -536,7 +536,7 @@ pub fn GridType(comptime Storage: type) type {
                     pending_read.callback(pending_read, block);
                 }
             }
-            
+
             // Remove the "root" read so that the address is no longer actively reading / locked.
             // Then invoke the callback with the cache block (which is only valid until the the
             // next Grid.read_block/Grid.write_block which may be done inside callback).

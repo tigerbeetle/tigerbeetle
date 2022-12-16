@@ -154,7 +154,7 @@ pub const Storage = struct {
     writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
-    next_tick_queue: FIFO(NextTick) = .{}, 
+    next_tick_queue: FIFO(NextTick) = .{},
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(options.write_latency_mean >= options.write_latency_min);
@@ -808,7 +808,7 @@ pub const Storage = struct {
     pub fn grid_block(
         storage: *const Storage,
         address: u64,
-    ) *align(constants.sector_size) const [constants.block_size]u8 {
+    ) *align(constants.sector_size) [constants.block_size]u8 {
         assert(address > 0);
 
         const block_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
