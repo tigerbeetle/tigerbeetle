@@ -319,6 +319,9 @@ pub fn GridType(comptime Storage: type) type {
             const grid = iop.grid;
             const completed_write = iop.write;
 
+            // We can only update the cache if the Grid is not resolving callbacks with a cache block.
+            assert(!grid.read_resolving);
+
             const cached_block = grid.cache.insert_preserve_locked(
                 *Grid,
                 block_locked,
