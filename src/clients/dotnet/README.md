@@ -54,72 +54,49 @@ var errors = await client.CreateTransfers(accounts);
 
 ## Build from source
 
-### 1. Install [dotnet 6](https://dotnet.microsoft.com/en-us/download)
+*Prerequisites:*
 
-It is needed to build and run the tests, this library can be used from any [.Net Standard 2.1 compatible runtime](https://docs.microsoft.com/en-us/dotnet/standard/net-standard) (.Net Framework 4.8, .Net Core, Xamarin, etc)
+[dotnet 6](https://dotnet.microsoft.com/en-us/download)
 
+> Dotnet 6 is needed only to build and run the tests, this library can be used from any [.Net Standard 2.1 compatible runtime](https://docs.microsoft.com/en-us/dotnet/standard/net-standard) (.Net Framework 4.8, .Net Core, Xamarin, etc)
+> For Windows users, there is a `.sln` solution file that can be opened with `Microsoft Visual Studio 2022`.
 
-For Windows users, there is a `.sln` solution file that can be opened with `Microsoft Visual Studio 2022`.
-
-### 2. Clone this repo
-
-Clone loading the submodules
+### 1. Clone this repository
 
 ```bash
-git clone --recurse-submodules https://github.com/batiati/tigerbeetle-dotnet.git
-```
-
-Or initialize the submodules after cloning
-
-```bash
-git submodule init
-git submodule update 
-```
-
-### 3. Install TigerBeetle
-
-Run the install script provided by TigerBeetle repo, and build the server executable.
-
-**Linux/MacOS**
-```bash
+git clone https://github.com/tigerbeetledb/tigerbeetle.git
 cd tigerbeetle
-scripts/install.sh
+```
+
+### 2. Install Zig and Tigerbeetle
+
+**Linux and macOS**
+
+```bash
+./scripts/install.sh
 ```
 
 **Windows**
+
 ```cmd
-cd tigerbeetle
-scripts\install.bat
+.\scripts\install.bat
 ```
 
-### 4. Test
+### 3. Build dotnet client
 
-On `tigerbeetle-dotnet/src` folder, run the integrated tests.
-
-During the build, the `tb_client` library will be built and embedded into the dotnet project.
+**Linux and macOS**
 
 ```bash
+cd src/clients/dotnet/src 
 dotnet test
 ```
 
-### 5. Benchmark
-
-On `tigerbeetle-dotnet` folder, run the `benchmark.sh` script.
-
-**Linux/MacOS**
-```bash
-scripts/benchmark.sh
-```
-
 **Windows**
-```bash
-scripts\benchmark.bat
-```
-## Other clients and documentation
 
-- [Tigerbeetle Node](https://github.com/tigerbeetledb/tigerbeetle-node)
-- [Tigerbeetle Go](https://github.com/tigerbeetledb/tigerbeetle-go)
-- [Tigerbeetle Java](https://github.com/tigerbeetledb/tigerbeetle-java)
+```cmd
+cd src\clients\dotnet\src 
+dotnet test
+```
 
 ## License
 

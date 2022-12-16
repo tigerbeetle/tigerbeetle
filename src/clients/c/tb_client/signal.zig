@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const IO = @import("../../io.zig").IO;
+const IO = @import("../../../io.zig").IO;
 
 const os = std.os;
 const assert = std.debug.assert;

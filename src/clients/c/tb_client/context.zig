@@ -2,15 +2,15 @@ const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
 
-const constants = @import("../../constants.zig");
+const constants = @import("../../../constants.zig");
 const log = std.log.scoped(.tb_client_context);
 
-const util = @import("../../util.zig");
-const vsr = @import("../../vsr.zig");
+const util = @import("../../../util.zig");
+const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 
-const IO = @import("../../io.zig").IO;
-const message_pool = @import("../../message_pool.zig");
+const IO = @import("../../../io.zig").IO;
+const message_pool = @import("../../../message_pool.zig");
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;

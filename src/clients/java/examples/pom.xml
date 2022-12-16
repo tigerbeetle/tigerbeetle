@@ -39,7 +39,7 @@
       <artifactId>tigerbeetle-java</artifactId>
       <version>0.0.1-SNAPSHOT</version>
       <scope>system</scope>
-      <systemPath>${pom.basedir}/../src/tigerbeetle-java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar</systemPath>
+      <systemPath>${pom.basedir}/../target/tigerbeetle-java-0.0.1-SNAPSHOT.jar</systemPath>
     </dependency>
   </dependencies>
   <build>

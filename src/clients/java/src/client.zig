@@ -4,7 +4,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const jui = @import("jui");
-const tb = @import("tigerbeetle");
+const tb = @import("../../c/tb_client.zig");
 
 const log = std.log.scoped(.tb_client_jni);
 

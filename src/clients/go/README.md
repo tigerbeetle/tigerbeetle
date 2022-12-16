@@ -32,7 +32,7 @@ Import ok!
 See [./samples/basic](./samples/basic) for a Go project
 showing many features of the client.
 
-## Development Setup
+## Building from source 
 
 This section is only relevant to folks modifying the Go client code
 itself. If you are just using the client, you can ignore this.
@@ -41,19 +41,43 @@ itself. If you are just using the client, you can ignore this.
 - go 1.17+
 - zig 0.9.1
 
-```sh
-# Step 1 - Set up Zig
-$ cd src/clients/go
-$ ./tigerbeetle/scripts/install_zig.sh
+### 1. Clone this repository
 
-# Step 2 - Build tb_client for your platform and use it in go
-$ ./scripts/rebuild_binaries.sh
-
-# Step 3 - Build and test tigerbeetle-go (zgo = go with CGO env setup)
-$ ./zgo.sh test # on unix
-$ zgo.bat test # on windows
+```bash
+git clone https://github.com/tigerbeetledb/tigerbeetle.git
+cd tigerbeetle
 ```
 
-## Other clients and documentation
+### 2. Install Zig and Tigerbeetle
 
-- [Tigerbeetle Node](https://github.com/tigerbeetledb/tigerbeetle-node)
+**Linux and macOS**
+
+```bash
+./scripts/install.sh
+```
+
+**Windows**
+
+```cmd
+.\scripts\install.bat
+```
+
+### 3. Build Go client
+
+> zgo = go with CGO env setup
+
+**Linux and macOS**
+
+```bash
+./zig/zig build go_client -Drelease-safe
+cd src/clients/go
+./zgo.sh test
+```
+
+**Windows**
+
+```cmd
+.\zig\zig.exe build go_client -Drelease-safe
+cd src\clients\go
+zgo.bat test
+```

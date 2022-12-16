@@ -1,8 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const tb = @import("../tigerbeetle.zig");
-const tb_client = @import("./tb_client.zig");
+const tb = @import("../../tigerbeetle.zig");
+const tb_client = @import("tb_client.zig");
 const c = @cImport(@cInclude("tb_client.h"));
 
 fn to_lowercase(comptime input: []const u8) []const u8 {

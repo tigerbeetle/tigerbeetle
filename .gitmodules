@@ -1,5 +1,5 @@
 [submodule "src/clients/java/src/zig/lib/jui"]
-	path = src/clients/java/src/zig/lib/jui
+	path = src/clients/java/lib/jui
 	url = https://github.com/zig-java/jui.git
 [submodule "tools/tracy"]
 	path = tools/tracy

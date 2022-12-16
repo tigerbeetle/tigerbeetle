@@ -139,21 +139,22 @@ while(errors.next()) {
 ### 1. Clone this repository
 
 ```bash
-git clone --recurse-submodules https://github.com/tigerbeetledb/tigerbeetle-java.git
+git clone https://github.com/tigerbeetledb/tigerbeetle.git
+cd tigerbeetle
 ```
 ### 2. Install Zig and Tigerbeetle
 
 **Linux and macOS**
 
 ```bash
-cd tigerbeetle-java
+cd src/clients/java
 ./scripts/install.sh
 ```
 
 **Windows**
 
 ```cmd
-cd tigerbeetle-java
+cd src\clients\java
 .\scripts\install.bat
 ```
 
@@ -170,12 +171,6 @@ cd tigerbeetle-java
 ```cmd
 .\scripts\benchmark.bat
 ```
-
-## Other clients and documentation
-
-- [TigerBeetle documentation](https://docs.tigerbeetle.com/)
-- [TigerBeetle Node](https://github.com/tigerbeetledb/tigerbeetle-node)
-- [TigerBeetle Go](https://github.com/tigerbeetledb/tigerbeetle-go)
 
 ## License
 
