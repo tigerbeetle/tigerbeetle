@@ -153,8 +153,12 @@ pub fn build(b: *std.build.Builder) void {
             simulator.setBuildMode(.ReleaseSafe);
         }
 
-        const step = b.step("simulator", "Run the Simulator");
-        step.dependOn(&run_cmd.step);
+        const install_step = b.addInstallArtifact(simulator);
+        const build_step = b.step("simulator", "Build the Simulator");
+        build_step.dependOn(&install_step.step);
+
+        const run_step = b.step("simulator_run", "Run the Simulator");
+        run_step.dependOn(&run_cmd.step);
     }
 
     {
