@@ -4387,8 +4387,8 @@ pub fn ReplicaType(
                 prepare.?.header.checksum,
             });
 
-            const prepare_old = self.pipeline.cache.insert(prepare.?.ref());
-            if (prepare_old) |message_old| self.message_bus.unref(message_old);
+            const prepare_evicted = self.pipeline.cache.insert(prepare.?.ref());
+            if (prepare_evicted) |message_evicted| self.message_bus.unref(message_evicted);
 
             if (self.primary_repair_pipeline_op()) |_| {
                 assert(!self.pipeline_repairing);
@@ -6023,6 +6023,18 @@ pub fn ReplicaType(
                 return;
             }
 
+            // Criteria for caching:
+            // - The primary does not update the cache (even in status=view_change) since it
+            //   will be reconstructing its pipeline.
+            // - Cache uncommitted ops, since it will avoid a WAL read in the common case.
+            if (self.pipeline == .cache and
+                self.replica != self.primary_index(self.view) and
+                self.commit_min < message.header.op)
+            {
+                const prepare_evicted = self.pipeline.cache.insert(message.ref());
+                if (prepare_evicted) |m| self.message_bus.unref(m);
+            }
+
             self.journal.write_prepare(write_prepare_callback, message, trigger);
         }
 
@@ -6248,8 +6260,8 @@ const PipelineCache = struct {
         var cache = PipelineCache{};
         var prepares = queue.prepare_queue.iterator();
         while (prepares.next()) |prepare| {
-            const prepare_old = cache.insert(prepare.message.ref());
-            assert(prepare_old == null);
+            const prepare_evicted = cache.insert(prepare.message.ref());
+            assert(prepare_evicted == null);
             assert(prepare.message.header.command == .prepare);
         }
         return cache;
@@ -6298,8 +6310,8 @@ const PipelineCache = struct {
         assert(prepare.header.command == .prepare);
 
         const slot = prepare.header.op % prepares_max;
-        const prepare_old = pipeline.prepares[slot];
+        const prepare_evicted = pipeline.prepares[slot];
         pipeline.prepares[slot] = prepare;
-        return prepare_old;
+        return prepare_evicted;
     }
 };
