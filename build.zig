@@ -43,7 +43,7 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
-    {
+    const tigerbeetle_exe = blk: {
         const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
         tigerbeetle.setTarget(target);
         tigerbeetle.setBuildMode(mode);
@@ -58,7 +58,14 @@ pub fn build(b: *std.build.Builder) void {
 
         const run_step = b.step("run", "Run TigerBeetle");
         run_step.dependOn(&run_cmd.step);
-    }
+
+        // Moves the server executable to the root folder.
+        const install = b.addInstallBinFile(tigerbeetle.getOutputSource(), b.pathJoin(&.{ "../../", tigerbeetle.out_filename }));
+        install.step.dependOn(&tigerbeetle.step);
+        b.default_step = &install.step;
+
+        break :blk install;
+    };
 
     {
         const benchmark = b.addExecutable("benchmark", "src/benchmark.zig");
@@ -119,20 +126,22 @@ pub fn build(b: *std.build.Builder) void {
     {
         go_client(
             b,
-            &tb_client_header_generate.step,
             mode,
+            &.{ &tigerbeetle_exe.step, &tb_client_header_generate.step },
             options,
             tracer_backend,
         );
         java_client(
             b,
             mode,
+            &.{&tigerbeetle_exe.step},
             options,
             tracer_backend,
         );
         dotnet_client(
             b,
             mode,
+            &.{&tigerbeetle_exe.step},
             options,
             tracer_backend,
         );
@@ -335,21 +344,24 @@ fn link_tracer_backend(
 
 fn go_client(
     b: *std.build.Builder,
-    header_generate_step: *std.build.Step,
     mode: Mode,
+    dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("go_client", "Build Go client shared library");
+
+    for (dependencies) |dependency| {
+        build_step.dependOn(dependency);
+    }
 
     // Updates the generated header file:
     const install_header = b.addInstallFile(
         .{ .path = "src/clients/c/tb_client.h" },
         "../src/clients/go/pkg/native/tb_client.h",
     );
-    install_header.step.dependOn(header_generate_step);
 
-    // Zig cross-targets
+    // Zig cross-targets:
     const platforms = .{
         "x86_64-linux",
         "x86_64-macos",
@@ -384,12 +396,17 @@ fn go_client(
 fn java_client(
     b: *std.build.Builder,
     mode: Mode,
+    dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("java_client", "Build Java client shared library");
 
-    // Zig cross-targets
+    for (dependencies) |dependency| {
+        build_step.dependOn(dependency);
+    }
+
+    // Zig cross-targets:
     const platforms = .{
         "x86_64-linux-gnu",
         "x86_64-linux-musl",
@@ -428,12 +445,17 @@ fn java_client(
 fn dotnet_client(
     b: *std.build.Builder,
     mode: Mode,
+    dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("dotnet_client", "Build dotnet client shared library");
 
-    // Zig cross-targets
+    for (dependencies) |dependency| {
+        build_step.dependOn(dependency);
+    }
+
+    // Zig cross-targets:
     const platforms = .{
         "x86_64-linux-gnu",
         "x86_64-macos",

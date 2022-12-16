@@ -19,4 +19,3 @@ else
     echo "Building TigerBeetle..."
     zig/zig build -Dcpu=baseline -Drelease-safe
 fi
-mv zig-out/bin/tigerbeetle .
