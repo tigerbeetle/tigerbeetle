@@ -9,7 +9,7 @@ COLOR_END='\033[0m'
 
 echo "Building TigerBeetle..."
 (cd ../../.. && ./zig/zig build -Dcpu=baseline -Drelease-safe)
-(cd ../../.. && mv ./zig-out/bin/tigerbeetle .)
+
 echo "Building TigerBeetle Java Client"
 mvn -B compile --quiet
 

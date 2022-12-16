@@ -28,7 +28,6 @@ exit /b
 
 :main
 zig\zig.exe build -Drelease-safe
-move zig-out\bin\tigerbeetle.exe . >nul
 
 for /l %%i in (0, 1, 0) do (
     echo Initializing replica %%i

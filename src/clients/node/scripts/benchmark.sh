@@ -7,7 +7,6 @@ COLOR_END='\033[0m'
 
 cd ./src/tigerbeetle
 "$CWD"/zig/zig build -Drelease-safe
-mv zig-out/bin/tigerbeetle "$CWD"
 cd "$CWD"
 
 REPLICAS="0"
