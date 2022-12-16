@@ -5254,12 +5254,20 @@ pub fn ReplicaType(
 
             self.set_op_and_commit_max(
                 do_view_change_head.op,
-                // `set_op_and_commit_max()` expects the highest commit_max that we know of.
-                // But DVCs include replica's `commit_min`, not `commit_max`.
-                std.math.max(
-                    self.commit_max,
-                    do_view_change_head.commit_min_max,
-                ),
+                commit_max: {
+                    var commit_max = self.commit_max;
+                    // `set_op_and_commit_max()` expects the highest commit_max that we know of.
+                    // But DVCs include replica's `commit_min`, not `commit_max`.
+                    commit_max = std.math.max(commit_max, do_view_change_head.commit_min_max);
+                    // An op cannot be uncommitted if it is definitely outside the pipeline.
+                    // Use `do_view_change_head.op` instead of `replica.op` since the former is
+                    // about to become the new `replica.op`.
+                    commit_max = std.math.max(
+                        commit_max,
+                        do_view_change_head.op -| constants.pipeline_max,
+                    );
+                    break :commit_max commit_max;
+                },
                 "on_do_view_change",
             );
             // "`replica.op` exists" invariant may be broken until after the canonical DVC headers
@@ -5337,6 +5345,8 @@ pub fn ReplicaType(
                 self.journal.remove_entries_from(op_max + 1);
                 self.op = op_max;
             }
+            assert(self.op >= self.commit_min);
+            assert(self.op >= self.commit_max);
             assert(self.journal.header_with_op(self.op) != null);
         }
 
@@ -5485,6 +5495,7 @@ pub fn ReplicaType(
             // wrapping implies a checkpoint (which implies a commit).
             assert(self.op - self.commit_max <= constants.journal_slot_count);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
+            assert(self.op <= self.commit_max + constants.pipeline_max);
 
             assert(op_canonical <= self.op);
             assert(op_canonical >= self.commit_min);
@@ -5516,11 +5527,7 @@ pub fn ReplicaType(
             // (the old primary may have committed the op shortly before crashing), nevertheless,
             // if it was committed it would have survived into the new view as a header not a gap.
             const op_before_gap = blk: {
-                // An op cannot be uncommitted if it is definitely outside the pipeline.
-                const op_committed = std.math.max(self.commit_max, self.op -| constants.pipeline_max);
-                assert(op_committed <= self.op);
-
-                var op = op_committed;
+                var op = self.commit_max;
                 while (op < self.op) : (op += 1) {
                     if (self.journal.header_with_op(op + 1) == null) break :blk op;
                 } else break :blk self.op;
