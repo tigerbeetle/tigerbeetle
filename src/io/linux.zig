@@ -819,6 +819,14 @@ pub const IO = struct {
                 },
             },
         };
+
+        // Special case a zero timeout as a yield.
+        if (nanoseconds == 0) {
+            completion.result = -@intCast(i32, @enumToInt(std.os.E.TIME));
+            self.completed.push(completion);
+            return;
+        }
+
         self.enqueue(completion);
     }
 

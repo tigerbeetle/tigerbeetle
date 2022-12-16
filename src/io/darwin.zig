@@ -571,6 +571,25 @@ pub const IO = struct {
         completion: *Completion,
         nanoseconds: u63,
     ) void {
+        // Special case a zero timeout as a yield.
+        if (nanoseconds == 0) {
+            completion.* = .{
+                .next = null,
+                .context = context,
+                .operation = undefined,
+                .callback = struct {
+                    fn on_complete(_io: *IO, _completion: *Completion) void {
+                        _ = _io;
+                        const _context = @intToPtr(Context, @ptrToInt(_completion.context));
+                        callback(_context, _completion, {});
+                    }
+                }.on_complete,
+            };
+
+            self.completed.push(completion);
+            return;
+        }
+
         self.submit(
             context,
             callback,
