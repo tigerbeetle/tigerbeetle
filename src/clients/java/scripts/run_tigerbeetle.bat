@@ -2,16 +2,16 @@
 setlocal enabledelayedexpansion
 
 echo "Building TigerBeetle..."
-cd .\src\zig\lib\tigerbeetle
+cd ..\..\..
 .\zig\zig.exe build -Dcpu=baseline -Drelease-safe
 move .\zig-out\bin\tigerbeetle.exe .
-cd ..\..\..\..
+cd src\clients\java
 
 set ZIG_FILE=.\0_0.tigerbeetle.examples
 
 echo Initializing replica
 if exist "!ZIG_FILE!" DEL /F "!ZIG_FILE!"
-.\src\zig\lib\tigerbeetle\tigerbeetle.exe format --cluster=0 --replica=0 !ZIG_FILE!
+..\..\..tigerbeetle.exe format --cluster=0 --replica=0 !ZIG_FILE!
 
 echo Starting replica
-.\src\zig\lib\tigerbeetle\tigerbeetle.exe start --addresses=3000 !ZIG_FILE!
+..\..\..tigerbeetle.exe start --addresses=3000 !ZIG_FILE!

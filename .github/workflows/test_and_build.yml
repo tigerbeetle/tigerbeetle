@@ -165,14 +165,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - run: git submodule init
+      - run: git submodule update      
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build tb_client
+      - run: zig/zig build go_client
+      - run: zig/zig build java_client
+      - run: zig/zig build dotnet_client
       - run: zig/zig build build_benchmark_ewah
       - run: zig/zig build build_benchmark_eytzinger
       - run: zig/zig build build_benchmark_segmented_array
       - run: zig/zig build -Dtracer-backend=perfetto
-      - run: git submodule init -- tools/tracy
-      - run: git submodule update -- tools/tracy
       - run: zig/zig build -Dtracer-backend=tracy
 
   build-and-push:

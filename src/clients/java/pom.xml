@@ -121,7 +121,7 @@
           <version>2.19.0</version>
           <configuration>
             <lineEnding>LF</lineEnding>
-            <configFile>${project.basedir}/../../eclipse-formatter.xml</configFile>
+            <configFile>${project.basedir}/eclipse-formatter.xml</configFile>
           </configuration>
         </plugin>
         <plugin>
@@ -152,10 +152,11 @@
           </execution>
         </executions>
         <configuration>
-          <workingDirectory>${project.basedir}/../zig</workingDirectory>
-          <executable>${project.basedir}/../zig/lib/tigerbeetle/zig/zig</executable>
+          <workingDirectory>${project.basedir}/../../../</workingDirectory>
+          <executable>${project.basedir}/../../../zig/zig</executable>
           <arguments>
             <argument>build</argument>
+            <argument>java_client</argument>
             <argument>-Drelease-safe</argument>
           </arguments>
         </configuration>
@@ -262,10 +263,9 @@
           </execution>
         </executions>
       </plugin>
-
     </plugins>
   </build>
-
+  
   <distributionManagement>
     <repository>
       <id>github</id>

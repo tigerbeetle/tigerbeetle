@@ -4,15 +4,13 @@ setlocal enabledelayedexpansion
 git submodule init
 git submodule update
 
-cd .\src\zig\lib\tigerbeetle
+cd ..\..\.. 
 call .\scripts\install_zig.bat
 
 echo "Building TigerBeetle..."
 .\zig\zig.exe build -Dcpu=baseline -Drelease-safe
 move .\zig-out\bin\tigerbeetle.exe .
-cd ..\..\..\..
+cd src\clients\java
 
 echo "Building TigerBeetle Java Client..."
-cd .\src\tigerbeetle-java
 mvn -B package --quiet
-cd ..\..

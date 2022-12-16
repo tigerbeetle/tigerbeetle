@@ -31,7 +31,7 @@ jobs:
         settings-path: ${{ github.workspace }}
 
     - name: Format linter
-      working-directory: src/clients/java/src/tigerbeetle-java
+      working-directory: src/clients/java
       run: mvn -B formatter:validate --file pom.xml
 
     - name: Install Zig
@@ -47,7 +47,7 @@ jobs:
 
     - name: Build
       if: ${{ github.event_name == 'pull_request' }}
-      working-directory: src/clients/java/src/tigerbeetle-java
+      working-directory: src/clients/java
       run: mvn -B package --file pom.xml
 
     - name: Save local package
@@ -56,12 +56,12 @@ jobs:
       with:
         name: jar-artifact
         path: |
-          src/clients/java/src/tigerbeetle-java/target/*.jar
-          !src/clients/java/src/tigerbeetle-java/target/*javadoc.jar
+          src/clients/java/target/*.jar
+          !src/clients/java/target/*javadoc.jar
 
     - name: Build and publish
       if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-      working-directory: src/clients/java/src/tigerbeetle-java
+      working-directory: src/clients/java
       run: mvn -B deploy --file pom.xml -s $GITHUB_WORKSPACE/settings.xml
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
