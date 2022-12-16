@@ -47,36 +47,38 @@ pub fn RingBuffer(
 
         // TODO Add doc comments to these functions:
         pub inline fn head(self: Self) ?T {
-            if (self.empty()) return null;
+            if (count_max == 0 or self.empty()) return null;
             return self.buffer[self.index];
         }
 
         pub inline fn head_ptr(self: *Self) ?*T {
-            if (self.empty()) return null;
+            if (count_max == 0 or self.empty()) return null;
             return &self.buffer[self.index];
         }
 
         pub inline fn head_ptr_const(self: *const Self) ?*const T {
-            if (self.empty()) return null;
+            if (count_max == 0 or self.empty()) return null;
             return &self.buffer[self.index];
         }
 
         pub inline fn tail(self: Self) ?T {
-            if (self.empty()) return null;
+            if (count_max == 0 or self.empty()) return null;
             return self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
         pub inline fn tail_ptr(self: *Self) ?*T {
-            if (self.empty()) return null;
+            if (count_max == 0 or self.empty()) return null;
             return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
         pub inline fn tail_ptr_const(self: *const Self) ?*const T {
-            if (self.empty()) return null;
+            if (count_max == 0 or self.empty()) return null;
             return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
         pub inline fn get_ptr(self: *Self, index: usize) ?*T {
+            if (count_max == 0) unreachable;
+
             if (index < self.count) {
                 return &self.buffer[(self.index + index) % self.buffer.len];
             } else {
@@ -86,17 +88,17 @@ pub fn RingBuffer(
         }
 
         pub inline fn next_tail(self: Self) ?T {
-            if (self.full()) return null;
+            if (count_max == 0 or self.full()) return null;
             return self.buffer[(self.index + self.count) % self.buffer.len];
         }
 
         pub inline fn next_tail_ptr(self: *Self) ?*T {
-            if (self.full()) return null;
+            if (count_max == 0 or self.full()) return null;
             return &self.buffer[(self.index + self.count) % self.buffer.len];
         }
 
         pub inline fn next_tail_ptr_const(self: *const Self) ?*const T {
-            if (self.full()) return null;
+            if (count_max == 0 or self.full()) return null;
             return &self.buffer[(self.index + self.count) % self.buffer.len];
         }
 
@@ -143,6 +145,7 @@ pub fn RingBuffer(
         }
 
         pub fn push_slice(self: *Self, items: []const T) error{NoSpaceLeft}!void {
+            if (count_max == 0) return error.NoSpaceLeft;
             if (self.count + items.len > self.buffer.len) return error.NoSpaceLeft;
 
             const pre_wrap_start = (self.index + self.count) % self.buffer.len;
@@ -174,6 +177,7 @@ pub fn RingBuffer(
             count: usize = 0,
 
             pub fn next(it: *Iterator) ?T {
+                if (count_max == 0) return null;
                 // TODO Use next_ptr() internally to avoid duplicating this code.
                 assert(it.count <= it.ring.count);
                 if (it.count == it.ring.count) return null;
@@ -183,6 +187,7 @@ pub fn RingBuffer(
 
             pub fn next_ptr(it: *Iterator) ?*const T {
                 assert(it.count <= it.ring.count);
+                if (count_max == 0) return null;
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
                 return &it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
@@ -201,6 +206,7 @@ pub fn RingBuffer(
 
             pub fn next_ptr(it: *IteratorMutable) ?*T {
                 assert(it.count <= it.ring.count);
+                if (count_max == 0) return null;
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
                 return &it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
@@ -386,4 +392,8 @@ test "RingBuffer: pop_tail" {
     try testing.expectEqual(@as(?u32, 1), lifo.pop_tail());
     try testing.expectEqual(@as(?u32, null), lifo.pop_tail());
     try testing.expect(lifo.empty());
+}
+
+test "RingBuffer: count_max=0" {
+    std.testing.refAllDecls(RingBuffer(u32, 0, .array));
 }
