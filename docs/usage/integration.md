@@ -20,7 +20,7 @@ to each [client session](#client-sessions).
 But consistency models can seem arcane.
 What specific guarantees does TigerBeetle provide to applications?
 
-#### [Client Sessions](#client-sessions)
+#### [Sessions](#client-sessions)
 
 - A client session may have at most one in-flight request.
 - A client session reads its own writes.
@@ -35,7 +35,7 @@ What specific guarantees does TigerBeetle provide to applications?
 - Multiple client sessions may receive replies [out of order](#reply-order) relative to one another.
 - A client session can consider a request executed when it receives a reply for the request.
 
-#### [Requests](#requests)
+#### [Requests](#client-requests)
 
 - A request executes within the cluster at most once.
 - Requests do not [time out](#retries) — a timeout typically implies failure, which cannot be
@@ -211,8 +211,8 @@ orphaned accounts in TigerBeetle, which may be confusing for auditing and debugg
 
 ## Client Sessions
 
-A _client session_ is a sequence of alternating [requests](#requests) and replies between a client
-and a cluster.
+A _client session_ is a sequence of alternating [requests](#client-requests) and replies between a
+client and a cluster.
 
 A client session may have at most one in-flight request — i.e. at most one unique request on the
 network for which a reply has not been received. This simplifies consistency and allows the cluster
@@ -266,7 +266,7 @@ the application is trying to run [too many](#batching-events) concurrent clients
 
 
 
-## Requests
+## Client Requests
 
 A _request_ is a [batch](#batching-events) of one or more
 [operation events](../reference/operations/index.md) sent to the cluster in a single message.
