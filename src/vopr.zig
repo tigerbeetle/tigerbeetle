@@ -138,14 +138,14 @@ fn build_simulator(
     mode: std.builtin.Mode,
 ) void {
     const mode_str = switch (mode) {
-        .Debug => "-ODebug",
-        .ReleaseSafe => "-OReleaseSafe",
+        .Debug => "-Ddebug",
+        .ReleaseSafe => "-Drelease-safe",
         else => unreachable,
     };
 
     const exec_result = std.ChildProcess.exec(.{
         .allocator = allocator,
-        .argv = &.{ "zig/zig", "build-exe", "./src/simulator.zig", mode_str },
+        .argv = &.{ "zig/zig", "build", "simulator", mode_str },
     }) catch |err| {
         fatal("unable to build the simulator binary. Error: {}", .{err});
     };
@@ -184,7 +184,7 @@ fn run_simulator(
     // simulator's exit code.
     const exit_code = run_child_process(
         allocator,
-        &.{ "./simulator", seed_str.items },
+        &.{ "./zig-out/bin/simulator", seed_str.items },
     );
 
     const result = switch (exit_code) {
