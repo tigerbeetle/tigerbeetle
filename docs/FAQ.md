@@ -72,7 +72,7 @@ hardware.
 
 With financial data, it's also important not to lump it together with
 general purpose data. The risk profile is different: retention
-policies, compliance requirements,and privacy concerns. In auditing
+policies, compliance requirements, and privacy concerns. In auditing
 the term is “separation of concerns”. And the performance
 characteristics, auditability, and availability requirements are also
 dissimilar from general purpose data. In much the same way that you
