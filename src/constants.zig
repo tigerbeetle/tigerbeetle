@@ -161,7 +161,27 @@ comptime {
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
 /// possibly be uncommitted during a view change, and this must be constant for all replicas.
-pub const pipeline_max = clients_max;
+pub const pipeline_prepare_queue_max = config.cluster.pipeline_prepare_queue_max;
+
+/// The maximum number of Viewstamped Replication request messages that can be queued at a primary,
+/// waiting to prepare.
+// TODO(Zig): After 0.10, change this to simply "clients_max -| pipeline_prepare_queue_max".
+// In Zig 0.9 compilation fails with "operation caused overflow" despite the saturating subtraction.
+// See: https://github.com/ziglang/zig/issues/10870
+pub const pipeline_request_queue_max =
+    if (clients_max < pipeline_prepare_queue_max)
+    0
+else
+    clients_max - pipeline_prepare_queue_max;
+
+comptime {
+    // A prepare-queue capacity larger than clients_max is wasted.
+    assert(pipeline_prepare_queue_max <= clients_max);
+    // A total queue capacity larger than clients_max is wasted.
+    assert(pipeline_prepare_queue_max + pipeline_request_queue_max <= clients_max);
+    assert(pipeline_prepare_queue_max > 0);
+    assert(pipeline_request_queue_max >= 0);
+}
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.
@@ -263,7 +283,7 @@ pub const iops_write_max = journal_iops_write_max;
 /// The maximum number of concurrent WAL read I/O operations to allow at once.
 pub const journal_iops_read_max = config.process.journal_iops_read_max;
 /// The maximum number of concurrent WAL write I/O operations to allow at once.
-/// Ideally this is at least as high as pipeline_max, but it is safe to be lower.
+/// Ideally this is at least as high as pipeline_prepare_queue_max, but it is safe to be lower.
 pub const journal_iops_write_max = config.process.journal_iops_write_max;
 
 /// The number of redundant copies of the superblock in the superblock storage zone.

@@ -59,6 +59,11 @@ const Prepare = struct {
     ok_quorum_received: bool = false,
 };
 
+const Request = struct {
+    message: *Message, // header.command == .request
+    realtime: i64,
+};
+
 const QuorumMessages = [constants.replicas_max]?*Message;
 const quorum_messages_null = [_]?*Message{null} ** constants.replicas_max;
 
@@ -71,11 +76,11 @@ const quorum_counter_null = QuorumCounter.initEmpty();
 // that cannot be repaired because they are gaps, and this must be relative to the
 // cluster as a whole (not relative to the difference between our op and commit number)
 // as otherwise we would break correctness.
-const view_change_headers_count = constants.pipeline_max;
+const view_change_headers_count = constants.pipeline_prepare_queue_max;
 
 comptime {
     assert(view_change_headers_count > 0);
-    assert(view_change_headers_count >= constants.pipeline_max);
+    assert(view_change_headers_count >= constants.pipeline_prepare_queue_max);
     assert(view_change_headers_count <=
         @divFloor(constants.message_size_max - @sizeOf(Header), @sizeOf(Header)));
 }
@@ -195,12 +200,17 @@ pub fn ReplicaType(
         /// Whether we are reading a prepare from storage in order to push to the pipeline.
         repairing_pipeline: bool = false,
 
-        /// The primary's pipeline of inflight prepares waiting to commit in FIFO order.
-        /// This allows us to pipeline without the complexity of out-of-order commits.
-        ///
-        /// After a view change, the old primary's pipeline is left untouched so that it is able to
-        /// help the new primary repair, even in the face of local storage faults.
-        pipeline: RingBuffer(Prepare, constants.pipeline_max, .array) = .{},
+        /// The pipeline is a queue for a replica which is the primary and in status=normal.
+        /// At all other times the pipeline is a cache.
+        pipeline: union(enum) {
+            /// The primary's pipeline of inflight prepares waiting to commit in FIFO order,
+            /// with a tail of pending requests which have not begun to prepare.
+            /// This allows us to pipeline without the complexity of out-of-order commits.
+            queue: PipelineQueue,
+            /// Prepares in the cache may be committed or uncommitted, and may not belong to the
+            /// current view.
+            cache: PipelineCache,
+        },
 
         /// In some cases, a replica may send a message to itself. We do not submit these messages
         /// to the message bus but rather queue them here for guaranteed immediate delivery, which
@@ -511,6 +521,7 @@ pub fn ReplicaType(
                 .op_checkpoint = self.superblock.working.vsr_state.commit_min,
                 .commit_min = self.superblock.working.vsr_state.commit_min,
                 .commit_max = self.superblock.working.vsr_state.commit_max,
+                .pipeline = .{ .cache = .{} },
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
                     .id = replica_index,
@@ -588,7 +599,11 @@ pub fn ReplicaType(
             self.grid.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
-            while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
+            // TODO(Zig) 0.10: inline-switch.
+            switch (self.pipeline) {
+                .queue => |*pipeline| pipeline.deinit(self.message_bus.pool),
+                .cache => |*pipeline| pipeline.deinit(self.message_bus.pool),
+            }
 
             if (self.loopback_queue) |loopback_message| {
                 assert(loopback_message.next == null);
@@ -809,18 +824,22 @@ pub fn ReplicaType(
             self.clock.learn(message.header.replica, m0, t1, m2);
         }
 
-        /// The primary advances op-number, adds the request to the end of the log, and updates the
-        /// information for this client in the client-table to contain the new request number, s.
-        /// Then it sends a ⟨PREPARE v, m, n, k⟩ message to the other replicas, where v is the
-        /// current view-number, m is the message it received from the client, n is the op-number
-        /// it assigned to the request, and k is the commit-number.
+        /// When there is free space in the pipeline's prepare queue:
+        ///   The primary advances op-number, adds the request to the end of the log, and updates the
+        ///   information for this client in the client-table to contain the new request number, s.
+        ///   Then it sends a ⟨PREPARE v, m, n, k⟩ message to the other replicas, where v is the
+        ///   current view-number, m is the message it received from the client, n is the op-number
+        ///   it assigned to the request, and k is the commit-number.
+        /// Otherwise, when there is room in the pipeline's request queue:
+        ///   The request is queued, and will be dequeued & prepared when the pipeline head commits.
+        /// Otherwise, drop the request.
         fn on_request(self: *Self, message: *Message) void {
             if (self.ignore_request_message(message)) return;
 
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
-            assert(self.commit_max + self.pipeline.count == self.op);
+            assert(self.commit_max + self.pipeline.queue.prepare_queue.count == self.op);
 
             assert(message.header.command == .request);
             assert(message.header.view <= self.view); // The client's view may be behind ours.
@@ -830,59 +849,16 @@ pub fn ReplicaType(
                 return;
             };
 
-            log.debug("{}: on_request: request {}", .{ self.replica, message.header.checksum });
+            const request = .{
+                .message = message.ref(),
+                .realtime = realtime,
+            };
 
-            // Guard against the wall clock going backwards by taking the max with timestamps issued:
-            self.state_machine.prepare_timestamp = std.math.max(
-                // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
-                // may be our first prepare as a recently elected primary:
-                std.math.max(
-                    self.state_machine.prepare_timestamp,
-                    self.state_machine.commit_timestamp,
-                ) + 1,
-                @intCast(u64, realtime),
-            );
-            assert(self.state_machine.prepare_timestamp > self.state_machine.commit_timestamp);
-
-            const prepare_timestamp = self.state_machine.prepare(
-                message.header.operation.cast(StateMachine),
-                message.body(),
-            );
-
-            const latest_entry = self.journal.header_with_op(self.op).?;
-            message.header.parent = latest_entry.checksum;
-            message.header.context = message.header.checksum;
-            message.header.view = self.view;
-            message.header.op = self.op + 1;
-            message.header.commit = self.commit_max;
-            message.header.timestamp = prepare_timestamp;
-            message.header.replica = self.replica;
-            message.header.command = .prepare;
-
-            message.header.set_checksum_body(message.body());
-            message.header.set_checksum();
-
-            log.debug("{}: on_request: prepare {}", .{ self.replica, message.header.checksum });
-
-            self.pipeline.push_assume_capacity(.{ .message = message.ref() });
-            assert(self.pipeline.count >= 1);
-
-            if (self.pipeline.count == 1) {
-                // This is the only prepare in the pipeline, start the timeout:
-                assert(!self.prepare_timeout.ticking);
-                self.prepare_timeout.start();
+            if (self.pipeline.queue.prepare_queue.full()) {
+                self.pipeline.queue.push_request(request);
             } else {
-                // Do not restart the prepare timeout as it is already ticking for another prepare.
-                assert(self.prepare_timeout.ticking);
-                const previous = self.pipeline.get_ptr(self.pipeline.count - 2).?;
-                assert(previous.message.header.checksum == message.header.parent);
+                self.primary_pipeline_prepare(request);
             }
-
-            self.on_prepare(message);
-
-            // We expect `on_prepare()` to increment `self.op` to match the primary's latest prepare:
-            // This is critical to ensure that pipelined prepares do not receive the same op number.
-            assert(self.op == message.header.op);
         }
 
         /// Replication is simple, with a single code path for the primary and backups.
@@ -1000,11 +976,20 @@ pub fn ReplicaType(
             assert(message.header.view == self.view);
             assert(self.primary());
 
-            const prepare = self.pipeline_prepare_for_prepare_ok(message) orelse return;
+            const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
+                // This can be normal, for example, if an old prepare_ok is replayed.
+                log.debug("{}: on_prepare_ok: not preparing ok={} checksum={}", .{
+                    self.replica,
+                    message.header.op,
+                    message.header.context,
+                });
+                return;
+            };
 
             assert(prepare.message.header.checksum == message.header.context);
             assert(prepare.message.header.op >= self.commit_max + 1);
-            assert(prepare.message.header.op <= self.commit_max + self.pipeline.count);
+            assert(prepare.message.header.op <= self.commit_max +
+                self.pipeline.queue.prepare_queue.count);
             assert(prepare.message.header.op <= self.op);
 
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
@@ -1392,7 +1377,7 @@ pub fn ReplicaType(
             // To understand why, consider this scenario, where:
             //
             //                   replica_count   3
-            //      do_view_change.headers.len   3 (= pipeline_max)
+            //      do_view_change.headers.len   3 (= pipeline_prepare_queue_max)
             //   recovery_response.headers.len   2 (!)
             //                   replica 0 log   3, 4a, 5a, 6a, 7a, 8a  (status=normal, primary)
             //                   replica 1 log   3, 4a, 5a, --, --, --  (status=normal, backup)
@@ -1686,13 +1671,13 @@ pub fn ReplicaType(
             // Try to serve the message directly from the pipeline.
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
             // of an uncommitted prepare is lost/corrupted.
-            if (self.pipeline_prepare_for_op_and_checksum(op, checksum)) |prepare| {
+            if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
                 log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
                     self.replica,
                     op,
                     checksum,
                 });
-                self.send_message_to_replica(message.header.replica, prepare.message);
+                self.send_message_to_replica(message.header.replica, prepare);
                 return;
             }
 
@@ -1979,8 +1964,9 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
 
-            const prepare = self.pipeline.head_ptr().?;
+            const prepare = self.pipeline.queue.prepare_queue.head_ptr().?;
             assert(prepare.message.header.command == .prepare);
+            assert(prepare.message.header.op == self.commit_min + 1);
 
             if (prepare.ok_quorum_received) {
                 self.prepare_timeout.reset();
@@ -2026,10 +2012,10 @@ pub fn ReplicaType(
                 // We may be slow and waiting for the write to complete.
                 //
                 // We may even have maxed out our IO depth and been unable to initiate the write,
-                // which can happen if `constants.pipeline_max` exceeds `constants.journal_iops_write_max`.
-                // This can lead to deadlock for a cluster of one or two (if we do not retry here),
-                // since there is no other way for the primary to repair the dirty op because no
-                // other replica has it.
+                // which can happen if `constants.pipeline_prepare_queue_max` exceeds
+                // `constants.journal_iops_write_max`. This can lead to deadlock for a cluster of
+                // one or two (if we do not retry here), since there is no other way for the primary
+                // to repair the dirty op because no other replica has it.
                 //
                 // Retry the write through `on_repair()` which will work out which is which.
                 // We do expect that the op would have been run through `on_prepare()` already.
@@ -2310,7 +2296,7 @@ pub fn ReplicaType(
             assert(message.header.view == self.view);
             assert(message.header.op == self.op);
 
-            if (self.replica_count == 1 and self.pipeline.count > 1) {
+            if (self.replica_count == 1 and self.pipeline.queue.prepare_queue.count > 1) {
                 // In a cluster-of-one, the prepares must always be written to the WAL sequentially
                 // (never concurrently). This ensures that there will be no gaps in the WAL during
                 // crash recovery.
@@ -2560,16 +2546,22 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
 
             if (self.status == .normal and self.primary()) {
-                const prepare = self.pipeline.pop().?;
+                const prepare = self.pipeline.queue.pop_prepare().?;
+                if (self.pipeline.queue.pop_request()) |request| {
+                    // Start preparing the next request in the queue (if any).
+                    self.primary_pipeline_prepare(request);
+                }
+
                 assert(self.commit_min == self.commit_max);
+                assert(self.prepare_timeout.ticking);
+                assert(prepare.message.header.command == .prepare);
                 assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
                 assert(prepare.message.header.op == self.commit_min);
                 assert(prepare.message.header.op == self.commit_max);
-                assert(self.prepare_timeout.ticking);
 
                 self.message_bus.unref(prepare.message);
 
-                if (self.pipeline.head_ptr()) |next| {
+                if (self.pipeline.queue.prepare_queue.head_ptr()) |next| {
                     assert(next.message.header.op == self.commit_min + 1);
                     assert(next.message.header.op == self.commit_prepare.?.header.op + 1);
 
@@ -2830,7 +2822,7 @@ pub fn ReplicaType(
         fn commit_pipeline(self: *Self) void {
             assert(self.status == .normal);
             assert(self.primary());
-            assert(self.pipeline.count > 0);
+            assert(self.pipeline.queue.prepare_queue.count > 0);
 
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.committing) {
@@ -2847,10 +2839,10 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
 
-            if (self.pipeline.head_ptr()) |prepare| {
+            if (self.pipeline.queue.prepare_queue.head_ptr()) |prepare| {
                 assert(self.commit_min == self.commit_max);
                 assert(self.commit_min + 1 == prepare.message.header.op);
-                assert(self.commit_min + self.pipeline.count == self.op);
+                assert(self.commit_min + self.pipeline.queue.prepare_queue.count == self.op);
                 assert(self.journal.has(prepare.message.header));
 
                 if (!prepare.ok_quorum_received) {
@@ -2876,7 +2868,7 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
 
             if (self.status == .normal and self.primary()) {
-                if (self.pipeline.head_ptr()) |pipeline_head| {
+                if (self.pipeline.queue.prepare_queue.head_ptr()) |pipeline_head| {
                     assert(pipeline_head.message.header.op == self.commit_min + 1);
                 }
                 self.commit_pipeline_next();
@@ -3125,16 +3117,16 @@ pub fn ReplicaType(
                 self.op - self.commit_min,
                 // The number of uncommitted ops cannot be more than the length of the pipeline.
                 // Do not reset any ops that we did not include in our do_view_change message.
-                constants.pipeline_max,
+                constants.pipeline_prepare_queue_max,
             );
 
-            assert(uncanonical_op_count <= constants.pipeline_max);
+            assert(uncanonical_op_count <= constants.pipeline_prepare_queue_max);
             if (uncanonical_op_count == 0) return self.op;
 
             // * When uncanonical_op_count = self.op - self.commit_min,
             //   self.op - uncanonical_op_count = self.commit_min.
-            // * When uncanonical_op_count = constants.pipeline_max,
-            //   constants.pipeline_max < self.op - self.commit_min holds.
+            // * When uncanonical_op_count = constants.pipeline_prepare_queue_max,
+            //   constants.pipeline_prepare_queue_max < self.op - self.commit_min holds.
             const canonical_op_max = self.op - uncanonical_op_count;
 
             log.debug("{}: on_do_view_change: not canonical ops={}..{}", .{
@@ -3145,7 +3137,7 @@ pub fn ReplicaType(
 
             assert(canonical_op_max <= self.op);
             assert(canonical_op_max >= self.commit_min);
-            assert(canonical_op_max + constants.pipeline_max >= self.op);
+            assert(canonical_op_max + constants.pipeline_prepare_queue_max >= self.op);
             return canonical_op_max;
         }
 
@@ -3353,9 +3345,10 @@ pub fn ReplicaType(
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;
 
-            // Verify that the new request will fit in the WAL.
-            // The message's op hasn't been assigned yet, but it will be `self.op + 1`.
-            if (self.op == self.op_checkpoint_trigger()) {
+            // Don't accept more requests than will fit in the current checkpoint.
+            // (The request's op hasn't been assigned yet, but it will be `self.op + 1`
+            // when primary_pipeline_next() converts the request to a prepare.)
+            if (self.op + self.pipeline.queue.request_queue.count == self.op_checkpoint_trigger()) {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint_trigger={})", .{
                     self.replica,
                     self.op + 1,
@@ -3428,7 +3421,7 @@ pub fn ReplicaType(
             } else if (message.header.operation == .register) {
                 log.debug("{}: on_request: new session", .{self.replica});
                 return false;
-            } else if (self.pipeline_prepare_for_client(message.header.client)) |_| {
+            } else if (self.pipeline.queue.message_by_client(message.header.client)) |_| {
                 // The client registered with the previous primary, which committed and replied back
                 // to the client before the view change, after which the register operation was
                 // reloaded into the pipeline to be driven to completion by the new primary, which
@@ -3500,21 +3493,31 @@ pub fn ReplicaType(
             assert(message.header.client > 0);
             assert(message.header.view <= self.view); // See ignore_request_message_backup().
 
-            if (self.pipeline_prepare_for_client(message.header.client)) |prepare| {
-                assert(prepare.message.header.command == .prepare);
-                assert(prepare.message.header.client == message.header.client);
-                assert(prepare.message.header.op > self.commit_max);
+            if (self.pipeline.queue.message_by_client(message.header.client)) |pipeline_message| {
+                assert(pipeline_message.header.client == message.header.client);
+                assert(pipeline_message.header.command == .request or
+                    pipeline_message.header.command == .prepare);
 
-                if (message.header.checksum == prepare.message.header.context) {
-                    log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
-                    return true;
-                } else {
-                    log.err("{}: on_request: ignoring (client forked)", .{self.replica});
+                if (pipeline_message.header.command == .request and
+                    pipeline_message.header.checksum == message.header.checksum)
+                {
+                    log.debug("{}: on_request: ignoring (already queued)", .{self.replica});
                     return true;
                 }
+
+                if (pipeline_message.header.command == .prepare and
+                    pipeline_message.header.context == message.header.checksum)
+                {
+                    assert(pipeline_message.header.op > self.commit_max);
+                    log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
+                    return true;
+                }
+
+                log.err("{}: on_request: ignoring (client forked)", .{self.replica});
+                return true;
             }
 
-            if (self.pipeline.full()) {
+            if (self.pipeline.queue.full()) {
                 log.debug("{}: on_request: ignoring (pipeline full)", .{self.replica});
                 return true;
             }
@@ -3826,93 +3829,81 @@ pub fn ReplicaType(
             }
         }
 
-        /// Searches the pipeline for a prepare for a given op and checksum.
-        /// When `checksum` is `null`, match any checksum.
-        fn pipeline_prepare_for_op_and_checksum(self: *Self, op: u64, checksum: ?u128) ?*Prepare {
-            assert(self.status == .normal or self.status == .view_change);
-
-            // To optimize the search, we can leverage the fact that the pipeline is ordered and
-            // continuous.
-            if (self.pipeline.count == 0) return null;
-            const head_op = self.pipeline.head_ptr().?.message.header.op;
-            const tail_op = self.pipeline.tail_ptr().?.message.header.op;
-            if (op < head_op) return null;
-            if (op > tail_op) return null;
-
-            const pipeline_prepare = self.pipeline.get_ptr(op - head_op).?;
-            assert(pipeline_prepare.message.header.op == op);
-
-            if (checksum == null or pipeline_prepare.message.header.checksum == checksum.?) {
-                return pipeline_prepare;
-            } else {
-                return null;
-            }
-        }
-
-        /// Searches the pipeline for a prepare for a given client.
-        fn pipeline_prepare_for_client(self: *Self, client: u128) ?*Prepare {
+        fn primary_pipeline_prepare(self: *Self, request: Request) void {
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
+            assert(self.commit_max + self.pipeline.queue.prepare_queue.count == self.op);
+            assert(!self.pipeline.queue.prepare_queue.full());
+            self.pipeline.queue.verify();
 
-            var op = self.commit_max + 1;
-            var parent = self.journal.header_with_op(self.commit_max).?.checksum;
-            var iterator = self.pipeline.iterator_mutable();
-            while (iterator.next_ptr()) |prepare| {
-                assert(prepare.message.header.command == .prepare);
-                assert(prepare.message.header.op == op);
-                assert(prepare.message.header.parent == parent);
+            const message = request.message;
+            assert(!self.ignore_request_message(message));
 
-                // A client may have multiple requests in the pipeline if these were committed by
-                // the previous primary and were reloaded into the pipeline after a view change.
-                if (prepare.message.header.client == client) return prepare;
+            log.debug("{}: primary_pipeline_next: request checksum={} client={}", .{
+                self.replica,
+                message.header.checksum,
+                message.header.client,
+            });
 
-                parent = prepare.message.header.checksum;
-                op += 1;
+            // Guard against the wall clock going backwards by taking the max with timestamps issued:
+            self.state_machine.prepare_timestamp = std.math.max(
+                // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
+                // may be our first prepare as a recently elected primary:
+                std.math.max(
+                    self.state_machine.prepare_timestamp,
+                    self.state_machine.commit_timestamp,
+                ) + 1,
+                @intCast(u64, request.realtime),
+            );
+            assert(self.state_machine.prepare_timestamp > self.state_machine.commit_timestamp);
+
+            const prepare_timestamp = self.state_machine.prepare(
+                message.header.operation.cast(StateMachine),
+                message.body(),
+            );
+
+            const latest_entry = self.journal.header_with_op(self.op).?;
+            message.header.parent = latest_entry.checksum;
+            message.header.context = message.header.checksum;
+            message.header.view = self.view;
+            message.header.op = self.op + 1;
+            message.header.commit = self.commit_max;
+            message.header.timestamp = prepare_timestamp;
+            message.header.replica = self.replica;
+            message.header.command = .prepare;
+
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
+
+            log.debug("{}: primary_pipeline_next: prepare {}", .{ self.replica, message.header.checksum });
+
+            if (self.pipeline.queue.prepare_queue.tail_ptr()) |previous| {
+                // Do not restart the prepare timeout as it is already ticking for another prepare.
+                assert(self.prepare_timeout.ticking);
+                assert(previous.message.header.checksum == message.header.parent);
+            } else {
+                // We are about to add the first prepare to the pipeline, so start the timeout.
+                assert(!self.prepare_timeout.ticking);
+                self.prepare_timeout.start();
             }
 
-            assert(self.pipeline.count <= constants.pipeline_max);
-            assert(self.commit_max + self.pipeline.count == op - 1);
-            assert(self.commit_max + self.pipeline.count == self.op);
+            self.pipeline.queue.push_prepare(message);
+            self.on_prepare(message);
 
-            return null;
+            // We expect `on_prepare()` to increment `self.op` to match the primary's latest prepare:
+            // This is critical to ensure that pipelined prepares do not receive the same op number.
+            assert(self.op == message.header.op);
         }
 
-        /// Searches the pipeline for a prepare for a given client and checksum.
-        /// Passing the prepare_ok message prevents these u128s from being accidentally swapped.
-        /// Asserts that the returned prepare, if any, exactly matches the prepare_ok.
-        fn pipeline_prepare_for_prepare_ok(self: *Self, ok: *const Message) ?*Prepare {
-            assert(ok.header.command == .prepare_ok);
-
-            assert(self.status == .normal);
-            assert(self.primary());
-
-            const prepare = self.pipeline_prepare_for_client(ok.header.client) orelse {
-                log.debug("{}: pipeline_prepare_for_prepare_ok: not preparing", .{self.replica});
-                return null;
+        fn pipeline_prepare_by_op_and_checksum(self: *Self, op: u64, checksum: ?u128) ?*Message {
+            return switch (self.pipeline) {
+                .queue => |*pipeline| if (pipeline.prepare_by_op_and_checksum(op, checksum)) |prepare|
+                    prepare.message
+                else
+                    null,
+                .cache => |*pipeline| pipeline.prepare_by_op_and_checksum(op, checksum),
             };
-
-            if (ok.header.context != prepare.message.header.checksum) {
-                // This can be normal, for example, if an old prepare_ok is replayed.
-                log.debug("{}: pipeline_prepare_for_prepare_ok: preparing a different client op", .{
-                    self.replica,
-                });
-                return null;
-            }
-
-            assert(prepare.message.header.parent == ok.header.parent);
-            assert(prepare.message.header.client == ok.header.client);
-            assert(prepare.message.header.request == ok.header.request);
-            assert(prepare.message.header.cluster == ok.header.cluster);
-            assert(prepare.message.header.epoch == ok.header.epoch);
-            // A prepare may be committed in the same view or in a newer view:
-            assert(prepare.message.header.view <= ok.header.view);
-            assert(prepare.message.header.op == ok.header.op);
-            assert(prepare.message.header.commit == ok.header.commit);
-            assert(prepare.message.header.timestamp == ok.header.timestamp);
-            assert(prepare.message.header.operation == ok.header.operation);
-
-            return prepare;
         }
 
         fn recover(self: *Self) void {
@@ -4039,9 +4030,13 @@ pub fn ReplicaType(
             }
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
-                if (self.primary_repair_pipeline_op() != null) return self.primary_repair_pipeline();
-                // Start the view as the new primary:
-                self.start_view_as_the_new_primary();
+                // Repair the pipeline, which may discover faulty prepares and drive more repairs.
+                switch (self.primary_repair_pipeline()) {
+                    // primary_repair_pipeline() is already working.
+                    // TODO: Uncomment assert once the journal read is guaranteed to be async.
+                    .busy => {}, // assert(self.repairing_pipeline);
+                    .done => self.start_view_as_the_new_primary(),
+                }
             }
         }
 
@@ -4236,110 +4231,106 @@ pub fn ReplicaType(
         }
 
         /// Reads prepares into the pipeline (before we start the view as the new primary).
-        fn primary_repair_pipeline(self: *Self) void {
+        fn primary_repair_pipeline(self: *Self) enum { done, busy } {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
-            assert(self.commit_max < self.op);
+            assert(self.commit_max == self.commit_min);
+            assert(self.commit_max <= self.op);
             assert(self.journal.dirty.count == 0);
+            assert(self.pipeline == .cache);
 
             if (self.repairing_pipeline) {
                 log.debug("{}: primary_repair_pipeline: already repairing...", .{self.replica});
-                return;
+                return .busy;
             }
 
-            log.debug("{}: primary_repair_pipeline: repairing", .{self.replica});
+            if (self.primary_repair_pipeline_op()) |_| {
+                log.debug("{}: primary_repair_pipeline: repairing", .{self.replica});
+                assert(!self.repairing_pipeline);
+                self.repairing_pipeline = true;
+                self.primary_repair_pipeline_read();
+                return .busy;
+            }
 
-            assert(!self.repairing_pipeline);
-            self.repairing_pipeline = true;
-
-            self.primary_repair_pipeline_read();
+            // All prepares needed to reconstruct the pipeline queue are now available in the cache.
+            return .done;
         }
 
-        /// Discard messages from the prepare pipeline.
-        /// Retain uncommitted messages that belong in the current view to maximize durability.
-        fn primary_repair_pipeline_diff(self: *Self) void {
+        fn primary_repair_pipeline_done(self: *Self) PipelineQueue {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_max == self.commit_min);
+            assert(self.commit_max <= self.op);
+            assert(self.journal.dirty.count == 0);
+            assert(self.valid_hash_chain_between(self.commit_min, self.op));
+            assert(self.pipeline == .cache);
+            assert(!self.repairing_pipeline);
+            assert(self.primary_repair_pipeline() == .done);
+            assert(self.commit_max + constants.pipeline_prepare_queue_max >= self.op);
 
-            // Discard messages from the front of the pipeline that committed since we were primary.
-            while (self.pipeline.head_ptr()) |prepare| {
-                if (prepare.message.header.op > self.commit_max) break;
+            var pipeline_queue = PipelineQueue{};
+            var op = self.commit_max + 1;
+            var parent = self.journal.header_with_op(self.commit_max).?.checksum;
+            while (op <= self.op) : (op += 1) {
+                const journal_header = self.journal.header_with_op(op).?;
+                assert(journal_header.op == op);
+                assert(journal_header.parent == parent);
 
-                self.message_bus.unref(self.pipeline.pop().?.message);
+                const prepare =
+                    self.pipeline.cache.prepare_by_op_and_checksum(op, journal_header.checksum).?;
+                assert(prepare.header.op == op);
+                assert(prepare.header.op <= self.op);
+                assert(prepare.header.checksum == journal_header.checksum);
+                assert(prepare.header.parent == parent);
+                assert(self.journal.has(prepare.header));
+
+                pipeline_queue.push_prepare(prepare.ref());
+                parent = prepare.header.checksum;
             }
+            assert(self.commit_max + pipeline_queue.prepare_queue.count == self.op);
 
-            // Discard the whole pipeline if it is now disconnected from the WAL's hash chain.
-            if (self.pipeline.head_ptr()) |pipeline_head| {
-                const parent = self.journal.header_with_op_and_checksum(
-                    pipeline_head.message.header.op - 1,
-                    pipeline_head.message.header.parent,
-                );
-                if (parent == null) {
-                    while (self.pipeline.pop()) |prepare| self.message_bus.unref(prepare.message);
-                    assert(self.pipeline.count == 0);
-                }
-            }
-
-            // Discard messages from the back of the pipeline that are not part of this view.
-            while (self.pipeline.tail_ptr()) |prepare| {
-                if (self.journal.has(prepare.message.header)) break;
-
-                self.message_bus.unref(self.pipeline.pop_tail().?.message);
-            }
-
-            log.debug("{}: primary_repair_pipeline_diff: {} prepare(s)", .{
-                self.replica,
-                self.pipeline.count,
-            });
-
-            self.verify_pipeline();
-
-            // Do not reset `repairing_pipeline` here as this must be reset by the read callback.
-            // Otherwise, we would be making `primary_repair_pipeline()` reentrant.
+            pipeline_queue.verify();
+            return pipeline_queue;
         }
 
         /// Returns the next `op` number that needs to be read into the pipeline.
-        fn primary_repair_pipeline_op(self: *Self) ?u64 {
+        /// Returns null when all necessary prepares are in the pipeline cache.
+        fn primary_repair_pipeline_op(self: *const Self) ?u64 {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_max == self.commit_min);
+            assert(self.commit_max <= self.op);
+            assert(self.pipeline == .cache);
 
-            // We cannot rely on `pipeline.count` below unless the pipeline has first been diffed.
-            self.primary_repair_pipeline_diff();
-
-            const op = self.commit_max + self.pipeline.count + 1;
-            if (op <= self.op) return op;
-
-            assert(self.commit_max + self.pipeline.count == self.op);
+            var op = self.commit_max + 1;
+            while (op <= self.op) : (op += 1) {
+                const op_header = self.journal.header_with_op(op).?;
+                if (!self.pipeline.cache.contains_header(op_header)) {
+                    return op;
+                }
+            }
             return null;
         }
 
         fn primary_repair_pipeline_read(self: *Self) void {
-            assert(self.repairing_pipeline);
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.commit_max == self.commit_min);
+            assert(self.commit_max <= self.op);
+            assert(self.pipeline == .cache);
+            assert(self.repairing_pipeline);
 
-            if (self.primary_repair_pipeline_op()) |op| {
-                assert(op > self.commit_max);
-                assert(op <= self.op);
-                assert(self.commit_max + self.pipeline.count + 1 == op);
-
-                const checksum = self.journal.header_with_op(op).?.checksum;
-
-                log.debug("{}: primary_repair_pipeline_read: op={} checksum={}", .{
-                    self.replica,
-                    op,
-                    checksum,
-                });
-
-                self.journal.read_prepare(repair_pipeline_push, op, checksum, null);
-            } else {
-                log.debug("{}: primary_repair_pipeline_read: repaired", .{self.replica});
-                self.repairing_pipeline = false;
-                self.repair();
-            }
+            const op = self.primary_repair_pipeline_op().?;
+            const op_checksum = self.journal.header_with_op(op).?.checksum;
+            log.debug("{}: primary_repair_pipeline_read: op={} checksum={}", .{
+                self.replica,
+                op,
+                op_checksum,
+            });
+            self.journal.read_prepare(repair_pipeline_read_callback, op, op_checksum, null);
         }
 
-        fn repair_pipeline_push(
+        fn repair_pipeline_read_callback(
             self: *Self,
             prepare: ?*Message,
             destination_replica: ?u8,
@@ -4350,61 +4341,62 @@ pub fn ReplicaType(
             self.repairing_pipeline = false;
 
             if (prepare == null) {
-                log.debug("{}: repair_pipeline_push: prepare == null", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: prepare == null", .{self.replica});
                 return;
             }
 
             // Our state may have advanced significantly while we were reading from disk.
             if (self.status != .view_change) {
-                log.debug("{}: repair_pipeline_push: no longer in view change status", .{
+                assert(self.primary_index(self.view) != self.replica);
+
+                log.debug("{}: repair_pipeline_read_callback: no longer in view change status", .{
                     self.replica,
                 });
                 return;
             }
 
             if (self.primary_index(self.view) != self.replica) {
-                log.debug("{}: repair_pipeline_push: no longer primary", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: no longer primary", .{self.replica});
                 return;
             }
 
             // We may even be several views ahead and may now have a completely different pipeline.
             const op = self.primary_repair_pipeline_op() orelse {
-                log.debug("{}: repair_pipeline_push: pipeline changed", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: pipeline changed", .{self.replica});
                 return;
             };
-
             assert(op > self.commit_max);
             assert(op <= self.op);
-            assert(self.commit_max + self.pipeline.count + 1 == op);
 
             if (prepare.?.header.op != op) {
-                log.debug("{}: repair_pipeline_push: op changed", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: op changed", .{self.replica});
                 return;
             }
 
             if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
-                log.debug("{}: repair_pipeline_push: checksum changed", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: checksum changed", .{self.replica});
                 return;
             }
 
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
 
-            log.debug("{}: repair_pipeline_push: op={} checksum={}", .{
+            log.debug("{}: repair_pipeline_read_callback: op={} checksum={}", .{
                 self.replica,
                 prepare.?.header.op,
                 prepare.?.header.checksum,
             });
 
-            if (self.pipeline.tail_ptr()) |parent| {
-                assert(prepare.?.header.parent == parent.message.header.checksum);
+            const prepare_old = self.pipeline.cache.insert(prepare.?.ref());
+            if (prepare_old) |message_old| self.message_bus.unref(message_old);
+
+            if (self.primary_repair_pipeline_op()) |_| {
+                assert(!self.repairing_pipeline);
+                self.repairing_pipeline = true;
+                self.primary_repair_pipeline_read();
+            } else {
+                self.repair();
             }
-
-            self.pipeline.push_assume_capacity(.{ .message = prepare.?.ref() });
-            assert(self.pipeline.count >= 1);
-
-            self.repairing_pipeline = true;
-            self.primary_repair_pipeline_read();
         }
 
         fn repair_prepares(self: *Self) void {
@@ -4552,9 +4544,9 @@ pub fn ReplicaType(
             //
             // Using the pipeline to repair is faster than a `request_prepare`.
             // Also, messages in the pipeline are never corrupt.
-            if (self.pipeline_prepare_for_op_and_checksum(op, checksum)) |prepare| {
-                assert(prepare.message.header.op == op);
-                assert(prepare.message.header.checksum == checksum);
+            if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
+                assert(prepare.header.op == op);
+                assert(prepare.header.checksum == checksum);
 
                 if (self.replica_count == 1) {
                     // This op won't start writing until all ops in the pipeline preceding it have
@@ -4564,7 +4556,8 @@ pub fn ReplicaType(
                         op,
                         checksum,
                     });
-                    assert(op > self.pipeline.head_ptr().?.message.header.op);
+                    const pipeline_head = self.pipeline.queue.prepare_queue.head_ptr().?;
+                    assert(pipeline_head.message.header.op < op);
                     return false;
                 }
 
@@ -4573,7 +4566,7 @@ pub fn ReplicaType(
                     op,
                     checksum,
                 });
-                self.write_prepare(prepare.message, .pipeline);
+                self.write_prepare(prepare, .pipeline);
                 return true;
             }
 
@@ -4803,20 +4796,6 @@ pub fn ReplicaType(
         fn reset_quorum_nack_prepare(self: *Self) void {
             self.reset_quorum_counter(&self.nack_prepare_from_other_replicas);
             self.nack_prepare_op = null;
-        }
-
-        fn reset_quorum_prepare_ok(self: *Self) void {
-            // "prepare_ok"s from previous views are not valid, even if the pipeline entry is reused
-            // after a cycle of view changes. In other words, when a view change cycles around, so
-            // that the original primary becomes a primary of a new view, pipeline entries may be
-            // reused. However, the pipeline's prepare_ok quorums must not be reused, since the
-            // replicas that sent them may have swapped them out during a previous view change.
-            var iterator = self.pipeline.iterator_mutable();
-            while (iterator.next_ptr()) |prepare| {
-                prepare.ok_quorum_received = false;
-                prepare.ok_from_all_replicas = quorum_counter_null;
-                assert(prepare.ok_from_all_replicas.count() == 0);
-            }
         }
 
         fn reset_quorum_start_view_change(self: *Self) void {
@@ -5192,9 +5171,7 @@ pub fn ReplicaType(
                 });
             }
 
-            assert(commit_max >=
-                self.commit_max - std.math.min(constants.pipeline_max, self.commit_max));
-
+            assert(commit_max >= self.commit_max -| constants.pipeline_prepare_queue_max);
             assert(self.commit_min <= self.commit_max);
             assert(self.op >= self.commit_max or self.op < self.commit_max);
 
@@ -5275,7 +5252,7 @@ pub fn ReplicaType(
             // headers to become dirty.
             const op_canonical_primary = self.primary_op_canonical_max(log_view_canonical);
             assert(op_canonical_primary <= self.op);
-            assert(op_canonical_primary >= self.op -| constants.pipeline_max);
+            assert(op_canonical_primary >= self.op -| constants.pipeline_prepare_queue_max);
             assert(op_canonical_primary >= self.commit_min);
 
             if (do_view_change_head.op > self.op_checkpoint_trigger()) {
@@ -5561,7 +5538,7 @@ pub fn ReplicaType(
             // wrapping implies a checkpoint (which implies a commit).
             assert(self.op - self.commit_max <= constants.journal_slot_count);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
-            assert(self.op <= self.commit_max + constants.pipeline_max);
+            assert(self.op <= self.commit_max + constants.pipeline_prepare_queue_max);
 
             assert(op_canonical <= self.op);
             assert(op_canonical >= self.commit_min);
@@ -5607,23 +5584,48 @@ pub fn ReplicaType(
             assert(self.primary_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
             assert(!self.repairing_pipeline);
+            assert(self.primary_repair_pipeline() == .done);
 
             assert(self.commit_min == self.commit_max);
-            assert(self.primary_repair_pipeline_op() == null);
-            self.verify_pipeline();
-            assert(self.commit_max + self.pipeline.count == self.op);
-            assert(self.valid_hash_chain_between(self.commit_min, self.op));
-
+            assert(self.nack_prepare_op == null);
             assert(self.journal.dirty.count == 0);
             assert(self.journal.faulty.count == 0);
-            assert(self.nack_prepare_op == null);
+            assert(self.valid_hash_chain_between(self.commit_min, self.op));
+
+            {
+                const pipeline_queue = self.primary_repair_pipeline_done();
+                assert(pipeline_queue.request_queue.empty());
+                assert(pipeline_queue.prepare_queue.count + self.commit_max == self.op);
+                if (!pipeline_queue.prepare_queue.empty()) {
+                    const prepares = &pipeline_queue.prepare_queue;
+                    assert(prepares.head_ptr_const().?.message.header.op == self.commit_max + 1);
+                    assert(prepares.tail_ptr_const().?.message.header.op == self.op);
+                }
+
+                var pipeline_prepares = pipeline_queue.prepare_queue.iterator();
+                while (pipeline_prepares.next()) |prepare| {
+                    assert(self.journal.has(prepare.message.header));
+                    assert(!prepare.ok_quorum_received);
+                    assert(prepare.ok_from_all_replicas.count() == 0);
+
+                    log.debug("{}: start_view_as_the_new_primary: pipeline " ++
+                        "(op={} checksum={x} parent={x})", .{
+                        self.replica,
+                        prepare.message.header.op,
+                        prepare.message.header.checksum,
+                        prepare.message.header.parent,
+                    });
+                }
+
+                self.pipeline.cache.deinit(self.message_bus.pool);
+                self.pipeline = .{ .queue = pipeline_queue };
+                self.pipeline.queue.verify();
+            }
 
             const start_view = self.create_view_change_message(.start_view);
             defer self.message_bus.unref(start_view);
 
             self.transition_to_normal_from_view_change_status(self.view);
-            // Detect if the transition to normal status above accidentally resets the pipeline:
-            assert(self.commit_max + self.pipeline.count == self.op);
 
             assert(self.status == .normal);
             assert(self.primary());
@@ -5646,6 +5648,7 @@ pub fn ReplicaType(
             assert(!self.committing);
             assert(self.replica_count > 1 or new_view == 0);
             assert(self.journal.header_with_op(self.op) != null);
+            assert(self.pipeline == .cache);
             self.view = new_view;
             self.log_view = new_view;
             self.status = .normal;
@@ -5669,6 +5672,9 @@ pub fn ReplicaType(
                 self.commit_timeout.start();
                 self.repair_timeout.start();
                 self.recovery_timeout.stop();
+
+                self.pipeline.cache.deinit(self.message_bus.pool);
+                self.pipeline = .{ .queue = .{} };
             } else {
                 log.debug(
                     "{}: transition_to_normal_from_recovering_status: view={} backup",
@@ -5710,6 +5716,8 @@ pub fn ReplicaType(
 
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
+                assert(!self.repairing_pipeline);
+                assert(self.pipeline == .queue);
                 assert(self.log_view == new_view);
 
                 self.ping_timeout.start();
@@ -5720,7 +5728,7 @@ pub fn ReplicaType(
                 self.repair_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
-                if (self.pipeline.count > 0) self.prepare_timeout.start();
+                if (self.pipeline.queue.prepare_queue.count > 0) self.prepare_timeout.start();
             } else {
                 log.debug("{}: transition_to_normal_from_view_change_status: view={} backup", .{
                     self.replica,
@@ -5729,6 +5737,7 @@ pub fn ReplicaType(
 
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
+                assert(self.pipeline == .cache);
 
                 self.log_view = new_view;
                 self.ping_timeout.start();
@@ -5742,7 +5751,6 @@ pub fn ReplicaType(
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
-            self.reset_quorum_prepare_ok();
 
             assert(self.start_view_change_quorum == false);
             assert(self.do_view_change_quorum == false);
@@ -5764,6 +5772,11 @@ pub fn ReplicaType(
             assert(new_view > self.view);
             self.view = new_view;
             self.status = .view_change;
+            if (self.pipeline == .queue) {
+                var queue = self.pipeline.queue;
+                self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
+                queue.deinit(self.message_bus.pool);
+            }
 
             self.ping_timeout.stop();
             self.commit_timeout.stop();
@@ -5782,7 +5795,6 @@ pub fn ReplicaType(
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
-            self.reset_quorum_prepare_ok();
 
             assert(self.start_view_change_quorum == false);
             assert(self.do_view_change_quorum == false);
@@ -5908,37 +5920,6 @@ pub fn ReplicaType(
             }
             assert(b.op == op_min);
             return true;
-        }
-
-        fn verify_pipeline(self: *Self) void {
-            assert(self.status == .view_change);
-
-            var op = self.commit_max + 1;
-            var parent = self.journal.header_with_op(self.commit_max).?.checksum;
-
-            var iterator = self.pipeline.iterator();
-            while (iterator.next_ptr()) |prepare| {
-                assert(prepare.message.header.command == .prepare);
-                assert(!prepare.ok_quorum_received);
-                assert(prepare.ok_from_all_replicas.count() == 0);
-
-                log.debug("{}: verify_pipeline: op={} checksum={x} parent={x}", .{
-                    self.replica,
-                    prepare.message.header.op,
-                    prepare.message.header.checksum,
-                    prepare.message.header.parent,
-                });
-
-                assert(self.journal.has(prepare.message.header));
-                assert(prepare.message.header.op == op);
-                assert(prepare.message.header.op <= self.op);
-                assert(prepare.message.header.parent == parent);
-
-                parent = prepare.message.header.checksum;
-                op += 1;
-            }
-            assert(self.pipeline.count <= constants.pipeline_max);
-            assert(self.commit_max + self.pipeline.count == op - 1);
         }
 
         fn view_jump(self: *Self, header: *const Header) void {
@@ -6067,3 +6048,258 @@ pub fn ReplicaType(
         }
     };
 }
+
+/// The PipelineQueue belongs to a normal-status primary. It consists of two queues:
+/// - A prepare queue, containing all messages currently being prepared.
+/// - A request queue, containing all messages which are waiting to begin preparing.
+///
+/// Invariants:
+/// - prepare_queue contains only messages with command=prepare.
+/// - prepare_queue's messages have sequential, increasing ops.
+/// - prepare_queue's messages are hash-chained.
+/// - request_queue contains only messages with command=request.
+/// - If request_queue is not empty, then prepare_queue is full OR 1-less than full.
+///   (The caller is responsible for maintaining this invariant. If the caller removes an entry
+///   from `prepare_queue`, an entry from request_queue should be moved over promptly.)
+///
+/// Note: The prepare queue may contain multiple prepares from a single client, but the request
+/// queue may not (see message_by_client()).
+const PipelineQueue = struct {
+    const PrepareQueue = RingBuffer(Prepare, constants.pipeline_prepare_queue_max, .array);
+    const RequestQueue = RingBuffer(Request, constants.pipeline_request_queue_max, .array);
+
+    /// Messages that are preparing (uncommitted, being written to the WAL (may already be written
+    /// to the WAL) and replicated (may just be waiting for acks)).
+    prepare_queue: PrepareQueue = .{},
+    /// Messages that are accepted from the client, but not yet preparing.
+    /// When `pipeline_prepare_queue_max + pipeline_request_queue_max = clients_max`, the request
+    /// queue guards against clients starving one another.
+    request_queue: RequestQueue = .{},
+
+    fn deinit(pipeline: *PipelineQueue, message_pool: *MessagePool) void {
+        while (pipeline.request_queue.pop()) |r| message_pool.unref(r.message);
+        while (pipeline.prepare_queue.pop()) |p| message_pool.unref(p.message);
+    }
+
+    fn verify(pipeline: PipelineQueue) void {
+        assert(pipeline.request_queue.count <= constants.pipeline_request_queue_max);
+        assert(pipeline.prepare_queue.count <= constants.pipeline_prepare_queue_max);
+        assert(pipeline.request_queue.empty() or
+            constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count or
+            constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count + 1);
+
+        if (pipeline.prepare_queue.head_ptr_const()) |head| {
+            var op = head.message.header.op;
+            var parent = head.message.header.parent;
+            var prepare_iterator = pipeline.prepare_queue.iterator();
+            while (prepare_iterator.next_ptr()) |prepare| {
+                assert(prepare.message.header.command == .prepare);
+                assert(prepare.message.header.op == op);
+                assert(prepare.message.header.parent == parent);
+
+                parent = prepare.message.header.checksum;
+                op += 1;
+            }
+        }
+
+        var request_iterator = pipeline.request_queue.iterator();
+        while (request_iterator.next()) |request| {
+            assert(request.message.header.command == .request);
+        }
+    }
+
+    fn full(pipeline: PipelineQueue) bool {
+        if (pipeline.prepare_queue.full()) {
+            return pipeline.request_queue.full();
+        } else {
+            assert(pipeline.request_queue.empty() or
+                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max);
+            return false;
+        }
+    }
+
+    /// Searches the pipeline for a prepare for a given op and checksum.
+    /// When `checksum` is `null`, match any checksum.
+    fn prepare_by_op_and_checksum(pipeline: *PipelineQueue, op: u64, checksum: ?u128) ?*Prepare {
+        if (pipeline.prepare_queue.empty()) return null;
+
+        // To optimize the search, we can leverage the fact that the pipeline's entries are
+        // ordered and consecutive.
+        const head_op = pipeline.prepare_queue.head_ptr().?.message.header.op;
+        const tail_op = pipeline.prepare_queue.tail_ptr().?.message.header.op;
+        if (op < head_op) return null;
+        if (op > tail_op) return null;
+
+        const prepare = pipeline.prepare_queue.get_ptr(op - head_op).?;
+        assert(prepare.message.header.op == op);
+
+        if (checksum == null) return prepare;
+        if (checksum.? == prepare.message.header.checksum) return prepare;
+        return null;
+    }
+
+    /// Searches the pipeline for a prepare matching the given ack.
+    /// Asserts that the returned prepare corresponds to the prepare_ok.
+    fn prepare_by_prepare_ok(pipeline: *PipelineQueue, ok: *const Message) ?*Prepare {
+        assert(ok.header.command == .prepare_ok);
+
+        const prepare = pipeline.prepare_by_op_and_checksum(
+            ok.header.op,
+            ok.header.context,
+        ) orelse return null;
+        assert(prepare.message.header.command == .prepare);
+        assert(prepare.message.header.parent == ok.header.parent);
+        assert(prepare.message.header.client == ok.header.client);
+        assert(prepare.message.header.request == ok.header.request);
+        assert(prepare.message.header.cluster == ok.header.cluster);
+        assert(prepare.message.header.epoch == ok.header.epoch);
+        // A prepare may be committed in the same view or in a newer view:
+        assert(prepare.message.header.view <= ok.header.view);
+        assert(prepare.message.header.op == ok.header.op);
+        assert(prepare.message.header.commit == ok.header.commit);
+        assert(prepare.message.header.timestamp == ok.header.timestamp);
+        assert(prepare.message.header.operation == ok.header.operation);
+
+        return prepare;
+    }
+
+    /// Search the pipeline (both request & prepare queues) for a message from the given client.
+    /// - A client may have multiple prepares in the pipeline if these were committed by the
+    ///   previous primary and were reloaded into the pipeline after a view change.
+    /// - A client may have at most one request in the pipeline.
+    /// If there are multiple messages in the pipeline from the client, the *latest* message is
+    /// returned (to help the caller identify bad client behavior).
+    fn message_by_client(pipeline: PipelineQueue, client_id: u128) ?*const Message {
+        var message: ?*const Message = null;
+        var prepare_iterator = pipeline.prepare_queue.iterator();
+        while (prepare_iterator.next_ptr()) |prepare| {
+            if (prepare.message.header.client == client_id) message = prepare.message;
+        }
+
+        var request_iterator = pipeline.request_queue.iterator();
+        while (request_iterator.next()) |request| {
+            if (request.message.header.client == client_id) message = request.message;
+        }
+        return message;
+    }
+
+    /// Warning: This temporarily violates the prepare/request queue count invariant.
+    /// After invocation, call pop_request→push_prepare to begin preparing the next request.
+    fn pop_prepare(pipeline: *PipelineQueue) ?Prepare {
+        if (pipeline.prepare_queue.pop()) |prepare| {
+            assert(pipeline.request_queue.empty() or
+                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max);
+            return prepare;
+        } else {
+            assert(pipeline.request_queue.empty());
+            return null;
+        }
+    }
+
+    fn pop_request(pipeline: *PipelineQueue) ?Request {
+        return pipeline.request_queue.pop();
+    }
+
+    fn push_request(pipeline: *PipelineQueue, request: Request) void {
+        assert(request.message.header.command == .request);
+        var queue_iterator = pipeline.request_queue.iterator();
+        while (queue_iterator.next()) |queue_request| {
+            assert(queue_request.message.header.client != request.message.header.client);
+        }
+
+        pipeline.request_queue.push_assume_capacity(request);
+        if (constants.verify) pipeline.verify();
+    }
+
+    fn push_prepare(pipeline: *PipelineQueue, message: *Message) void {
+        assert(message.header.command == .prepare);
+        if (pipeline.prepare_queue.tail()) |tail| {
+            assert(message.header.op == tail.message.header.op + 1);
+            assert(message.header.parent == tail.message.header.checksum);
+            assert(message.header.view >= tail.message.header.view);
+        } else {
+            assert(pipeline.request_queue.empty());
+        }
+
+        pipeline.prepare_queue.push_assume_capacity(.{ .message = message });
+        if (constants.verify) pipeline.verify();
+    }
+};
+
+/// Prepares in the cache may be committed or uncommitted, and may not belong to the current view.
+///
+/// Invariants:
+/// - The cache contains only messages with command=prepare.
+/// - If a message with op X is in the cache, it is in `prepares[X % prepares.len]`.
+const PipelineCache = struct {
+    const prepares_max =
+        constants.pipeline_prepare_queue_max +
+        constants.pipeline_request_queue_max;
+
+    prepares: [prepares_max]?*Message = [_]?*Message{null} ** prepares_max,
+
+    /// Converting a PipelineQueue to a PipelineCache discards all accumulated acks.
+    /// "prepare_ok"s from previous views are not valid, even if the pipeline entry is reused
+    /// after a cycle of view changes. In other words, when a view change cycles around, so
+    /// that the original primary becomes a primary of a new view, pipeline entries may be
+    /// reused. However, the pipeline's prepare_ok quorums must not be reused, since the
+    /// replicas that sent them may have swapped them out during a previous view change.
+    fn init_from_queue(queue: *PipelineQueue) PipelineCache {
+        var cache = PipelineCache{};
+        var prepares = queue.prepare_queue.iterator();
+        while (prepares.next()) |prepare| {
+            const prepare_old = cache.insert(prepare.message.ref());
+            assert(prepare_old == null);
+            assert(prepare.message.header.command == .prepare);
+        }
+        return cache;
+    }
+
+    fn deinit(pipeline: *PipelineCache, message_pool: *MessagePool) void {
+        for (pipeline.prepares) |*entry| {
+            if (entry.*) |m| {
+                message_pool.unref(m);
+                entry.* = null;
+            }
+        }
+    }
+
+    fn empty(pipeline: *const PipelineCache) bool {
+        for (pipeline.prepares) |*entry| {
+            if (entry) |_| return true;
+        }
+        return false;
+    }
+
+    fn contains_header(pipeline: *const PipelineCache, header: *const Header) bool {
+        assert(header.command == .prepare);
+
+        const slot = header.op % prepares_max;
+        const prepare = pipeline.prepares[slot] orelse return false;
+        return prepare.header.op == header.op and prepare.header.checksum == header.checksum;
+    }
+
+    fn prepare_by_op(pipeline: *PipelineCache, op: u64) ?*Message {
+        const slot = op % prepares_max;
+        const prepare = pipeline.prepares[slot] orelse return null;
+        if (prepare.header.op != op) return null;
+        return prepare;
+    }
+
+    fn prepare_by_op_and_checksum(pipeline: *PipelineCache, op: u64, checksum: ?u128) ?*Message {
+        const prepare = pipeline.prepare_by_op(op) orelse return null;
+        if (checksum == null) return prepare;
+        if (checksum.? == prepare.header.checksum) return prepare;
+        return null;
+    }
+
+    /// Returns the message evicted from the cache, if any.
+    fn insert(pipeline: *PipelineCache, prepare: *Message) ?*Message {
+        assert(prepare.header.command == .prepare);
+
+        const slot = prepare.header.op % prepares_max;
+        const prepare_old = pipeline.prepares[slot];
+        pipeline.prepares[slot] = prepare;
+        return prepare_old;
+    }
+};

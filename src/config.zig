@@ -68,6 +68,7 @@ const ConfigProcess = struct {
 const ConfigCluster = struct {
     cache_line_size: comptime_int = 64,
     clients_max: usize,
+    pipeline_prepare_queue_max: usize = 8,
     quorum_replication_max: u8 = 3,
     journal_slot_count: usize = 1024,
     message_size_max: usize = 1 * 1024 * 1024,
@@ -91,7 +92,7 @@ const ConfigCluster = struct {
     pub const clients_max_min = 1;
 
     /// The smallest possible message_size_max (for use in the simulator to improve performance).
-    /// The message body must have room for pipeline_max headers in the DVC.
+    /// The message body must have room for pipeline_prepare_queue_max headers in the DVC.
     pub fn message_size_max_min(clients_max: usize) usize {
         return std.math.max(
             sector_size,
@@ -166,7 +167,8 @@ pub const configs = struct {
             .verify = true,
         },
         .cluster = .{
-            .clients_max = 4,
+            .clients_max = 6 + 4,
+            .pipeline_prepare_queue_max = 6,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
             .message_size_max = Config.Cluster.message_size_max_min(2),
             .storage_size_max = 1024 * 1024 * 1024,

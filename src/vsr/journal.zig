@@ -101,7 +101,7 @@ comptime {
     assert(slot_count >= headers_per_sector);
     // The length of the prepare pipeline is the upper bound on how many ops can be
     // reordered during a view change. See `recover_prepares_callback()` for more detail.
-    assert(slot_count > constants.pipeline_max);
+    assert(slot_count > constants.pipeline_prepare_queue_max);
 
     assert(headers_size > 0);
     assert(headers_size % constants.sector_size == 0);
