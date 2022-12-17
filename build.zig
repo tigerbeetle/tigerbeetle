@@ -377,9 +377,6 @@ fn go_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
-        var cache = CacheWorkaround.init(b, platform);
-        defer cache.deinit();
-
         const lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
         lib.setMainPkgPath("src");
         lib.setTarget(cross_target);
@@ -425,9 +422,6 @@ fn java_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
-        var cache = CacheWorkaround.init(b, platform);
-        defer cache.deinit();
-
         const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.addPackagePath("jui", "src/clients/java/lib/jui/src/jui.zig");
@@ -471,9 +465,6 @@ fn dotnet_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
-        var cache = CacheWorkaround.init(b, platform);
-        defer cache.deinit();
-
         const lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.setOutputDir("src/clients/dotnet/src/TigerBeetle/native/" ++ platform);
@@ -492,34 +483,3 @@ fn dotnet_client(
         build_step.dependOn(&lib.step);
     }
 }
-
-const CacheWorkaround = struct {
-    const Self = @This();
-
-    b: *std.build.Builder,
-    cache_root: []const u8 = undefined,
-    global_cache_root: []const u8 = undefined,
-
-    pub fn init(b: *std.build.Builder, comptime platform: []const u8) Self {
-        var self = Self{
-            .b = b,
-            .cache_root = b.cache_root,
-            .global_cache_root = b.global_cache_root,
-        };
-
-        // Hit some issue with the build cache between cross compilations:
-        // - From Linux, it runs fine
-        // - From Windows it fails on libc "invalid object"
-        // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
-        // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
-        b.cache_root = "zig-cache/" ++ platform;
-        b.global_cache_root = "zig-cache/" ++ platform ++ "/global";
-
-        return self;
-    }
-
-    pub fn deinit(self: *const Self) void {
-        self.b.cache_root = self.cache_root;
-        self.b.global_cache_root = self.global_cache_root;
-    }
-};
