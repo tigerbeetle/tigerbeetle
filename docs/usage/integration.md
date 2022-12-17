@@ -20,7 +20,7 @@ to each [client session](#client-sessions).
 But consistency models can seem arcane.
 What specific guarantees does TigerBeetle provide to applications?
 
-#### [Client Sessions](#client-sessions)
+#### Sessions
 
 - A client session may have at most one in-flight request.
 - A client session reads its own writes.
@@ -35,7 +35,7 @@ What specific guarantees does TigerBeetle provide to applications?
 - Multiple client sessions may receive replies [out of order](#reply-order) relative to one another.
 - A client session can consider a request executed when it receives a reply for the request.
 
-#### [Requests](#requests)
+#### Requests
 
 - A request executes within the cluster at most once.
 - Requests do not [time out](#retries) — a timeout typically implies failure, which cannot be
@@ -49,7 +49,7 @@ What specific guarantees does TigerBeetle provide to applications?
   entirely before/after?)
 - All events within a request batch are committed, or none are.
 
-#### [Events](../reference/operations/index.md)
+#### Events
 
 - Once committed, an event will always be committed — the cluster's state never backtracks.
 - Within a cluster, object timestamps are unique.
@@ -64,7 +64,7 @@ What specific guarantees does TigerBeetle provide to applications?
   occur at any point in the future, or never. Handling application crash recovery safely requires
   [using `id`s to idempotently retry events](#consistency-with-foreign-databases).
 
-#### [Accounts](../reference/accounts.md)
+#### Accounts
 
 - Accounts are immutable — once created, they are never modified
   (excluding balance fields, which are modified by transfers).
@@ -72,7 +72,7 @@ What specific guarantees does TigerBeetle provide to applications?
 - The sum of all accounts' `debits_pending` equals the sum of all accounts' `credits_pending`.
 - The sum of all accounts' `debits_posted` equals the sum of all accounts' `credits_posted`.
 
-#### [Transfers](../reference/transfers.md)
+#### Transfers
 
 - Transfers are immutable — once created, they are never modified.
 - There is at most one `Transfer` with a particular `id`.
@@ -211,8 +211,8 @@ orphaned accounts in TigerBeetle, which may be confusing for auditing and debugg
 
 ## Client Sessions
 
-A _client session_ is a sequence of alternating [requests](#requests) and replies between a client
-and a cluster.
+A _client session_ is a sequence of alternating [requests](#client-requests) and replies between a
+client and a cluster.
 
 A client session may have at most one in-flight request — i.e. at most one unique request on the
 network for which a reply has not been received. This simplifies consistency and allows the cluster
@@ -266,7 +266,7 @@ the application is trying to run [too many](#batching-events) concurrent clients
 
 
 
-## Requests
+## Client Requests
 
 A _request_ is a [batch](#batching-events) of one or more
 [operation events](../reference/operations/index.md) sent to the cluster in a single message.
