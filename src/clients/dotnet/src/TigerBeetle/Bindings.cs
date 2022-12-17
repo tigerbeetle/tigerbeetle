@@ -424,219 +424,214 @@ namespace TigerBeetle
         PendingIdMustBeZero = 12,
 
         /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_must_timeout
-        /// </summary>
-        PendingTransferMustTimeout = 13,
-
-        /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#ledger_must_not_be_zero
         /// </summary>
-        LedgerMustNotBeZero = 14,
+        LedgerMustNotBeZero = 13,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#code_must_not_be_zero
         /// </summary>
-        CodeMustNotBeZero = 15,
+        CodeMustNotBeZero = 14,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#amount_must_not_be_zero
         /// </summary>
-        AmountMustNotBeZero = 16,
+        AmountMustNotBeZero = 15,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_not_found
         /// </summary>
-        DebitAccountNotFound = 17,
+        DebitAccountNotFound = 16,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_not_found
         /// </summary>
-        CreditAccountNotFound = 18,
+        CreditAccountNotFound = 17,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_have_the_same_ledger
         /// </summary>
-        AccountsMustHaveTheSameLedger = 19,
+        AccountsMustHaveTheSameLedger = 18,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#transfer_must_have_the_same_ledger_as_accounts
         /// </summary>
-        TransferMustHaveTheSameLedgerAsAccounts = 20,
+        TransferMustHaveTheSameLedgerAsAccounts = 19,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_flags
         /// </summary>
-        ExistsWithDifferentFlags = 21,
+        ExistsWithDifferentFlags = 20,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_debit_account_id
         /// </summary>
-        ExistsWithDifferentDebitAccountId = 22,
+        ExistsWithDifferentDebitAccountId = 21,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_credit_account_id
         /// </summary>
-        ExistsWithDifferentCreditAccountId = 23,
+        ExistsWithDifferentCreditAccountId = 22,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data
         /// </summary>
-        ExistsWithDifferentUserData = 24,
+        ExistsWithDifferentUserData = 23,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_pending_id
         /// </summary>
-        ExistsWithDifferentPendingId = 25,
+        ExistsWithDifferentPendingId = 24,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_timeout
         /// </summary>
-        ExistsWithDifferentTimeout = 26,
+        ExistsWithDifferentTimeout = 25,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_code
         /// </summary>
-        ExistsWithDifferentCode = 27,
+        ExistsWithDifferentCode = 26,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_amount
         /// </summary>
-        ExistsWithDifferentAmount = 28,
+        ExistsWithDifferentAmount = 27,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists
         /// </summary>
-        Exists = 29,
+        Exists = 28,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending
         /// </summary>
-        OverflowsDebitsPending = 30,
+        OverflowsDebitsPending = 29,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending
         /// </summary>
-        OverflowsCreditsPending = 31,
+        OverflowsCreditsPending = 30,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted
         /// </summary>
-        OverflowsDebitsPosted = 32,
+        OverflowsDebitsPosted = 31,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted
         /// </summary>
-        OverflowsCreditsPosted = 33,
+        OverflowsCreditsPosted = 32,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits
         /// </summary>
-        OverflowsDebits = 34,
+        OverflowsDebits = 33,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits
         /// </summary>
-        OverflowsCredits = 35,
+        OverflowsCredits = 34,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout
         /// </summary>
-        OverflowsTimeout = 36,
+        OverflowsTimeout = 35,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits
         /// </summary>
-        ExceedsCredits = 37,
+        ExceedsCredits = 36,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits
         /// </summary>
-        ExceedsDebits = 38,
+        ExceedsDebits = 37,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#cannot_post_and_void_pending_transfer
         /// </summary>
-        CannotPostAndVoidPendingTransfer = 39,
+        CannotPostAndVoidPendingTransfer = 38,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_cannot_post_or_void_another
         /// </summary>
-        PendingTransferCannotPostOrVoidAnother = 40,
+        PendingTransferCannotPostOrVoidAnother = 39,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#timeout_reserved_for_pending_transfer
         /// </summary>
-        TimeoutReservedForPendingTransfer = 41,
+        TimeoutReservedForPendingTransfer = 40,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_zero
         /// </summary>
-        PendingIdMustNotBeZero = 42,
+        PendingIdMustNotBeZero = 41,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_int_max
         /// </summary>
-        PendingIdMustNotBeIntMax = 43,
+        PendingIdMustNotBeIntMax = 42,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_different
         /// </summary>
-        PendingIdMustBeDifferent = 44,
+        PendingIdMustBeDifferent = 43,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_found
         /// </summary>
-        PendingTransferNotFound = 45,
+        PendingTransferNotFound = 44,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_pending
         /// </summary>
-        PendingTransferNotPending = 46,
+        PendingTransferNotPending = 45,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_debit_account_id
         /// </summary>
-        PendingTransferHasDifferentDebitAccountId = 47,
+        PendingTransferHasDifferentDebitAccountId = 46,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_credit_account_id
         /// </summary>
-        PendingTransferHasDifferentCreditAccountId = 48,
+        PendingTransferHasDifferentCreditAccountId = 47,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_ledger
         /// </summary>
-        PendingTransferHasDifferentLedger = 49,
+        PendingTransferHasDifferentLedger = 48,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_code
         /// </summary>
-        PendingTransferHasDifferentCode = 50,
+        PendingTransferHasDifferentCode = 49,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_pending_transfer_amount
         /// </summary>
-        ExceedsPendingTransferAmount = 51,
+        ExceedsPendingTransferAmount = 50,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_amount
         /// </summary>
-        PendingTransferHasDifferentAmount = 52,
+        PendingTransferHasDifferentAmount = 51,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_posted
         /// </summary>
-        PendingTransferAlreadyPosted = 53,
+        PendingTransferAlreadyPosted = 52,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_voided
         /// </summary>
-        PendingTransferAlreadyVoided = 54,
+        PendingTransferAlreadyVoided = 53,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_expired
         /// </summary>
-        PendingTransferExpired = 55,
+        PendingTransferExpired = 54,
 
     }
 
