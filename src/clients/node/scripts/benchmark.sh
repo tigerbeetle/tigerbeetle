@@ -6,7 +6,7 @@ COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
 cd ./src/tigerbeetle
-"$CWD"/zig/zig build -Drelease-safe
+"$CWD"/zig/zig build install -Drelease-safe
 cd "$CWD"
 
 REPLICAS="0"

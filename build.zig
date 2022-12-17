@@ -43,29 +43,31 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
-    const tigerbeetle_exe = blk: {
-        const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
-        tigerbeetle.setTarget(target);
-        tigerbeetle.setBuildMode(mode);
-        tigerbeetle.install();
-        // Ensure that we get stack traces even in release builds.
-        tigerbeetle.omit_frame_pointer = false;
-        tigerbeetle.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(tigerbeetle, tracer_backend, target);
+    const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
+    tigerbeetle.setTarget(target);
+    tigerbeetle.setBuildMode(mode);
+    tigerbeetle.install();
+    // Ensure that we get stack traces even in release builds.
+    tigerbeetle.omit_frame_pointer = false;
+    tigerbeetle.addOptions("tigerbeetle_build_options", options);
+    link_tracer_backend(tigerbeetle, tracer_backend, target);
 
+    {
         const run_cmd = tigerbeetle.run();
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("run", "Run TigerBeetle");
         run_step.dependOn(&run_cmd.step);
+    }
 
-        // Moves the server executable to the root folder.
-        const install = b.addInstallBinFile(tigerbeetle.getOutputSource(), b.pathJoin(&.{ "../../", tigerbeetle.out_filename }));
-        install.step.dependOn(&tigerbeetle.step);
-        b.default_step = &install.step;
+    {
+        // "zig build install" moves the server executable to the root folder:
+        const move_cmd = b.addInstallBinFile(tigerbeetle.getOutputSource(), b.pathJoin(&.{ "../../", tigerbeetle.out_filename }));
+        move_cmd.step.dependOn(&tigerbeetle.step);
 
-        break :blk install;
-    };
+        var install_step = b.getInstallStep();
+        install_step.dependOn(&move_cmd.step);
+    }
 
     {
         const benchmark = b.addExecutable("benchmark", "src/benchmark.zig");
@@ -124,24 +126,26 @@ pub fn build(b: *std.build.Builder) void {
 
     // Clients build:
     {
+        var install_step = b.addInstallArtifact(tigerbeetle);
+
         go_client(
             b,
             mode,
-            &.{ &tigerbeetle_exe.step, &tb_client_header_generate.step },
+            &.{ &install_step.step, &tb_client_header_generate.step },
             options,
             tracer_backend,
         );
         java_client(
             b,
             mode,
-            &.{&tigerbeetle_exe.step},
+            &.{&install_step.step},
             options,
             tracer_backend,
         );
         dotnet_client(
             b,
             mode,
-            &.{&tigerbeetle_exe.step},
+            &.{&install_step.step},
             options,
             tracer_backend,
         );
@@ -373,6 +377,9 @@ fn go_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
+        var cache = CacheWorkaround.init(b, platform);
+        defer cache.deinit();
+
         const lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
         lib.setMainPkgPath("src");
         lib.setTarget(cross_target);
@@ -382,8 +389,6 @@ fn go_client(
         lib.bundle_compiler_rt = true;
 
         lib.setOutputDir("src/clients/go/pkg/native/" ++ platform);
-
-        set_cache_dir(b, platform);
 
         lib.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
@@ -420,6 +425,9 @@ fn java_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
+        var cache = CacheWorkaround.init(b, platform);
+        defer cache.deinit();
+
         const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.addPackagePath("jui", "src/clients/java/lib/jui/src/jui.zig");
@@ -432,8 +440,6 @@ fn java_client(
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
         }
-
-        set_cache_dir(b, platform);
 
         lib.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
@@ -465,6 +471,9 @@ fn dotnet_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
+        var cache = CacheWorkaround.init(b, platform);
+        defer cache.deinit();
+
         const lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.setOutputDir("src/clients/dotnet/src/TigerBeetle/native/" ++ platform);
@@ -477,8 +486,6 @@ fn dotnet_client(
             lib.linkSystemLibrary("advapi32");
         }
 
-        set_cache_dir(b, platform);
-
         lib.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
@@ -486,12 +493,33 @@ fn dotnet_client(
     }
 }
 
-fn set_cache_dir(b: *std.build.Builder, comptime platform: []const u8) void {
-    // Hit some issue with the build cache between cross compilations:
-    // - From Linux, it runs fine
-    // - From Windows it fails on libc "invalid object"
-    // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
-    // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
-    b.cache_root = "zig-cache/" ++ platform;
-    b.global_cache_root = "zig-cache/" ++ platform ++ "/global";
-}
+const CacheWorkaround = struct {
+    const Self = @This();
+
+    b: *std.build.Builder,
+    cache_root: []const u8 = undefined,
+    global_cache_root: []const u8 = undefined,
+
+    pub fn init(b: *std.build.Builder, comptime platform: []const u8) Self {
+        var self = Self{
+            .b = b,
+            .cache_root = b.cache_root,
+            .global_cache_root = b.global_cache_root,
+        };
+
+        // Hit some issue with the build cache between cross compilations:
+        // - From Linux, it runs fine
+        // - From Windows it fails on libc "invalid object"
+        // - From MacOS, similar to https://github.com/ziglang/zig/issues/9711
+        // Workarround: Just setting a different cache folder for each platform and an isolated global cache.
+        b.cache_root = "zig-cache/" ++ platform;
+        b.global_cache_root = "zig-cache/" ++ platform ++ "/global";
+
+        return self;
+    }
+
+    pub fn deinit(self: *const Self) void {
+        self.b.cache_root = self.cache_root;
+        self.b.global_cache_root = self.global_cache_root;
+    }
+};

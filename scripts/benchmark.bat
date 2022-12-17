@@ -27,7 +27,7 @@ echo.
 exit /b
 
 :main
-zig\zig.exe build -Drelease-safe
+zig\zig.exe build install -Drelease-safe
 
 for /l %%i in (0, 1, 0) do (
     echo Initializing replica %%i

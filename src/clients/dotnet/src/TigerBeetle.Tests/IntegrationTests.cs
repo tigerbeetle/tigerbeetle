@@ -618,8 +618,8 @@ namespace TigerBeetle.Tests
 		#region Fields
 
 		public const string TB_EXE = "tigerbeetle";
-		public const string TB_PATH = "../../../../../../../..";
-		public static readonly string TB_SERVER = $"{TB_PATH}/{TB_EXE}";
+		public const string BIN_PATH = "../../../../../../../../zig-out/bin";
+		public static readonly string TB_SERVER = $"{BIN_PATH}/{TB_EXE}";
 		public const int TB_PORT = 3001;
 		public const string TB_FILE = "dotnet-tests.tigerbeetle";
 		public static readonly string FORMAT = $"format --cluster=0 --replica=0 ./{TB_FILE}";
