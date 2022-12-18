@@ -3615,7 +3615,7 @@ pub fn ReplicaType(
         }
 
         fn message_body_as_headers(message: *const Message) []const Header {
-            assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
+            assert(message.header.size >= @sizeOf(Header)); // Body must contain at least one header.
             assert(message.header.command == .do_view_change or
                 message.header.command == .start_view or
                 message.header.command == .headers or
@@ -3633,6 +3633,33 @@ pub fn ReplicaType(
             }
 
             return headers;
+        }
+
+        /// Returns the op of the lowest gap within the DVC headers.
+        /// Returns `null` when the headers are sequential.
+        ///
+        /// For example:
+        /// - Given ops "2 3 6 8", return 4.
+        /// - Given ops "2 3 4 5", return null.
+        fn do_view_change_headers_gap_min(message: *const Message) ?u64 {
+            assert(message.header.command == .do_view_change);
+            assert(message.header.size >= @sizeOf(Header));
+
+            const headers = message_body_as_headers(message);
+            var op_gap: ?u64 = null;
+            var op = headers[0].op;
+            var parent = headers[0].parent;
+            for (headers[1..]) |header| {
+                if (header.op == op - 1) {
+                    // DVC headers never contain breaks, only gaps.
+                    assert(header.checksum == parent);
+                } else {
+                    op_gap = header.op + 1;
+                }
+                op = header.op;
+                parent = header.parent;
+            }
+            return op_gap;
         }
 
         /// Returns whether the highest known op is certain.
@@ -5231,16 +5258,16 @@ pub fn ReplicaType(
             }
 
             const view_normal_canonical = do_view_change_head.view_normal;
-            // `op_canonical` must be computed before calling `set_op_and_commit_max()`, since
-            // that may change `replica.op`.
+            // `op_canonical_primary` must be computed before calling `set_op_and_commit_max()`,
+            // since that may change `replica.op`.
             //
             // Don't remove the uncanonical headers yet — even though the removed headers are
             // a subset of the DVC headers, removing and then adding them back would cause clean
             // headers to become dirty.
-            const op_canonical = self.primary_op_canonical_max(view_normal_canonical);
-            assert(op_canonical <= self.op);
-            assert(op_canonical >= self.op -| constants.pipeline_max);
-            assert(op_canonical >= self.commit_min);
+            const op_canonical_primary = self.primary_op_canonical_max(view_normal_canonical);
+            assert(op_canonical_primary <= self.op);
+            assert(op_canonical_primary >= self.op -| constants.pipeline_max);
+            assert(op_canonical_primary >= self.commit_min);
 
             if (do_view_change_head.op > self.op_checkpoint_trigger()) {
                 // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
@@ -5273,6 +5300,31 @@ pub fn ReplicaType(
             // "`replica.op` exists" invariant may be broken until after the canonical DVC headers
             // are installed.
 
+            // "op_canonical" distinguishes between ops maybe-uncommitted ops from
+            // definitely-uncommitted ops — the latter are discarded to improve availablility.
+            // Gaps within a DVC's headers indicate ops that are not committed by that replica,
+            // but gaps in the new primary's headers cannot in general be truncated.
+            //
+            // Consider a view change with DVCs (pipeline_max=3):
+            //
+            //   replica   headers                       view_normal
+            //         0   1 [2  3  4b]                  4     (new primary)
+            //         1   1  2  3  4a  5  6 [7  8  9]   5
+            //         2  (1  2  3  4a  5  6  7  8  9 )  5     (partitioned)
+            //
+            // Then replica 0 constructs:
+            //
+            //             1  2  3  4b        7  8  9
+            //
+            // The correct behavior is to keep all of these headers, and then after
+            // primary_set_log_from_do_view_change_messages(), repair backwards from 7 (op 4b will
+            // be replaced by 4a). Discarding at the gap (5…9) would fork the log (4a→4b).
+            //
+            // If there is no gap in a DVC's headers, use its highest op — without a gap we must
+            // assume that all of the headers may be committed (at least until we run the nack
+            // protocol).
+            var op_canonical: u64 = op_canonical_primary;
+
             // First, set all the canonical headers from the replica(s) with highest `view_normal`:
             for (self.do_view_change_from_all_replicas) |received| {
                 if (received) |message| {
@@ -5295,7 +5347,12 @@ pub fn ReplicaType(
                             },
                         );
                     }
+
                     self.replace_headers(message_headers);
+                    op_canonical = std.math.max(
+                        op_canonical,
+                        do_view_change_headers_gap_min(message) orelse message_headers[0].op,
+                    );
                 }
             }
 
