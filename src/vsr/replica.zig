@@ -1265,6 +1265,13 @@ pub fn ReplicaType(
             self.do_view_change_quorum = true;
 
             self.primary_set_log_from_do_view_change_messages();
+            // We aren't status=normal yet, but our headers from our prior view_normal may have been
+            // replaced. If we participate in another DVC (before reaching status=normal, which
+            // would update our view_normal), we must disambiguate our (new) headers from the
+            // headers of any other replica with the same view_normal so that the next primary can
+            // identify an unambiguous set of canonical headers.
+            self.view_normal = self.view;
+
             assert(self.op >= self.commit_max);
             assert(self.state_machine.prepare_timestamp >=
                 self.journal.header_with_op(self.op).?.timestamp);
@@ -5688,7 +5695,6 @@ pub fn ReplicaType(
             assert(new_view >= self.view);
             assert(self.journal.header_with_op(self.op) != null);
             self.view = new_view;
-            self.view_normal = new_view;
             self.status = .normal;
 
             if (self.primary()) {
@@ -5702,6 +5708,7 @@ pub fn ReplicaType(
 
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
+                assert(self.view_normal == new_view);
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
@@ -5721,6 +5728,7 @@ pub fn ReplicaType(
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
 
+                self.view_normal = new_view;
                 self.ping_timeout.start();
                 self.commit_timeout.stop();
                 self.normal_status_timeout.start();
