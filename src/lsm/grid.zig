@@ -347,6 +347,9 @@ pub fn GridType(comptime Storage: type) type {
             const cache_index = grid.cache.insert_index(&completed_write.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
+            if (constants.verify) {
+                std.mem.set(u8, completed_write.block.*, undefined);
+            }
 
             // Start a queued write if possible *before* calling the completed
             // write's callback. This ensures that if the callback calls
@@ -466,6 +469,9 @@ pub fn GridType(comptime Storage: type) type {
             const cache_index = grid.cache.insert_index(&read.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, iop_block, cache_block);
+            if (constants.verify) {
+                std.mem.set(u8, iop_block.*, undefined);
+            }
 
             // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {
