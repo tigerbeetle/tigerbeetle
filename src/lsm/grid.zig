@@ -528,23 +528,24 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn read_block_resolve(grid: *Grid, read: *Grid.Read, block: BlockPtrConst) void {
-            {
-                // Guard to make sure the cache cannot be updated by pending_read.callbacks()
-                assert(!grid.read_resolving);
-                grid.read_resolving = true;
-                defer grid.read_resolving = false;
+            // Guard to make sure the cache cannot be updated by any read.callbacks() below.
+            assert(!grid.read_resolving);
+            grid.read_resolving = true;
+            defer {
+                assert(grid.read_resolving);
+                grid.read_resolving = false;
+            }
 
-                // Resolve all reads queued to the address with the block.
-                // Callbacks may queue more to read.resolves so it must drain any new/existing pendings.
-                while (read.resolves.pop()) |pending| {
-                    const pending_read = @fieldParentPtr(Read, "pending", pending);
-                    pending_read.callback(pending_read, block);
-                }
+            // Resolve all reads queued to the address with the block.
+            // Callbacks may queue more to read.resolves so it must drain any new/existing pendings.
+            while (read.resolves.pop()) |pending| {
+                const pending_read = @fieldParentPtr(Read, "pending", pending);
+                pending_read.callback(pending_read, block);
             }
 
             // Remove the "root" read so that the address is no longer actively reading / locked.
-            // Then invoke the callback with the cache block (which is only valid until the the
-            // next Grid.read_block/Grid.write_block which may be done inside callback).
+            // Then invoke the callback with the cache block (which should be valid for the duration
+            // of the callback as any nested Grid calls cannot synchronously update the cache).
             grid.read_queue.remove(read);
             read.callback(read, block);
         }
