@@ -25,8 +25,7 @@ exit /b
 
 echo "Building TigerBeetle..."
 cd ..\..\..
-.\zig\zig.exe build -Dcpu=baseline -Drelease-safe
-move .\zig-out\bin\tigerbeetle.exe .
+.\zig\zig.exe build install -Dcpu=baseline -Drelease-safe
 cd src/clients/dotnet 
 
 for /l %%i in (0, 1, 0) do (

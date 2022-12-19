@@ -30,9 +30,9 @@ func toU128(value string) *types.Uint128 {
 func WithClient(s testing.TB, withClient func(Client)) {
 	var tigerbeetlePath string
 	if runtime.GOOS == "windows" {
-		tigerbeetlePath = "../../../tigerbeetle.exe"
+		tigerbeetlePath = "../../../zig-out/bin/tigerbeetle.exe"
 	} else {
-		tigerbeetlePath = "../../../tigerbeetle"
+		tigerbeetlePath = "../../../zig-out/bin/tigerbeetle"
 	}
 
 	addressArg := "--addresses=" + TIGERBEETLE_PORT

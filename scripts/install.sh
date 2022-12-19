@@ -14,9 +14,8 @@ set -eu
 scripts/install_zig.sh
 if [ "$debug" = "true" ]; then
     echo "Building Tigerbeetle debug..."
-    zig/zig build -Dcpu=baseline
+    zig/zig build install -Dcpu=baseline
 else
     echo "Building TigerBeetle..."
-    zig/zig build -Dcpu=baseline -Drelease-safe
+    zig/zig build install -Dcpu=baseline -Drelease-safe
 fi
-mv zig-out/bin/tigerbeetle .

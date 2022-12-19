@@ -25,8 +25,7 @@ exit /b
 
 echo "Building TigerBeetle..."
 cd ..\..\..
-.\zig\zig.exe build -Dcpu=baseline -Drelease-safe
-move .\zig-out\bin\tigerbeetle.exe .
+.\zig\zig.exe build install -Dcpu=baseline -Drelease-safe
 cd src\clients\java
 
 echo "Building TigerBeetle Java Client"
