@@ -186,7 +186,7 @@ pub fn TableMutableType(comptime Table: type) type {
                     if (tombstone(value)) {
                         cache.remove(key_from_value(value));
                     } else {
-                        cache.insert(key_from_value(value)).* = value.*;
+                        cache.insert(value);
                     }
                 }
             }
