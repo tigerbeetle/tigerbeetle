@@ -475,12 +475,17 @@ pub fn GridType(comptime Storage: type) type {
                 grid.read_iops.release(iop);
             }
 
-            // Either reoslve all reads on the address or send them all to recovery.
+            // A valid block filled by storage means the reads for the address can be resolved
             if (read_block_valid(read, block)) {
                 grid.read_block_resolve(read, block);
-            } else {
-                grid.read_recovery_queue.push(read);
+                return;
             }
+
+            // On the result of an invalid block, move the "root" read (and all others it resolves)
+            // to recovery queue. Future reads on the same address will see the "root" read in the
+            // recovery queue and enqueue to it.
+            grid.read_queue.remove(read);
+            grid.read_recovery_queue.push(read);
         }
 
         fn read_block_valid(read: *Grid.Read, block: BlockPtrConst) bool {
