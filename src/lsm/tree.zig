@@ -336,7 +336,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
 
             if (index_block_count == 0) {
-                callback(context, null);
+                context.callback = callback;
+                tree.grid.on_next_tick(lookup_invalid_tick_callback, &context.next_tick);
                 return;
             }
 
@@ -346,6 +347,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             context.* = .{
                 .tree = tree,
                 .completion = undefined,
+                .next_tick = undefined,
 
                 .key = key,
                 .fingerprint = fingerprint,
@@ -360,12 +362,18 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             context.read_index_block();
         }
 
+        fn lookup_invalid_tick_callback(next_tick: *Grid.NextTick) void {
+            const context = @fieldParentPtr(LookupContext, "next_tick", next_tick);
+            context.callback(context, null);
+        }
+
         pub const LookupContext = struct {
             const Read = Grid.Read;
             const BlockPtrConst = Grid.BlockPtrConst;
 
             tree: *Tree,
             completion: Read,
+            next_tick: Grid.NextTick,
 
             key: Key,
             fingerprint: bloom_filter.Fingerprint,
