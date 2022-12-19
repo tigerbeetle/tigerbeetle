@@ -356,7 +356,7 @@ pub fn ReplicaType(
             self.opened = false;
             self.state_machine.open(state_machine_open_callback);
             while (!self.opened) {
-                self.grid.tick();
+                // self.grid.tick();
                 self.superblock.storage.tick();
             }
 
@@ -629,7 +629,7 @@ pub fn ReplicaType(
 
             // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
-            self.grid.tick();
+            // self.grid.tick();
             self.message_bus.tick();
 
             if (self.status == .recovering) {

@@ -125,7 +125,7 @@ const Environment = struct {
     }
 
     fn tick(env: *Environment) void {
-        env.grid.tick();
+        // env.grid.tick();
         env.storage.tick();
     }
 

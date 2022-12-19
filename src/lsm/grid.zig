@@ -104,12 +104,15 @@ pub fn GridType(comptime Storage: type) type {
         pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
         pub const Reservation = free_set.Reservation;
 
+        // Grid just reuses the Storage's NextTick abstraction for simplicity.
+        pub const NextTick = Storage.NextTick;
+
         pub const Write = struct {
             callback: fn (*Grid.Write) void,
             address: u64,
             block: BlockPtrConst,
 
-            /// Link for the write_queue linked list.
+            /// Link for the Grid.write_queue linked list.
             next: ?*Write = null,
         };
 
@@ -125,15 +128,24 @@ pub fn GridType(comptime Storage: type) type {
             checksum: u128,
             block_type: BlockType,
 
-            /// Link for read_queue/read_recovery_queue/ReadIOP.reads linked lists.
+            pending: ReadPending = .{},
+            resolves: FIFO(ReadPending) = .{},
+
+            grid: *Grid,
+            next_tick: Grid.NextTick = undefined,
+
+            /// Link for Grid.read_queue/Grid.read_recovery_queue linked lists.
             next: ?*Read = null,
         };
 
+        const ReadPending = struct {
+            /// Link for Read.resolves linked lists.
+            next: ?*ReadPending = null,
+        };
+
         const ReadIOP = struct {
-            grid: *Grid,
             completion: Storage.Read,
-            reads: FIFO(Read) = .{},
-            /// This is a pointer to a value in the block cache.
+            read: *Read,
             block: BlockPtr,
         };
 
@@ -143,20 +155,15 @@ pub fn GridType(comptime Storage: type) type {
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_queue: FIFO(Write) = .{},
 
-        /// `read_iops` maintains a list of ReadIOPs currently performing storage.read_sector() on
-        /// a unique address.
-        ///
-        /// Invariants:
-        /// * An address is listed in `read_iops` at most once. Multiple reads of the same address
-        ///   (past or present) are coalesced.
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
         read_queue: FIFO(Read) = .{},
 
-        /// Reads that were found to be in the cache on start_read() and queued to be resolved on
-        /// the next tick(). This keeps read_block() always asynchronous to the caller.
-        read_cached_queue: FIFO(Read) = .{},
+        // List if Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
+        read_pending_queue: FIFO(ReadPending) = .{},
         // TODO interrogate this list and do recovery in Replica.tick().
         read_recovery_queue: FIFO(Read) = .{},
+        // True if there's a read thats resolving callbacks. If so, the read cache must not be invalidated.
+        read_resolving: bool = false,
 
         pub fn init(allocator: mem.Allocator, superblock: *SuperBlock) !Grid {
             // TODO Determine this at runtime based on runtime configured maximum
@@ -174,33 +181,15 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
             grid.cache.deinit(allocator);
-
             grid.* = undefined;
         }
 
-        pub fn tick(grid: *Grid) void {
-            // Resolve reads that were seen in the cache during start_read()
-            // but deferred to be asynchronously resolved on the next tick.
-            //
-            // Drain directly from the queue so that new cache reads (added upon completion of old
-            // cache reads) that can be serviced immediately aren't deferred until the next tick
-            // (which may be milliseconds later due to IO.run_for_ns). This is necessary to ensure
-            // that groove prefetch completes promptly.
-            //
-            // Even still, we cap the reads processed to prevent going over
-            // any implicit time slice expected of Grid.tick(). This limit is fairly arbitrary.
-            var retry_max: u32 = 100_000;
-            while (grid.read_cached_queue.pop()) |read| {
-                if (grid.cache.get(read.address)) |block| {
-                    if (constants.verify) grid.verify_cached_read(read.address, block);
-                    read.callback(read, block);
-                } else {
-                    grid.start_read(read);
-                }
-
-                retry_max -= 1;
-                if (retry_max == 0) break;
-            }
+        pub fn on_next_tick(
+            grid: *Grid,
+            callback: fn (*Grid.NextTick) void,
+            next_tick: *Grid.NextTick,
+        ) void {
+            grid.superblock.storage.on_next_tick(callback, next_tick);
         }
 
         /// Returning null indicates that there are not enough free blocks to fill the reservation.
@@ -242,9 +231,9 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
             {
                 var it = grid.write_queue.peek();
-                while (it) |pending_write| : (it = pending_write.next) {
-                    assert(address != pending_write.address);
-                    assert(block != pending_write.block);
+                while (it) |queued_write| : (it = queued_write.next) {
+                    assert(address != queued_write.address);
+                    assert(block != queued_write.block);
                 }
             }
             {
@@ -260,21 +249,19 @@ pub fn GridType(comptime Storage: type) type {
         /// Assert that the block pointer is not being used for any read if non-null.
         fn assert_not_reading(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
             assert(address > 0);
-            for ([_]FIFO(Read){
-                grid.read_queue,
-                grid.read_cached_queue,
-                grid.read_recovery_queue,
+            for ([_]*const FIFO(Read){
+                &grid.read_queue,
+                &grid.read_recovery_queue,
             }) |queue| {
                 var it = queue.peek();
-                while (it) |pending_read| : (it = pending_read.next) {
-                    assert(address != pending_read.address);
+                while (it) |queued_read| : (it = queued_read.next) {
+                    assert(address != queued_read.address);
                 }
             }
             {
                 var it = grid.read_iops.iterate();
                 while (it.next()) |iop| {
-                    const iop_read = iop.reads.peek() orelse continue;
-                    assert(address != iop_read.address);
+                    assert(address != iop.read.address);
                     assert(block != iop.block);
                 }
             }
@@ -287,11 +274,12 @@ pub fn GridType(comptime Storage: type) type {
             block: BlockPtrConst,
             address: u64,
         ) void {
-            assert(grid.superblock.opened);
             assert(address > 0);
-            assert(!grid.superblock.free_set.is_free(address));
             grid.assert_not_writing(address, block);
             grid.assert_not_reading(address, block);
+
+            assert(grid.superblock.opened);
+            assert(!grid.superblock.free_set.is_free(address));
 
             write.* = .{
                 .callback = callback,
@@ -299,27 +287,15 @@ pub fn GridType(comptime Storage: type) type {
                 .block = block,
             };
 
-            const initial_iops_available = grid.write_iops.available();
-            if (initial_iops_available > 0) {
-                assert(grid.write_queue.empty());
-            }
-
-            grid.start_write(write);
-
-            if (initial_iops_available > 0) {
-                assert(grid.write_iops.available() == initial_iops_available - 1);
-            }
-        }
-
-        fn start_write(grid: *Grid, write: *Write) void {
-            grid.assert_not_writing(write.address, write.block);
-            grid.assert_not_reading(write.address, write.block);
-
             const iop = grid.write_iops.acquire() orelse {
                 grid.write_queue.push(write);
                 return;
             };
 
+            grid.write_block_with(iop, write);
+        }
+
+        fn write_block_with(grid: *Grid, iop: *WriteIOP, write: *Write) void {
             iop.* = .{
                 .grid = grid,
                 .completion = undefined,
@@ -343,6 +319,9 @@ pub fn GridType(comptime Storage: type) type {
             const grid = iop.grid;
             const completed_write = iop.write;
 
+            // We can only update the cache if the Grid is not resolving callbacks with a cache block.
+            assert(!grid.read_resolving);
+
             const cached_block = grid.cache.insert_preserve_locked(
                 *Grid,
                 block_locked,
@@ -351,19 +330,16 @@ pub fn GridType(comptime Storage: type) type {
             );
             util.copy_disjoint(.exact, u8, cached_block, completed_write.block);
 
-            grid.write_iops.release(iop);
-
             // Start a queued write if possible *before* calling the completed
             // write's callback. This ensures that if the callback calls
             // Grid.write_block() it doesn't preempt the queue.
             if (grid.write_queue.pop()) |queued_write| {
-                const initial_iops_available = grid.write_iops.available();
-                assert(initial_iops_available > 0);
-                grid.start_write(queued_write);
-                assert(grid.write_iops.available() == initial_iops_available - 1);
+                grid.write_block_with(iop, queued_write);
+            } else {
+                grid.write_iops.release(iop);
             }
 
-            // This call must come after releasing the IOP. Otherwise we risk tripping
+            // This call must come after (logicall) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
             completed_write.callback(completed_write);
@@ -381,11 +357,11 @@ pub fn GridType(comptime Storage: type) type {
             checksum: u128,
             block_type: BlockType,
         ) void {
-            assert(grid.superblock.opened);
             assert(address > 0);
             assert(block_type != .reserved);
-
             grid.assert_not_writing(address, null);
+
+            assert(grid.superblock.opened);
             assert(!grid.superblock.free_set.is_free(address));
 
             read.* = .{
@@ -393,107 +369,87 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .checksum = checksum,
                 .block_type = block_type,
+                .grid = grid,
             };
 
-            grid.start_read(read);
-        }
-
-        fn start_read(grid: *Grid, read: *Grid.Read) void {
-            grid.assert_not_writing(read.address, null);
-
-            if (grid.superblock.free_set.is_free(read.address)) {
-                // We cannot assert `free_set.is_free()` because of the following case:
-                // 1. The replica receives a request_block from a repairing replica.
-                //    The block is allocated but not cached — but is due to be freed at checkpoint.
-                // 2. All of the Grid's Read IOPS are occupied, so queue the read.
-                // 3. The replica checkpoints.
-                // 4. The read dequeues, but the requested block is no longer allocated.
-                // TODO(State Transfer):
-                // 1. If a local read results in a fault, then the replica should attempt a
-                //    remote read.
-                // 2. If a remote replica has the block then it responds (and the local read
-                //    completes), otherwise it nacks.
-                // 3. If we receive too many nacks or if we get the feeling that we are too far
-                //    behind (perhaps the primary nacks), then complete the read callback but now
-                //    with a null result, so that it unwinds the stack all the way back to VSR,
-                //    which then initiates state transfer. At present, we expect that reads always
-                //    return a block, so to support this bubbling up, we'll need to make the block
-                //    result optional.
-                unreachable;
-            }
-
-            // Check if a read is already in progress for the target address.
-            {
-                var it = grid.read_iops.iterate();
-                while (it.next()) |iop| {
-                    const iop_read = iop.reads.peek() orelse continue;
-                    if (iop_read.address == read.address) {
-                        assert(iop_read.checksum == read.checksum);
-                        iop.reads.push(read);
+            // Check if a read is already processing/recovering and merge with it.
+            for ([_]*const FIFO(Read){
+                &grid.read_queue,
+                &grid.read_recovery_queue,
+            }) |queue| {
+                var it = queue.peek();
+                while (it) |queued_read| : (it = queued_read.next) {
+                    if (address == queued_read.address) {
+                        assert(checksum == queued_read.checksum);
+                        assert(block_type == queued_read.block_type);
+                        queued_read.resolves.push(&read.pending);
                         return;
                     }
                 }
             }
 
-            // If the block is already in the cache, queue up the read to be resolved
-            // from the cache on the next tick. This keeps start_read() asynchronous.
-            // Note that this must be called after we have checked for an in
-            // progress read targeting the same address, otherwise we may read an
-            // unininitialized block.
-            if (grid.cache.exists(read.address)) {
-                grid.read_cached_queue.push(read);
+            // Become the "root" read thats fetching the block for the given address.
+            // The fetch happens asynchronously to avoid stack-overflow and nested cache invalidation.
+            grid.read_queue.push(read);
+            grid.on_next_tick(read_block_tick_callback, &read.next_tick);
+        }
+
+        fn read_block_tick_callback(next_tick: *Storage.NextTick) void {
+            const read = @fieldParentPtr(Grid.Read, "next_tick", next_tick);
+            const grid = read.grid;
+
+            // Try to resolve the read from the cache.
+            if (grid.cache.get(read.address)) |block| {
+                if (constants.verify) grid.verify_cached_read(read.address, block);
+                grid.read_block_resolve(read, block);
                 return;
             }
 
+            // Grab an IOP to resolve the block from storage.
+            // Failure to do so means the read is queued to receive an IOP when one finishes.
             const iop = grid.read_iops.acquire() orelse {
-                grid.read_queue.push(read);
+                grid.read_pending_queue.push(&read.pending);
                 return;
             };
 
+            grid.read_block_with(iop, read);
+        }
+
+        fn read_block_with(grid: *Grid, iop: *Grid.ReadIOP, read: *Grid.Read) void {
+            const address = read.address;
+            assert(address > 0);
+
+            // We can only update the cache if the Grid is not resolving callbacks with a cache block.
+            assert(!grid.read_resolving);
+
+            // Grab a block from the cache to read with.
+            // This also inserts the block into the cache at the address.
             const block = grid.cache.insert_preserve_locked(
                 *Grid,
                 block_locked,
                 grid,
-                read.address,
+                address,
             );
+
             // `block` will be initialized later when the read completes.
-            // This is safe because we will never attempt to lookup an address in the cache
-            // while a read is pending.
+            // This is safe because as long as `read` is in `grid.read_queue` or `grid.read_recovery_queue`
+            // we will never attempt to read from or overwrite this cache entry.
             // However, we do have to immediately set the cache key to uphold the
             // invariants of `SetAssociativeCache`.
-            cache_interface.set_address(block, read.address);
+            cache_interface.set_address(block, address);
 
             iop.* = .{
-                .grid = grid,
                 .completion = undefined,
+                .read = read,
                 .block = block,
             };
-
-            // Collect the current Read and any other pending Reads for the same address to this IOP.
-            // If we didn't gather them here, they would eventually be processed at the end of
-            // read_block_callback(), but that would issue a new call to read_sectors().
-            iop.reads.push(read);
-            {
-                // Make a copy here to avoid an infinite loop from pending_reads being
-                // re-added to read_queue after not matching the current read.
-                var copy = grid.read_queue;
-                grid.read_queue = .{};
-                while (copy.pop()) |pending_read| {
-                    if (pending_read.address == read.address) {
-                        assert(pending_read.checksum == read.checksum);
-                        iop.reads.push(pending_read);
-                    } else {
-                        grid.read_queue.push(pending_read);
-                    }
-                }
-            }
 
             grid.superblock.storage.read_sectors(
                 read_block_callback,
                 &iop.completion,
-                iop.block,
+                block,
                 .grid,
-                block_offset(read.address),
+                block_offset(address),
             );
         }
 
@@ -507,73 +463,91 @@ pub fn GridType(comptime Storage: type) type {
 
         fn read_block_callback(completion: *Storage.Read) void {
             const iop = @fieldParentPtr(ReadIOP, "completion", completion);
-            const grid = iop.grid;
+            const block = iop.block;
+            const read = iop.read;
+            const grid = read.grid;
 
-            const header_bytes = iop.block[0..@sizeOf(vsr.Header)];
+            // Handoff the iop to a pending read or release it before resolving the callbacks below.
+            if (grid.read_pending_queue.pop()) |pending| {
+                const queued_read = @fieldParentPtr(Read, "pending", pending);
+                grid.read_block_with(iop, queued_read);
+            } else {
+                grid.read_iops.release(iop);
+            }
+
+            // A valid block filled by storage means the reads for the address can be resolved
+            if (read_block_valid(read, block)) {
+                grid.read_block_resolve(read, block);
+                return;
+            }
+
+            // On the result of an invalid block, move the "root" read (and all others it resolves)
+            // to recovery queue. Future reads on the same address will see the "root" read in the
+            // recovery queue and enqueue to it.
+            grid.read_queue.remove(read);
+            grid.read_recovery_queue.push(read);
+        }
+
+        fn read_block_valid(read: *Grid.Read, block: BlockPtrConst) bool {
+            const address = read.address;
+            const checksum = read.checksum;
+            const block_type = read.block_type;
+
+            const header_bytes = block[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
 
-            const address = iop.reads.peek().?.address;
-            const checksum = iop.reads.peek().?.checksum;
-            const block_type = iop.reads.peek().?.block_type;
-
-            const checksum_valid = header.valid_checksum();
-            const checksum_body_valid = checksum_valid and
-                header.valid_checksum_body(iop.block[@sizeOf(vsr.Header)..header.size]);
-            const checksum_match = header.checksum == checksum;
-
-            if (checksum_valid and checksum_body_valid and checksum_match) {
-                assert(header.op == address);
-                assert(header.operation == block_type.operation());
-
-                // NOTE: read callbacks resolved here could queue up reads into this very iop.
-                // This extends this while loop, but that's fine as it keeps the callbacks
-                // asynchronous to themselves (preventing something like a stack-overflow).
-                while (iop.reads.pop()) |read| {
-                    assert(read.address == address);
-                    assert(read.checksum == checksum);
-                    assert(read.block_type == BlockType.from(header.operation));
-                    read.callback(read, iop.block);
-                }
-            } else {
-                if (!checksum_valid) {
-                    log.err("invalid checksum at address {}", .{address});
-                } else if (!checksum_body_valid) {
-                    log.err("invalid checksum body at address {}", .{address});
-                } else if (!checksum_match) {
-                    log.err(
-                        "expected address={} checksum={} block_type={}, " ++
-                            "found address={} checksum={} block_type={}",
-                        .{
-                            address,
-                            checksum,
-                            block_type,
-                            header.op,
-                            header.checksum,
-                            @enumToInt(header.operation),
-                        },
-                    );
-                } else {
-                    unreachable;
-                }
-
-                // IOP reads that fail checksum validation get punted to a recovery queue.
-                // TODO: Have the replica do something with the pending reads here.
-                while (iop.reads.pop()) |read| {
-                    iop.grid.read_recovery_queue.push(read);
-                }
+            if (!header.valid_checksum()) {
+                log.err("invalid checksum at address {}", .{address});
+                return false;
             }
 
-            grid.read_iops.release(iop);
-
-            // Always iterate through the full list of pending reads instead of just one to ensure
-            // that those serviced from the cache don't prevent others waiting for an IOP from
-            // seeing the IOP that was just released.
-            var copy = grid.read_queue;
-            grid.read_queue = .{};
-            while (copy.pop()) |read| {
-                assert(read.address != address);
-                grid.start_read(read);
+            if (!header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size])) {
+                log.err("invalid checksum body at address {}", .{address});
+                return false;
             }
+
+            if (header.checksum != checksum) {
+                log.err(
+                    "expected address={} checksum={} block_type={}, " ++
+                        "found address={} checksum={} block_type={}",
+                    .{
+                        address,
+                        checksum,
+                        block_type,
+                        header.op,
+                        header.checksum,
+                        @enumToInt(header.operation),
+                    },
+                );
+                return false;
+            }
+
+            assert(header.op == address);
+            assert(header.operation == block_type.operation());
+            return true;
+        }
+
+        fn read_block_resolve(grid: *Grid, read: *Grid.Read, block: BlockPtrConst) void {
+            // Guard to make sure the cache cannot be updated by any read.callbacks() below.
+            assert(!grid.read_resolving);
+            grid.read_resolving = true;
+            defer {
+                assert(grid.read_resolving);
+                grid.read_resolving = false;
+            }
+
+            // Resolve all reads queued to the address with the block.
+            // Callbacks may queue more to read.resolves so it must drain any new/existing pendings.
+            while (read.resolves.pop()) |pending| {
+                const pending_read = @fieldParentPtr(Read, "pending", pending);
+                pending_read.callback(pending_read, block);
+            }
+
+            // Remove the "root" read so that the address is no longer actively reading / locked.
+            // Then invoke the callback with the cache block (which should be valid for the duration
+            // of the callback as any nested Grid calls cannot synchronously update the cache).
+            grid.read_queue.remove(read);
+            read.callback(read, block);
         }
 
         fn block_offset(address: u64) u64 {

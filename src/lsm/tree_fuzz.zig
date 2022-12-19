@@ -181,7 +181,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn tick(env: *Environment) void {
-            env.grid.tick();
+            // env.grid.tick();
             env.storage.tick();
         }
 
