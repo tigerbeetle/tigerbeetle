@@ -3,7 +3,7 @@
 //!   * vsr_state
 //!     - vsr_state.commit_min is initially 0 (for a newly-formatted replica).
 //!     - vsr_state.commit_min ≤ vsr_state.commit_max
-//!     - vsr_state.view_normal ≤ vsr_state.view
+//!     - vsr_state.log_view ≤ vsr_state.view
 //!     - checkpoint() must advance the superblock's vsr_state.commit_min.
 //!     - view_change() must not advance the superblock's vsr_state.commit_min.
 //!     - All fields of vsr_state except commit_min_checksum are monotonically increasing over
@@ -110,7 +110,7 @@ pub const SuperBlockSector = extern struct {
         commit_max: u64,
 
         /// The last view in which the replica's status was normal.
-        view_normal: u32,
+        log_view: u32,
 
         /// The view number of the replica.
         view: u32,
@@ -128,13 +128,13 @@ pub const SuperBlockSector = extern struct {
                 .commit_min_checksum = vsr.Header.root_prepare(cluster).checksum,
                 .commit_min = 0,
                 .commit_max = 0,
-                .view_normal = 0,
+                .log_view = 0,
                 .view = 0,
             };
         }
 
         pub fn internally_consistent(state: VSRState) bool {
-            return state.commit_max >= state.commit_min and state.view >= state.view_normal;
+            return state.commit_max >= state.commit_min and state.view >= state.log_view;
         }
 
         pub fn monotonic(old: VSRState, new: VSRState) bool {
@@ -146,7 +146,7 @@ pub const SuperBlockSector = extern struct {
                 (old.commit_min_checksum == 0 and old.commit_min == 0));
 
             if (old.view > new.view) return false;
-            if (old.view_normal > new.view_normal) return false;
+            if (old.log_view > new.log_view) return false;
             if (old.commit_min > new.commit_min) return false;
             if (old.commit_max > new.commit_max) return false;
 
@@ -615,7 +615,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .commit_min_checksum = 0,
                     .commit_min = 0,
                     .commit_max = 0,
-                    .view_normal = 0,
+                    .log_view = 0,
                     .view = 0,
                 },
                 .snapshots = undefined,
@@ -663,7 +663,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         /// The vsr_state must update the commit_min and commit_min_checksum.
-        // TODO Will the replica ever update view/view_normal by calling checkpoint() during a view
+        // TODO Will the replica ever update view/log_view by calling checkpoint() during a view
         // change? If not, forbid it.
         pub fn checkpoint(
             superblock: *SuperBlock,
@@ -703,7 +703,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             log.debug(
                 "view_change: commit_min_checksum={}..{} commit_min={}..{} commit_max={}..{} " ++
-                    "view_normal={}..{} view={}..{}",
+                    "log_view={}..{} view={}..{}",
                 .{
                     superblock.staging.vsr_state.commit_min_checksum,
                     vsr_state.commit_min_checksum,
@@ -714,8 +714,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     superblock.staging.vsr_state.commit_max,
                     vsr_state.commit_max,
 
-                    superblock.staging.vsr_state.view_normal,
-                    vsr_state.view_normal,
+                    superblock.staging.vsr_state.log_view,
+                    vsr_state.log_view,
 
                     superblock.staging.vsr_state.view,
                     vsr_state.view,
@@ -1125,7 +1125,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         vsr.Header.root_prepare(working.cluster).checksum);
                     assert(working.vsr_state.commit_min == 0);
                     assert(working.vsr_state.commit_max == 0);
-                    assert(working.vsr_state.view_normal == 0);
+                    assert(working.vsr_state.log_view == 0);
                     assert(working.vsr_state.view == 0);
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
@@ -1137,7 +1137,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
                         "replica={} size={} " ++
                         "commit_min_checksum={} commit_min={} commit_max={} " ++
-                        "view_normal={} view={}",
+                        "log_view={} view={}",
                     .{
                         @tagName(context.caller),
                         superblock.working.checksum,
@@ -1148,7 +1148,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.vsr_state.commit_min_checksum,
                         superblock.working.vsr_state.commit_min,
                         superblock.working.vsr_state.commit_max,
-                        superblock.working.vsr_state.view_normal,
+                        superblock.working.vsr_state.log_view,
                         superblock.working.vsr_state.view,
                     },
                 );

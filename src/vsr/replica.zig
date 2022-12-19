@@ -138,8 +138,10 @@ pub fn ReplicaType(
         /// The current view, initially 0:
         view: u32,
 
-        /// The latest view, in which the replica's status was normal.
-        view_normal: u32,
+        /// The latest view where
+        /// - the replica was a primary and acquired a DVC quorum, or
+        /// - the replica was a backup and received a SV message.
+        log_view: u32,
 
         /// The current status, either normal, view_change, or recovering:
         status: Status = .recovering,
@@ -504,7 +506,7 @@ pub fn ReplicaType(
                 .grid = self.grid,
                 .opened = self.opened,
                 .view = self.superblock.working.vsr_state.view,
-                .view_normal = self.superblock.working.vsr_state.view_normal,
+                .log_view = self.superblock.working.vsr_state.log_view,
                 .op = 0,
                 .op_checkpoint = self.superblock.working.vsr_state.commit_min,
                 .commit_min = self.superblock.working.vsr_state.commit_min,
@@ -1203,15 +1205,15 @@ pub fn ReplicaType(
         /// For each DVC in the quorum:
         ///
         /// * The headers must all belong to the same hash chain. (Gaps are allowed).
-        ///   (Reason: the headers bundled with the DVC(s) with the highest view_normal will be
+        ///   (Reason: the headers bundled with the DVC(s) with the highest log_view will be
         ///   loaded into the new primary with `replace_header()`, not `repair_header()`).
         ///
         /// Across all DVCs in the quorum:
         ///
-        /// * The headers of every DVC with the same view_normal must agree. In other words:
+        /// * The headers of every DVC with the same log_view must agree. In other words:
         ///   dvc₁.headers[i].op == dvc₂.headers[j].op implies
         ///   dvc₁.headers[i].checksum == dvc₂.headers[j].checksum.
-        ///   (Reason: the headers bundled with the DVC(s) with the highest view_normal will be
+        ///   (Reason: the headers bundled with the DVC(s) with the highest log_view will be
         ///   loaded into the new primary with `replace_header()`, not `repair_header()`).
         ///
         /// Perhaps unintuitively, it is safe to advertise a header before its message is prepared
@@ -1265,12 +1267,12 @@ pub fn ReplicaType(
             self.do_view_change_quorum = true;
 
             self.primary_set_log_from_do_view_change_messages();
-            // We aren't status=normal yet, but our headers from our prior view_normal may have been
+            // We aren't status=normal yet, but our headers from our prior log_view may have been
             // replaced. If we participate in another DVC (before reaching status=normal, which
-            // would update our view_normal), we must disambiguate our (new) headers from the
-            // headers of any other replica with the same view_normal so that the next primary can
+            // would update our log_view), we must disambiguate our (new) headers from the
+            // headers of any other replica with the same log_view so that the next primary can
             // identify an unambiguous set of canonical headers.
-            self.view_normal = self.view;
+            self.log_view = self.view;
 
             assert(self.op >= self.commit_max);
             assert(self.state_machine.prepare_timestamp >=
@@ -1404,9 +1406,9 @@ pub fn ReplicaType(
             // 5. Replica 0 fails (before replica 2 has a chance to repair its hash chain.)
             // 6. Replica 1 initiates a view change.
             // 7. Replica 1 collects a DVC quorum:
-            //      replica 1:  3, 4a, 5a (view_normal=latest)
-            //      replica 2: 5b, 7a, 8a (view_normal=latest)
-            //    Replicas 1 and 2 share the highest view_normal, so both sets of headers are canonical.
+            //      replica 1:  3, 4a, 5a (log_view=latest)
+            //      replica 2: 5b, 7a, 8a (log_view=latest)
+            //    Replicas 1 and 2 share the highest log_view, so both sets of headers are canonical.
             // 8. Replica 1 loads the canonical headers (via `replace_header()`) from both DVCs.
             //    Messages 8a and 7a will be dropped via `do_view_change_op_max()` (due to the
             //    gap at op 6). But there is a conflict at op=5. For correctness, replica 1 must
@@ -1414,7 +1416,7 @@ pub fn ReplicaType(
             //    Without replica 0's assistance, replica 1 has no way to pick between 5a/5b.
             //
             // Including at least as many headers in the recovery response as the DVC maintains the
-            // invariant: DVCs with the same view_normal must never disagree on the identity of a
+            // invariant: DVCs with the same log_view must never disagree on the identity of a
             // message.
             //
             // (DVCs can still safely include gaps — but they must be of the form [4a,__,6a],
@@ -2649,7 +2651,7 @@ pub fn ReplicaType(
                 .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
                 .commit_min = vsr_state_commit_min,
                 .commit_max = self.commit_max,
-                .view_normal = self.view_normal,
+                .log_view = self.log_view,
                 .view = self.view,
             };
             assert(self.superblock.working.vsr_state.monotonic(vsr_state_new));
@@ -3047,7 +3049,7 @@ pub fn ReplicaType(
                 // number contained in the prepare headers we include in the body. The former shows
                 // how recent a view change the replica participated in, which may be much higher.
                 // We use the `timestamp` field to send this in addition to the current view number:
-                .timestamp = if (command == .do_view_change) self.view_normal else 0,
+                .timestamp = if (command == .do_view_change) self.log_view else 0,
                 .op = self.op,
                 // See the comment in `on_do_view_change()` for why `commit_min` is crucial:
                 .commit = if (command == .do_view_change) self.commit_min else self.commit_max,
@@ -3088,9 +3090,9 @@ pub fn ReplicaType(
 
         /// Returns the op of the highest canonical message, according to this replica (the new
         /// primary) prior to loading the current view change's DVC quorum headers.
-        /// When this replica participated in the last `view_normal`, this is just `replica.op`.
+        /// When this replica participated in the last `log_view`, this is just `replica.op`.
         ///
-        /// - A *canonical* message was part of the last view_normal.
+        /// - A *canonical* message was part of the last log_view.
         /// - An *uncanonical* message may have been removed/changed by a prior view.
         /// - Canonical messages do not necessarily survive into the new view, but they take
         ///   precedence over uncanonical messages.
@@ -3106,17 +3108,17 @@ pub fn ReplicaType(
         /// 2. Replicas 1 and 2 must determine the new chain HEAD.
         /// 3. 8b is discarded due to the gap in 7.
         /// 4. To distinguish between 6a and 6b (and safely discard 6a), the new primary trusts ops
-        ///    from the DVC(s) with the greatest `view_normal`.
-        fn primary_op_canonical_max(self: *const Self, view_normal_canonical: u64) usize {
+        ///    from the DVC(s) with the greatest `log_view`.
+        fn primary_op_canonical_max(self: *const Self, log_view_canonical: u64) usize {
             assert(self.replica_count > 1);
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
             assert(!self.repair_timeout.ticking);
             assert(self.journal.header_with_op(self.op) != null);
-            assert(self.view_normal <= view_normal_canonical);
+            assert(self.log_view <= log_view_canonical);
 
-            if (self.view_normal == view_normal_canonical) return self.op;
+            if (self.log_view == log_view_canonical) return self.op;
 
             const uncanonical_op_count = std.math.min(
                 // Do not reset any ops that we have already committed.
@@ -5235,13 +5237,13 @@ pub fn ReplicaType(
         /// where the new primary's headers depends on which of replica 1 and 2's DVC is used
         /// for repair before the other (i.e. whether they repair op 6 or 7 first).
         ///
-        /// For the above case to occur, replicas 0, 1, and 2 must all share the highest `view_normal`.
-        /// And since they share the latest `view_normal`, ops 5,6,7 were just installed by
+        /// For the above case to occur, replicas 0, 1, and 2 must all share the highest `log_view`.
+        /// And since they share the latest `log_view`, ops 5,6,7 were just installed by
         /// `replace_header`, which is order-independent (it doesn't use the hash chain).
         ///
-        /// (If replica 0's view_normal was greater than 1/2's, then replica 0 must have all
+        /// (If replica 0's log_view was greater than 1/2's, then replica 0 must have all
         /// headers from previous views. Which means 6,7 are from the current view. But since
-        /// replica 0 doesn't have 6/7, then replica 1/2 must share the latest view_normal. ∎)
+        /// replica 0 doesn't have 6/7, then replica 1/2 must share the latest log_view. ∎)
         fn primary_set_log_from_do_view_change_messages(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
@@ -5250,7 +5252,7 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum);
 
             const do_view_change_head = self.do_view_change_quorum_head();
-            assert(do_view_change_head.view_normal >= self.view_normal);
+            assert(do_view_change_head.log_view >= self.log_view);
             assert(do_view_change_head.op >= self.commit_min);
             assert(do_view_change_head.op >= do_view_change_head.commit_min_max);
             assert(do_view_change_head.commit_min_max >= self.commit_min);
@@ -5264,14 +5266,14 @@ pub fn ReplicaType(
                 self.state_machine.prepare_timestamp = do_view_change_head.timestamp;
             }
 
-            const view_normal_canonical = do_view_change_head.view_normal;
+            const log_view_canonical = do_view_change_head.log_view;
             // `op_canonical_primary` must be computed before calling `set_op_and_commit_max()`,
             // since that may change `replica.op`.
             //
             // Don't remove the uncanonical headers yet — even though the removed headers are
             // a subset of the DVC headers, removing and then adding them back would cause clean
             // headers to become dirty.
-            const op_canonical_primary = self.primary_op_canonical_max(view_normal_canonical);
+            const op_canonical_primary = self.primary_op_canonical_max(log_view_canonical);
             assert(op_canonical_primary <= self.op);
             assert(op_canonical_primary >= self.op -| constants.pipeline_max);
             assert(op_canonical_primary >= self.commit_min);
@@ -5314,7 +5316,7 @@ pub fn ReplicaType(
             //
             // Consider a view change with DVCs (pipeline_max=3):
             //
-            //   replica   headers                       view_normal
+            //   replica   headers                       log_view
             //         0   1 [2  3  4b]                  4     (new primary)
             //         1   1  2  3  4a  5  6 [7  8  9]   5
             //         2  (1  2  3  4a  5  6  7  8  9 )  5     (partitioned)
@@ -5332,15 +5334,15 @@ pub fn ReplicaType(
             // protocol).
             var op_canonical: u64 = op_canonical_primary;
 
-            // First, set all the canonical headers from the replica(s) with highest `view_normal`:
+            // First, set all the canonical headers from the replica(s) with highest `log_view`:
             for (self.do_view_change_from_all_replicas) |received| {
                 if (received) |message| {
-                    const view_normal = @intCast(u32, message.header.timestamp);
+                    const log_view = @intCast(u32, message.header.timestamp);
                     // The view in which this replica's status was normal must be before this view.
-                    assert(view_normal < message.header.view);
+                    assert(log_view < message.header.view);
 
-                    if (view_normal < view_normal_canonical) continue;
-                    assert(view_normal == view_normal_canonical);
+                    if (log_view < log_view_canonical) continue;
+                    assert(log_view == log_view_canonical);
 
                     const message_headers = message_body_as_headers(message);
                     for (message_headers) |*header| {
@@ -5370,11 +5372,11 @@ pub fn ReplicaType(
             // Now that the canonical headers are all in place, repair any other headers:
             for (self.do_view_change_from_all_replicas) |received| {
                 if (received) |message| {
-                    const view_normal = @intCast(u32, message.header.timestamp);
-                    assert(view_normal < message.header.view);
+                    const log_view = @intCast(u32, message.header.timestamp);
+                    assert(log_view < message.header.view);
 
-                    if (view_normal == view_normal_canonical) continue;
-                    assert(view_normal < view_normal_canonical);
+                    if (log_view == log_view_canonical) continue;
+                    assert(log_view < log_view_canonical);
 
                     for (message_body_as_headers(message)) |*header| {
                         // We must trust headers that other replicas have committed, because
@@ -5415,14 +5417,14 @@ pub fn ReplicaType(
         }
 
         fn do_view_change_quorum_head(self: *const Self) struct {
-            /// The highest `view_normal` of any DVC.
+            /// The highest `log_view` of any DVC.
             ///
-            /// The headers bundled with DVCs with the highest `view_normal` are canonical, since
+            /// The headers bundled with DVCs with the highest `log_view` are canonical, since
             /// the replica has knowledge of previous view changes in which headers were replaced.
-            view_normal: u32,
+            log_view: u32,
             /// The highest `commit_min` from any DVC (this is not a `commit_max`).
             commit_min_max: u64,
-            /// The highest `op` from a DVC with the highest `view_normal`.
+            /// The highest `op` from a DVC with the highest `log_view`.
             op: u64,
             /// The higest timestamp from any DVC.
             timestamp: u64,
@@ -5434,8 +5436,8 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
 
-            var v: ?u32 = null; // The highest `view_normal` from any replica.
-            var n: ?u64 = null; // The highest `op` for the highest `view_normal` from any replica.
+            var v: ?u32 = null; // The highest `log_view` from any replica.
+            var n: ?u64 = null; // The highest `op` for the highest `log_view` from any replica.
             var k: ?u64 = null; // The highest `commit_min` from any replica.
             var t: ?u64 = null; // The highest `timestamp` from any replica.
 
@@ -5451,11 +5453,11 @@ pub fn ReplicaType(
                     // The view when this replica was last in normal status, which:
                     // * may be higher than the view in any of the prepare headers.
                     // * must be lower than the view of this view change.
-                    const view_normal = @intCast(u32, message.header.timestamp);
-                    assert(view_normal < message.header.view);
+                    const log_view = @intCast(u32, message.header.timestamp);
+                    assert(log_view < message.header.view);
 
                     if (replica == self.replica) {
-                        assert(view_normal == self.view_normal);
+                        assert(log_view == self.log_view);
                         assert(message.header.op == self.op);
                         // We may have a newer commit than our DVC due to async commits (see below).
                         assert(message.header.commit <= self.commit_min);
@@ -5463,20 +5465,20 @@ pub fn ReplicaType(
 
                     log.debug(
                         "{}: on_do_view_change: " ++
-                            "replica={} view_normal={} op={} commit_min={}",
+                            "replica={} log_view={} op={} commit_min={}",
                         .{
                             self.replica,
                             message.header.replica,
-                            view_normal,
+                            log_view,
                             message.header.op,
                             message.header.commit, // The `commit_min` of the replica.
                         },
                     );
 
-                    if (v == null or view_normal > v.?) {
-                        v = view_normal;
+                    if (v == null or log_view > v.?) {
+                        v = log_view;
                         n = message.header.op;
-                    } else if (view_normal == v.? and message.header.op > n.?) {
+                    } else if (log_view == v.? and message.header.op > n.?) {
                         n = message.header.op;
                     }
 
@@ -5508,11 +5510,11 @@ pub fn ReplicaType(
                 k = self.commit_min;
             }
 
-            assert(v.? >= self.view_normal);
+            assert(v.? >= self.log_view);
             assert(k.? >= self.commit_min);
 
             return .{
-                .view_normal = v.?,
+                .log_view = v.?,
                 .commit_min_max = k.?,
                 .op = n.?,
                 .timestamp = t.?,
@@ -5645,7 +5647,7 @@ pub fn ReplicaType(
             assert(self.replica_count > 1 or new_view == 0);
             assert(self.journal.header_with_op(self.op) != null);
             self.view = new_view;
-            self.view_normal = new_view;
+            self.log_view = new_view;
             self.status = .normal;
 
             if (self.primary()) {
@@ -5708,7 +5710,7 @@ pub fn ReplicaType(
 
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
-                assert(self.view_normal == new_view);
+                assert(self.log_view == new_view);
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
@@ -5728,7 +5730,7 @@ pub fn ReplicaType(
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
 
-                self.view_normal = new_view;
+                self.log_view = new_view;
                 self.ping_timeout.start();
                 self.commit_timeout.stop();
                 self.normal_status_timeout.start();
