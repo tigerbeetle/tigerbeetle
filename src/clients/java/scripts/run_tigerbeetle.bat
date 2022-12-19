@@ -3,8 +3,7 @@ setlocal enabledelayedexpansion
 
 echo "Building TigerBeetle..."
 cd ..\..\..
-.\zig\zig.exe build -Dcpu=baseline -Drelease-safe
-move .\zig-out\bin\tigerbeetle.exe .
+.\zig\zig.exe build install -Dcpu=baseline -Drelease-safe
 cd src\clients\java
 
 set ZIG_FILE=.\0_0.tigerbeetle.examples

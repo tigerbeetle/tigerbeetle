@@ -2,8 +2,7 @@
 set -eEuo pipefail
 
 echo "Building TigerBeetle..."
-(cd ../../../ && ./zig/zig build -Dcpu=baseline -Drelease-safe)
-(cd ../../../ && mv ./zig-out/bin/tigerbeetle .)
+(cd ../../../ && ./zig/zig build install -Dcpu=baseline -Drelease-safe)
 
 echo "Formatting replica ..."
 

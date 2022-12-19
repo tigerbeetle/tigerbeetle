@@ -5,12 +5,7 @@ git submodule init
 git submodule update
 
 cd ..\..\.. 
-call .\scripts\install_zig.bat
-
-echo "Building TigerBeetle..."
-.\zig\zig.exe build -Dcpu=baseline -Drelease-safe
-move .\zig-out\bin\tigerbeetle.exe .
-cd src\clients\java
+call .\scripts\install.bat
 
 echo "Building TigerBeetle Java Client..."
 mvn -B package --quiet
