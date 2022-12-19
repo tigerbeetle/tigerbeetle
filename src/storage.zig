@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
 
 const IO = @import("io.zig").IO;
+const FIFO = @import("fifo.zig").FIFO;
 const constants = @import("constants.zig");
 const fatal = @import("cli.zig").fatal;
 const vsr = @import("vsr.zig");
@@ -68,8 +69,16 @@ pub const Storage = struct {
         offset: u64,
     };
 
+    pub const NextTick = struct {
+        next: ?*NextTick = null,
+        callback: fn (next_tick: *NextTick) void,
+    };
+
     io: *IO,
     fd: os.fd_t,
+
+    next_tick_queue: FIFO(NextTick) = .{},
+    next_tick_completion: IO.Completion = undefined,
 
     pub fn init(io: *IO, fd: os.fd_t) !Storage {
         return Storage{
@@ -79,6 +88,7 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage) void {
+        assert(storage.next_tick_queue.empty());
         assert(storage.fd != IO.INVALID_FILE);
         storage.fd = IO.INVALID_FILE;
     }
@@ -88,6 +98,43 @@ pub const Storage = struct {
             log.warn("tick: {}", .{err});
             std.debug.panic("io.tick(): {}", .{err});
         };
+    }
+
+    pub fn on_next_tick(
+        storage: *Storage,
+        callback: fn (next_tick: *Storage.NextTick) void,
+        next_tick: *Storage.NextTick,
+    ) void {
+        next_tick.* = .{ .callback = callback };
+
+        const was_empty = storage.next_tick_queue.empty();
+        storage.next_tick_queue.push(next_tick);
+
+        if (was_empty) {
+            storage.io.timeout(
+                *Storage,
+                storage,
+                timeout_callback,
+                &storage.next_tick_completion,
+                0, // 0ns timeout means to resolve as soon as possible - like a yield
+            );
+        }
+    }
+
+    fn timeout_callback(
+        storage: *Storage,
+        completion: *IO.Completion,
+        result: IO.TimeoutError!void,
+    ) void {
+        assert(completion == &storage.next_tick_completion);
+        _ = result catch |e| switch (e) {
+            error.Canceled => unreachable,
+            error.Unexpected => unreachable,
+        };
+
+        var queue = storage.next_tick_queue;
+        storage.next_tick_queue = .{};
+        while (queue.pop()) |next_tick| next_tick.callback(next_tick);
     }
 
     pub fn read_sectors(
@@ -113,18 +160,24 @@ pub const Storage = struct {
             .target_max = buffer.len,
         };
 
-        self.start_read(read, 0);
+        self.start_read(read, null);
         assert(read.target().len > 0);
     }
 
-    fn start_read(self: *Storage, read: *Storage.Read, bytes_read: usize) void {
-        assert(bytes_read <= read.target().len);
+    fn start_read(self: *Storage, read: *Storage.Read, bytes_read: ?usize) void {
+        const bytes = bytes_read orelse 0;
+        assert(bytes <= read.target().len);
 
-        read.offset += bytes_read;
-        read.buffer = read.buffer[bytes_read..];
+        read.offset += bytes;
+        read.buffer = read.buffer[bytes..];
 
         const target = read.target();
         if (target.len == 0) {
+            // Resolving the read inline means start_read() must not have been called from
+            // read_sectors(). If it was, this is a synchronous callback resolution and should
+            // be reported.
+            assert(bytes_read != null);
+
             read.callback(read);
             return;
         }

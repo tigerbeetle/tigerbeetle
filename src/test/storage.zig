@@ -25,6 +25,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
+const FIFO = @import("../fifo.zig").FIFO;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
@@ -119,6 +120,11 @@ pub const Storage = struct {
         }
     };
 
+    pub const NextTick = struct {
+        next: ?*NextTick = null,
+        callback: fn (next_tick: *NextTick) void,
+    };
+
     /// Faulty areas are always sized to message_size_max
     /// If the faulty areas of all replicas are superimposed, the padding between them is always message_size_max.
     /// For a single replica, the padding between faulty areas depends on the number of other replicas.
@@ -148,6 +154,7 @@ pub const Storage = struct {
     writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
+    next_tick_queue: FIFO(NextTick) = .{},
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(options.write_latency_mean >= options.write_latency_min);
@@ -222,6 +229,7 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
+        assert(storage.next_tick_queue.empty());
         allocator.free(storage.memory);
         storage.memory_written.deinit(allocator);
         storage.faults.deinit(allocator);
@@ -280,6 +288,19 @@ pub const Storage = struct {
             _ = storage.writes.remove();
             storage.write_sectors_finish(write);
         }
+
+        var queue = storage.next_tick_queue;
+        storage.next_tick_queue = .{};
+        while (queue.pop()) |next_tick| next_tick.callback(next_tick);
+    }
+
+    pub fn on_next_tick(
+        storage: *Storage,
+        callback: fn (next_tick: *Storage.NextTick) void,
+        next_tick: *Storage.NextTick,
+    ) void {
+        next_tick.* = .{ .callback = callback };
+        storage.next_tick_queue.push(next_tick);
     }
 
     /// * Verifies that the read fits within the target sector.
