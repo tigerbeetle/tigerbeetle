@@ -432,8 +432,8 @@ pub fn GridType(comptime Storage: type) type {
             );
 
             // `block` will be initialized later when the read completes.
-            // This is safe because we will never attempt to lookup an address in the cache
-            // while a read is pending.
+             // This is safe because as long as `read` is in `grid.read_queue` or `grid.read_recovery_queue` 
+             // we will never attempt to read from or overwrite this cache entry.
             // However, we do have to immediately set the cache key to uphold the
             // invariants of `SetAssociativeCache`.
             cache_interface.set_address(block, address);
