@@ -3651,7 +3651,7 @@ pub fn ReplicaType(
         }
 
         fn message_body_as_headers(message: *const Message) []const Header {
-            assert(message.header.size >= @sizeOf(Header)); // Body must contain at least one header.
+            assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
             assert(message.header.command == .do_view_change or
                 message.header.command == .start_view or
                 message.header.command == .headers or
@@ -3679,13 +3679,13 @@ pub fn ReplicaType(
         /// - Given ops "2 3 4 5", return null.
         fn do_view_change_headers_gap_min(message: *const Message) ?u64 {
             assert(message.header.command == .do_view_change);
-            assert(message.header.size >= @sizeOf(Header));
 
             const headers = message_body_as_headers(message);
             var op_gap: ?u64 = null;
             var op = headers[0].op;
             var parent = headers[0].parent;
             for (headers[1..]) |header| {
+                assert(header.op <= op);
                 if (header.op == op - 1) {
                     // DVC headers never contain breaks, only gaps.
                     assert(header.checksum == parent);
@@ -3694,6 +3694,10 @@ pub fn ReplicaType(
                 }
                 op = header.op;
                 parent = header.parent;
+            }
+            if (op_gap) |gap| {
+                assert(gap < headers[0].op);
+                assert(gap > headers[headers.len - 1].op);
             }
             return op_gap;
         }
@@ -5317,27 +5321,25 @@ pub fn ReplicaType(
 
             self.set_op_and_commit_max(
                 do_view_change_head.op,
-                commit_max: {
-                    var commit_max = self.commit_max;
-                    // `set_op_and_commit_max()` expects the highest commit_max that we know of.
-                    // But DVCs include replica's `commit_min`, not `commit_max`.
-                    commit_max = std.math.max(commit_max, do_view_change_head.commit_min_max);
-                    // An op cannot be uncommitted if it is definitely outside the pipeline.
-                    // Use `do_view_change_head.op` instead of `replica.op` since the former is
-                    // about to become the new `replica.op`.
-                    commit_max = std.math.max(
-                        commit_max,
+                std.math.max(
+                    self.commit_max,
+                    std.math.max(
+                        // `set_op_and_commit_max()` expects the highest commit_max that we know of.
+                        // But DVCs include replica's `commit_min`, not `commit_max`.
+                        do_view_change_head.commit_min_max,
+                        // An op cannot be uncommitted if it is definitely outside the pipeline.
+                        // Use `do_view_change_head.op` instead of `replica.op` since the former is
+                        // about to become the new `replica.op`.
                         do_view_change_head.op -| constants.pipeline_max,
-                    );
-                    break :commit_max commit_max;
-                },
+                    ),
+                ),
                 "on_do_view_change",
             );
             // "`replica.op` exists" invariant may be broken until after the canonical DVC headers
             // are installed.
 
             // "op_canonical" distinguishes between ops maybe-uncommitted ops from
-            // definitely-uncommitted ops — the latter are discarded to improve availablility.
+            // definitely-uncommitted ops — the latter are discarded to improve availability.
             // Gaps within a DVC's headers indicate ops that are not committed by that replica,
             // but gaps in the new primary's headers cannot in general be truncated.
             //
@@ -5346,7 +5348,7 @@ pub fn ReplicaType(
             //   replica   headers                       log_view
             //         0   1 [2  3  4b]                  4     (new primary)
             //         1   1  2  3  4a  5  6 [7  8  9]   5
-            //         2  (1  2  3  4a  5  6  7  8  9 )  5     (partitioned)
+            //         2  (1  2  3  4a  5  6  7  8  9)   5     (partitioned)
             //
             // Then replica 0 constructs:
             //
@@ -5372,7 +5374,10 @@ pub fn ReplicaType(
                     assert(log_view == log_view_canonical);
 
                     const message_headers = message_body_as_headers(message);
+                    assert(message_headers[0].op == message.header.op);
+
                     for (message_headers) |*header| {
+                        assert(header.op <= message.header.op);
                         log.debug(
                             "{}: on_do_view_change: canonical: replica={} op={} checksum={}",
                             .{
@@ -5387,7 +5392,7 @@ pub fn ReplicaType(
                     self.replace_headers(message_headers);
                     op_canonical = std.math.max(
                         op_canonical,
-                        do_view_change_headers_gap_min(message) orelse message_headers[0].op,
+                        do_view_change_headers_gap_min(message) orelse message.header.op,
                     );
                 }
             }
