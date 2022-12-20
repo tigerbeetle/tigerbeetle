@@ -4010,6 +4010,7 @@ pub fn ReplicaType(
 
             // Request any missing or disconnected headers:
             // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
+            // TODO use commit_min_checksum?
             var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
             if (broken) |range| {
                 log.debug("{}: repair: break: view={} op_min={} op_max={} (commit={}..{} op={})", .{
@@ -6092,3 +6093,125 @@ pub fn ReplicaType(
         }
     };
 }
+
+// TODO assert order of message_headers
+//const DVCQuorum = struct {
+//    messages: *const QuorumMessages,
+//
+//    // The highest `log_view` from any replica.
+//    log_view_max: u32,
+//
+//    op_max: u64,
+//
+//    commit_min_max: u64,
+//
+//    timestamp_max: u64,
+//            var n: ?u64 = null; // The highest `op` for the highest `log_view` from any replica.
+//            var k: ?u64 = null; // The highest `commit_min` from any replica.
+//            var t: ?u64 = null; // The highest `timestamp` from any replica.
+//
+//    fn init(message: *const QuorumMessages) DVCQuorum {
+//        for (self.do_view_change_from_all_replicas) |received, replica| {
+//            if (received) |message| {
+//                assert(message.header.command == .do_view_change);
+//                assert(message.header.replica == replica);
+//                assert(message.header.op >= message.header.commit);
+//                assert(message.header.op - message.header.commit <= constants.journal_slot_count);
+//
+//                // The view when this replica was last in normal status, which:
+//                // * may be higher than the view in any of the prepare headers.
+//                // * must be lower than the view of this view change.
+//                const log_view = @intCast(u32, message.header.timestamp);
+//                assert(log_view < message.header.view);
+//
+//            }
+//        }
+//    }
+//
+//    fn log_view_max() u32 {
+//    }
+//
+//            var v: ?u32 = null; // The highest `log_view` from any replica.
+//            var n: ?u64 = null; // The highest `op` for the highest `log_view` from any replica.
+//            var k: ?u64 = null; // The highest `commit_min` from any replica.
+//            var t: ?u64 = null; // The highest `timestamp` from any replica.
+//
+//            for (self.do_view_change_from_all_replicas) |received, replica| {
+//                if (received) |message| {
+//                    assert(message.header.command == .do_view_change);
+//                    assert(message.header.cluster == self.cluster);
+//                    assert(message.header.replica == replica);
+//                    assert(message.header.view == self.view);
+//                    assert(message.header.op >= message.header.commit);
+//                    assert(message.header.op - message.header.commit <= constants.journal_slot_count);
+//
+//                    // The view when this replica was last in normal status, which:
+//                    // * may be higher than the view in any of the prepare headers.
+//                    // * must be lower than the view of this view change.
+//                    const log_view = @intCast(u32, message.header.timestamp);
+//                    assert(log_view < message.header.view);
+//
+//                    if (replica == self.replica) {
+//                        assert(log_view == self.log_view);
+//                        assert(message.header.op == self.op);
+//                        // We may have a newer commit than our DVC due to async commits (see below).
+//                        assert(message.header.commit <= self.commit_min);
+//                    }
+//
+//                    log.debug(
+//                        "{}: on_do_view_change: " ++
+//                            "replica={} log_view={} op={} commit_min={}",
+//                        .{
+//                            self.replica,
+//                            message.header.replica,
+//                            log_view,
+//                            message.header.op,
+//                            message.header.commit, // The `commit_min` of the replica.
+//                        },
+//                    );
+//
+//                    if (v == null or log_view > v.?) {
+//                        v = log_view;
+//                        n = message.header.op;
+//                    } else if (log_view == v.? and message.header.op > n.?) {
+//                        n = message.header.op;
+//                    }
+//
+//                    if (k == null or message.header.commit > k.?) k = message.header.commit;
+//
+//                    const message_headers = message_body_as_headers(message);
+//                    if (t == null or t.? < message_headers[0].timestamp) {
+//                        t = message_headers[0].timestamp;
+//                    }
+//                }
+//            }
+//
+//            // Consider the case:
+//            // 1. Start committing op=N…M.
+//            // 2. Send `do_view_change` to self.
+//            // 3. Finish committing op=N…M.
+//            // 4. Remaining `do_view_change` messages arrive, completing the quorum.
+//            // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
+//            // Don't let the commit backtrack.
+//            if (k.? < self.commit_min) {
+//                assert(self.commit_min >
+//                    self.do_view_change_from_all_replicas[self.replica].?.header.commit);
+//                log.debug("{}: on_do_view_change: bump commit_min view={} commit={}..{}", .{
+//                    self.replica,
+//                    self.view,
+//                    k.?,
+//                    self.commit_min,
+//                });
+//                k = self.commit_min;
+//            }
+//
+//            assert(v.? >= self.log_view);
+//            assert(k.? >= self.commit_min);
+//
+//            return .{
+//                .log_view = v.?,
+//                .commit_min_max = k.?,
+//                .op = n.?,
+//                .timestamp = t.?,
+//            };
+//};
