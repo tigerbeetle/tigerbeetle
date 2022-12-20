@@ -35,8 +35,7 @@ const Environment = struct {
     const node_count = 1024;
     const cache_entries_max = 2 * 1024 * 1024;
     const forest_options = StateMachine.forest_options(.{
-        // Ignored by StateMachine.forest_options().
-        .lsm_forest_node_count = undefined,
+        .lsm_forest_node_count = node_count,
         .cache_entries_accounts = cache_entries_max,
         .cache_entries_transfers = cache_entries_max,
         .cache_entries_posted = cache_entries_max,
