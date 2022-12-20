@@ -220,7 +220,7 @@ pub fn main() !void {
         \\
     , .{});
 
-    // Emit C# declarations.
+    // Emit Go declarations.
     inline for (type_mappings) |type_mapping| {
         const ZigType = type_mapping[0];
         const name = type_mapping[1];
