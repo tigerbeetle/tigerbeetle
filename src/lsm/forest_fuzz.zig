@@ -263,6 +263,8 @@ const Environment = struct {
                     if (compact.checkpoint) env.checkpoint(compact.op);
                 },
                 .put_account => |account| {
+                    // The forest requires prefetch before put.
+                    env.prefetch_account(account.id);
                     env.forest.grooves.accounts.put(&account);
                     try model.put(account.id, account);
                 },
