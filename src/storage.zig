@@ -131,9 +131,9 @@ pub const Storage = struct {
             error.Unexpected => unreachable,
         };
 
-        var queue = storage.next_tick_queue;
-        storage.next_tick_queue = .{};
-        while (queue.pop()) |next_tick| next_tick.callback(next_tick);
+        while (storage.next_tick_queue.pop()) |next_tick| {
+            next_tick.callback(next_tick);
+        }
     }
 
     pub fn read_sectors(
