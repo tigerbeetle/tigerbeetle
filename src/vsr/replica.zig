@@ -1410,8 +1410,8 @@ pub fn ReplicaType(
             //      replica 2: 5b, 7a, 8a (log_view=latest)
             //    Replicas 1 and 2 share the highest log_view, so both sets of headers are canonical.
             // 8. Replica 1 loads the canonical headers (via `replace_header()`) from both DVCs.
-            //    Messages 8a and 7a will be dropped via `do_view_change_op_max()` (due to the
-            //    gap at op 6). But there is a conflict at op=5. For correctness, replica 1 must
+            //    Messages 8a and 7a will be dropped via `primary_do_view_change_op_max()` (due to
+            //    the gap at op 6). But there is a conflict at op=5. For correctness, replica 1 must
             //    pick 5a — 5a may be committed by replica 0.
             //    Without replica 0's assistance, replica 1 has no way to pick between 5a/5b.
             //
@@ -3216,8 +3216,8 @@ pub fn ReplicaType(
             //    asynchronous prepare_ok to itself.
             // 3. In on_start_view_change(), after receiving a quorum of start_view_change
             //    messages, the new primary sends a synchronous do_view_change to itself.
-            // 4. In start_view_as_the_new_primary(), the new primary sends itself a prepare_ok
-            //    message for each uncommitted message.
+            // 4. In primary_start_view_as_the_new_primary(), the new primary sends itself a
+            //    prepare_ok message for each uncommitted message.
             if (self.loopback_queue) |message| {
                 defer self.message_bus.unref(message);
 
@@ -4060,7 +4060,7 @@ pub fn ReplicaType(
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
                 if (self.primary_repair_pipeline_op() != null) return self.primary_repair_pipeline();
                 // Start the view as the new primary:
-                self.start_view_as_the_new_primary();
+                self.primary_start_view_as_the_new_primary();
             }
         }
 
@@ -5419,7 +5419,7 @@ pub fn ReplicaType(
                 }
             }
 
-            const op_max = self.do_view_change_op_max(op_canonical);
+            const op_max = self.primary_do_view_change_op_max(op_canonical);
             assert(op_max <= self.op);
             assert(op_max >= self.commit_min);
             if (op_max != self.op) {
@@ -5570,7 +5570,7 @@ pub fn ReplicaType(
         /// For example, if the old primary replicates ops=7,8,9 (all uncommitted) but only op=9 is
         /// prepared on another replica before the old primary crashes, then this function finds a
         /// gap for ops=7,8 and will attempt to discard ops 7,8,9.
-        fn do_view_change_op_max(self: *const Self, op_canonical: u64) u64 {
+        fn primary_do_view_change_op_max(self: *const Self, op_canonical: u64) u64 {
             assert(self.replica_count > 1);
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
@@ -5627,7 +5627,7 @@ pub fn ReplicaType(
             return std.math.min(op_before_break, op_before_gap);
         }
 
-        fn start_view_as_the_new_primary(self: *Self) void {
+        fn primary_start_view_as_the_new_primary(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
