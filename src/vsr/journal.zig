@@ -1737,9 +1737,17 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
+            const slot = journal.slot_with_header(message.header).?;
+            if (!journal.prepare_inhabited[slot.index] or
+                journal.prepare_checksums[slot.index] != message.header.checksum)
+            {
+                journal.write_prepare_debug(message.header, "entry changed twice while writing headers");
+                journal.write_prepare_release(write, null);
+                return;
+            }
+
             journal.write_prepare_debug(message.header, "complete, marking clean");
 
-            const slot = journal.slot_with_header(message.header).?;
             journal.dirty.clear(slot);
             journal.faulty.clear(slot);
 
