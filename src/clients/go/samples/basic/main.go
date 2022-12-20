@@ -27,12 +27,12 @@ func main() {
 	// Create two accounts
 	res, err := client.CreateAccounts([]tb_types.Account{
 		{
-			Id:     uint128("1"),
+			ID:     uint128("1"),
 			Ledger: 1,
 			Code:   1,
 		},
 		{
-			Id:     uint128("2"),
+			ID:     uint128("2"),
 			Ledger: 1,
 			Code:   1,
 		},
@@ -54,9 +54,9 @@ func main() {
 	for i := 0; i < SAMPLES; i += BATCH_SIZE {
 		for j := 0; (j < BATCH_SIZE) && (i+j < SAMPLES); j++ {
 			batch[j] = tb_types.Transfer{
-				Id:              uint128(fmt.Sprintf("%d", i+j+1)),
-				DebitAccountId:  uint128("1"),
-				CreditAccountId: uint128("2"),
+				ID:              uint128(fmt.Sprintf("%d", i+j+1)),
+				DebitAccountID:  uint128("1"),
+				CreditAccountID: uint128("2"),
 				Ledger:          1,
 				Code:            1,
 				Amount:          10,
@@ -87,7 +87,7 @@ func main() {
 
 	total := uint64(10 * SAMPLES)
 	for _, account := range accounts {
-		if account.Id == uint128("1") {
+		if account.ID == uint128("1") {
 			if account.DebitsPosted != total {
 				panic(fmt.Sprintf("Expected debits to be %d, got %d", total, account.DebitsPosted))
 			}

@@ -65,7 +65,7 @@ func (f TransferFlags) ToUint16() uint16 {
 }
 
 type Account struct {
-	Id             Uint128
+	ID             Uint128
 	UserData       Uint128
 	Reserved       [48]uint8
 	Ledger         uint32
@@ -79,12 +79,12 @@ type Account struct {
 }
 
 type Transfer struct {
-	Id              Uint128
-	DebitAccountId  Uint128
-	CreditAccountId Uint128
+	ID              Uint128
+	DebitAccountID  Uint128
+	CreditAccountID Uint128
 	UserData        Uint128
 	Reserved        Uint128
-	PendingId       Uint128
+	PendingID       Uint128
 	Timeout         uint64
 	Ledger          uint32
 	Code            uint16
@@ -96,13 +96,13 @@ type Transfer struct {
 type CreateAccountResult uint32
 
 const (
-	AccountOk                          CreateAccountResult = 0
+	AccountOK                          CreateAccountResult = 0
 	AccountLinkedEventFailed           CreateAccountResult = 1
 	AccountLinkedEventChainOpen        CreateAccountResult = 2
 	AccountReservedFlag                CreateAccountResult = 3
 	AccountReservedField               CreateAccountResult = 4
-	AccountIdMustNotBeZero             CreateAccountResult = 5
-	AccountIdMustNotBeIntMax           CreateAccountResult = 6
+	AccountIDMustNotBeZero             CreateAccountResult = 5
+	AccountIDMustNotBeIntMax           CreateAccountResult = 6
 	AccountLedgerMustNotBeZero         CreateAccountResult = 7
 	AccountCodeMustNotBeZero           CreateAccountResult = 8
 	AccountDebitsPendingMustBeZero     CreateAccountResult = 9
@@ -119,8 +119,8 @@ const (
 
 func (i CreateAccountResult) String() string {
 	switch i {
-	case AccountOk:
-		return "AccountOk"
+	case AccountOK:
+		return "AccountOK"
 	case AccountLinkedEventFailed:
 		return "AccountLinkedEventFailed"
 	case AccountLinkedEventChainOpen:
@@ -129,10 +129,10 @@ func (i CreateAccountResult) String() string {
 		return "AccountReservedFlag"
 	case AccountReservedField:
 		return "AccountReservedField"
-	case AccountIdMustNotBeZero:
-		return "AccountIdMustNotBeZero"
-	case AccountIdMustNotBeIntMax:
-		return "AccountIdMustNotBeIntMax"
+	case AccountIDMustNotBeZero:
+		return "AccountIDMustNotBeZero"
+	case AccountIDMustNotBeIntMax:
+		return "AccountIDMustNotBeIntMax"
 	case AccountLedgerMustNotBeZero:
 		return "AccountLedgerMustNotBeZero"
 	case AccountCodeMustNotBeZero:
@@ -164,19 +164,19 @@ func (i CreateAccountResult) String() string {
 type CreateTransferResult uint32
 
 const (
-	TransferOk                                         CreateTransferResult = 0
+	TransferOK                                         CreateTransferResult = 0
 	TransferLinkedEventFailed                          CreateTransferResult = 1
 	TransferLinkedEventChainOpen                       CreateTransferResult = 2
 	TransferReservedFlag                               CreateTransferResult = 3
 	TransferReservedField                              CreateTransferResult = 4
-	TransferIdMustNotBeZero                            CreateTransferResult = 5
-	TransferIdMustNotBeIntMax                          CreateTransferResult = 6
-	TransferDebitAccountIdMustNotBeZero                CreateTransferResult = 7
-	TransferDebitAccountIdMustNotBeIntMax              CreateTransferResult = 8
-	TransferCreditAccountIdMustNotBeZero               CreateTransferResult = 9
-	TransferCreditAccountIdMustNotBeIntMax             CreateTransferResult = 10
+	TransferIDMustNotBeZero                            CreateTransferResult = 5
+	TransferIDMustNotBeIntMax                          CreateTransferResult = 6
+	TransferDebitAccountIDMustNotBeZero                CreateTransferResult = 7
+	TransferDebitAccountIDMustNotBeIntMax              CreateTransferResult = 8
+	TransferCreditAccountIDMustNotBeZero               CreateTransferResult = 9
+	TransferCreditAccountIDMustNotBeIntMax             CreateTransferResult = 10
 	TransferAccountsMustBeDifferent                    CreateTransferResult = 11
-	TransferPendingIdMustBeZero                        CreateTransferResult = 12
+	TransferPendingIDMustBeZero                        CreateTransferResult = 12
 	TransferLedgerMustNotBeZero                        CreateTransferResult = 13
 	TransferCodeMustNotBeZero                          CreateTransferResult = 14
 	TransferAmountMustNotBeZero                        CreateTransferResult = 15
@@ -185,10 +185,10 @@ const (
 	TransferAccountsMustHaveTheSameLedger              CreateTransferResult = 18
 	TransferTransferMustHaveTheSameLedgerAsAccounts    CreateTransferResult = 19
 	TransferExistsWithDifferentFlags                   CreateTransferResult = 20
-	TransferExistsWithDifferentDebitAccountId          CreateTransferResult = 21
-	TransferExistsWithDifferentCreditAccountId         CreateTransferResult = 22
+	TransferExistsWithDifferentDebitAccountID          CreateTransferResult = 21
+	TransferExistsWithDifferentCreditAccountID         CreateTransferResult = 22
 	TransferExistsWithDifferentUserData                CreateTransferResult = 23
-	TransferExistsWithDifferentPendingId               CreateTransferResult = 24
+	TransferExistsWithDifferentPendingID               CreateTransferResult = 24
 	TransferExistsWithDifferentTimeout                 CreateTransferResult = 25
 	TransferExistsWithDifferentCode                    CreateTransferResult = 26
 	TransferExistsWithDifferentAmount                  CreateTransferResult = 27
@@ -205,13 +205,13 @@ const (
 	TransferCannotPostAndVoidPendingTransfer           CreateTransferResult = 38
 	TransferPendingTransferCannotPostOrVoidAnother     CreateTransferResult = 39
 	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 40
-	TransferPendingIdMustNotBeZero                     CreateTransferResult = 41
-	TransferPendingIdMustNotBeIntMax                   CreateTransferResult = 42
-	TransferPendingIdMustBeDifferent                   CreateTransferResult = 43
+	TransferPendingIDMustNotBeZero                     CreateTransferResult = 41
+	TransferPendingIDMustNotBeIntMax                   CreateTransferResult = 42
+	TransferPendingIDMustBeDifferent                   CreateTransferResult = 43
 	TransferPendingTransferNotFound                    CreateTransferResult = 44
 	TransferPendingTransferNotPending                  CreateTransferResult = 45
-	TransferPendingTransferHasDifferentDebitAccountId  CreateTransferResult = 46
-	TransferPendingTransferHasDifferentCreditAccountId CreateTransferResult = 47
+	TransferPendingTransferHasDifferentDebitAccountID  CreateTransferResult = 46
+	TransferPendingTransferHasDifferentCreditAccountID CreateTransferResult = 47
 	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 48
 	TransferPendingTransferHasDifferentCode            CreateTransferResult = 49
 	TransferExceedsPendingTransferAmount               CreateTransferResult = 50
@@ -223,8 +223,8 @@ const (
 
 func (i CreateTransferResult) String() string {
 	switch i {
-	case TransferOk:
-		return "TransferOk"
+	case TransferOK:
+		return "TransferOK"
 	case TransferLinkedEventFailed:
 		return "TransferLinkedEventFailed"
 	case TransferLinkedEventChainOpen:
@@ -233,22 +233,22 @@ func (i CreateTransferResult) String() string {
 		return "TransferReservedFlag"
 	case TransferReservedField:
 		return "TransferReservedField"
-	case TransferIdMustNotBeZero:
-		return "TransferIdMustNotBeZero"
-	case TransferIdMustNotBeIntMax:
-		return "TransferIdMustNotBeIntMax"
-	case TransferDebitAccountIdMustNotBeZero:
-		return "TransferDebitAccountIdMustNotBeZero"
-	case TransferDebitAccountIdMustNotBeIntMax:
-		return "TransferDebitAccountIdMustNotBeIntMax"
-	case TransferCreditAccountIdMustNotBeZero:
-		return "TransferCreditAccountIdMustNotBeZero"
-	case TransferCreditAccountIdMustNotBeIntMax:
-		return "TransferCreditAccountIdMustNotBeIntMax"
+	case TransferIDMustNotBeZero:
+		return "TransferIDMustNotBeZero"
+	case TransferIDMustNotBeIntMax:
+		return "TransferIDMustNotBeIntMax"
+	case TransferDebitAccountIDMustNotBeZero:
+		return "TransferDebitAccountIDMustNotBeZero"
+	case TransferDebitAccountIDMustNotBeIntMax:
+		return "TransferDebitAccountIDMustNotBeIntMax"
+	case TransferCreditAccountIDMustNotBeZero:
+		return "TransferCreditAccountIDMustNotBeZero"
+	case TransferCreditAccountIDMustNotBeIntMax:
+		return "TransferCreditAccountIDMustNotBeIntMax"
 	case TransferAccountsMustBeDifferent:
 		return "TransferAccountsMustBeDifferent"
-	case TransferPendingIdMustBeZero:
-		return "TransferPendingIdMustBeZero"
+	case TransferPendingIDMustBeZero:
+		return "TransferPendingIDMustBeZero"
 	case TransferLedgerMustNotBeZero:
 		return "TransferLedgerMustNotBeZero"
 	case TransferCodeMustNotBeZero:
@@ -265,14 +265,14 @@ func (i CreateTransferResult) String() string {
 		return "TransferTransferMustHaveTheSameLedgerAsAccounts"
 	case TransferExistsWithDifferentFlags:
 		return "TransferExistsWithDifferentFlags"
-	case TransferExistsWithDifferentDebitAccountId:
-		return "TransferExistsWithDifferentDebitAccountId"
-	case TransferExistsWithDifferentCreditAccountId:
-		return "TransferExistsWithDifferentCreditAccountId"
+	case TransferExistsWithDifferentDebitAccountID:
+		return "TransferExistsWithDifferentDebitAccountID"
+	case TransferExistsWithDifferentCreditAccountID:
+		return "TransferExistsWithDifferentCreditAccountID"
 	case TransferExistsWithDifferentUserData:
 		return "TransferExistsWithDifferentUserData"
-	case TransferExistsWithDifferentPendingId:
-		return "TransferExistsWithDifferentPendingId"
+	case TransferExistsWithDifferentPendingID:
+		return "TransferExistsWithDifferentPendingID"
 	case TransferExistsWithDifferentTimeout:
 		return "TransferExistsWithDifferentTimeout"
 	case TransferExistsWithDifferentCode:
@@ -305,20 +305,20 @@ func (i CreateTransferResult) String() string {
 		return "TransferPendingTransferCannotPostOrVoidAnother"
 	case TransferTimeoutReservedForPendingTransfer:
 		return "TransferTimeoutReservedForPendingTransfer"
-	case TransferPendingIdMustNotBeZero:
-		return "TransferPendingIdMustNotBeZero"
-	case TransferPendingIdMustNotBeIntMax:
-		return "TransferPendingIdMustNotBeIntMax"
-	case TransferPendingIdMustBeDifferent:
-		return "TransferPendingIdMustBeDifferent"
+	case TransferPendingIDMustNotBeZero:
+		return "TransferPendingIDMustNotBeZero"
+	case TransferPendingIDMustNotBeIntMax:
+		return "TransferPendingIDMustNotBeIntMax"
+	case TransferPendingIDMustBeDifferent:
+		return "TransferPendingIDMustBeDifferent"
 	case TransferPendingTransferNotFound:
 		return "TransferPendingTransferNotFound"
 	case TransferPendingTransferNotPending:
 		return "TransferPendingTransferNotPending"
-	case TransferPendingTransferHasDifferentDebitAccountId:
-		return "TransferPendingTransferHasDifferentDebitAccountId"
-	case TransferPendingTransferHasDifferentCreditAccountId:
-		return "TransferPendingTransferHasDifferentCreditAccountId"
+	case TransferPendingTransferHasDifferentDebitAccountID:
+		return "TransferPendingTransferHasDifferentDebitAccountID"
+	case TransferPendingTransferHasDifferentCreditAccountID:
+		return "TransferPendingTransferHasDifferentCreditAccountID"
 	case TransferPendingTransferHasDifferentLedger:
 		return "TransferPendingTransferHasDifferentLedger"
 	case TransferPendingTransferHasDifferentCode:

@@ -46,20 +46,18 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
     comptime {
         var len: usize = 0;
-        var word_start: bool = false;
         var output = [_]u8{' '} ** (min_len orelse input.len);
-        inline for (input) |char| {
-            if (char == '_') {
-                word_start = true;
-                continue;
+        var iterator = std.mem.tokenize(u8, input, "_");
+        while (iterator.next()) |word| {
+            if (is_upper_case(word)) {
+                _ = std.ascii.upperString(output[len..], word);
+            } else {
+                std.mem.copy(u8, output[len..], word);
+                output[len] = std.ascii.toUpper(output[len]);
             }
-
-            output[len] = if (word_start) std.ascii.toUpper(char) else char;
-            word_start = false;
-            len += 1;
+            len += word.len;
         }
 
-        output[0] = std.ascii.toUpper(output[0]);
         return output[0 .. min_len orelse len];
     }
 }
@@ -77,6 +75,16 @@ fn calculate_min_len(comptime type_info: anytype) comptime_int {
     }
 }
 
+fn is_upper_case(comptime word: []const u8) bool {
+    // https://github.com/golang/go/wiki/CodeReviewComments#initialisms
+    const initialisms = .{ "id", "ok" };
+    inline for (initialisms) |initialism| {
+        if (std.ascii.eqlIgnoreCase(initialism, word)) {
+            return true;
+        }
+    } else return false;
+}
+
 fn emit_enum(
     buffer: *std.ArrayList(u8),
     comptime type_info: anytype,
@@ -84,12 +92,8 @@ fn emit_enum(
     comptime prefix: []const u8,
     comptime int_type: []const u8,
 ) !void {
-    try buffer.writer().print(
-        \\type {s} {s}
-        \\
-        \\const (
-        \\
-    , .{
+    try buffer.writer().print("type {s} {s}\n\n" ++
+        "const (\n", .{
         name,
         int_type,
     });
@@ -106,7 +110,9 @@ fn emit_enum(
 
     try buffer.writer().print(")\n\n" ++
         "func (i {s}) String() string {{\n" ++
-        "\tswitch i {{\n", .{name});
+        "\tswitch i {{\n", .{
+        name,
+    });
 
     inline for (type_info.fields) |field| {
         const enum_name = prefix ++ to_pascal_case(field.name, null);
@@ -119,7 +125,9 @@ fn emit_enum(
 
     try buffer.writer().print("\t}}\n" ++
         "\treturn \"{s}(\" + strconv.FormatInt(int64(i+1), 10) + \")\"\n" ++
-        "}}\n\n", .{name});
+        "}}\n\n", .{
+        name,
+    });
 }
 
 fn emit_packed_struct(
