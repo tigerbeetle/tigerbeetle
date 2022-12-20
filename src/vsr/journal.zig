@@ -411,7 +411,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         pub fn slot_with_header(journal: *const Journal, header: *const Header) ?Slot {
             assert(header.command == .prepare);
-            return journal.slot_with_op(header.op);
+            return journal.slot_with_op_and_checksum(header.op, header.checksum);
         }
 
         /// Returns any existing header at the location indicated by header.op.
