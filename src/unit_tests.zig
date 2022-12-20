@@ -34,4 +34,6 @@ test {
     _ = @import("test/id.zig");
     _ = @import("test/storage.zig");
     _ = @import("test/table.zig");
+
+    _ = @import("clients/go/go_bindings_test.zig");
 }
