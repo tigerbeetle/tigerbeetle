@@ -167,7 +167,7 @@ pub const configs = struct {
             .verify = true,
         },
         .cluster = .{
-            .clients_max = 6 + 4,
+            .clients_max = 6,
             .pipeline_prepare_queue_max = 6,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
             .message_size_max = Config.Cluster.message_size_max_min(2),

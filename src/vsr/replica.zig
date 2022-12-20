@@ -76,6 +76,7 @@ const quorum_counter_null = QuorumCounter.initEmpty();
 // that cannot be repaired because they are gaps, and this must be relative to the
 // cluster as a whole (not relative to the difference between our op and commit number)
 // as otherwise we would break correctness.
+// TODO SuperBlock should use this too
 const view_change_headers_count = constants.pipeline_prepare_queue_max;
 
 comptime {
@@ -2359,10 +2360,9 @@ pub fn ReplicaType(
         /// A function which calls `commit_journal()` to set `commit_max` must first call
         /// `view_jump()`. Otherwise, we may fork the log.
         fn commit_journal(self: *Self, commit: u64) void {
-            // TODO Restrict `view_change` status only to the primary purely as defense-in-depth.
-            // Be careful of concurrency when doing this, as successive view changes can happen quickly.
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
+            assert(!(self.status == .normal and self.primary()));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
             assert(self.commit_max <= self.op or self.commit_max > self.op);
@@ -2387,6 +2387,7 @@ pub fn ReplicaType(
                 log.debug("{}: commit_journal: already committing...", .{self.replica});
                 return;
             }
+            assert(!(self.status == .normal and self.primary()));
 
             // We check the hash chain before we read each op, rather than once upfront, because
             // it's possible for `commit_max` to change while we read asynchronously, after we
@@ -2408,6 +2409,8 @@ pub fn ReplicaType(
             assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
+            assert(!(self.status == .normal and self.primary()));
+            assert(self.pipeline == .cache);
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
@@ -2417,6 +2420,8 @@ pub fn ReplicaType(
                 return;
             }
             assert(self.op >= self.commit_max);
+
+            // TODO for the cache, verify that journal.has and is clean
 
             // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
             // Even a naive state transfer may fail to correct for this.
@@ -2492,7 +2497,15 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            self.commit_journal_next();
+            if (self.status == .normal and self.primary()) {
+                if (self.pipeline.queue.prepare_queue.empty()) {
+                    self.commit_ops_done();
+                } else {
+                    self.commit_pipeline_next();
+                }
+            } else {
+                self.commit_journal_next();
+            }
         }
 
         /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
@@ -2868,7 +2881,7 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
 
             if (self.status == .normal and self.primary()) {
-                if (self.pipeline.queue.prepare_queue.head_ptr()) |pipeline_head| {
+                if (self.pipeline.queue.prepare_queue.head_ptr()) |pipeline_head| { // TODO remove cleaup
                     assert(pipeline_head.message.header.op == self.commit_min + 1);
                 }
                 self.commit_pipeline_next();
@@ -3119,6 +3132,8 @@ pub fn ReplicaType(
                 // Do not reset any ops that we did not include in our do_view_change message.
                 constants.pipeline_prepare_queue_max,
             );
+
+            std.debug.print("{}: PRIMARY_OP_CANON {} op={} commit_min={} queue_max={} uncanon={}\n", .{ self.replica, view_normal_canonical, self.op, self.commit_min, constants.pipeline_prepare_queue_max, uncanonical_op_count });
 
             assert(uncanonical_op_count <= constants.pipeline_prepare_queue_max);
             if (uncanonical_op_count == 0) return self.op;
@@ -3897,12 +3912,27 @@ pub fn ReplicaType(
         }
 
         fn pipeline_prepare_by_op_and_checksum(self: *Self, op: u64, checksum: ?u128) ?*Message {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.replica == self.primary_index(self.view) or checksum != null);
+
+            if (checksum == null) {
+                // The PipelineCache may hold messages that have been discarded, so we must be
+                // careful not to access it unless we can verify the entry's checksum.
+                //
+                // Only on_request_prepare() queries the pipeline with checksum=null.
+                // And primaries ignore request_prepare messages during their view change
+                // (during which time the pipeline is not yet repaired, and so is untrusted).
+                assert(self.status == .normal);
+                assert(self.replica == self.primary_index(self.view));
+                assert(self.pipeline == .queue);
+            }
+
             return switch (self.pipeline) {
-                .queue => |*pipeline| if (pipeline.prepare_by_op_and_checksum(op, checksum)) |prepare|
+                .cache => |*cache| cache.prepare_by_op_and_checksum(op, checksum.?),
+                .queue => |*queue| if (queue.prepare_by_op_and_checksum(op, checksum)) |prepare|
                     prepare.message
                 else
                     null,
-                .cache => |*pipeline| pipeline.prepare_by_op_and_checksum(op, checksum),
             };
         }
 
@@ -5277,7 +5307,7 @@ pub fn ReplicaType(
                     // about to become the new `replica.op`.
                     commit_max = std.math.max(
                         commit_max,
-                        do_view_change_head.op -| constants.pipeline_max,
+                        do_view_change_head.op -| constants.pipeline_prepare_queue_max,
                     );
                     break :commit_max commit_max;
                 },
@@ -5377,8 +5407,10 @@ pub fn ReplicaType(
             }
 
             const op_max = self.do_view_change_op_max(op_canonical);
+            std.debug.print("OP_CANON={} OP_MAX={} commit_max={}\n", .{ op_canonical, op_max, self.commit_max });
             assert(op_max <= self.op);
             assert(op_max >= self.commit_min);
+            //assert(op_max >= self.commit_max); // TODO??
             if (op_max != self.op) {
                 log.debug("{}: primary_set_log_from_do_view_change_messages: discard op={}..{}", .{
                     self.replica,
@@ -6291,18 +6323,14 @@ const PipelineCache = struct {
         return prepare.header.op == header.op and prepare.header.checksum == header.checksum;
     }
 
-    fn prepare_by_op(pipeline: *PipelineCache, op: u64) ?*Message {
+    /// Unlike the PipelineQueue, cached messages may not belong to the current view.
+    /// Thus, a matching checksum is required.
+    fn prepare_by_op_and_checksum(pipeline: *PipelineCache, op: u64, checksum: u128) ?*Message {
         const slot = op % prepares_max;
         const prepare = pipeline.prepares[slot] orelse return null;
         if (prepare.header.op != op) return null;
+        if (prepare.header.checksum != checksum) return null;
         return prepare;
-    }
-
-    fn prepare_by_op_and_checksum(pipeline: *PipelineCache, op: u64, checksum: ?u128) ?*Message {
-        const prepare = pipeline.prepare_by_op(op) orelse return null;
-        if (checksum == null) return prepare;
-        if (checksum.? == prepare.header.checksum) return prepare;
-        return null;
     }
 
     /// Returns the message evicted from the cache, if any.

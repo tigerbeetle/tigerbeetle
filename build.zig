@@ -142,6 +142,7 @@ pub fn build(b: *std.build.Builder) void {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
         simulator.addOptions("tigerbeetle_build_options", options);
+        simulator.omit_frame_pointer = false;
         link_tracer_backend(simulator, tracer_backend, target);
 
         const run_cmd = simulator.run();

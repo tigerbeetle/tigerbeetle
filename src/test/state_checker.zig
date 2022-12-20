@@ -119,6 +119,7 @@ pub const StateChecker = struct {
 
         const request = client.request_queue.head_ptr_const().?;
         assert(request.message.header.client == commit_header.?.client);
+        std.debug.print("CHECK replica={} request={} commit_header={}\n", .{ replica_index, request.message.header, commit_header.? });
         assert(request.message.header.request == commit_header.?.request);
         assert(request.message.header.command == .request);
         assert(request.message.header.operation == commit_header.?.operation);
