@@ -620,6 +620,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             op_max: u64,
         ) ?HeaderRange {
             assert(journal.status == .recovered);
+            assert(journal.header_with_op(op_min) != null);
+            assert(journal.header_with_op(op_max) != null);
             assert(op_max >= op_min);
             assert(op_max - op_min + 1 <= slot_count);
             var range: ?HeaderRange = null;
@@ -1416,6 +1418,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var dirty_iterator = journal.dirty.bits.iterator(.{ .kind = .set });
             while (dirty_iterator.next()) |dirty_slot| {
                 if (journal.faulty.bit(Slot{ .index = dirty_slot })) continue;
+                assert(journal.prepare_inhabited[dirty_slot]);
+                assert(journal.prepare_checksums[dirty_slot] ==
+                    journal.headers[dirty_slot].checksum);
+                assert(journal.prepare_checksums[dirty_slot] ==
+                    journal.headers_redundant[dirty_slot].checksum);
 
                 const dirty_slot_sector = @divFloor(dirty_slot, headers_per_sector);
                 if (fix_sector) |fix_sector_| {
@@ -1580,6 +1587,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
             assert(journal.has(message.header));
+            assert(!journal.writing(message.header.op, message.header.checksum));
             assert(replica.replica_count != 1 or journal.writes.executing() == 0);
 
             // The underlying header memory must be owned by the buffer and not by journal.headers:
