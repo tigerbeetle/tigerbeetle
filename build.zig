@@ -365,6 +365,11 @@ fn go_client(
         "../src/clients/go/pkg/native/tb_client.h",
     );
 
+    const bindings = b.addExecutable("go_bindings", "src/clients/go/go_bindings.zig");
+    bindings.addOptions("tigerbeetle_build_options", options);
+    bindings.setMainPkgPath("src");
+    const bindings_step = bindings.run();
+
     // Zig cross-targets:
     const platforms = .{
         "x86_64-linux",
@@ -391,6 +396,7 @@ fn go_client(
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         lib.step.dependOn(&install_header.step);
+        lib.step.dependOn(&bindings_step.step);
         build_step.dependOn(&lib.step);
     }
 }
