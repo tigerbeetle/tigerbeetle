@@ -128,7 +128,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, uint64(0), accA.DebitsPosted)
 		assert.Equal(t, uint64(0), accA.CreditsPending)
 		assert.Equal(t, uint64(0), accA.CreditsPosted)
-		assert.NotEqual(t, uint64(0), accA.TimeStamp)
+		assert.NotEqual(t, uint64(0), accA.Timestamp)
 		assert.Equal(t, unsafe.Sizeof(accA), 128)
 
 		accB := results[1]
@@ -139,7 +139,7 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, uint64(0), accB.DebitsPosted)
 		assert.Equal(t, uint64(0), accB.CreditsPending)
 		assert.Equal(t, uint64(0), accB.CreditsPosted)
-		assert.NotEqual(t, uint64(0), accB.TimeStamp)
+		assert.NotEqual(t, uint64(0), accB.Timestamp)
 	})
 
 	s.Run("can create a transfer", func(t *testing.T) {
@@ -205,8 +205,8 @@ func doTestClient(s *testing.T, client Client) {
 		}
 		assert.Len(t, results, 2)
 		assert.Equal(t, unsafe.Sizeof(transfer1), 128)
-		assert.Equal(t, types.TransferEventResult{Index: 0, Code: types.TransferLinkedEventFailed}, results[0])
-		assert.Equal(t, types.TransferEventResult{Index: 1, Code: types.TransferExistsWithDifferentFlags}, results[1])
+		assert.Equal(t, types.TransferEventResult{Index: 0, Result: types.TransferLinkedEventFailed}, results[0])
+		assert.Equal(t, types.TransferEventResult{Index: 1, Result: types.TransferExistsWithDifferentFlags}, results[1])
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
