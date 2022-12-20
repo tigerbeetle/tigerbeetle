@@ -216,6 +216,7 @@ pub fn SetAssociativeCache(
             const way = self.search(set, key) orelse return;
 
             self.counts.set(set.offset + way, 0);
+            set.values[way] = undefined;
         }
 
         /// Hint that the key is less likely to be accessed in the future, without actually removing
