@@ -43,7 +43,7 @@ public class Benchmark {
             final int TRANSFER_SIZE = 128; // @sizeOf(Transfer)
             final int MESSAGE_SIZE_MAX = 1024 * 1024; // config.message_size_max
 
-            final int BATCHES_COUNT = 5;
+            final int BATCHES_COUNT = 100;
             final int TRANSFERS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;
             final int MAX_TRANSFERS = BATCHES_COUNT * TRANSFERS_PER_BATCH;
 
@@ -53,7 +53,7 @@ public class Benchmark {
                 for (int j = 0; j < TRANSFERS_PER_BATCH; j++) {
 
                     transfersBatch.add();
-                    transfersBatch.setId(i + 1, j + 1);
+                    transfersBatch.setId(j + 1, i);
                     transfersBatch.setCreditAccountId(100, 1000);
                     transfersBatch.setDebitAccountId(200, 2000);
                     transfersBatch.setCode((short) 1);
@@ -74,7 +74,7 @@ public class Benchmark {
                 var transfersErrors = client.createTransfers(batch);
                 if (transfersErrors.getLength() > 0) {
 
-                    while (accountErrors.next()) {
+                    while (transfersErrors.next()) {
                         System.err.printf("Error creating transfer #%d -> %s%n",
                                 transfersErrors.getIndex(), transfersErrors.getResult());
                     }
