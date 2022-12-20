@@ -3066,21 +3066,9 @@ pub fn ReplicaType(
             //    occur before this completes. This replica (formerly the initializing primary)
             //    must be careful to not share the hash chain break in its DVC — only include the
             //    unbroken suffix of the log.
-            //
-            // SV does not have this issue — it is sent by a fully-repaired primary.
-            const op_min = std.math.max(
-                self.op -| (constants.pipeline_max - 1),
-                self.op -| (constants.journal_slot_count - 1),
-            );
-            const op_min_unbroken = if (self.journal.find_latest_headers_break_between(
-                op_min,
-                self.op,
-            )) |range|
-                range.op_max + 1
-            else
-                op_min;
+            const op_max_broken = self.journal.find_latest_headers_break_before(self.op);
+            const op_min_unbroken = if (op_max_broken) |op| op + 1 else 0;
             assert(op_min_unbroken <= self.op);
-            assert(op_min_unbroken == op_min or command == .do_view_change);
 
             const count = self.copy_latest_headers_and_set_size(
                 op_min_unbroken,
@@ -5630,6 +5618,11 @@ pub fn ReplicaType(
                     if (self.journal.header_with_op(op + 1) == null) break :blk op;
                 } else break :blk self.op;
             };
+
+            assert(op_before_break >= op_canonical);
+            assert(op_before_break <= self.op);
+            assert(op_before_gap >= self.commit_max);
+            assert(op_before_gap <= self.op);
 
             return std.math.min(op_before_break, op_before_gap);
         }

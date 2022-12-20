@@ -586,6 +586,20 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             return copied;
         }
 
+        /// Returns the op of the last gap or hash-break in the headers.
+        /// Returns null when the hash chain is valid all the way back to op=0.
+        pub fn find_latest_headers_break_before(journal: *const Journal, op_max: u64) ?u64 {
+            assert(journal.status == .recovered);
+            assert(journal.header_with_op(op_max) != null);
+
+            var op: u64 = op_max;
+            while (op > 0) : (op -= 1) {
+                const header_next = journal.header_with_op(op).?;
+                const header_prev = journal.header_with_op(op - 1) orelse return null;
+                if (header_prev.checksum != header_next.parent) return null;
+            } else return null;
+        }
+
         const HeaderRange = struct { op_min: u64, op_max: u64 };
 
         /// Finds the latest break in headers between `op_min` and `op_max` (both inclusive).
@@ -605,6 +619,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             op_min: u64,
             op_max: u64,
         ) ?HeaderRange {
+            assert(journal.status == .recovered);
             assert(op_max >= op_min);
             assert(op_max - op_min + 1 <= slot_count);
             var range: ?HeaderRange = null;
