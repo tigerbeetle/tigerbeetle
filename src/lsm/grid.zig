@@ -546,7 +546,6 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_queue.remove(read);
 
             // Resolve all reads queued to the address with the block.
-            // Callbacks may queue more to read.resolves so it must drain any new/existing pendings.
             while (read.resolves.pop()) |pending| {
                 const pending_read = @fieldParentPtr(Read, "pending", pending);
                 pending_read.callback(pending_read, block);
