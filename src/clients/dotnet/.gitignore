@@ -3,6 +3,6 @@ bin/
 obj/
 cobertura/
 TestResults/
-src/TigerBeetle/native/
+src/TigerBeetle/runtimes/
 src/TigerBeetle.Tests/coverage.json
 *tigerbeetle.benchmark

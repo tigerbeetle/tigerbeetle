@@ -858,13 +858,16 @@ namespace TigerBeetle.Tests
 
     internal class TBServer : IDisposable
     {
-        public const string TB_EXE = "tigerbeetle";
-        public const string TB_PATH = "../../../../../../../..";
-        public static readonly string TB_SERVER = $"{TB_PATH}/{TB_EXE}";
         public const string TB_PORT = "3001";
-        public const string TB_FILE = "dotnet-tests.tigerbeetle";
-        public static readonly string FORMAT = $"format --cluster=0 --replica=0 ./{TB_FILE}";
-        public static readonly string START = $"start --addresses={TB_PORT} ./{TB_FILE}";
+
+        // Path relative from /TigerBeetle.Test/bin/<framework>/<release>/<platform> :
+        private const string PROJECT_ROOT = "../../../../..";
+        private const string TB_PATH = PROJECT_ROOT + "/../../../../zig-out/bin";
+        private const string TB_EXE = "tigerbeetle";
+        private const string TB_FILE = "dotnet-tests.tigerbeetle";
+        private const string TB_SERVER = TB_PATH + "/" + TB_EXE;
+        private const string FORMAT = $"format --cluster=0 --replica=0 ./" + TB_FILE;
+        private const string START = $"start --addresses=" + TB_PORT + " ./" + TB_FILE;
 
         private readonly Process process;
 

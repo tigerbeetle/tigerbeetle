@@ -471,19 +471,23 @@ fn dotnet_client(
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
-    // Zig cross-targets
+    // Zig cross-targets vs Dotnet RID (Runtime Identifier):
     const platforms = .{
-        "x86_64-linux-gnu",
-        "x86_64-macos",
-        "x86_64-windows",
+        .{ "x86_64-linux-gnu", "linux-x64" },
+        .{ "x86_64-linux-musl", "linux-musl-x64" },
+        .{ "x86_64-macos", "osx-x64" },
+        .{ "aarch64-linux-gnu", "linux-arm64" },
+        .{ "aarch64-linux-musl", "linux-musl-arm64" },
+        .{ "aarch64-macos", "osx-arm64" },
+        .{ "x86_64-windows", "win-x64" },
     };
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
         const lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         lib.setMainPkgPath("src");
-        lib.setOutputDir("src/clients/dotnet/src/TigerBeetle/native/" ++ platform);
+        lib.setOutputDir("src/clients/dotnet/src/TigerBeetle/runtimes/" ++ platform[1] ++ "/native");
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
         lib.linkLibC();
