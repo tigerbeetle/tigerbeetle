@@ -36,4 +36,5 @@ test {
     _ = @import("test/table.zig");
 
     _ = @import("clients/go/go_bindings_test.zig");
+    _ = @import("clients/dotnet/dotnet_bindings_test.zig");
 }
