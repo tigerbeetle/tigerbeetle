@@ -480,5 +480,5 @@ pub fn main() !void {
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
 
-    try std.fs.cwd().writeFile("src/clients/dotnet/src/TigerBeetle/Bindings.cs", buffer.items);
+    try std.fs.cwd().writeFile("src/clients/dotnet/TigerBeetle/Bindings.cs", buffer.items);
 }

@@ -862,7 +862,7 @@ namespace TigerBeetle.Tests
 
         // Path relative from /TigerBeetle.Test/bin/<framework>/<release>/<platform> :
         private const string PROJECT_ROOT = "../../../../..";
-        private const string TB_PATH = PROJECT_ROOT + "/../../../../zig-out/bin";
+        private const string TB_PATH = PROJECT_ROOT + "/../../../zig-out/bin";
         private const string TB_EXE = "tigerbeetle";
         private const string TB_FILE = "dotnet-tests.tigerbeetle";
         private const string TB_SERVER = TB_PATH + "/" + TB_EXE;

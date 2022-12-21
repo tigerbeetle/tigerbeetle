@@ -8,7 +8,7 @@ test "bindings dotnet" {
 
     try dotnet_bindings.generate_bindings(&buffer);
 
-    const current = try std.fs.cwd().readFileAlloc(testing.allocator, "src/clients/dotnet/src/TigerBeetle/Bindings.cs", std.math.maxInt(usize));
+    const current = try std.fs.cwd().readFileAlloc(testing.allocator, "src/clients/dotnet/TigerBeetle/Bindings.cs", std.math.maxInt(usize));
     defer testing.allocator.free(current);
 
     try testing.expectEqualStrings(current, buffer.items);

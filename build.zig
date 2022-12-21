@@ -487,7 +487,7 @@ fn dotnet_client(
 
         const lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         lib.setMainPkgPath("src");
-        lib.setOutputDir("src/clients/dotnet/src/TigerBeetle/runtimes/" ++ platform[1] ++ "/native");
+        lib.setOutputDir("src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native");
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
         lib.linkLibC();

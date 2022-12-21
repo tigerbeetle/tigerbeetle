@@ -87,14 +87,14 @@ cd tigerbeetle
 **Linux and macOS**
 
 ```bash
-cd src/clients/dotnet/src 
+cd src/clients/dotnet
 dotnet test
 ```
 
 **Windows**
 
 ```cmd
-cd src\clients\dotnet\src 
+cd src\clients\dotnet
 dotnet test
 ```
 
