@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 
 namespace TigerBeetle
 {
+    [Flags]
     public enum AccountFlags : ushort
     {
         None = 0,
@@ -29,6 +30,7 @@ namespace TigerBeetle
 
     }
 
+    [Flags]
     public enum TransferFlags : ushort
     {
         None = 0,
