@@ -1,4 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="TigerBeetle.props" />
 	<PropertyGroup>
 		<TargetFrameworks>net6.0</TargetFrameworks>
 		<LangVersion>10</LangVersion>
