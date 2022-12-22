@@ -4,5 +4,5 @@ obj/
 cobertura/
 TestResults/
 TigerBeetle/runtimes/
-TigerBeetle.Tests/coverage.json
+TigerBeetle.Tests/coverage.*.json
 *tigerbeetle.benchmark

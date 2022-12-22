@@ -238,8 +238,9 @@ namespace TigerBeetle
         // Using managed delegate, the instance must be referenced to prevents GC.
 
 #if NETSTANDARD
-		private static readonly OnCompletionFn OnCompletionHandler = new OnCompletionFn(OnCompletionCallback);
-		[AllowReversePInvokeCalls]
+		private unsafe static readonly OnCompletionFn OnCompletionHandler = new OnCompletionFn(OnCompletionCallback);
+		
+        [AllowReversePInvokeCalls]
 #else
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
 #endif

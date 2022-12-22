@@ -45,7 +45,7 @@ namespace TigerBeetle.Tests
         [TestMethod]
         public void InitializationException()
         {
-            foreach (InitializationStatus status in Enum.GetValues<InitializationStatus>())
+            foreach (InitializationStatus status in (InitializationStatus[])Enum.GetValues(typeof(InitializationStatus)))
             {
                 var exception = new InitializationException(status);
                 var unknownMessage = "Unknown error status " + status;
@@ -63,7 +63,7 @@ namespace TigerBeetle.Tests
         [TestMethod]
         public void RequestException()
         {
-            foreach (PacketStatus status in Enum.GetValues<PacketStatus>())
+            foreach (PacketStatus status in (PacketStatus[])Enum.GetValues(typeof(PacketStatus)))
             {
                 var exception = new RequestException(status);
                 var unknownMessage = "Unknown error status " + status;
