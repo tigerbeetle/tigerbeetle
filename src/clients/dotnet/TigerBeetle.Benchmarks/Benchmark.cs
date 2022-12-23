@@ -20,7 +20,6 @@ namespace TigerBeetle.Benchmarks
         {
             Console.WriteLine($"Benchmarking dotnet");
 
-            var queue = new TimedQueue();
             using var client = new Client(0, new string[] { "3001" });
 
             var accounts = new[] {
@@ -38,126 +37,71 @@ namespace TigerBeetle.Benchmarks
                 }
             };
 
-            // Pre-allocate a million transfers:
-            var transfers = new Transfer[MAX_TRANSFERS];
-            for (int i = 0; i < transfers.Length; i++)
+            var transfers = new Transfer[BATCHES_COUNT][];
+            for (int i = 0; i < BATCHES_COUNT; i++)
             {
-                transfers[i] = new Transfer
+                transfers[i] = new Transfer[TRANSFERS_PER_BATCH];
+                for (int j=0; j<TRANSFERS_PER_BATCH; j++)
                 {
-                    Id = i + 1,
-                    DebitAccountId = accounts[0].Id,
-                    CreditAccountId = accounts[1].Id,
-                    Code = 1,
-                    Ledger = 777,
-                    Amount = 1,
-                };
+                    transfers[i][j] = new Transfer
+                    {
+                        Id = new UInt128(j + 1, i),
+                        DebitAccountId = accounts[0].Id,
+                        CreditAccountId = accounts[1].Id,
+                        Code = 1,
+                        Ledger = 777,
+                        Amount = 1,
+                    };
+                }
             }
 
             Console.WriteLine("creating accounts...");
 
             if (IS_ASYNC)
             {
-                async Task createAccountsAsync()
-                {
-                    var results = await client.CreateAccountsAsync(accounts);
-                    if (results.Any(x => x.Result != CreateAccountResult.Ok && x.Result != CreateAccountResult.Exists)) throw new Exception("Invalid account results");
-                }
-
-                queue.Batches.Enqueue(createAccountsAsync);
-                await queue.ExecuteAsync();
+                var results = await client.CreateAccountsAsync(accounts);
+                if (results.Length > 0) throw new Exception("Invalid account results");
             }
             else
             {
-                void createAccounts()
-                {
-                    var results = client.CreateAccounts(accounts);
-                    if (results.Any(x => x.Result != CreateAccountResult.Ok && x.Result != CreateAccountResult.Exists)) throw new Exception("Invalid account results");
-                }
-
-                queue.Batches.Enqueue(createAccounts);
-                queue.Execute();
+                var results = client.CreateAccounts(accounts);
+                if (results.Length > 0) throw new Exception("Invalid account results");
             }
-
-            Trace.Assert(queue.Batches.Count == 0);
-
-            Console.WriteLine("batching transfers...");
-            queue.Reset();
-
-            int batchCount = 0;
-            int count = 0;
-
-            for (; ; )
-            {
-                var batch = transfers.Skip(batchCount * TRANSFERS_PER_BATCH).Take(TRANSFERS_PER_BATCH).ToArray();
-                if (batch.Length == 0) break;
-
-                if (IS_ASYNC)
-                {
-                    async Task createTransfersAsync()
-                    {
-                        var ret = await client.CreateTransfersAsync(batch);
-                        if (ret.Length > 0) throw new Exception("Invalid transfer results");
-                    }
-                    queue.Batches.Enqueue(createTransfersAsync);
-                }
-                else
-                {
-                    void createTransfers()
-                    {
-                        var ret = client.CreateTransfers(batch);
-                        if (ret.Length > 0) throw new Exception("Invalid transfer results");
-                    }
-
-                    queue.Batches.Enqueue(createTransfers);
-                }
-
-                batchCount += 1;
-                count += TRANSFERS_PER_BATCH;
-            }
-
-            Trace.Assert(count == MAX_TRANSFERS);
 
             Console.WriteLine("starting benchmark...");
 
-            if (IS_ASYNC)
-            {
-                await queue.ExecuteAsync();
-            }
-            else
-            {
-                queue.Execute();
-            }
+            var stopWatch = new Stopwatch();
+            long totalTime = 0;
+            long maxTransfersLatency = 0;
 
-            Trace.Assert(queue.Batches.Count == 0);
-
-            var assertAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
-            Debug.Assert(accounts[0].Id == assertAccounts[0].Id);
-            Debug.Assert(assertAccounts[0].DebitsPosted == (ulong)count);
-            Debug.Assert(accounts[1].Id == assertAccounts[1].Id);
-            Debug.Assert(assertAccounts[1].CreditsPosted == (ulong)count);
-
-            var randonTransfer = transfers[1];
-            var mayAssertTransfer = client.LookupTransfer(randonTransfer.Id);
-            if (mayAssertTransfer is Transfer assertTransfer)
+            for (int batchCount = 0; batchCount < BATCHES_COUNT; batchCount++)
             {
-                Debug.Assert(assertTransfer.Id == randonTransfer.Id);
-                Debug.Assert(assertTransfer.Ledger == randonTransfer.Ledger);
-                Debug.Assert(assertTransfer.Amount == randonTransfer.Amount);
-                Debug.Assert(assertTransfer.CreditAccountId == randonTransfer.CreditAccountId);
-                Debug.Assert(assertTransfer.DebitAccountId == randonTransfer.DebitAccountId);
-            }
-            else
-            {
-                Debug.Assert(false);
+                var batch = transfers[batchCount];
+
+                stopWatch.Restart();
+                if (IS_ASYNC)
+                {
+                    var ret = await client.CreateTransfersAsync(batch);
+                    if (ret.Length > 0) throw new Exception("Invalid transfer results");
+                }
+                else
+                {
+                    var ret = client.CreateTransfers(batch);
+                    if (ret.Length > 0) throw new Exception("Invalid transfer results");
+                }
+                stopWatch.Stop();
+
+                totalTime += stopWatch.ElapsedMilliseconds;
+                maxTransfersLatency = Math.Max(stopWatch.ElapsedMilliseconds, maxTransfersLatency);
             }
 
             Console.WriteLine("============================================");
 
-            var result = (long)((transfers.Length * 1000) / queue.TotalTime);
+            var result = (long)((MAX_TRANSFERS * 1000) / totalTime);
 
             Console.WriteLine($"{result} transfers per second");
-            Console.WriteLine($"create_transfers max p100 latency per {TRANSFERS_PER_BATCH} transfers = {queue.MaxTransfersLatency}ms");
-            Console.WriteLine($"total {transfers.Length} transfers in {queue.TotalTime}ms");
+            Console.WriteLine($"create_transfers max p100 latency per {TRANSFERS_PER_BATCH} transfers = {maxTransfersLatency}ms");
+            Console.WriteLine($"total {MAX_TRANSFERS} transfers in {totalTime}ms");
         }
     }
 }
