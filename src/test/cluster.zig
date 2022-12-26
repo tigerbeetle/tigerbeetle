@@ -17,8 +17,8 @@ pub const StateMachine = constants.StateMachineType(Storage, .{
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
-const StateChecker = @import("state_checker.zig").StateChecker;
-const StorageChecker = @import("storage_checker.zig").StorageChecker;
+const StateChecker = @import("cluster/state_checker.zig").StateChecker;
+const StorageChecker = @import("cluster/storage_checker.zig").StorageChecker;
 
 const vsr = @import("../vsr.zig");
 pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);

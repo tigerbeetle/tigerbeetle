@@ -22,12 +22,12 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage_checker);
 
-const constants = @import("../constants.zig");
-const vsr = @import("../vsr.zig");
-const SuperBlockLayout = @import("../vsr/superblock.zig").Layout;
-const SuperBlockSector = @import("../vsr/superblock.zig").SuperBlockSector;
-const Replica = @import("cluster.zig").Replica;
-const Storage = @import("storage.zig").Storage;
+const constants = @import("../../constants.zig");
+const vsr = @import("../../vsr.zig");
+const SuperBlockLayout = @import("../../vsr/superblock.zig").Layout;
+const SuperBlockSector = @import("../../vsr/superblock.zig").SuperBlockSector;
+const Replica = @import("../cluster.zig").Replica;
+const Storage = @import("../storage.zig").Storage;
 
 /// After each compaction half measure, save the cumulative hash of all acquired grid blocks.
 ///
