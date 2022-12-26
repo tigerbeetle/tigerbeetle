@@ -13,7 +13,7 @@ const Message = MessagePool.Message;
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Process = @import("message_bus.zig").Process;
 
-const PacketSimulator = @import("packet_simulator.zig").PacketSimulator;
+const PacketSimulatorType = @import("packet_simulator.zig").PacketSimulatorType;
 const PacketSimulatorOptions = @import("packet_simulator.zig").PacketSimulatorOptions;
 const PacketSimulatorPath = @import("packet_simulator.zig").Path;
 
@@ -28,6 +28,10 @@ pub const Network = struct {
         network: *Network,
         message: *Message,
 
+        pub fn command(packet: *const Packet) vsr.Command {
+            return packet.message.header.command;
+        }
+
         pub fn deinit(packet: *const Packet) void {
             packet.network.message_pool.unref(packet.message);
         }
@@ -41,10 +45,10 @@ pub const Network = struct {
     allocator: std.mem.Allocator,
 
     options: NetworkOptions,
-    packet_simulator: PacketSimulator(Packet),
+    packet_simulator: PacketSimulatorType(Packet),
 
     // TODO(Zig) If this stored a ?*MessageBus, then a process's bus could be set to `null` while
-    // the replica is crashed, and replaced when it is destroy. Zig complains:
+    // the replica is crashed, and replaced when it is destroyed. But Zig complains:
     //
     //   ./src/test/message_bus.zig:20:24: error: struct 'test.message_bus.MessageBus' depends on itself
     //   pub const MessageBus = struct {
@@ -72,7 +76,7 @@ pub const Network = struct {
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
         errdefer processes.deinit(allocator);
 
-        var packet_simulator = try PacketSimulator(Packet).init(
+        var packet_simulator = try PacketSimulatorType(Packet).init(
             allocator,
             options.packet_simulator_options,
         );
@@ -109,6 +113,10 @@ pub const Network = struct {
         network.processes.deinit(network.allocator);
         network.packet_simulator.deinit(network.allocator);
         network.message_pool.deinit(network.allocator);
+    }
+
+    pub fn tick(network: *Network) void {
+        network.packet_simulator.tick();
     }
 
     pub fn link(network: *Network, process: Process, message_bus: *MessageBus) void {

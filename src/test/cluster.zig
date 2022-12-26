@@ -3,13 +3,13 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const constants = @import("../constants.zig");
-
 const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
 const Network = @import("network.zig").Network;
 const NetworkOptions = @import("network.zig").NetworkOptions;
+const IdPermutation = @import("id.zig").IdPermutation;
 
 pub const StateMachine = constants.StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
@@ -26,15 +26,17 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
 
 pub const ClusterOptions = struct {
-    cluster: u32,
+    cluster_id: u32,
     replica_count: u8,
     client_count: u8,
     storage_size_limit: u64,
 
     seed: u64,
-    on_change_state: fn (replica: *const Replica) void,
-    on_compact: fn (replica: *const Replica) void,
-    on_checkpoint: fn (replica: *const Replica) void,
+    on_replica_change_state: ?fn (replica: *const Replica) void = null,
+    on_replica_compact: ?fn (replica: *const Replica) void = null,
+    on_replica_checkpoint: ?fn (replica: *const Replica) void = null,
+    /// Includes command=register messages.
+    on_client_reply: fn(cluster: *Cluster, client: usize, request: *Message, reply: *Message) void,
 
     network_options: NetworkOptions,
     storage_options: Storage.Options,
@@ -62,19 +64,28 @@ pub const ReplicaHealth = union(enum) {
     down: u32,
 };
 
+/// Shift the id-generating index because the simulator network expects client ids to never collide
+/// with a replica index.
+const client_id_permutation_shift = constants.replicas_max;
+
 pub const Cluster = struct {
     allocator: mem.Allocator,
     options: ClusterOptions,
 
     storages: []Storage,
-    pools: []MessagePool,
     replicas: []Replica,
-    health: []ReplicaHealth,
+    replica_pools: []MessagePool,
+    replica_health: []ReplicaHealth,
 
-    network: Network,
+    clients: []Client,
+    client_pools: []MessagePool,
+    client_id_permutation: IdPermutation,
 
-    pub fn create(allocator: mem.Allocator, prng: std.rand.Random, options: ClusterOptions) !*Cluster {
-        assert(options.replica_count > 0);
+    network: *Network,
+
+    pub fn create(allocator: mem.Allocator, options: ClusterOptions) !*Cluster {
+        assert(options.replica_count >= 1);
+        assert(options.replica_count <= 6);
         assert(options.client_count > 0);
         assert(options.storage_size_limit % constants.sector_size == 0);
         assert(options.storage_size_limit <= constants.storage_size_max);
@@ -83,29 +94,18 @@ pub const Cluster = struct {
         assert(options.health_options.restart_probability < 1.0);
         assert(options.health_options.restart_probability >= 0.0);
 
+        var prng = std.rand.DefaultPrng.init(options.seed);
+        const random = prng.random();
+
         const cluster = try allocator.create(Cluster);
         errdefer allocator.destroy(cluster);
 
-        const storages = try allocator.alloc(Storage, options.replica_count);
-        errdefer allocator.free(storages);
+        // TODO(Zig) Client.init()'s MessagePool.Options require a reference to the network — use
+        // @returnAddress() instead.
+        var network = try allocator.create(Network);
+        errdefer allocator.destroy(network);
 
-        var pools = try allocator.alloc(MessagePool, options.replica_count);
-        errdefer allocator.free(pools);
-
-        for (pools) |*pool, i| {
-            errdefer for (pools[0..i]) |*p| p.deinit(allocator);
-            pool.* = try MessagePool.init(allocator, .replica);
-        }
-        errdefer for (pools) |*pool| pool.deinit(allocator);
-
-        const replicas = try allocator.alloc(Replica, options.replica_count);
-        errdefer allocator.free(replicas);
-
-        const health = try allocator.alloc(ReplicaHealth, options.replica_count);
-        errdefer allocator.free(health);
-        mem.set(ReplicaHealth, health, .{ .up = 0 });
-
-        var network = try Network.init(
+        network.* = try Network.init(
             allocator,
             options.replica_count,
             options.client_count,
@@ -113,19 +113,70 @@ pub const Cluster = struct {
         );
         errdefer network.deinit();
 
+        const storages = try allocator.alloc(Storage, options.replica_count);
+        errdefer allocator.free(storages);
+
+        var replica_pools = try allocator.alloc(MessagePool, options.replica_count);
+        errdefer allocator.free(replica_pools);
+
+        for (replica_pools) |*pool, i| {
+            errdefer for (replica_pools[0..i]) |*p| p.deinit(allocator);
+            pool.* = try MessagePool.init(allocator, .replica);
+        }
+        errdefer for (replica_pools) |*pool| pool.deinit(allocator);
+
+        const replicas = try allocator.alloc(Replica, options.replica_count);
+        errdefer allocator.free(replicas);
+
+        const replica_health = try allocator.alloc(ReplicaHealth, options.replica_count);
+        errdefer allocator.free(replica_health);
+        mem.set(ReplicaHealth, replica_health, .{ .up = 0 });
+
+        var client_pools = try allocator.alloc(MessagePool, options.client_count);
+        errdefer allocator.free(client_pools);
+
+        for (client_pools) |*pool, i| {
+            errdefer for (client_pools[0..i]) |*p| p.deinit(allocator);
+            pool.* = try MessagePool.init(allocator, .client);
+        }
+        errdefer for (replica_pools) |*pool| pool.deinit(allocator);
+
+        const client_id_permutation = IdPermutation.generate(random);
+        var clients = try allocator.alloc(Client, options.client_count);
+        errdefer allocator.free(clients);
+
+        for (clients) |*client, i| {
+            errdefer for (clients[0..i]) |*c| c.deinit(allocator);
+            client.* = try Client.init(
+                allocator,
+                client_id_permutation.encode(i + client_id_permutation_shift),
+                options.cluster_id,
+                options.replica_count,
+                &client_pools[i],
+                .{ .network = network },
+            );
+            network.link(client.message_bus.process, &client.message_bus);
+        }
+        errdefer for (clients) |*c| c.deinit(allocator);
+
         cluster.* = .{
             .allocator = allocator,
             .options = options,
             .storages = storages,
-            .pools = pools,
             .replicas = replicas,
-            .health = health,
+            .replica_pools = replica_pools,
+            .replica_health = replica_health,
+            .clients = clients,
+            .client_pools = client_pools,
+            .client_id_permutation = client_id_permutation,
+            //.client_requests = client_requests,
+            //.client_requests_free = client_requests_free,
             .network = network,
         };
 
         var buffer: [constants.replicas_max]Storage.FaultyAreas = undefined;
-        const faulty_wal_areas = Storage.generate_faulty_wal_areas(
-            prng,
+        const faulty_wal_areas = Storage.generate_faulty_wal_areas( // TODO
+            random,
             constants.journal_size_max,
             options.replica_count,
             &buffer,
@@ -146,7 +197,7 @@ pub const Cluster = struct {
         for (cluster.storages) |*storage, replica_index| {
             var superblock = try SuperBlock.init(allocator, .{
                 .storage = storage,
-                .message_pool = &cluster.pools[replica_index],
+                .message_pool = &cluster.replica_pools[replica_index],
                 .storage_size_limit = options.storage_size_limit,
             });
             defer superblock.deinit(allocator);
@@ -154,7 +205,7 @@ pub const Cluster = struct {
             try vsr.format(
                 Storage,
                 allocator,
-                options.cluster,
+                options.cluster_id,
                 @intCast(u8, replica_index),
                 storage,
                 &superblock,
@@ -176,17 +227,42 @@ pub const Cluster = struct {
 
     pub fn destroy(cluster: *Cluster) void {
         cluster.network.deinit();
-
+        for (cluster.clients) |*client| client.deinit(cluster.allocator);
+        for (cluster.client_pools) |*pool| pool.deinit(cluster.allocator);
         for (cluster.replicas) |*replica| replica.deinit(cluster.allocator);
-        cluster.allocator.free(cluster.replicas);
-        cluster.allocator.free(cluster.health);
-        for (cluster.pools) |*pool| pool.deinit(cluster.allocator);
-        cluster.allocator.free(cluster.pools);
-
+        for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
         for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
-        cluster.allocator.free(cluster.storages);
 
+        cluster.allocator.free(cluster.clients);
+        cluster.allocator.free(cluster.client_pools);
+        cluster.allocator.free(cluster.replicas);
+        cluster.allocator.free(cluster.replica_health);
+        cluster.allocator.free(cluster.replica_pools);
+        cluster.allocator.free(cluster.storages);
+        cluster.allocator.destroy(cluster.network);
         cluster.allocator.destroy(cluster);
+    }
+
+    pub fn tick(cluster: *Cluster) void {
+        cluster.network.tick();
+
+        for (cluster.clients) |*client| client.tick();
+        for (cluster.storages) |*storage| storage.tick();
+        for (cluster.replicas) |*replica, i| {
+            switch (cluster.replica_health[i]) {
+                .up => replica.tick(),
+                // Keep ticking the time so that it won't have diverged too far to synchronize
+                // when the replica restarts.
+                .down => replica.clock.time.tick(),
+            }
+        }
+    }
+
+    pub fn restart_replica(cluster: *Cluster, replica_index: u8) void {
+        assert(cluster.replica_health[replica_index] == .down);
+
+        cluster.replica_health[replica_index] = .{ .up = cluster.options.health_options.restart_stability };
+        cluster.network.packet_simulator.fault_replica(replica_index, .enabled);
     }
 
     /// Reset a replica to its initial state, simulating a random crash/panic.
@@ -195,6 +271,8 @@ pub const Cluster = struct {
     ///
     /// Returns whether the replica was crashed.
     pub fn crash_replica(cluster: *Cluster, replica_index: u8) !bool {
+        assert(cluster.replica_health[replica_index] == .up);
+
         const replica = &cluster.replicas[replica_index];
         if (replica.op == 0) {
             // Only crash when `replica.op > 0` — an empty WAL would skip recovery after a crash.
@@ -224,7 +302,7 @@ pub const Cluster = struct {
                 var v: ?u32 = null;
                 var op_max: ?u64 = null;
                 for (cluster.replicas) |other_replica, i| {
-                    if (cluster.health[i] == .down) continue;
+                    if (cluster.replica_health[i] == .down) continue;
                     if (other_replica.status == .recovering) continue;
 
                     if (v == null or other_replica.view_normal > v.? or
@@ -252,7 +330,7 @@ pub const Cluster = struct {
                 for (cluster.replicas) |other_replica, i| {
                     // Ignore replicas that are ineligible to assist recovery.
                     if (replica_index == i) continue;
-                    if (cluster.health[i] == .down) continue;
+                    if (cluster.replica_health[i] == .down) continue;
                     if (other_replica.status == .recovering) continue;
 
                     if (other_replica.journal.header_with_op_and_checksum(op, parent)) |header| {
@@ -278,12 +356,13 @@ pub const Cluster = struct {
             if (parent != 0) return false;
         }
 
-        cluster.health[replica_index] = .{ .down = cluster.options.health_options.crash_stability };
+        cluster.replica_health[replica_index] = .{ .down = cluster.options.health_options.crash_stability };
 
         // Reset the storage before the replica so that pending writes can (partially) finish.
         cluster.storages[replica_index].reset();
         const replica_time = replica.time;
         replica.deinit(cluster.allocator);
+        cluster.network.packet_simulator.fault_replica(replica_index, .disabled);
 
         // Ensure that none of the replica's messages leaked when it was deinitialized.
         var messages_in_pool: usize = 0;
@@ -317,7 +396,7 @@ pub const Cluster = struct {
 
     pub fn replica_up_count(cluster: *const Cluster) u8 {
         var count: u8 = 0;
-        for (cluster.health) |health| {
+        for (cluster.replica_health) |health| {
             if (health == .up) {
                 count += 1;
             }
@@ -334,19 +413,77 @@ pub const Cluster = struct {
                 .storage = &cluster.storages[replica_index],
                 // TODO Test restarting with a higher storage limit.
                 .storage_size_limit = cluster.options.storage_size_limit,
-                .message_pool = &cluster.pools[replica_index],
+                .message_pool = &cluster.replica_pools[replica_index],
                 .time = time,
                 .state_machine_options = cluster.options.state_machine_options,
-                .message_bus_options = .{ .network = &cluster.network },
+                .message_bus_options = .{ .network = cluster.network },
             },
         );
-        assert(replica.cluster == cluster.options.cluster);
+        assert(replica.cluster == cluster.options.cluster_id);
         assert(replica.replica == replica_index);
         assert(replica.replica_count == cluster.replicas.len);
 
-        replica.on_change_state = cluster.options.on_change_state;
-        replica.on_compact = cluster.options.on_compact;
-        replica.on_checkpoint = cluster.options.on_checkpoint;
+        replica.on_change_state = cluster.options.on_replica_change_state;
+        replica.on_compact = cluster.options.on_replica_compact;
+        replica.on_checkpoint = cluster.options.on_replica_checkpoint;
         cluster.network.link(replica.message_bus.process, &replica.message_bus);
     }
+
+    pub fn request(
+        cluster: *Cluster,
+        client_index: usize,
+        request_operation: StateMachine.Operation,
+        request_message: *Message,
+        request_body_size: usize,
+    ) void {
+        // TODO(Zig) Move these into init when `@returnAddress()` is available. They only needs to
+        // be set once, it just requires a stable pointer to the Cluster.
+        cluster.clients[client_index].on_reply_context = cluster;
+        cluster.clients[client_index].on_reply_callback = client_on_reply;
+
+        cluster.clients[client_index].request(
+            undefined,
+            request_callback,
+            request_operation,
+            request_message,
+            request_body_size,
+        );
+    }
+
+    /// The `request_callback` is not used — Cluster uses `Client.on_reply_{context,callback}`
+    /// instead because:
+    /// - Cluster needs access to the request
+    /// - Cluster needs access to the reply message (not just the body)
+    /// - Cluster needs to know about command=register messages
+    ///
+    /// See `on_reply`.
+    fn request_callback(
+        user_data: u128,
+        operation: StateMachine.Operation,
+        result: Client.Error![]const u8,
+    ) void {
+        _ = user_data;
+        _ = operation;
+        _ = result catch |err| switch (err) {
+            error.TooManyOutstandingRequests => unreachable,
+        };
+    }
+
+    fn client_on_reply(client: *Client, request_message: *Message, reply_message: *Message) void {
+        const cluster = @ptrCast(*Cluster, @alignCast(@alignOf(*Cluster), client.on_reply_context.?));
+        assert(reply_message.header.cluster == cluster.options.cluster_id);
+        assert(reply_message.header.invalid() == null);
+        assert(reply_message.header.client == client.id);
+        assert(reply_message.header.request == request_message.header.request);
+        assert(reply_message.header.command == .reply);
+        assert(reply_message.header.operation == request_message.header.operation);
+
+        const client_index = for (cluster.clients) |*c, i| {
+            if (client == c) break i;
+        } else unreachable;
+
+        cluster.options.on_client_reply(cluster, client_index, request_message, reply_message);
+    }
 };
+
+// TODO StateChecker

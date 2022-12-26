@@ -17,8 +17,9 @@ const StateChecker = @import("test/state_checker.zig").StateChecker;
 const StorageChecker = @import("test/storage_checker.zig").StorageChecker;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
 const MessageBus = @import("test/message_bus.zig").MessageBus;
-const Conductor = @import("test/conductor.zig").ConductorType(Client, MessageBus, StateMachine);
+const Conductor = @import("test/conductor.zig").Conductor;
 const IdPermutation = @import("test/id.zig").IdPermutation;
+const Message = @import("message_pool.zig").MessagePool.Message;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
 const output = std.log.scoped(.state_checker);
@@ -37,6 +38,7 @@ pub const log_level: std.log.Level = if (log_state_transitions_only) .info else 
 const cluster_id = 0;
 
 var cluster: *Cluster = undefined;
+var conductor: *Conductor = undefined;
 var state_checker: *StateChecker = undefined;
 var storage_checker: *StorageChecker = undefined;
 
@@ -79,7 +81,6 @@ pub fn main() !void {
 
     const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
-    const node_count = replica_count + client_count;
 
     const ticks_max = 50_000_000;
     const request_probability = 1 + random.uintLessThan(u8, 99);
@@ -91,21 +92,21 @@ pub fn main() !void {
     const requests_committed_max: usize = constants.journal_slot_count * 3;
 
     const cluster_options: ClusterOptions = .{
-        .cluster = cluster_id,
+        .cluster_id = cluster_id,
         .replica_count = replica_count,
         .client_count = client_count,
         .storage_size_limit = vsr.sector_floor(
             constants.storage_size_max - random.uintLessThan(u64, constants.storage_size_max / 10),
         ),
         .seed = random.int(u64),
-        .on_change_state = on_replica_change_state,
-        .on_compact = on_replica_compact,
-        .on_checkpoint = on_replica_checkpoint,
+        .on_client_reply = on_cluster_reply,
+        .on_replica_change_state = on_replica_change_state,
+        .on_replica_compact = on_replica_compact,
+        .on_replica_checkpoint = on_replica_checkpoint,
         .network_options = .{
             .packet_simulator_options = .{
                 .replica_count = replica_count,
                 .client_count = client_count,
-                .node_count = node_count,
 
                 .seed = random.int(u64),
                 .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
@@ -214,7 +215,7 @@ pub fn main() !void {
         cluster_options.health_options.restart_stability,
     });
 
-    cluster = try Cluster.create(allocator, random, cluster_options);
+    cluster = try Cluster.create(allocator, cluster_options);
     defer cluster.destroy();
 
     const workload_options = StateMachine.Workload.Options.generate(random, .{
@@ -225,21 +226,16 @@ pub fn main() !void {
     var workload = try StateMachine.Workload.init(allocator, random, workload_options);
     defer workload.deinit(allocator);
 
-    var conductor = try Conductor.init(allocator, random, &workload, .{
-        .cluster = cluster_id,
-        .replica_count = replica_count,
-        .client_count = client_count,
-        .message_bus_options = .{ .network = &cluster.network },
+    conductor = try allocator.create(Conductor);
+    defer allocator.destroy(conductor);
+
+    conductor.* = try Conductor.init(allocator, random, cluster, &workload, .{
         .requests_max = requests_committed_max,
         .request_probability = request_probability,
         .idle_on_probability = idle_on_probability,
         .idle_off_probability = idle_off_probability,
     });
     defer conductor.deinit(allocator);
-
-    for (conductor.clients) |*client| {
-        cluster.network.link(client.message_bus.process, &client.message_bus);
-    }
 
     state_checker = try allocator.create(StateChecker);
     defer allocator.destroy(state_checker);
@@ -248,7 +244,7 @@ pub fn main() !void {
         allocator,
         cluster_id,
         cluster.replicas,
-        conductor.clients,
+        cluster.clients,
     );
     defer state_checker.deinit();
 
@@ -286,7 +282,7 @@ pub fn main() !void {
                 // not have the prepare. The two healthy replicas can never complete a view change,
                 // because two replicas are not enough to nack, and the unhealthy replica cannot
                 // complete the VSR recovery protocol either.
-                if (cluster.health[replica] == .up and crashes == 0) {
+                if (cluster.replica_health[replica] == .up and crashes == 0) {
                     if (storage.faulty) {
                         log_simulator.debug("{}: disable storage faults", .{replica});
                         storage.faulty = false;
@@ -303,7 +299,7 @@ pub fn main() !void {
         }
 
         for (cluster.replicas) |*replica, index| {
-            switch (cluster.health[replica.replica]) {
+            switch (cluster.replica_health[replica.replica]) {
                 .up => |*ticks| {
                     ticks.* -|= 1;
                     replica.tick();
@@ -321,25 +317,23 @@ pub fn main() !void {
                         if (!chance_f64(random, health_options.crash_probability * 10.0)) continue;
                     }
 
-                    if (!try cluster.crash_replica(replica.replica)) continue;
+                    const replica_crashed = try cluster.crash_replica(replica.replica);
+                    if (!replica_crashed) continue;
                     log_simulator.debug("{}: crash replica", .{replica.replica});
                     crashes -= 1;
                 },
                 .down => |*ticks| {
                     ticks.* -|= 1;
-                    // Keep ticking the time so that it won't have diverged too far to synchronize
-                    // when the replica restarts.
-                    replica.clock.time.tick();
                     assert(replica.status == .recovering);
                     if (ticks.* == 0 and chance_f64(random, health_options.restart_probability)) {
-                        cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
+                        cluster.restart_replica(replica.replica);
                         log_simulator.debug("{}: restart replica", .{replica.replica});
                     }
                 },
             }
         }
 
-        cluster.network.packet_simulator.tick(cluster.health);
+        cluster.tick();
         conductor.tick();
 
         if (state_checker.convergence() and conductor.done() and
@@ -383,6 +377,10 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
     return err_or_bytes catch @panic("Unable to extract next value from args");
 }
 
+fn on_cluster_reply(_: *Cluster, client: usize, request: *Message, reply: *Message) void {
+    conductor.reply(client, request, reply);
+}
+
 fn on_replica_change_state(replica: *const Replica) void {
     state_checker.check_state(replica.replica) catch |err| {
         fatal(.correctness, "state checker error: {}", .{err});
@@ -401,11 +399,10 @@ fn on_replica_checkpoint(replica: *const Replica) void {
     };
 }
 
-/// Returns a random partitioning mode, excluding .custom
+/// Returns a random partitioning mode.
 fn random_partition_mode(random: std.rand.Random) PartitionMode {
     const typeInfo = @typeInfo(PartitionMode).Enum;
-    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 2);
-    if (enumAsInt >= @enumToInt(PartitionMode.custom)) enumAsInt += 1;
+    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @intToEnum(PartitionMode, enumAsInt);
 }
 
