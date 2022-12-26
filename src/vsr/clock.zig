@@ -459,27 +459,29 @@ const DeterministicClock = Clock(DeterministicTime);
 
 const ClockUnitTestContainer = struct {
     const Self = @This();
+    time: DeterministicTime,
     clock: DeterministicClock,
     rtt: u64 = 300 * std.time.ns_per_ms,
     owd: u64 = 150 * std.time.ns_per_ms,
     learn_interval: u64 = 5,
 
     pub fn init(
+        self: *Self,
         allocator: std.mem.Allocator,
         offset_type: OffsetType,
         offset_coefficient_A: i64,
         offset_coefficient_B: i64,
-    ) !Self {
-        const time: DeterministicTime = .{
-            .resolution = std.time.ns_per_s / 2,
-            .offset_type = offset_type,
-            .offset_coefficient_A = offset_coefficient_A,
-            .offset_coefficient_B = offset_coefficient_B,
+    ) !void {
+        // TODO(Zig) Use @returnAddress() when available.
+        self.* = .{
+            .time = .{
+                .resolution = std.time.ns_per_s / 2,
+                .offset_type = offset_type,
+                .offset_coefficient_A = offset_coefficient_A,
+                .offset_coefficient_B = offset_coefficient_B,
+            },
+            .clock = try DeterministicClock.init(allocator, 3, 0, &self.time),
         };
-        const self: Self = .{
-            .clock = try DeterministicClock.init(allocator, 3, 0, time),
-        };
-        return self;
     }
 
     pub fn run_till_tick(self: *Self, tick: u64) void {
@@ -567,9 +569,10 @@ test "ideal clocks get clamped to cluster time" {
     std.testing.log_level = .err;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
-    var ideal_constant_drift_clock = try ClockUnitTestContainer.init(
+    var ideal_constant_drift_clock: ClockUnitTestContainer = undefined;
+    try ideal_constant_drift_clock.init(
         allocator,
         OffsetType.linear,
         std.time.ns_per_ms, // loses 1ms per tick
@@ -585,7 +588,8 @@ test "ideal clocks get clamped to cluster time" {
         );
     }
 
-    var ideal_periodic_drift_clock = try ClockUnitTestContainer.init(
+    var ideal_periodic_drift_clock: ClockUnitTestContainer = undefined;
+    try ideal_periodic_drift_clock.init(
         allocator,
         OffsetType.periodic,
         std.time.ns_per_s, // loses up to 1s
@@ -602,7 +606,8 @@ test "ideal clocks get clamped to cluster time" {
         );
     }
 
-    var ideal_jumping_clock = try ClockUnitTestContainer.init(
+    var ideal_jumping_clock: ClockUnitTestContainer = undefined;
+    try ideal_jumping_clock.init(
         allocator,
         OffsetType.step,
         -5 * std.time.ns_per_day, // jumps 5 days ahead.
@@ -620,18 +625,23 @@ test "ideal clocks get clamped to cluster time" {
 }
 
 const PacketSimulatorOptions = @import("../test/packet_simulator.zig").PacketSimulatorOptions;
-const PacketSimulator = @import("../test/packet_simulator.zig").PacketSimulator;
+const PacketSimulatorType = @import("../test/packet_simulator.zig").PacketSimulatorType;
 const Path = @import("../test/packet_simulator.zig").Path;
+const Command = @import("../vsr.zig").Command;
 const ClockSimulator = struct {
     const Packet = struct {
         m0: u64,
         t1: ?i64,
         clock_simulator: *ClockSimulator,
 
-        /// PacketSimulator requires this function, but we don't actually have anything to deinit.
-        pub fn deinit(packet: *const Packet, path: Path) void {
+        pub fn command(packet: *const Packet) Command {
             _ = packet;
-            _ = path;
+            return .prepare;
+        }
+
+        /// PacketSimulator requires this function, but we don't actually have anything to deinit.
+        pub fn deinit(packet: *const Packet) void {
+            _ = packet;
         }
     };
 
@@ -644,39 +654,62 @@ const ClockSimulator = struct {
     allocator: std.mem.Allocator,
     options: Options,
     ticks: u64 = 0,
-    network: PacketSimulator(Packet),
+    network: PacketSimulatorType(Packet),
+    times: []DeterministicTime,
     clocks: []DeterministicClock,
     prng: std.rand.DefaultPrng,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) !ClockSimulator {
-        var self = ClockSimulator{
+        var network = try PacketSimulatorType(Packet).init(allocator, options.network_options);
+        errdefer network.deinit(allocator);
+
+        var times = try allocator.alloc(DeterministicTime, options.clock_count);
+        errdefer allocator.free(times);
+
+        var clocks = try allocator.alloc(DeterministicClock, options.clock_count);
+        errdefer allocator.free(clocks);
+
+        var prng = std.rand.DefaultPrng.init(options.network_options.seed);
+
+        for (clocks) |*clock, replica| {
+            errdefer for (clocks[0..replica]) |*c| c.deinit(allocator);
+
+            const amplitude = prng.random().intRangeAtMost(i64, -10, 10) * std.time.ns_per_s;
+            const phase = prng.random().intRangeAtMost(i64, 100, 1000) +
+                @floatToInt(i64, prng.random().floatNorm(f64) * 50);
+            times[replica] = .{
+                .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
+                .offset_type = OffsetType.non_ideal,
+                .offset_coefficient_A = amplitude,
+                .offset_coefficient_B = phase,
+                .offset_coefficient_C = 10,
+            };
+
+            clock.* = try DeterministicClock.init(
+                allocator,
+                options.clock_count,
+                @intCast(u8, replica),
+                &times[replica],
+            );
+            errdefer clock.deinit(allocator);
+        }
+        errdefer for (clocks) |*clock| clock.deinit(allocator);
+
+        return ClockSimulator{
             .allocator = allocator,
             .options = options,
-            .network = try PacketSimulator(Packet).init(allocator, options.network_options),
-            .clocks = try allocator.alloc(DeterministicClock, options.clock_count),
-            .prng = std.rand.DefaultPrng.init(options.network_options.seed),
+            .network = network,
+            .times = times,
+            .clocks = clocks,
+            .prng = prng,
         };
-
-        for (self.clocks) |*clock, index| {
-            clock.* = try self.create_clock(@intCast(u8, index));
-        }
-
-        return self;
     }
 
-    fn create_clock(self: *ClockSimulator, replica: u8) !DeterministicClock {
-        const amplitude = self.prng.random.intRangeAtMost(i64, -10, 10) * std.time.ns_per_s;
-        const phase = self.prng.random.intRangeAtMost(i64, 100, 1000) +
-            @floatToInt(i64, self.prng.random.floatNorm(f64) * 50);
-        const time: DeterministicTime = .{
-            .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
-            .offset_type = OffsetType.non_ideal,
-            .offset_coefficient_A = amplitude,
-            .offset_coefficient_B = phase,
-            .offset_coefficient_C = 10,
-        };
-
-        return try DeterministicClock.init(self.allocator, self.options.clock_count, replica, time);
+    pub fn deinit(self: *ClockSimulator) void {
+        for (self.clocks) |*clock| clock.deinit(self.allocator);
+        self.allocator.free(self.clocks);
+        self.allocator.free(self.times);
+        self.network.deinit(self.allocator);
     }
 
     pub fn tick(self: *ClockSimulator) void {
@@ -738,24 +771,29 @@ const ClockSimulator = struct {
     }
 };
 
-test "fuzz test" {
+test "clock: fuzz test" {
     std.testing.log_level = .err; // silence all clock logs
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena_allocator.deinit();
-    const allocator = &arena_allocator.allocator;
+
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
     const SystemTime = @import("../test/time.zig").Time;
-    var system_time = SystemTime{};
+    var system_time = SystemTime{
+        .resolution = constants.tick_ms * std.time.ns_per_ms,
+        .offset_type = .linear,
+        .offset_coefficient_A = 0,
+        .offset_coefficient_B = 0,
+    };
     var seed = @intCast(u64, system_time.realtime());
     var min_sync_error: u64 = 1_000_000_000;
     var max_sync_error: u64 = 0;
     var max_clock_offset: u64 = 0;
     var min_clock_offset: u64 = 1_000_000_000;
-    var simulator = try ClockSimulator.init(allocator, .{
+    var simulator = try ClockSimulator.init(std.testing.allocator, .{
         .network_options = .{
-            .node_count = clock_count,
+            .replica_count = 3,
+            .client_count = 0,
             .seed = seed,
+
             .one_way_delay_mean = 25,
             .one_way_delay_min = 10,
             .packet_loss_probability = 10,
@@ -763,10 +801,17 @@ test "fuzz test" {
             .path_clog_duration_mean = 200,
             .path_clog_probability = 2,
             .packet_replay_probability = 2,
+
+            .partition_mode = .isolate_single,
+            .partition_probability = 25,
+            .unpartition_probability = 5,
+            .partition_stability = 100,
+            .unpartition_stability = 10,
         },
         .clock_count = clock_count,
         .ping_timeout = 20,
     });
+    defer simulator.deinit();
 
     var clock_ticks_without_synchronization = [_]u32{0} ** clock_count;
     while (simulator.ticks < ticks_max) {
