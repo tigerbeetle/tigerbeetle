@@ -17,6 +17,8 @@ pub const StateMachine = constants.StateMachineType(Storage, .{
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
+const StateChecker = @import("state_checker.zig").StateChecker;
+const StorageChecker = @import("storage_checker.zig").StorageChecker;
 
 const vsr = @import("../vsr.zig");
 pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
@@ -32,9 +34,6 @@ pub const ClusterOptions = struct {
     storage_size_limit: u64,
 
     seed: u64,
-    on_replica_change_state: ?fn (replica: *const Replica) void = null,
-    on_replica_compact: ?fn (replica: *const Replica) void = null,
-    on_replica_checkpoint: ?fn (replica: *const Replica) void = null,
     /// Includes command=register messages.
     on_client_reply: fn(cluster: *Cluster, client: usize, request: *Message, reply: *Message) void,
 
@@ -64,6 +63,17 @@ pub const ReplicaHealth = union(enum) {
     down: u32,
 };
 
+/// Integer values represent exit codes.
+// TODO This doesn't really belong in Cluster, but it is needed here so that StateChecker failures
+// use the particular exit code.
+pub const Failure = enum(u8) {
+    //ok = 0,
+    /// Any assertion crash will be given an exit code of 127 by default.
+    crash = 127,
+    liveness = 128,
+    correctness = 129,
+};
+
 /// Shift the id-generating index because the simulator network expects client ids to never collide
 /// with a replica index.
 const client_id_permutation_shift = constants.replicas_max;
@@ -82,6 +92,8 @@ pub const Cluster = struct {
     client_id_permutation: IdPermutation,
 
     network: *Network,
+    state_checker: StateChecker,
+    storage_checker: StorageChecker,
 
     pub fn create(allocator: mem.Allocator, options: ClusterOptions) !*Cluster {
         assert(options.replica_count >= 1);
@@ -159,6 +171,13 @@ pub const Cluster = struct {
         }
         errdefer for (clients) |*c| c.deinit(allocator);
 
+        var state_checker =
+            try StateChecker.init(allocator, options.cluster_id, replicas, clients);
+        errdefer state_checker.deinit();
+
+        var storage_checker = StorageChecker.init(allocator);
+        errdefer storage_checker.deinit();
+
         cluster.* = .{
             .allocator = allocator,
             .options = options,
@@ -169,9 +188,9 @@ pub const Cluster = struct {
             .clients = clients,
             .client_pools = client_pools,
             .client_id_permutation = client_id_permutation,
-            //.client_requests = client_requests,
-            //.client_requests_free = client_requests_free,
             .network = network,
+            .state_checker = state_checker,
+            .storage_checker = storage_checker,
         };
 
         var buffer: [constants.replicas_max]Storage.FaultyAreas = undefined;
@@ -226,6 +245,8 @@ pub const Cluster = struct {
     }
 
     pub fn destroy(cluster: *Cluster) void {
+        cluster.storage_checker.deinit();
+        cluster.state_checker.deinit();
         cluster.network.deinit();
         for (cluster.clients) |*client| client.deinit(cluster.allocator);
         for (cluster.client_pools) |*pool| pool.deinit(cluster.allocator);
@@ -255,14 +276,17 @@ pub const Cluster = struct {
                 // when the replica restarts.
                 .down => replica.clock.time.tick(),
             }
+            on_replica_change_state(replica);
         }
     }
 
     pub fn restart_replica(cluster: *Cluster, replica_index: u8) void {
         assert(cluster.replica_health[replica_index] == .down);
 
-        cluster.replica_health[replica_index] = .{ .up = cluster.options.health_options.restart_stability };
         cluster.network.packet_simulator.fault_replica(replica_index, .enabled);
+        cluster.replica_health[replica_index] = .{
+            .up = cluster.options.health_options.restart_stability,
+        };
     }
 
     /// Reset a replica to its initial state, simulating a random crash/panic.
@@ -423,9 +447,10 @@ pub const Cluster = struct {
         assert(replica.replica == replica_index);
         assert(replica.replica_count == cluster.replicas.len);
 
-        replica.on_change_state = cluster.options.on_replica_change_state;
-        replica.on_compact = cluster.options.on_replica_compact;
-        replica.on_checkpoint = cluster.options.on_replica_checkpoint;
+        replica.context = cluster;
+        replica.on_change_state = on_replica_change_state;
+        replica.on_compact = on_replica_compact;
+        replica.on_checkpoint = on_replica_checkpoint;
         cluster.network.link(replica.message_bus.process, &replica.message_bus);
     }
 
@@ -470,7 +495,7 @@ pub const Cluster = struct {
     }
 
     fn client_on_reply(client: *Client, request_message: *Message, reply_message: *Message) void {
-        const cluster = @ptrCast(*Cluster, @alignCast(@alignOf(*Cluster), client.on_reply_context.?));
+        const cluster = @ptrCast(*Cluster, @alignCast(@alignOf(Cluster), client.on_reply_context.?));
         assert(reply_message.header.cluster == cluster.options.cluster_id);
         assert(reply_message.header.invalid() == null);
         assert(reply_message.header.client == client.id);
@@ -486,4 +511,29 @@ pub const Cluster = struct {
     }
 };
 
-// TODO StateChecker
+fn on_replica_change_state(replica: *const Replica) void {
+    const cluster = @ptrCast(*Cluster, @alignCast(@alignOf(Cluster), replica.context.?));
+    cluster.state_checker.check_state(replica.replica) catch |err| {
+        fatal(.correctness, "state checker error: {}", .{err});
+    };
+}
+
+fn on_replica_compact(replica: *const Replica) void {
+    const cluster = @ptrCast(*Cluster, @alignCast(@alignOf(Cluster), replica.context.?));
+    cluster.storage_checker.replica_compact(replica) catch |err| {
+        fatal(.correctness, "storage checker error: {}", .{err});
+    };
+}
+
+fn on_replica_checkpoint(replica: *const Replica) void {
+    const cluster = @ptrCast(*Cluster, @alignCast(@alignOf(Cluster), replica.context.?));
+    cluster.storage_checker.replica_checkpoint(replica) catch |err| {
+        fatal(.correctness, "storage checker error: {}", .{err});
+    };
+}
+
+/// Print an error message and then exit with an exit code.
+fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
+    std.log.scoped(.state_checker).err(fmt_string, args);
+    std.os.exit(@enumToInt(failure));
+}
