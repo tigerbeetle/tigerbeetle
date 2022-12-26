@@ -13,8 +13,7 @@ const Cluster = @import("test/cluster.zig").Cluster;
 const ClusterOptions = @import("test/cluster.zig").ClusterOptions;
 const Replica = @import("test/cluster.zig").Replica;
 const StateMachine = @import("test/cluster.zig").StateMachine;
-const StateChecker = @import("test/state_checker.zig").StateChecker;
-const StorageChecker = @import("test/storage_checker.zig").StorageChecker;
+const Failure = @import("test/cluster.zig").Failure;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
 const MessageBus = @import("test/message_bus.zig").MessageBus;
 const Conductor = @import("test/conductor.zig").Conductor;
@@ -39,8 +38,6 @@ const cluster_id = 0;
 
 var cluster: *Cluster = undefined;
 var conductor: *Conductor = undefined;
-var state_checker: *StateChecker = undefined;
-var storage_checker: *StorageChecker = undefined;
 
 pub fn main() !void {
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
@@ -100,9 +97,6 @@ pub fn main() !void {
         ),
         .seed = random.int(u64),
         .on_client_reply = on_cluster_reply,
-        .on_replica_change_state = on_replica_change_state,
-        .on_replica_compact = on_replica_compact,
-        .on_replica_checkpoint = on_replica_checkpoint,
         .network_options = .{
             .packet_simulator_options = .{
                 .replica_count = replica_count,
@@ -237,23 +231,6 @@ pub fn main() !void {
     });
     defer conductor.deinit(allocator);
 
-    state_checker = try allocator.create(StateChecker);
-    defer allocator.destroy(state_checker);
-
-    state_checker.* = try StateChecker.init(
-        allocator,
-        cluster_id,
-        cluster.replicas,
-        cluster.clients,
-    );
-    defer state_checker.deinit();
-
-    storage_checker = try allocator.create(StorageChecker);
-    defer allocator.destroy(storage_checker);
-
-    storage_checker.* = StorageChecker.init(allocator);
-    defer storage_checker.deinit();
-
     // The minimum number of healthy replicas required for a crashed replica to be able to recover.
     const replica_normal_min = replicas: {
         if (replica_count == 1) {
@@ -305,10 +282,6 @@ pub fn main() !void {
                     replica.tick();
                     cluster.storages[index].tick();
 
-                    state_checker.check_state(replica.replica) catch |err| {
-                        fatal(.correctness, "state checker error: {}", .{err});
-                    };
-
                     if (ticks.* != 0) continue;
                     if (crashes == 0) continue;
                     if (cluster.storages[replica.replica].writes.count() == 0) {
@@ -333,10 +306,10 @@ pub fn main() !void {
             }
         }
 
-        cluster.tick();
         conductor.tick();
+        cluster.tick();
 
-        if (state_checker.convergence() and conductor.done() and
+        if (cluster.state_checker.convergence() and conductor.done() and
             cluster.replica_up_count() == replica_count)
         {
             break;
@@ -346,23 +319,16 @@ pub fn main() !void {
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
 
-    assert(state_checker.convergence());
+    assert(cluster.state_checker.convergence());
     assert(conductor.done());
 
     output.info("\n          PASSED ({} ticks)", .{tick});
 }
 
-pub const ExitCode = enum(u8) {
-    ok = 0,
-    crash = 127, // Any assertion crash will be given an exit code of 127 by default.
-    liveness = 128,
-    correctness = 129,
-};
-
 /// Print an error message and then exit with an exit code.
-fn fatal(exit_code: ExitCode, comptime fmt_string: []const u8, args: anytype) noreturn {
+fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
     output.err(fmt_string, args);
-    std.os.exit(@enumToInt(exit_code));
+    std.os.exit(@enumToInt(failure));
 }
 
 /// Returns true, `p` percent of the time, else false.
@@ -379,24 +345,6 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
 
 fn on_cluster_reply(_: *Cluster, client: usize, request: *Message, reply: *Message) void {
     conductor.reply(client, request, reply);
-}
-
-fn on_replica_change_state(replica: *const Replica) void {
-    state_checker.check_state(replica.replica) catch |err| {
-        fatal(.correctness, "state checker error: {}", .{err});
-    };
-}
-
-fn on_replica_compact(replica: *const Replica) void {
-    storage_checker.replica_compact(replica) catch |err| {
-        fatal(.correctness, "storage checker error: {}", .{err});
-    };
-}
-
-fn on_replica_checkpoint(replica: *const Replica) void {
-    storage_checker.replica_checkpoint(replica) catch |err| {
-        fatal(.correctness, "storage checker error: {}", .{err});
-    };
 }
 
 /// Returns a random partitioning mode.
