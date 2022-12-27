@@ -37,4 +37,5 @@ test {
 
     _ = @import("clients/go/go_bindings_test.zig");
     _ = @import("clients/dotnet/dotnet_bindings_test.zig");
+    _ = @import("clients/java/java_bindings.zig");
 }

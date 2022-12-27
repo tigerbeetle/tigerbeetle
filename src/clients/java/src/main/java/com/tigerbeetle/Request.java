@@ -98,7 +98,7 @@ abstract class Request<TResponse extends Batch> {
 
                 exception = new AssertionError("Unexpected callback packet: packet=null");
 
-            } else if (status != RequestException.Status.OK) {
+            } else if (status != PacketStatus.Ok.value) {
 
                 exception = new RequestException(status);
 

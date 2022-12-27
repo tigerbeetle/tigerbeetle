@@ -110,6 +110,10 @@
               <exclude>com/tigerbeetle/JNILoader$Arch.class</exclude>
               <exclude>com/tigerbeetle/JNILoader$Abi.class</exclude>
 
+              <!-- Excluding enums -->
+              <exclude>com/tigerbeetle/PacketStatus.class</exclude>
+              <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
+
               <!-- Excluding the benchmark -->
               <exclude>benchmark/Benchmark.class</exclude>
             </excludes>

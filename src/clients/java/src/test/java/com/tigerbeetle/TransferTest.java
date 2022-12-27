@@ -49,13 +49,14 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getId());
     }
 
-    @Test(expected = NullPointerException.class)
     public void testIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] id = null;
         transfers.setId(id);
+
+        assertArrayEquals(new byte[16], transfers.getId());
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -88,13 +89,14 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getDebitAccountId());
     }
 
-    @Test(expected = NullPointerException.class)
     public void testDebitAccountIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] debitAccountId = null;
         transfers.setDebitAccountId(debitAccountId);
+
+        assertArrayEquals(new byte[16], transfers.getDebitAccountId());
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -127,13 +129,14 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getCreditAccountId());
     }
 
-    @Test(expected = NullPointerException.class)
     public void testCreditAccountIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] creditAccountId = null;
         transfers.setCreditAccountId(creditAccountId);
+
+        assertArrayEquals(new byte[16], transfers.getCreditAccountId());
     }
 
     @Test(expected = IllegalArgumentException.class)

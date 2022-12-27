@@ -419,6 +419,11 @@ fn java_client(
         build_step.dependOn(dependency);
     }
 
+    const bindings = b.addExecutable("java_bindings", "src/clients/java/java_bindings.zig");
+    bindings.addOptions("tigerbeetle_build_options", options);
+    bindings.setMainPkgPath("src");
+    const bindings_step = bindings.run();
+
     // Zig cross-targets:
     const platforms = .{
         "x86_64-linux-gnu",
@@ -449,6 +454,7 @@ fn java_client(
         lib.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
+        lib.step.dependOn(&bindings_step.step);
         build_step.dependOn(&lib.step);
     }
 }

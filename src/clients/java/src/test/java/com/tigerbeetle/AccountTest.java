@@ -44,13 +44,14 @@ public class AccountTest {
         assertArrayEquals(id, accounts.getId());
     }
 
-    @Test(expected = NullPointerException.class)
     public void testIdNull() {
         byte[] id = null;
         var accounts = new AccountBatch(1);
 
         accounts.add();
         accounts.setId(id);
+
+        assertArrayEquals(new byte[16], accounts.getId());
     }
 
     @Test(expected = IllegalArgumentException.class)

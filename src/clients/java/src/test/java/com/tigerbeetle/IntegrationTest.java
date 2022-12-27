@@ -101,7 +101,7 @@ public class IntegrationTest {
         try (var client = new Client(0, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
-            assertEquals(InitializationException.Status.ADDRESS_LIMIT_EXCEEDED,
+            assertEquals(InitializationStatus.AddressLimitExceeded.value,
                     initializationException.getStatus());
         }
     }
@@ -111,7 +111,7 @@ public class IntegrationTest {
         try (var client = new Client(0, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
-            assertEquals(InitializationException.Status.ADDRESS_INVALID,
+            assertEquals(InitializationStatus.AddressInvalid.value,
                     initializationException.getStatus());
         }
     }
@@ -122,7 +122,7 @@ public class IntegrationTest {
         try (var client = new Client(0, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
-            assertEquals(InitializationException.Status.ADDRESS_INVALID,
+            assertEquals(InitializationStatus.AddressInvalid.value,
                     initializationException.getStatus());
         }
     }
@@ -796,8 +796,7 @@ public class IntegrationTest {
                     assert false;
                 } catch (RequestException requestException) {
 
-                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
-                            requestException.getStatus());
+                    assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
 
                 }
 
@@ -840,8 +839,7 @@ public class IntegrationTest {
                     assertTrue(executionException.getCause() instanceof RequestException);
 
                     var requestException = (RequestException) executionException.getCause();
-                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
-                            requestException.getStatus());
+                    assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
 
                 }
 
@@ -878,8 +876,7 @@ public class IntegrationTest {
                     assert false;
                 } catch (RequestException requestException) {
 
-                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
-                            requestException.getStatus());
+                    assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
 
                 }
 
@@ -925,8 +922,7 @@ public class IntegrationTest {
                     assertTrue(executionException.getCause() instanceof RequestException);
 
                     var requestException = (RequestException) executionException.getCause();
-                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
-                            requestException.getStatus());
+                    assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
 
                 }
 
