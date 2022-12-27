@@ -20,7 +20,7 @@ const PacketSimulatorPath = @import("../packet_simulator.zig").Path;
 const log = std.log.scoped(.network);
 
 pub const NetworkOptions = struct {
-    packet_simulator_options: PacketSimulatorOptions,
+    packet_simulator: PacketSimulatorOptions,
 };
 
 pub const Network = struct {
@@ -78,7 +78,7 @@ pub const Network = struct {
 
         var packet_simulator = try PacketSimulatorType(Packet).init(
             allocator,
-            options.packet_simulator_options,
+            options.packet_simulator,
         );
         errdefer packet_simulator.deinit(allocator);
 
@@ -93,7 +93,7 @@ pub const Network = struct {
             allocator,
             // +1 so we can allocate an extra packet when all packet queues are at capacity,
             // so that `PacketSimulator.submit_packet` can choose which packet to drop.
-            1 + @as(usize, options.packet_simulator_options.path_maximum_capacity) *
+            1 + @as(usize, options.packet_simulator.path_maximum_capacity) *
                 path_count,
         );
         errdefer message_pool.deinit(allocator);

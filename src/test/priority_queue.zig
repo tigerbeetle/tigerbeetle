@@ -1,7 +1,7 @@
 // Backport PriorityQueue fixes from 0.10 to 0.9.
 // https://github.com/ziglang/zig/blob/d925d19cfcabd96fdc4459e11ecb85a4f42ec655/lib/std/priority_queue.zig
 //
-// In particular, the conductor hits this bug:
+// In particular, the ReplySequence hits this bug:
 // https://github.com/ziglang/zig/commit/7deae071014237e995ec3017825f7534305ec0c4
 //
 // Also https://github.com/ziglang/zig/commit/d925d19cfcabd96fdc4459e11ecb85a4f42ec655
