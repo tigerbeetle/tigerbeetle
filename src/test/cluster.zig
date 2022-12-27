@@ -27,20 +27,17 @@ pub const Client = vsr.Client(StateMachine, MessageBus);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
 
-pub const ClusterOptions = struct {
+const ClusterOptions = struct {
     cluster_id: u32,
     replica_count: u8,
     client_count: u8,
     storage_size_limit: u64,
-
     seed: u64,
-    /// Includes command=register messages.
-    on_client_reply: fn(cluster: *Cluster, client: usize, request: *Message, reply: *Message) void,
 
-    network_options: NetworkOptions,
-    storage_options: Storage.Options,
-    health_options: HealthOptions,
-    state_machine_options: StateMachine.Options,
+    network: NetworkOptions,
+    storage: Storage.Options,
+    health: HealthOptions,
+    state_machine: StateMachine.Options,
 };
 
 pub const HealthOptions = struct {
@@ -67,7 +64,6 @@ pub const ReplicaHealth = union(enum) {
 // TODO This doesn't really belong in Cluster, but it is needed here so that StateChecker failures
 // use the particular exit code.
 pub const Failure = enum(u8) {
-    //ok = 0,
     /// Any assertion crash will be given an exit code of 127 by default.
     crash = 127,
     liveness = 128,
@@ -79,9 +75,18 @@ pub const Failure = enum(u8) {
 const client_id_permutation_shift = constants.replicas_max;
 
 pub const Cluster = struct {
+    pub const Options = ClusterOptions;
+
     allocator: mem.Allocator,
     options: ClusterOptions,
+    on_client_reply: fn(
+        cluster: *Cluster,
+        client: usize,
+        request: *Message,
+        reply: *Message,
+    ) void,
 
+    network: *Network,
     storages: []Storage,
     replicas: []Replica,
     replica_pools: []MessagePool,
@@ -91,26 +96,34 @@ pub const Cluster = struct {
     client_pools: []MessagePool,
     client_id_permutation: IdPermutation,
 
-    network: *Network,
     state_checker: StateChecker,
     storage_checker: StorageChecker,
 
-    pub fn create(allocator: mem.Allocator, options: ClusterOptions) !*Cluster {
+    context: ?*anyopaque = null,
+
+    pub fn init(
+        allocator: mem.Allocator,
+        /// Includes command=register messages.
+        on_client_reply: fn(
+            cluster: *Cluster,
+            client: usize,
+            request: *Message,
+            reply: *Message,
+        ) void,
+        options: ClusterOptions,
+    ) !*Cluster {
         assert(options.replica_count >= 1);
         assert(options.replica_count <= 6);
         assert(options.client_count > 0);
         assert(options.storage_size_limit % constants.sector_size == 0);
         assert(options.storage_size_limit <= constants.storage_size_max);
-        assert(options.health_options.crash_probability < 1.0);
-        assert(options.health_options.crash_probability >= 0.0);
-        assert(options.health_options.restart_probability < 1.0);
-        assert(options.health_options.restart_probability >= 0.0);
+        assert(options.health.crash_probability < 1.0);
+        assert(options.health.crash_probability >= 0.0);
+        assert(options.health.restart_probability < 1.0);
+        assert(options.health.restart_probability >= 0.0);
 
         var prng = std.rand.DefaultPrng.init(options.seed);
         const random = prng.random();
-
-        const cluster = try allocator.create(Cluster);
-        errdefer allocator.destroy(cluster);
 
         // TODO(Zig) Client.init()'s MessagePool.Options require a reference to the network — use
         // @returnAddress() instead.
@@ -121,7 +134,7 @@ pub const Cluster = struct {
             allocator,
             options.replica_count,
             options.client_count,
-            options.network_options,
+            options.network,
         );
         errdefer network.deinit();
 
@@ -178,21 +191,6 @@ pub const Cluster = struct {
         var storage_checker = StorageChecker.init(allocator);
         errdefer storage_checker.deinit();
 
-        cluster.* = .{
-            .allocator = allocator,
-            .options = options,
-            .storages = storages,
-            .replicas = replicas,
-            .replica_pools = replica_pools,
-            .replica_health = replica_health,
-            .clients = clients,
-            .client_pools = client_pools,
-            .client_id_permutation = client_id_permutation,
-            .network = network,
-            .state_checker = state_checker,
-            .storage_checker = storage_checker,
-        };
-
         var buffer: [constants.replicas_max]Storage.FaultyAreas = undefined;
         const faulty_wal_areas = Storage.generate_faulty_wal_areas( // TODO
             random,
@@ -202,21 +200,21 @@ pub const Cluster = struct {
         );
         assert(faulty_wal_areas.len == options.replica_count);
 
-        for (cluster.storages) |*storage, replica_index| {
-            var storage_options = options.storage_options;
+        for (storages) |*storage, replica_index| {
+            var storage_options = options.storage;
             storage_options.replica_index = @intCast(u8, replica_index);
             storage_options.faulty_wal_areas = faulty_wal_areas[replica_index];
             storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
             // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
             storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
         }
-        errdefer for (cluster.storages) |*storage| storage.deinit(allocator);
+        errdefer for (storages) |*storage| storage.deinit(allocator);
 
         // Format each replica's storage (equivalent to "tigerbeetle format ...").
-        for (cluster.storages) |*storage, replica_index| {
+        for (storages) |*storage, replica_index| {
             var superblock = try SuperBlock.init(allocator, .{
                 .storage = storage,
-                .message_pool = &cluster.replica_pools[replica_index],
+                .message_pool = &replica_pools[replica_index],
                 .storage_size_limit = options.storage_size_limit,
             });
             defer superblock.deinit(allocator);
@@ -231,6 +229,27 @@ pub const Cluster = struct {
             );
         }
 
+        // We must heap-allocate the cluster since its pointer will be attached to the replica.
+        // TODO(Zig) @returnAddress().
+        var cluster = try allocator.create(Cluster);
+        errdefer allocator.destroy(cluster);
+
+        cluster.* = Cluster{
+            .allocator = allocator,
+            .options = options,
+            .on_client_reply = on_client_reply,
+            .network = network,
+            .storages = storages,
+            .replicas = replicas,
+            .replica_pools = replica_pools,
+            .replica_health = replica_health,
+            .clients = clients,
+            .client_pools = client_pools,
+            .client_id_permutation = client_id_permutation,
+            .state_checker = state_checker,
+            .storage_checker = storage_checker,
+        };
+
         for (cluster.replicas) |_, replica_index| {
             try cluster.open_replica(@intCast(u8, replica_index), .{
                 .resolution = constants.tick_ms * std.time.ns_per_ms,
@@ -244,7 +263,7 @@ pub const Cluster = struct {
         return cluster;
     }
 
-    pub fn destroy(cluster: *Cluster) void {
+    pub fn deinit(cluster: *Cluster) void {
         cluster.storage_checker.deinit();
         cluster.state_checker.deinit();
         cluster.network.deinit();
@@ -285,7 +304,7 @@ pub const Cluster = struct {
 
         cluster.network.packet_simulator.fault_replica(replica_index, .enabled);
         cluster.replica_health[replica_index] = .{
-            .up = cluster.options.health_options.restart_stability,
+            .up = cluster.options.health.restart_stability,
         };
     }
 
@@ -294,6 +313,7 @@ pub const Cluster = struct {
     /// inflight messages to/from the replica in the network.
     ///
     /// Returns whether the replica was crashed.
+    /// Returns an error when the replica was unable to recover (open).
     pub fn crash_replica(cluster: *Cluster, replica_index: u8) !bool {
         assert(cluster.replica_health[replica_index] == .up);
 
@@ -380,7 +400,7 @@ pub const Cluster = struct {
             if (parent != 0) return false;
         }
 
-        cluster.replica_health[replica_index] = .{ .down = cluster.options.health_options.crash_stability };
+        cluster.replica_health[replica_index] = .{ .down = cluster.options.health.crash_stability };
 
         // Reset the storage before the replica so that pending writes can (partially) finish.
         cluster.storages[replica_index].reset();
@@ -401,8 +421,8 @@ pub const Cluster = struct {
         // the crash. But having it here allows the replica's MessageBus to initialize and begin
         // queueing packets.
         //
-        // Pass the old replica's Time through to the new replica. It will continue to be tick
-        // while the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
+        // Pass the old replica's Time through to the new replica. It will continue to tick while
+        // the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
         try cluster.open_replica(replica_index, replica_time);
 
         return true;
@@ -439,7 +459,7 @@ pub const Cluster = struct {
                 .storage_size_limit = cluster.options.storage_size_limit,
                 .message_pool = &cluster.replica_pools[replica_index],
                 .time = time,
-                .state_machine_options = cluster.options.state_machine_options,
+                .state_machine_options = cluster.options.state_machine,
                 .message_bus_options = .{ .network = cluster.network },
             },
         );
@@ -507,7 +527,7 @@ pub const Cluster = struct {
             if (client == c) break i;
         } else unreachable;
 
-        cluster.options.on_client_reply(cluster, client_index, request_message, reply_message);
+        cluster.on_client_reply(cluster, client_index, request_message, reply_message);
     }
 };
 
