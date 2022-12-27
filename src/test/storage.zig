@@ -393,16 +393,6 @@ pub const Storage = struct {
                 other.offset + other.buffer.len <= offset_in_zone);
         }
 
-        switch (zone) {
-            .superblock => storage.verify_write_superblock(buffer, offset_in_zone),
-            .wal_headers => {
-                for (std.mem.bytesAsSlice(vsr.Header, buffer)) |header| {
-                    storage.verify_write_wal_header(header);
-                }
-            },
-            else => {},
-        }
-
         write.* = .{
             .callback = callback,
             .buffer = buffer,
@@ -684,97 +674,6 @@ pub const Storage = struct {
         assert(@mod(offset, constants.sector_size) == 0);
     }
 
-    /// Each redundant header written must either:
-    /// - match the corresponding (already written) prepare, or
-    /// - be a command=reserved header (due to Journal.remove_entries_from), or
-    /// - match the old redundant header (i.e. no change).
-    ///   This last case applies when an in-memory header is changed after the prepare is written
-    ///   but before the redundant header is written, so the journal defers the redundant header
-    ///   update until after the new prepare has been written.
-    fn verify_write_wal_header(storage: *const Storage, header: vsr.Header) void {
-        // The checksum is zero when writing the header of a faulty prepare.
-        if (header.checksum == 0) return;
-
-        const header_slot = header.op % constants.journal_slot_count;
-        const header_old = storage.wal_headers()[header_slot];
-
-        const prepare_header = storage.wal_prepares()[header_slot].header;
-        const prepare_offset = vsr.Zone.wal_prepares.offset(header_slot * constants.message_size_max);
-        const prepare_sector = @divExact(prepare_offset, constants.sector_size);
-
-        assert(storage.memory_written.isSet(prepare_sector));
-        if (header.command == .prepare) {
-            assert(header.checksum == header_old.checksum or
-                header.checksum == prepare_header.checksum);
-        } else {
-            assert(header.command == .reserved);
-        }
-    }
-
-    /// When a SuperBlock sector is written, verify:
-    ///
-    /// - There are no other pending writes or reads to the superblock zone.
-    /// - All trailers are written.
-    /// - All trailers' checksums validate.
-    /// - All blocks referenced by the Manifest trailer exist.
-    ///
-    fn verify_write_superblock(storage: *const Storage, buffer: []const u8, offset_in_zone: u64) void {
-        const Layout = superblock.Layout;
-        assert(offset_in_zone < vsr.Zone.superblock.size().?);
-
-        // Ignore trailer writes; only check the superblock sector writes.
-        if (buffer.len != @sizeOf(superblock.SuperBlockSector)) return;
-        var copy_: u8 = 0;
-        while (copy_ < constants.superblock_copies) : (copy_ += 1) {
-            if (Layout.offset_sector(copy_) == offset_in_zone) break;
-        } else return;
-
-        for (storage.reads.items[0..storage.reads.len]) |read| assert(read.zone != .superblock);
-        for (storage.writes.items[0..storage.writes.len]) |write| assert(write.zone != .superblock);
-
-        const sector = mem.bytesAsSlice(superblock.SuperBlockSector, buffer)[0];
-        assert(sector.valid_checksum());
-        assert(sector.vsr_state.internally_consistent());
-        assert(sector.copy == copy_);
-
-        const manifest_offset = vsr.Zone.superblock.offset(Layout.offset_manifest(copy_));
-        const manifest_buffer = storage.memory[manifest_offset..][0..sector.manifest_size];
-        assert(vsr.checksum(manifest_buffer) == sector.manifest_checksum);
-
-        const free_set_offset = vsr.Zone.superblock.offset(Layout.offset_free_set(copy_));
-        const free_set_buffer = storage.memory[free_set_offset..][0..sector.free_set_size];
-        assert(vsr.checksum(free_set_buffer) == sector.free_set_checksum);
-
-        const client_table_offset = vsr.Zone.superblock.offset(Layout.offset_client_table(copy_));
-        const client_table_buffer =
-            storage.memory[client_table_offset..][0..sector.client_table_size];
-        assert(vsr.checksum(client_table_buffer) == sector.client_table_checksum);
-
-        const Manifest = superblock.SuperBlockManifest;
-        var manifest = Manifest.init(
-            storage.allocator,
-            @divExact(
-                superblock.superblock_trailer_manifest_size_max,
-                Manifest.BlockReferenceSize,
-            ),
-            @import("../lsm/tree.zig").table_count_max,
-        ) catch unreachable;
-        defer manifest.deinit(storage.allocator);
-
-        manifest.decode(manifest_buffer);
-
-        for (manifest.addresses[0..manifest.count]) |block_address, i| {
-            const block_offset = vsr.Zone.grid.offset((block_address - 1) * constants.block_size);
-            const block_header = mem.bytesAsValue(
-                vsr.Header,
-                storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
-            );
-            assert(block_header.op == block_address);
-            assert(block_header.checksum == manifest.checksums[i]);
-            assert(block_header.operation == BlockType.manifest.operation());
-        }
-    }
-
     pub fn superblock_sector(
         storage: *const Storage,
         copy_: u8,
@@ -795,6 +694,7 @@ pub const Storage = struct {
         body: [constants.message_size_max - @sizeOf(vsr.Header)]u8,
 
         comptime {
+            assert(@sizeOf(MessageRaw) == constants.message_size_max);
             assert(@sizeOf(MessageRaw) * 8 == @bitSizeOf(MessageRaw));
         }
     };
