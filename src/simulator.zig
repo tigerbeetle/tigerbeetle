@@ -116,12 +116,6 @@ pub fn main() !void {
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
             .faulty_superblock = true,
         },
-        .health = .{
-            .crash_probability = 0.000001,
-            .crash_stability = random.uintLessThan(u32, 1_000),
-            .restart_probability = 0.0001,
-            .restart_stability = random.uintLessThan(u32, 1_000),
-        },
         .state_machine = switch (constants.state_machine) {
             .testing => .{},
             .accounting => .{
@@ -136,12 +130,17 @@ pub fn main() !void {
     const workload_options = StateMachine.Workload.Options.generate(random, .{
         .client_count = client_count,
         // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity private.
+        // Also maybe make it dynamic (computed from the client_count instead of clients_max).
         .in_flight_max = ReplySequence.stalled_queue_capacity,
     });
 
     const simulator_options = Simulator.Options{
         .cluster = cluster_options,
         .workload = workload_options,
+        .replica_crash_probability = 0.000001,
+        .replica_crash_stability = random.uintLessThan(u32, 1_000),
+        .replica_restart_probability = 0.0001,
+        .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
@@ -204,10 +203,10 @@ pub fn main() !void {
         cluster_options.storage.write_latency_mean,
         cluster_options.storage.read_fault_probability,
         cluster_options.storage.write_fault_probability,
-        cluster_options.health.crash_probability * 100,
-        cluster_options.health.crash_stability,
-        cluster_options.health.restart_probability * 100,
-        cluster_options.health.restart_stability,
+        simulator_options.replica_crash_probability * 100,
+        simulator_options.replica_crash_stability,
+        simulator_options.replica_restart_probability * 100,
+        simulator_options.replica_restart_stability,
     });
 
     var simulator = try Simulator.init(allocator, random, simulator_options);
@@ -232,6 +231,15 @@ pub const Simulator = struct {
         cluster: Cluster.Options,
         workload: StateMachine.Workload.Options,
 
+        /// Probability per tick that a crash will occur.
+        replica_crash_probability: f64,
+        /// Minimum duration of a crash.
+        replica_crash_stability: u32,
+        /// Probability per tick that a crashed replica will recovery.
+        replica_restart_probability: f64,
+        /// Minimum time a replica is up until it is crashed again.
+        replica_restart_stability: u32,
+
         /// The total number of requests to send. Does not count `register` messages.
         requests_max: usize,
         request_probability: u8, // percent
@@ -243,6 +251,9 @@ pub const Simulator = struct {
     options: Options,
     cluster: *Cluster,
     workload: StateMachine.Workload,
+
+    /// Protect a replica from fast successive crash/restarts.
+    replica_stability: []usize,
     reply_sequence: ReplySequence, // "ReplySequence"
 
     /// Total number of requests sent, including those that have not been delivered.
@@ -251,6 +262,10 @@ pub const Simulator = struct {
     requests_idle: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Simulator {
+        assert(options.replica_crash_probability < 1.0);
+        assert(options.replica_crash_probability >= 0.0);
+        assert(options.replica_restart_probability < 1.0);
+        assert(options.replica_restart_probability >= 0.0);
         assert(options.requests_max > 0);
         assert(options.request_probability > 0);
         assert(options.request_probability <= 100);
@@ -264,6 +279,9 @@ pub const Simulator = struct {
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
         errdefer workload.deinit(allocator);
 
+        var replica_stability = try allocator.alloc(usize, options.cluster.replica_count);
+        errdefer allocator.free(replica_stability);
+
         var reply_sequence = try ReplySequence.init(allocator);
         errdefer reply_sequence.deinit(allocator);
 
@@ -272,99 +290,16 @@ pub const Simulator = struct {
             .options = options,
             .cluster = cluster,
             .workload = workload,
+            .replica_stability = replica_stability,
             .reply_sequence = reply_sequence,
         };
     }
 
     pub fn deinit(simulator: *Simulator, allocator: std.mem.Allocator) void {
+        allocator.free(simulator.replica_stability);
         simulator.reply_sequence.deinit(allocator);
         simulator.workload.deinit(allocator);
         simulator.cluster.deinit();
-    }
-
-    /// The minimum number of healthy replicas required for a crashed replica to be able to recover.
-    fn replica_normal_min(simulator: *const Simulator) u8 {
-        if (simulator.options.cluster.replica_count == 1) {
-            // A cluster of 1 can crash safely (as long as there is no disk corruption) since it
-            // does not run the recovery protocol.
-            return 0;
-        } else {
-            return simulator.cluster.replicas[0].quorum_view_change;
-        }
-    }
-
-    pub fn tick(simulator: *Simulator) void {
-        // TODO(Zig): Remove (see on_cluster_reply()).
-        simulator.cluster.context = simulator;
-
-        // The maximum number of replicas that can crash, with the cluster still able to recover.
-        var crashes = simulator.cluster.replica_normal_count() -| simulator.replica_normal_min();
-
-        for (simulator.cluster.storages) |*storage, replica| {
-            if (simulator.cluster.replicas[replica].journal.status == .recovered) {
-                // TODO Remove this workaround when VSR recovery protocol is disabled.
-                // When only the minimum number of replicas are healthy (no more crashes allowed),
-                // disable storage faults on all healthy replicas.
-                //
-                // This is a workaround to avoid the deadlock that occurs when (for example) in a
-                // cluster of 3 replicas, one is down, another has a corrupt prepare, and the last does
-                // not have the prepare. The two healthy replicas can never complete a view change,
-                // because two replicas are not enough to nack, and the unhealthy replica cannot
-                // complete the VSR recovery protocol either.
-                if (simulator.cluster.replica_health[replica] == .up and crashes == 0) {
-                    if (storage.faulty) {
-                        log_simulator.debug("{}: disable storage faults", .{replica});
-                        storage.faulty = false;
-                    }
-                } else {
-                    // When a journal recovers for the first time, enable its storage faults.
-                    // Future crashes will recover in the presence of faults.
-                    if (!storage.faulty) {
-                        log_simulator.debug("{}: enable storage faults", .{replica});
-                        storage.faulty = true;
-                    }
-                }
-            }
-        }
-
-        // TODO tick_crash()
-        for (simulator.cluster.replicas) |*replica| {
-            switch (simulator.cluster.replica_health[replica.replica]) {
-                .up => |*ticks| {
-                    ticks.* -|= 1;
-                    if (ticks.* != 0) continue;
-                    if (crashes == 0) continue;
-                    if (simulator.cluster.storages[replica.replica].writes.count() == 0) {
-                        if (!chance_f64(simulator.random, simulator.options.cluster.health.crash_probability)) continue;
-                    } else {
-                        if (!chance_f64(simulator.random, simulator.options.cluster.health.crash_probability * 10.0)) continue;
-                    }
-
-                    const replica_crashed = simulator.cluster.crash_replica(replica.replica) catch |err| {
-                        log_simulator.err("{}: crash replica: unable to open after crash (err={})", .{
-                            replica.replica,
-                            err,
-                        });
-                        unreachable;
-                    };
-                    if (replica_crashed) {
-                        log_simulator.debug("{}: crash replica", .{replica.replica});
-                        crashes -= 1;
-                    }
-                },
-                .down => |*ticks| {
-                    ticks.* -|= 1;
-                    assert(replica.status == .recovering);
-                    if (ticks.* == 0 and chance_f64(simulator.random, simulator.options.cluster.health.restart_probability)) {
-                        simulator.cluster.restart_replica(replica.replica);
-                        log_simulator.debug("{}: restart replica", .{replica.replica});
-                    }
-                },
-            }
-        }
-
-        simulator.cluster.tick();
-        simulator.tick_requests();
     }
 
     pub fn done(simulator: *Simulator) bool {
@@ -373,12 +308,24 @@ pub const Simulator = struct {
         if (!simulator.cluster.state_checker.convergence()) return false;
         if (!simulator.reply_sequence.empty()) return false;
         if (simulator.requests_sent < simulator.options.requests_max) return false;
-        if (simulator.cluster.replica_up_count() < simulator.options.cluster.replica_count) return false; // TODO move up_count into simulator? or just compute it here inline
+
+        for (simulator.cluster.replica_health) |health| {
+            if (health == .down) return false;
+        }
 
         for (simulator.cluster.clients) |*client| {
             if (client.request_queue.count > 0) return false;
         }
         return true;
+    }
+
+    pub fn tick(simulator: *Simulator) void {
+        // TODO(Zig): Remove (see on_cluster_reply()).
+        simulator.cluster.context = simulator;
+
+        simulator.cluster.tick();
+        simulator.tick_requests();
+        simulator.tick_crash();
     }
 
     fn on_cluster_reply(
@@ -487,6 +434,86 @@ pub const Simulator = struct {
 
         simulator.requests_sent += 1;
         assert(simulator.requests_sent <= simulator.options.requests_max);
+    }
+
+    fn tick_crash(simulator: *Simulator) void {
+        // The maximum number of replicas that can crash, with the cluster still able to recover.
+        var crashes = blk: {
+            // The minimum number of healthy replicas required for a crashed replica to be able to
+            // recover. A cluster of 1 can crash safely (as long as there is no disk corruption)
+            // since it does not run the recovery protocol.
+            var replica_normal_min = if (simulator.options.cluster.replica_count == 1)
+                0
+            else
+                simulator.cluster.replicas[0].quorum_view_change;
+            break :blk simulator.cluster.replica_normal_count() -| replica_normal_min;
+        };
+
+        for (simulator.cluster.storages) |*storage, replica| {
+            if (simulator.cluster.replicas[replica].journal.status == .recovered) {
+                // TODO Remove this workaround when VSR recovery protocol is disabled.
+                // When only the minimum number of replicas are healthy (no more crashes allowed),
+                // disable storage faults on all healthy replicas.
+                //
+                // This is a workaround to avoid the deadlock that occurs when (for example) in a
+                // cluster of 3 replicas, one is down, another has a corrupt prepare, and the last does
+                // not have the prepare. The two healthy replicas can never complete a view change,
+                // because two replicas are not enough to nack, and the unhealthy replica cannot
+                // complete the VSR recovery protocol either.
+                if (simulator.cluster.replica_health[replica] == .up and crashes == 0) {
+                    if (storage.faulty) {
+                        log_simulator.debug("{}: disable storage faults", .{replica});
+                        storage.faulty = false;
+                    }
+                } else {
+                    // When a journal recovers for the first time, enable its storage faults.
+                    // Future crashes will recover in the presence of faults.
+                    if (!storage.faulty) {
+                        log_simulator.debug("{}: enable storage faults", .{replica});
+                        storage.faulty = true;
+                    }
+                }
+            }
+        }
+
+        for (simulator.cluster.replicas) |*replica| {
+            simulator.replica_stability[replica.replica] -|= 1;
+            const stability = simulator.replica_stability[replica.replica];
+            if (stability > 0) continue;
+
+            switch (simulator.cluster.replica_health[replica.replica]) {
+                .up => {
+                    if (crashes == 0) continue;
+                    const replica_writes = simulator.cluster.storages[replica.replica].writes.count();
+                    const crash_probability = simulator.options.replica_crash_probability *
+                        @as(f64, if (replica_writes == 0) 1.0 else 10.0);
+                    if (!chance_f64(simulator.random, crash_probability)) continue;
+
+                    const replica_crashed = simulator.cluster.crash_replica(replica.replica) catch |err| {
+                        log_simulator.err("{}: crash replica: unable to open after crash (err={})", .{
+                            replica.replica,
+                            err,
+                        });
+                        unreachable;
+                    };
+                    if (replica_crashed) {
+                        log_simulator.debug("{}: crash replica", .{replica.replica});
+                        crashes -= 1;
+                        simulator.replica_stability[replica.replica] =
+                            simulator.options.replica_crash_stability;
+                    }
+                },
+                .down => {
+                    assert(replica.status == .recovering);
+                    if (chance_f64(simulator.random, simulator.options.replica_restart_probability)) {
+                        simulator.cluster.restart_replica(replica.replica);
+                        log_simulator.debug("{}: restart replica", .{replica.replica});
+                        simulator.replica_stability[replica.replica] =
+                            simulator.options.replica_restart_stability;
+                    }
+                },
+            }
+        }
     }
 };
 
