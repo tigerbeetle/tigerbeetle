@@ -8,283 +8,283 @@ package com.tigerbeetle;
 public enum CreateTransferResult {
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#ok
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#ok">ok</a>
      */
     Ok((int) 0),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#linked_event_failed
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#linked_event_failed">linked_event_failed</a>
      */
     LinkedEventFailed((int) 1),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#linked_event_chain_open
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#linked_event_chain_open">linked_event_chain_open</a>
      */
     LinkedEventChainOpen((int) 2),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#reserved_flag
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#reserved_flag">reserved_flag</a>
      */
     ReservedFlag((int) 3),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#reserved_field
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#reserved_field">reserved_field</a>
      */
     ReservedField((int) 4),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#id_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#id_must_not_be_zero">id_must_not_be_zero</a>
      */
     IdMustNotBeZero((int) 5),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#id_must_not_be_int_max
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#id_must_not_be_int_max">id_must_not_be_int_max</a>
      */
     IdMustNotBeIntMax((int) 6),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_zero">debit_account_id_must_not_be_zero</a>
      */
     DebitAccountIdMustNotBeZero((int) 7),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_int_max
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_int_max">debit_account_id_must_not_be_int_max</a>
      */
     DebitAccountIdMustNotBeIntMax((int) 8),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_zero">credit_account_id_must_not_be_zero</a>
      */
     CreditAccountIdMustNotBeZero((int) 9),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_int_max
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_int_max">credit_account_id_must_not_be_int_max</a>
      */
     CreditAccountIdMustNotBeIntMax((int) 10),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_be_different
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_be_different">accounts_must_be_different</a>
      */
     AccountsMustBeDifferent((int) 11),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_zero">pending_id_must_be_zero</a>
      */
     PendingIdMustBeZero((int) 12),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#ledger_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#ledger_must_not_be_zero">ledger_must_not_be_zero</a>
      */
     LedgerMustNotBeZero((int) 13),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#code_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#code_must_not_be_zero">code_must_not_be_zero</a>
      */
     CodeMustNotBeZero((int) 14),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#amount_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#amount_must_not_be_zero">amount_must_not_be_zero</a>
      */
     AmountMustNotBeZero((int) 15),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_not_found
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_not_found">debit_account_not_found</a>
      */
     DebitAccountNotFound((int) 16),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_not_found
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_not_found">credit_account_not_found</a>
      */
     CreditAccountNotFound((int) 17),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_have_the_same_ledger
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_have_the_same_ledger">accounts_must_have_the_same_ledger</a>
      */
     AccountsMustHaveTheSameLedger((int) 18),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#transfer_must_have_the_same_ledger_as_accounts
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#transfer_must_have_the_same_ledger_as_accounts">transfer_must_have_the_same_ledger_as_accounts</a>
      */
     TransferMustHaveTheSameLedgerAsAccounts((int) 19),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_flags
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_flags">exists_with_different_flags</a>
      */
     ExistsWithDifferentFlags((int) 20),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_debit_account_id
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_debit_account_id">exists_with_different_debit_account_id</a>
      */
     ExistsWithDifferentDebitAccountId((int) 21),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_credit_account_id
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_credit_account_id">exists_with_different_credit_account_id</a>
      */
     ExistsWithDifferentCreditAccountId((int) 22),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data">exists_with_different_user_data</a>
      */
     ExistsWithDifferentUserData((int) 23),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_pending_id
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_pending_id">exists_with_different_pending_id</a>
      */
     ExistsWithDifferentPendingId((int) 24),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_timeout
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_timeout">exists_with_different_timeout</a>
      */
     ExistsWithDifferentTimeout((int) 25),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_code
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_code">exists_with_different_code</a>
      */
     ExistsWithDifferentCode((int) 26),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_amount
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_amount">exists_with_different_amount</a>
      */
     ExistsWithDifferentAmount((int) 27),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exists
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exists">exists</a>
      */
     Exists((int) 28),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending">overflows_debits_pending</a>
      */
     OverflowsDebitsPending((int) 29),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending">overflows_credits_pending</a>
      */
     OverflowsCreditsPending((int) 30),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted">overflows_debits_posted</a>
      */
     OverflowsDebitsPosted((int) 31),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted">overflows_credits_posted</a>
      */
     OverflowsCreditsPosted((int) 32),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits">overflows_debits</a>
      */
     OverflowsDebits((int) 33),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits">overflows_credits</a>
      */
     OverflowsCredits((int) 34),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout">overflows_timeout</a>
      */
     OverflowsTimeout((int) 35),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits">exceeds_credits</a>
      */
     ExceedsCredits((int) 36),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits">exceeds_debits</a>
      */
     ExceedsDebits((int) 37),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#cannot_post_and_void_pending_transfer
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#cannot_post_and_void_pending_transfer">cannot_post_and_void_pending_transfer</a>
      */
     CannotPostAndVoidPendingTransfer((int) 38),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_cannot_post_or_void_another
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_cannot_post_or_void_another">pending_transfer_cannot_post_or_void_another</a>
      */
     PendingTransferCannotPostOrVoidAnother((int) 39),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#timeout_reserved_for_pending_transfer
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#timeout_reserved_for_pending_transfer">timeout_reserved_for_pending_transfer</a>
      */
     TimeoutReservedForPendingTransfer((int) 40),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_zero">pending_id_must_not_be_zero</a>
      */
     PendingIdMustNotBeZero((int) 41),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_int_max
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_int_max">pending_id_must_not_be_int_max</a>
      */
     PendingIdMustNotBeIntMax((int) 42),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_different
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_different">pending_id_must_be_different</a>
      */
     PendingIdMustBeDifferent((int) 43),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_found
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_found">pending_transfer_not_found</a>
      */
     PendingTransferNotFound((int) 44),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_pending
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_pending">pending_transfer_not_pending</a>
      */
     PendingTransferNotPending((int) 45),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_debit_account_id
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_debit_account_id">pending_transfer_has_different_debit_account_id</a>
      */
     PendingTransferHasDifferentDebitAccountId((int) 46),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_credit_account_id
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_credit_account_id">pending_transfer_has_different_credit_account_id</a>
      */
     PendingTransferHasDifferentCreditAccountId((int) 47),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_ledger
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_ledger">pending_transfer_has_different_ledger</a>
      */
     PendingTransferHasDifferentLedger((int) 48),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_code
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_code">pending_transfer_has_different_code</a>
      */
     PendingTransferHasDifferentCode((int) 49),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_pending_transfer_amount
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_pending_transfer_amount">exceeds_pending_transfer_amount</a>
      */
     ExceedsPendingTransferAmount((int) 50),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_amount
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_amount">pending_transfer_has_different_amount</a>
      */
     PendingTransferHasDifferentAmount((int) 51),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_posted
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_posted">pending_transfer_already_posted</a>
      */
     PendingTransferAlreadyPosted((int) 52),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_voided
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_voided">pending_transfer_already_voided</a>
      */
     PendingTransferAlreadyVoided((int) 53),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_expired
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_expired">pending_transfer_expired</a>
      */
     PendingTransferExpired((int) 54);
 
     public final int value;
 
-    private CreateTransferResult(int value) {
+    CreateTransferResult(int value) {
         this.value = value;
     }
 

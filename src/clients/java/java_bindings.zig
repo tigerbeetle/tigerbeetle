@@ -161,7 +161,7 @@ fn emit_enum(
             try buffer.writer().print(
                 \\
                 \\    /**
-                \\     * @see https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}
+                \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
             , .{
@@ -185,7 +185,7 @@ fn emit_enum(
         \\
         \\    public final {[int_type]s} value;
         \\
-        \\    private {[name]s}({[int_type]s} value) {{
+        \\    {[name]s}({[int_type]s} value) {{
         \\        this.value = value;
         \\    }}
         \\
@@ -232,7 +232,7 @@ fn emit_packed_enum(
             try buffer.writer().print(
                 \\
                 \\    /**
-                \\     * @see https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}
+                \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
             , .{
@@ -398,7 +398,7 @@ fn emit_batch_accessors(
 
     if (mapping.docs_link) |docs_link| {
         try buffer.writer().print(
-            \\     * @see https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}
+            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
         , .{
@@ -457,7 +457,7 @@ fn emit_batch_accessors(
 
     if (mapping.docs_link) |docs_link| {
         try buffer.writer().print(
-            \\     * @see https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}
+            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
         , .{
@@ -531,7 +531,7 @@ fn emit_u128_batch_accessors(
 
     if (mapping.docs_link) |docs_link| {
         try buffer.writer().print(
-            \\     * @see https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}
+            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
         , .{
@@ -570,7 +570,7 @@ fn emit_u128_batch_accessors(
 
     if (mapping.docs_link) |docs_link| {
         try buffer.writer().print(
-            \\     * @see https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}
+            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
         , .{
@@ -609,7 +609,7 @@ fn emit_u128_batch_accessors(
 
     if (mapping.docs_link) |docs_link| {
         try buffer.writer().print(
-            \\     * @see https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}
+            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
         , .{
@@ -648,7 +648,7 @@ fn emit_u128_batch_accessors(
 
     if (mapping.docs_link) |docs_link| {
         try buffer.writer().print(
-            \\     * @see https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}
+            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
         , .{

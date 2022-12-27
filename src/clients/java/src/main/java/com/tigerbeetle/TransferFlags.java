@@ -9,22 +9,22 @@ public interface TransferFlags {
     int NONE = (int) 0;
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/transfers#flagslinked
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagslinked">linked</a>
      */
     int LINKED = (int) (1 << 0);
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/transfers#flagspending
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagspending">pending</a>
      */
     int PENDING = (int) (1 << 1);
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/transfers#flagspost_pending_transfer
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagspost_pending_transfer">post_pending_transfer</a>
      */
     int POST_PENDING_TRANSFER = (int) (1 << 2);
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/transfers#flagsvoid_pending_transfer
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsvoid_pending_transfer">void_pending_transfer</a>
      */
     int VOID_PENDING_TRANSFER = (int) (1 << 3);
 

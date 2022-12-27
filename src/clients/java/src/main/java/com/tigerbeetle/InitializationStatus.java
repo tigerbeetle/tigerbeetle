@@ -17,7 +17,7 @@ public enum InitializationStatus {
 
     public final int value;
 
-    private InitializationStatus(int value) {
+    InitializationStatus(int value) {
         this.value = value;
     }
 

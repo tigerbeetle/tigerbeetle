@@ -8,103 +8,103 @@ package com.tigerbeetle;
 public enum CreateAccountResult {
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#ok
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#ok">ok</a>
      */
     Ok((int) 0),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#linked_event_failed
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#linked_event_failed">linked_event_failed</a>
      */
     LinkedEventFailed((int) 1),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#linked_event_chain_open
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#linked_event_chain_open">linked_event_chain_open</a>
      */
     LinkedEventChainOpen((int) 2),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_flag
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_flag">reserved_flag</a>
      */
     ReservedFlag((int) 3),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_field
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_field">reserved_field</a>
      */
     ReservedField((int) 4),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#id_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#id_must_not_be_zero">id_must_not_be_zero</a>
      */
     IdMustNotBeZero((int) 5),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#id_must_not_be_int_max
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#id_must_not_be_int_max">id_must_not_be_int_max</a>
      */
     IdMustNotBeIntMax((int) 6),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#ledger_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#ledger_must_not_be_zero">ledger_must_not_be_zero</a>
      */
     LedgerMustNotBeZero((int) 7),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#code_must_not_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#code_must_not_be_zero">code_must_not_be_zero</a>
      */
     CodeMustNotBeZero((int) 8),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_pending_must_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_pending_must_be_zero">debits_pending_must_be_zero</a>
      */
     DebitsPendingMustBeZero((int) 9),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_posted_must_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_posted_must_be_zero">debits_posted_must_be_zero</a>
      */
     DebitsPostedMustBeZero((int) 10),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_pending_must_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_pending_must_be_zero">credits_pending_must_be_zero</a>
      */
     CreditsPendingMustBeZero((int) 11),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_posted_must_be_zero
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_posted_must_be_zero">credits_posted_must_be_zero</a>
      */
     CreditsPostedMustBeZero((int) 12),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#mutually_exclusive_flags
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#mutually_exclusive_flags">mutually_exclusive_flags</a>
      */
     MutuallyExclusiveFlags((int) 13),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_flags
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_flags">exists_with_different_flags</a>
      */
     ExistsWithDifferentFlags((int) 14),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data">exists_with_different_user_data</a>
      */
     ExistsWithDifferentUserData((int) 15),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_ledger
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_ledger">exists_with_different_ledger</a>
      */
     ExistsWithDifferentLedger((int) 16),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_code
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_code">exists_with_different_code</a>
      */
     ExistsWithDifferentCode((int) 17),
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/operations/create_accounts#exists
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#exists">exists</a>
      */
     Exists((int) 18);
 
     public final int value;
 
-    private CreateAccountResult(int value) {
+    CreateAccountResult(int value) {
         this.value = value;
     }
 

@@ -148,6 +148,37 @@ public class AccountTest {
         accounts.setCode(Integer.MAX_VALUE);
     }
 
+    public void testReserved() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        var reserved = new byte[48];
+        reserved[0] = 100;
+        reserved[47] = 101;
+        accounts.setReserved(reserved);
+        assertArrayEquals(reserved, accounts.getReserved());
+    }
+
+    @Test
+    public void testReservedNull() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        byte[] reserved = null;
+        accounts.setReserved(reserved);
+        assertArrayEquals(new byte[48], accounts.getReserved());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testReservedInvalid() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        var reserved = new byte[49];
+        accounts.setReserved(reserved);
+        assert false;
+    }
+
     @Test
     public void testFlags() {
         var accounts = new AccountBatch(1);

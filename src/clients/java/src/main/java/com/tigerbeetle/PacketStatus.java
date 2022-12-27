@@ -13,7 +13,7 @@ public enum PacketStatus {
 
     public final byte value;
 
-    private PacketStatus(byte value) {
+    PacketStatus(byte value) {
         this.value = value;
     }
 

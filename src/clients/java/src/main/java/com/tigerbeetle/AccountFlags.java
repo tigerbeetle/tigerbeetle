@@ -9,17 +9,17 @@ public interface AccountFlags {
     int NONE = (int) 0;
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/accounts#flagslinked
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts#flagslinked">linked</a>
      */
     int LINKED = (int) (1 << 0);
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/accounts#flagsdebits_must_not_exceed_credits
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts#flagsdebits_must_not_exceed_credits">debits_must_not_exceed_credits</a>
      */
     int DEBITS_MUST_NOT_EXCEED_CREDITS = (int) (1 << 1);
 
     /**
-     * @see https://docs.tigerbeetle.com/reference/accounts#flagscredits_must_not_exceed_debits
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts#flagscredits_must_not_exceed_debits">credits_must_not_exceed_debits</a>
      */
     int CREDITS_MUST_NOT_EXCEED_DEBITS = (int) (1 << 2);
 
