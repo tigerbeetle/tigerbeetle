@@ -36,29 +36,10 @@ const ClusterOptions = struct {
 
     network: NetworkOptions,
     storage: Storage.Options,
-    health: HealthOptions,
     state_machine: StateMachine.Options,
 };
 
-pub const HealthOptions = struct {
-    /// Probability per tick that a crash will occur.
-    crash_probability: f64,
-    /// Minimum duration of a crash.
-    crash_stability: u32,
-    /// Probability per tick that a crashed replica will recovery.
-    restart_probability: f64,
-    /// Minimum time a replica is up until it is crashed again.
-    restart_stability: u32,
-};
-
-pub const ReplicaHealth = union(enum) {
-    /// When >0, the replica cannot crash.
-    /// When =0, the replica may crash.
-    up: u32,
-    /// When >0, this is the ticks remaining until recovery is possible.
-    /// When =0, the replica may recover.
-    down: u32,
-};
+pub const ReplicaHealth = enum { up, down };
 
 /// Integer values represent exit codes.
 // TODO This doesn't really belong in Cluster, but it is needed here so that StateChecker failures
@@ -79,7 +60,7 @@ pub const Cluster = struct {
 
     allocator: mem.Allocator,
     options: ClusterOptions,
-    on_client_reply: fn(
+    on_client_reply: fn (
         cluster: *Cluster,
         client: usize,
         request: *Message,
@@ -104,7 +85,7 @@ pub const Cluster = struct {
     pub fn init(
         allocator: mem.Allocator,
         /// Includes command=register messages.
-        on_client_reply: fn(
+        on_client_reply: fn (
             cluster: *Cluster,
             client: usize,
             request: *Message,
@@ -117,10 +98,6 @@ pub const Cluster = struct {
         assert(options.client_count > 0);
         assert(options.storage_size_limit % constants.sector_size == 0);
         assert(options.storage_size_limit <= constants.storage_size_max);
-        assert(options.health.crash_probability < 1.0);
-        assert(options.health.crash_probability >= 0.0);
-        assert(options.health.restart_probability < 1.0);
-        assert(options.health.restart_probability >= 0.0);
 
         var prng = std.rand.DefaultPrng.init(options.seed);
         const random = prng.random();
@@ -155,7 +132,7 @@ pub const Cluster = struct {
 
         const replica_health = try allocator.alloc(ReplicaHealth, options.replica_count);
         errdefer allocator.free(replica_health);
-        mem.set(ReplicaHealth, replica_health, .{ .up = 0 });
+        mem.set(ReplicaHealth, replica_health, .up);
 
         var client_pools = try allocator.alloc(MessagePool, options.client_count);
         errdefer allocator.free(client_pools);
@@ -192,7 +169,7 @@ pub const Cluster = struct {
         errdefer storage_checker.deinit();
 
         var buffer: [constants.replicas_max]Storage.FaultyAreas = undefined;
-        const faulty_wal_areas = Storage.generate_faulty_wal_areas( // TODO
+        const faulty_wal_areas = Storage.generate_faulty_wal_areas(
             random,
             constants.journal_size_max,
             options.replica_count,
@@ -303,9 +280,7 @@ pub const Cluster = struct {
         assert(cluster.replica_health[replica_index] == .down);
 
         cluster.network.packet_simulator.fault_replica(replica_index, .enabled);
-        cluster.replica_health[replica_index] = .{
-            .up = cluster.options.health.restart_stability,
-        };
+        cluster.replica_health[replica_index] = .up;
     }
 
     /// Reset a replica to its initial state, simulating a random crash/panic.
@@ -400,7 +375,7 @@ pub const Cluster = struct {
             if (parent != 0) return false;
         }
 
-        cluster.replica_health[replica_index] = .{ .down = cluster.options.health.crash_stability };
+        cluster.replica_health[replica_index] = .down;
 
         // Reset the storage before the replica so that pending writes can (partially) finish.
         cluster.storages[replica_index].reset();
@@ -430,20 +405,10 @@ pub const Cluster = struct {
 
     /// Returns the number of replicas capable of helping a crashed node recover (i.e. with
     /// replica.status=normal).
-    pub fn replica_normal_count(cluster: *Cluster) u8 {
+    pub fn replica_normal_count(cluster: *const Cluster) u8 {
         var count: u8 = 0;
         for (cluster.replicas) |*replica| {
             if (replica.status == .normal) count += 1;
-        }
-        return count;
-    }
-
-    pub fn replica_up_count(cluster: *const Cluster) u8 {
-        var count: u8 = 0;
-        for (cluster.replica_health) |health| {
-            if (health == .up) {
-                count += 1;
-            }
         }
         return count;
     }
