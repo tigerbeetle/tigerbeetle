@@ -35,9 +35,9 @@ pub const ReplySequence = struct {
     /// The ReplySequence must reassemble them in the original order (ascending op/commit
     /// number) before handing them off to the Workload for verification.
     ///
-    /// `Conduction.stalled_queue` hold replies (and corresponding requests) that are
+    /// `ReplySequence.stalled_queue` hold replies (and corresponding requests) that are
     /// waiting to be processed.
-    const stalled_queue_capacity =
+    pub const stalled_queue_capacity =
         constants.clients_max * constants.client_request_queue_max * 2;
 
     message_pool: MessagePool,
