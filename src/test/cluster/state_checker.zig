@@ -5,12 +5,8 @@ const mem = std.mem;
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
 
-const Cluster = @import("../cluster.zig").Cluster;
-const Network = @import("../network.zig").Network;
-const Storage = @import("../storage.zig").Storage;
 const Client = @import("../cluster.zig").Client;
 const Replica = @import("../cluster.zig").Replica;
-
 const message_pool = @import("../../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;

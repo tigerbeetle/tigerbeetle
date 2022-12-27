@@ -3,19 +3,19 @@ const math = std.math;
 const mem = std.mem;
 const assert = std.debug.assert;
 
-const constants = @import("../constants.zig");
-const vsr = @import("../vsr.zig");
-const util = @import("../util.zig");
+const constants = @import("../../constants.zig");
+const vsr = @import("../../vsr.zig");
+const util = @import("../../util.zig");
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
+const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Process = @import("message_bus.zig").Process;
 
-const PacketSimulatorType = @import("packet_simulator.zig").PacketSimulatorType;
-const PacketSimulatorOptions = @import("packet_simulator.zig").PacketSimulatorOptions;
-const PacketSimulatorPath = @import("packet_simulator.zig").Path;
+const PacketSimulatorType = @import("../packet_simulator.zig").PacketSimulatorType;
+const PacketSimulatorOptions = @import("../packet_simulator.zig").PacketSimulatorOptions;
+const PacketSimulatorPath = @import("../packet_simulator.zig").Path;
 
 const log = std.log.scoped(.network);
 
