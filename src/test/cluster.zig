@@ -7,16 +7,16 @@ const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
-const Network = @import("network.zig").Network;
-const NetworkOptions = @import("network.zig").NetworkOptions;
-const IdPermutation = @import("id.zig").IdPermutation;
-
 pub const StateMachine = constants.StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
 });
-const MessageBus = @import("message_bus.zig").MessageBus;
 const Storage = @import("storage.zig").Storage;
 const Time = @import("time.zig").Time;
+const IdPermutation = @import("id.zig").IdPermutation;
+
+const MessageBus = @import("cluster/message_bus.zig").MessageBus;
+const Network = @import("cluster/network.zig").Network;
+const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
 const StateChecker = @import("cluster/state_checker.zig").StateChecker;
 const StorageChecker = @import("cluster/storage_checker.zig").StorageChecker;
 

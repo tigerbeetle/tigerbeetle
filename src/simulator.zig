@@ -15,7 +15,6 @@ const Replica = @import("test/cluster.zig").Replica;
 const StateMachine = @import("test/cluster.zig").StateMachine;
 const Failure = @import("test/cluster.zig").Failure;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
-const MessageBus = @import("test/message_bus.zig").MessageBus;
 const Conductor = @import("test/conductor.zig").Conductor;
 const IdPermutation = @import("test/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
