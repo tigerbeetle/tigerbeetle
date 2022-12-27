@@ -19,7 +19,7 @@ const log = std.log.scoped(.state_checker);
 
 pub const StateChecker = struct {
     /// Indexed by replica index.
-    replica_states: [constants.replicas_max]u128 = [_]u128{0} ** constants.replicas_max,
+    replica_states: [constants.replicas_max]u128,
 
     /// Keyed by committed `message.header.checksum`.
     ///
@@ -29,7 +29,6 @@ pub const StateChecker = struct {
 
     root: u128,
 
-    // TODO When StateChecker is owned by the Simulation, use @fieldParentPtr to get these.
     replicas: []const Replica,
     clients: []const Client,
 
@@ -45,26 +44,28 @@ pub const StateChecker = struct {
         replicas: []const Replica,
         clients: []const Client,
     ) !StateChecker {
+        const root_checksum = vsr.Header.root_prepare(cluster).checksum;
+        var replica_states: [constants.replicas_max]u128 = undefined;
+        for (replica_states) |*s| s.* = root_checksum;
+
         var history = StateTransitions.init(allocator);
         errdefer history.deinit();
+        try history.putNoClobber(root_checksum, 0);
 
-        const root_checksum = vsr.Header.root_prepare(cluster).checksum;
-
-        var state_checker = StateChecker{
+        return StateChecker{
+            .replica_states = replica_states,
             .history = history,
             .root = root_checksum,
             .replicas = replicas,
             .clients = clients,
         };
-        try state_checker.history.putNoClobber(root_checksum, state_checker.requests_committed);
-
-        return state_checker;
     }
 
     pub fn deinit(state_checker: *StateChecker) void {
         state_checker.history.deinit();
     }
 
+    // TODO Pass the Replica as a parameter
     pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
         const replica = &state_checker.replicas[replica_index];
         const commit_header = header: {
@@ -73,6 +74,7 @@ pub const StateChecker = struct {
                 assert(commit_header != null or replica.commit_min == replica.op_checkpoint);
                 break :header replica.journal.header_with_op(replica.commit_min);
             } else {
+                // TODO Remove this branch; we recover the journal "synchronously".
                 // Still recovering.
                 break :header null;
             }
