@@ -257,14 +257,14 @@ fn emit_packed_enum(
         if (comptime mapping.is_private(field.name)) continue;
 
         try buffer.writer().print(
-            \\    static boolean has{[flag_name]s}(final {[java_type]s} flags) {{
+            \\    static boolean has{[flag_name]s}(final {[int_type]s} flags) {{
             \\        return (flags & {[enum_name]s}) == {[enum_name]s};
             \\    }}
             \\
             \\
         , .{
             .flag_name = to_case(field.name, .pascal),
-            .java_type = int_type,
+            .int_type = int_type,
             .enum_name = to_case(field.name, .upper),
         });
     }
@@ -286,7 +286,6 @@ fn batch_type(comptime Type: type) []const u8 {
                 else => {},
             }
         },
-        .Array => return "Array",
         .Struct => |info| switch (info.layout) {
             .Packed => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => {},
@@ -415,7 +414,7 @@ fn emit_batch_accessors(
     if (comptime trait.is(.Array)(field.field_type)) {
         try buffer.writer().print(
             \\    {[visibility]s}byte[] get{[property]s}() {{
-            \\        return getArray(at(Struct.{[property]s}), {[array_len]});
+            \\        return getArray(at(Struct.{[property]s}), {[array_len]d});
             \\    }}
             \\
             \\
@@ -731,11 +730,9 @@ test "bindings java" {
         const ZigType = type_mapping[0];
         const mapping = type_mapping[1];
 
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer arena.deinit();
-        const allocator = arena.allocator();
+        var buffer = std.ArrayList(u8).init(testing.allocator);
+        defer buffer.deinit();
 
-        var buffer = std.ArrayList(u8).init(allocator);
         try generate_bindings(ZigType, mapping, &buffer);
 
         const current = try std.fs.cwd().readFileAlloc(
@@ -745,6 +742,6 @@ test "bindings java" {
         );
         defer testing.allocator.free(current);
 
-        try testing.expectEqualStrings(current, buffer.items);
+        try testing.expectEqualStrings(buffer.items, current);
     }
 }
