@@ -838,7 +838,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = Layout.offset_manifest(context.copy.?);
+            const offset = areas.manifest.offset(context.copy.?);
 
             mem.set(u8, buffer[superblock.staging.manifest_size..], 0); // Zero sector padding.
 
@@ -881,7 +881,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = Layout.offset_free_set(context.copy.?);
+            const offset = areas.free_set.offset(context.copy.?);
 
             mem.set(u8, buffer[superblock.staging.free_set_size..], 0); // Zero sector padding.
 
@@ -924,7 +924,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = Layout.offset_client_table(context.copy.?);
+            const offset = areas.client_table.offset(context.copy.?);
 
             mem.set(u8, buffer[superblock.staging.client_table_size..], 0); // Zero sector padding.
 
@@ -986,7 +986,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.valid_checksum());
 
             const buffer = mem.asBytes(superblock.staging);
-            const offset = Layout.offset_sector(context.copy.?);
+            const offset = areas.sector.offset(context.copy.?);
 
             log.debug("{}: {s}: write_sector: checksum={x} sequence={} copy={} size={} offset={}", .{
                 superblock.staging.replica,
@@ -1065,7 +1065,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.read_threshold != null);
 
             const buffer = mem.asBytes(&superblock.reading[context.copy.?]);
-            const offset = Layout.offset_sector(context.copy.?);
+            const offset = areas.sector.offset(context.copy.?);
 
             log.debug("{s}: read_sector: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1187,7 +1187,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = Layout.offset_manifest(context.copy.?);
+            const offset = areas.manifest.offset(context.copy.?);
 
             log.debug("{s}: read_manifest: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1254,7 +1254,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = Layout.offset_free_set(context.copy.?);
+            const offset = areas.free_set.offset(context.copy.?);
 
             log.debug("{s}: read_free_set: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1328,7 +1328,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = Layout.offset_client_table(context.copy.?);
+            const offset = areas.client_table.offset(context.copy.?);
 
             log.debug("{s}: read_client_table: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1497,26 +1497,42 @@ pub fn SuperBlockType(comptime Storage: type) type {
     };
 }
 
-pub const Layout = struct {
-    pub fn offset_sector(copy: u8) u64 {
-        assert(copy < constants.superblock_copies);
-        return superblock_copy_size * @as(u64, copy);
-    }
+pub const Area = enum {
+    sector,
+    manifest,
+    free_set,
+    client_table,
+};
 
-    pub fn offset_manifest(copy: u8) u64 {
-        assert(copy < constants.superblock_copies);
-        return offset_sector(copy) + @sizeOf(SuperBlockSector);
-    }
+pub const areas = struct {
+    pub const sector = AreaRange{
+        .base = 0,
+        .size_max = @sizeOf(SuperBlockSector),
+    };
 
-    pub fn offset_free_set(copy: u8) u64 {
-        assert(copy < constants.superblock_copies);
-        return offset_manifest(copy) + superblock_trailer_manifest_size_max;
-    }
+    pub const manifest = AreaRange{
+        .base = sector.base + sector.size_max,
+        .size_max = superblock_trailer_manifest_size_max, // TODO inline these constants?
+    };
 
-    pub fn offset_client_table(copy: u8) u64 {
-        assert(copy < constants.superblock_copies);
-        return offset_free_set(copy) + superblock_trailer_free_set_size_max;
-    }
+    pub const free_set = AreaRange{
+        .base = manifest.base + manifest.size_max,
+        .size_max = superblock_trailer_free_set_size_max,
+    };
+
+    pub const client_table = AreaRange{
+        .base = free_set.base + free_set.size_max,
+        .size_max = superblock_trailer_client_table_size_max,
+    };
+
+    const AreaRange = struct {
+        base: u64,
+        size_max: u64,
+
+        pub fn offset(area: AreaRange, copy: u8) u64 {
+            return superblock_copy_size * @as(u64, copy) + area.base;
+        }
+    };
 };
 
 test "SuperBlockSector" {

@@ -24,8 +24,8 @@ const log = std.log.scoped(.storage_checker);
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
-const SuperBlockLayout = @import("../../vsr/superblock.zig").Layout;
-const SuperBlockSector = @import("../../vsr/superblock.zig").SuperBlockSector;
+const superblock = @import("../../vsr/superblock.zig");
+const SuperBlockSector = superblock.SuperBlockSector;
 const Replica = @import("../cluster.zig").Replica;
 const Storage = @import("../storage.zig").Storage;
 
@@ -130,18 +130,13 @@ pub const StorageChecker = struct {
             .checksum_grid = checksum_grid(replica),
         };
 
-        inline for (.{
-            .{ .field = .manifest, .offset = SuperBlockLayout.offset_manifest },
-            .{ .field = .free_set, .offset = SuperBlockLayout.offset_free_set },
-            .{ .field = .client_table, .offset = SuperBlockLayout.offset_client_table },
-        }) |trailer| {
-            const trailer_size = @field(working, @tagName(trailer.field) ++ "_size");
-
+        inline for (.{ .manifest, .free_set, .client_table }) |trailer| {
+            const trailer_area = @field(superblock.areas, trailer);
+            const trailer_size = @field(working, @tagName(trailer) ++ "_size");
             var copy: u8 = 0;
             while (copy < constants.superblock_copies) : (copy += 1) {
-                const offset_in_storage = vsr.Zone.superblock.offset(trailer.offset(copy));
                 @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer.field)) |=
-                    vsr.checksum(storage.memory[offset_in_storage..][0..trailer_size]);
+                    vsr.checksum(storage.memory[trailer_area.offset(copy)..][0..trailer_size]);
             }
         }
 

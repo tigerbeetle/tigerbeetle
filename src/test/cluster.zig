@@ -11,6 +11,7 @@ pub const StateMachine = constants.StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
 });
 const Storage = @import("storage.zig").Storage;
+const StorageFaultAtlas = @import("storage.zig").ClusterFaultAtlas;
 const Time = @import("time.zig").Time;
 const IdPermutation = @import("id.zig").IdPermutation;
 
@@ -32,6 +33,7 @@ const ClusterOptions = struct {
     replica_count: u8,
     client_count: u8,
     storage_size_limit: u64,
+    storage_fault_atlas: StorageFaultAtlas.Options,
     seed: u64,
 
     network: NetworkOptions,
@@ -69,6 +71,7 @@ pub const Cluster = struct {
 
     network: *Network,
     storages: []Storage,
+    storage_fault_atlas: *StorageFaultAtlas,
     replicas: []Replica,
     replica_pools: []MessagePool,
     replica_health: []ReplicaHealth,
@@ -115,8 +118,28 @@ pub const Cluster = struct {
         );
         errdefer network.deinit();
 
+        // TODO(Zig) @returnAddress()
+        var storage_fault_atlas = try allocator.create(StorageFaultAtlas);
+        errdefer allocator.destroy(storage_fault_atlas);
+
+        storage_fault_atlas.* = StorageFaultAtlas.init(
+            options.replica_count,
+            random,
+            options.storage_fault_atlas,
+        );
+
         const storages = try allocator.alloc(Storage, options.replica_count);
         errdefer allocator.free(storages);
+
+        for (storages) |*storage, replica_index| {
+            var storage_options = options.storage;
+            storage_options.replica_index = @intCast(u8, replica_index);
+            storage_options.fault_atlas = storage_fault_atlas;
+            storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
+            // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
+            storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
+        }
+        errdefer for (storages) |*storage| storage.deinit(allocator);
 
         var replica_pools = try allocator.alloc(MessagePool, options.replica_count);
         errdefer allocator.free(replica_pools);
@@ -168,25 +191,6 @@ pub const Cluster = struct {
         var storage_checker = StorageChecker.init(allocator);
         errdefer storage_checker.deinit();
 
-        var buffer: [constants.replicas_max]Storage.FaultyAreas = undefined;
-        const faulty_wal_areas = Storage.generate_faulty_wal_areas(
-            random,
-            constants.journal_size_max,
-            options.replica_count,
-            &buffer,
-        );
-        assert(faulty_wal_areas.len == options.replica_count);
-
-        for (storages) |*storage, replica_index| {
-            var storage_options = options.storage;
-            storage_options.replica_index = @intCast(u8, replica_index);
-            storage_options.faulty_wal_areas = faulty_wal_areas[replica_index];
-            storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
-            // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
-            storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
-        }
-        errdefer for (storages) |*storage| storage.deinit(allocator);
-
         // Format each replica's storage (equivalent to "tigerbeetle format ...").
         for (storages) |*storage, replica_index| {
             var superblock = try SuperBlock.init(allocator, .{
@@ -217,6 +221,7 @@ pub const Cluster = struct {
             .on_client_reply = on_client_reply,
             .network = network,
             .storages = storages,
+            .storage_fault_atlas = storage_fault_atlas,
             .replicas = replicas,
             .replica_pools = replica_pools,
             .replica_health = replica_health,
@@ -256,6 +261,7 @@ pub const Cluster = struct {
         cluster.allocator.free(cluster.replica_health);
         cluster.allocator.free(cluster.replica_pools);
         cluster.allocator.free(cluster.storages);
+        cluster.allocator.destroy(cluster.storage_fault_atlas);
         cluster.allocator.destroy(cluster.network);
         cluster.allocator.destroy(cluster);
     }

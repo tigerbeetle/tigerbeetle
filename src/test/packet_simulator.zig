@@ -90,7 +90,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         const Link = struct {
             queue: std.PriorityQueue(LinkPacket, void, Self.order_packets),
-            /// When false, packets sent on the path are dropped.
+            /// When false, packets sent on the path are not delivered.
             enabled: bool = true,
             /// We can arbitrary clog a path until a tick.
             clogged_till: u64 = 0,
@@ -99,7 +99,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         /// A send and receive path between each node in the network.
         /// Indexed by path_index().
         links: []Link,
-        /// When false, all packets to the corresponding node are dropped.
+        /// When false, all packets to the corresponding node are not delivered.
         nodes: []bool,
 
         ticks: u64 = 0,

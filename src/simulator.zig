@@ -114,7 +114,11 @@ pub fn main() !void {
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
+        },
+        .storage_fault_atlas = .{
             .faulty_superblock = true,
+            .faulty_wal_headers = replica_count > 1,
+            .faulty_wal_prepares = replica_count > 1,
         },
         .state_machine = switch (constants.state_machine) {
             .testing => .{},
