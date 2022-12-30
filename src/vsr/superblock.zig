@@ -312,7 +312,7 @@ pub const superblock_trailer_size_max = blk: {
 
 // A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
 // These references are stored in struct-of-arrays layout in the trailer for the sake of alignment.
-pub const superblock_trailer_manifest_size_max = blk: {
+const superblock_trailer_manifest_size_max = blk: {
     assert(SuperBlockManifest.BlockReferenceSize == 16 + 16 + 8);
 
     // Use a multiple of sector * reference so that the size is exactly divisible without padding:
@@ -321,14 +321,14 @@ pub const superblock_trailer_manifest_size_max = blk: {
     break :blk 16 * constants.sector_size * SuperBlockManifest.BlockReferenceSize;
 };
 
-pub const superblock_trailer_free_set_size_max = blk: {
+const superblock_trailer_free_set_size_max = blk: {
     const encode_size_max = SuperBlockFreeSet.encode_size_max(block_count_max);
     assert(encode_size_max > 0);
 
     break :blk vsr.sector_ceil(encode_size_max);
 };
 
-pub const superblock_trailer_client_table_size_max = blk: {
+const superblock_trailer_client_table_size_max = blk: {
     const encode_size_max = SuperBlockClientTable.encode_size_max;
     assert(encode_size_max > 0);
 
