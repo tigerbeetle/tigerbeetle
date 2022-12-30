@@ -18,6 +18,7 @@ const constants = @import("../constants.zig");
 const util = @import("../util.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../test/storage.zig").Storage;
+const StorageFaultAtlas = @import("../test/storage.zig").ClusterFaultAtlas;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("superblock.zig").data_file_size_min;
@@ -44,7 +45,14 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
+    const storage_fault_atlas = StorageFaultAtlas.init(1, random, .{
+        .faulty_superblock = true,
+        .faulty_wal_headers = false,
+        .faulty_wal_prepares = false,
+    });
+
     const storage_options = .{
+        .replica_index = 0,
         .seed = random.int(u64),
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
         .read_latency_min = 1,
@@ -56,7 +64,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .read_fault_probability = 25 + random.uintLessThan(u8, 76),
         .write_fault_probability = 25 + random.uintLessThan(u8, 76),
         .crash_fault_probability = 50 + random.uintLessThan(u8, 51),
-        .faulty_superblock = true,
+        .fault_atlas = &storage_fault_atlas,
     };
 
     var storage = try Storage.init(allocator, superblock_zone_size, storage_options);
