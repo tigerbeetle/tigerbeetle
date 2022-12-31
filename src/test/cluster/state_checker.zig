@@ -63,22 +63,14 @@ pub const StateChecker = struct {
 
     pub fn deinit(state_checker: *StateChecker) void {
         state_checker.history.deinit();
+        state_checker.commits.deinit();
     }
 
     // TODO Pass the Replica as a parameter
     pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
         const replica = &state_checker.replicas[replica_index];
-        const commit_header = header: {
-            if (replica.journal.status == .recovered) {
-                const commit_header = replica.journal.header_with_op(replica.commit_min);
-                assert(commit_header != null or replica.commit_min == replica.op_checkpoint);
-                break :header replica.journal.header_with_op(replica.commit_min);
-            } else {
-                // TODO Remove this branch; we recover the journal "synchronously".
-                // Still recovering.
-                break :header null;
-            }
-        };
+        const commit_header = replica.journal.header_with_op(replica.commit_min);
+        assert(commit_header != null or replica.commit_min == replica.op_checkpoint);
 
         const a = state_checker.replica_states[replica_index];
         const b = if (commit_header) |h| h.checksum else state_checker.root;
