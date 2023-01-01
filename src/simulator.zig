@@ -85,25 +85,23 @@ pub fn main() !void {
         ),
         .seed = random.int(u64),
         .network = .{
-            .packet_simulator = .{
-                .replica_count = replica_count,
-                .client_count = client_count,
+            .replica_count = replica_count,
+            .client_count = client_count,
 
-                .seed = random.int(u64),
-                .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
-                .one_way_delay_min = random.uintLessThan(u16, 3),
-                .packet_loss_probability = random.uintLessThan(u8, 30),
-                .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
-                .path_clog_duration_mean = random.uintLessThan(u16, 500),
-                .path_clog_probability = random.uintLessThan(u8, 2),
-                .packet_replay_probability = random.uintLessThan(u8, 50),
+            .seed = random.int(u64),
+            .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
+            .one_way_delay_min = random.uintLessThan(u16, 3),
+            .packet_loss_probability = random.uintLessThan(u8, 30),
+            .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
+            .path_clog_duration_mean = random.uintLessThan(u16, 500),
+            .path_clog_probability = random.uintLessThan(u8, 2),
+            .packet_replay_probability = random.uintLessThan(u8, 50),
 
-                .partition_mode = random_partition_mode(random),
-                .partition_probability = random.uintLessThan(u8, 3),
-                .unpartition_probability = 1 + random.uintLessThan(u8, 10),
-                .partition_stability = 100 + random.uintLessThan(u32, 100),
-                .unpartition_stability = random.uintLessThan(u32, 20),
-            },
+            .partition_mode = random_partition_mode(random),
+            .partition_probability = random.uintLessThan(u8, 3),
+            .unpartition_probability = 1 + random.uintLessThan(u8, 10),
+            .partition_stability = 100 + random.uintLessThan(u32, 100),
+            .unpartition_stability = random.uintLessThan(u32, 20),
         },
         .storage = .{
             .seed = random.int(u64),
@@ -189,18 +187,18 @@ pub fn main() !void {
         simulator_options.request_probability,
         simulator_options.request_idle_on_probability,
         simulator_options.request_idle_off_probability,
-        cluster_options.network.packet_simulator.one_way_delay_mean,
-        cluster_options.network.packet_simulator.one_way_delay_min,
-        cluster_options.network.packet_simulator.packet_loss_probability,
-        cluster_options.network.packet_simulator.path_maximum_capacity,
-        cluster_options.network.packet_simulator.path_clog_duration_mean,
-        cluster_options.network.packet_simulator.path_clog_probability,
-        cluster_options.network.packet_simulator.packet_replay_probability,
-        cluster_options.network.packet_simulator.partition_mode,
-        cluster_options.network.packet_simulator.partition_probability,
-        cluster_options.network.packet_simulator.unpartition_probability,
-        cluster_options.network.packet_simulator.partition_stability,
-        cluster_options.network.packet_simulator.unpartition_stability,
+        cluster_options.network.one_way_delay_mean,
+        cluster_options.network.one_way_delay_min,
+        cluster_options.network.packet_loss_probability,
+        cluster_options.network.path_maximum_capacity,
+        cluster_options.network.path_clog_duration_mean,
+        cluster_options.network.path_clog_probability,
+        cluster_options.network.packet_replay_probability,
+        cluster_options.network.partition_mode,
+        cluster_options.network.partition_probability,
+        cluster_options.network.unpartition_probability,
+        cluster_options.network.partition_stability,
+        cluster_options.network.unpartition_stability,
         cluster_options.storage.read_latency_min,
         cluster_options.storage.read_latency_mean,
         cluster_options.storage.write_latency_min,
@@ -450,7 +448,7 @@ pub const Simulator = struct {
             var replica_normal_min = if (simulator.options.cluster.replica_count == 1)
                 0
             else
-                simulator.cluster.replicas[0].quorum_view_change;
+                vsr.quorums(simulator.options.cluster.replica_count).view_change;
             break :blk simulator.cluster.replica_normal_count() -| replica_normal_min;
         };
 
