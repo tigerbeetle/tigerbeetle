@@ -101,6 +101,8 @@ pub const Cluster = struct {
         assert(options.client_count > 0);
         assert(options.storage_size_limit % constants.sector_size == 0);
         assert(options.storage_size_limit <= constants.storage_size_max);
+        assert(options.storage.replica_index == null);
+        assert(options.storage.fault_atlas == null);
 
         var prng = std.rand.DefaultPrng.init(options.seed);
         const random = prng.random();
