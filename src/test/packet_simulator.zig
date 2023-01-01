@@ -169,14 +169,22 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             allocator.free(self.auto_partition_replicas);
         }
 
-        pub fn fault_reset(self: *Self) void {
-            for (self.links) |*link| link.enabled = true;
+        pub fn fault_reset(self: *Self, enabled: enum { enabled, disabled }) void {
+            for (self.nodes) |*node| node.* = enabled == .enabled;
+            for (self.links) |*link| link.enabled = enabled == .enabled;
         }
 
         pub fn fault_replica(self: *Self, replica: u8, enabled: enum { enabled, disabled }) void {
             assert(replica < self.options.replica_count);
-
             self.nodes[replica] = enabled == .enabled;
+        }
+
+        pub fn fault_client(self: *Self, client: u8, enabled: enum { enabled, disabled }) void {
+            self.nodes[self.options.replica_count + client] = enabled == .enabled;
+        }
+
+        pub fn fault_path(self: *Self, path: Path, enabled: enum { enabled, disabled }) void {
+            self.links[self.path_index(path)].enabled = enabled == .enabled;
         }
 
         fn order_packets(context: void, a: LinkPacket, b: LinkPacket) math.Order {
