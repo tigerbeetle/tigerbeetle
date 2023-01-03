@@ -62,7 +62,6 @@ pub const StateChecker = struct {
         state_checker.commits.deinit();
     }
 
-    // TODO Pass the Replica as a parameter
     pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
         const replica = &state_checker.replicas[replica_index];
 
@@ -151,11 +150,18 @@ pub const StateChecker = struct {
             if (b != a) {
                 return false;
             }
-        } else {
-            for (state_checker.commits.items) |commit| {
-                assert(commit.replicas.count() == state_checker.replica_count);
-            }
-            return true;
         }
+
+        for (state_checker.commits.items) |commit, i| {
+            assert(commit.replicas.count() == state_checker.replica_count);
+            assert(commit.header.command == .prepare);
+            assert(commit.header.op == i);
+            if (i > 0) {
+                const previous = state_checker.commits.items[i - 1].header;
+                assert(commit.header.parent == previous.header.checksum);
+                assert(commit.header.view >= previous.header.view);
+            }
+        }
+        return true;
     }
 };
