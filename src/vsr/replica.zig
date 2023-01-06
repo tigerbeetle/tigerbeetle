@@ -1205,8 +1205,28 @@ pub fn ReplicaType(
         /// For each DVC in the quorum:
         ///
         /// * The headers must all belong to the same hash chain. (Gaps are allowed).
-        ///   (Reason: the headers bundled with the DVC(s) with the highest log_view will be
-        ///   loaded into the new primary with `replace_header()`, not `repair_header()`).
+        ///   - Reason: The headers bundled with the DVC(s) with the highest log_view will be
+        ///     loaded into the new primary with `replace_header()`, not `repair_header()`.
+        ///   - For example,
+        ///     - a DVC of 6a,8a,9a is valid
+        ///     - a DVC of 6b,8a,9a is invalid.
+        ///     - a DVC of 6b,7b,8a,9a is invalid.
+        ///
+        /// * The headers must connect to the cluster's committed ops (the "DVC anchor").
+        ///   This means that either:
+        ///   - the DVC includes the op=C header, or
+        ///   - the DVC includes the op=C+1 header (where C+1's parent is C).
+        ///   (Where `C = "DVC anchor" = max(replica.commit_min, replica.op + 1 -| pipeline_max)`).
+        ///   - Reason: The new primary may truncate the entire pipeline (6-9) due to a gap (6),
+        ///     but afterwards it still requires a head op to repair/chain backward from.
+        ///     (According to the intersection property, a gap in the pipeline indicates an
+        ///     uncommitted op).
+        ///   - For example, given pipeline_max=4:
+        ///     - a DVC of 7,8,9 is invalid if replica.commit_min=5.
+        ///     - a DVC of 7,8,9 is valid if replica.commit_min=6.
+        ///     - a DVC of 5,7,8,9 is valid. (5,_,7,8,9)
+        ///     - a DVC of 5,9 is valid.     (5,_,_,_,9)
+        ///     - a DVC of 0,1,2 is valid.
         ///
         /// Across all DVCs in the quorum:
         ///
@@ -3030,12 +3050,33 @@ pub fn ReplicaType(
             assert(self.client_table().count() <= constants.clients_max);
         }
 
+        /// Construct a SV/DVC message, including attached headers from the current log_view.
+        ///
+        /// - SVs are sent after the new primary has finished repair, so it always sends a chain of
+        ///   consequentive headers.
+        /// - DVCs must guard against sending a hash chain break in their headers, which would
+        ///   violate the "canonical headers" invariant. Consider the following sequence of events:
+        ///   1. The initializing primary loads all canonical headers.
+        ///   2. The initializing primary has a gap in its new pipeline, so it truncates the log
+        ///      after the gap.
+        ///   3. Suppose the initializing primary's log prior to the pipeline has a hash break.
+        ///      The initializing primary will begin to repair it, but another view change may
+        ///      occur before this completes. This replica (formerly the initializing primary)
+        ///      must be careful to not share the hash chain break in its DVC — only include the
+        ///      unbroken suffix of the log.
+        ///
+        ///        has gaps?  has breaks?
+        ///    SV      never        never
+        ///   DVC      maybe        never
+        ///
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_view_change_message(self: *Self, command: Command) *Message {
             assert(command == .do_view_change or command == .start_view);
 
             // We may send a start_view message in normal status to resolve a backup's view jump:
             assert(self.status == .normal or self.status == .view_change);
+            assert((self.status == .normal) == (command == .start_view));
+            assert((self.status == .view_change) == (command == .do_view_change));
 
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
@@ -3055,20 +3096,109 @@ pub fn ReplicaType(
                 .commit = if (command == .do_view_change) self.commit_min else self.commit_max,
             };
 
-            // DVCs must guard against sending a hash chain break in their headers, which would
-            // violate the "canonical headers" invariant. Consider the following sequence of events:
-            //
-            // 1. The initializing primary loads all canonical headers.
-            // 2. The initializing primary has a gap in its new pipeline, so it truncates the log
-            //    after the gap.
-            // 3. Suppose the initializing primary's log prior to the pipeline has a hash break.
-            //    The initializing primary will begin to repair it, but another view change may
-            //    occur before this completes. This replica (formerly the initializing primary)
-            //    must be careful to not share the hash chain break in its DVC — only include the
-            //    unbroken suffix of the log.
-            const op_max_broken = self.journal.find_latest_headers_break_before(self.op);
-            const op_min_unbroken = if (op_max_broken) |op| op + 1 else 0;
+            // The DVC anchor: Within the "suffix" (all ops following the anchor) we have additional
+            // guarantees about the state of the log headers, which allow us to tolerate certain
+            // gaps (by locally guaranteeing that the gap does not hide a break).
+            const op_dvc_anchor = std.math.max(
+                self.commit_min,
+                // +1: We can have a full pipeline, but not yet have performed any repair.
+                // In such a case, we want to send those pipeline_max headers in the DVC, but not
+                // the preceding op (which may belong to a different chain).
+                // This satisfies the DVC invariant because the first op in the pipeline is
+                // "connected" to the canonical chain.
+                //
+                // For example, as a follower, we might have received pipeline_max headers in the SV
+                // message, but not done any repair yet.
+                1 + self.op -| constants.pipeline_max,
+            );
+
+            // How many headers should we send in the DVC?
+            // - The DVC "The headers must connect to the cluster's committed ops." must be upheld.
+            // - The headers may contains gaps.
+            // - The headers may not contain breaks.
+            const op_suffix_min = op_min: {
+                var op: u64 = self.op;
+
+                if (command == .start_view) {
+                    // The primary starting a new view has a pristine log suffix — no gaps or breaks.
+                    while (op > self.commit_min) : (op -= 1) {
+                        const header_next = self.journal.header_with_op(op).?;
+                        const header_prev = self.journal.header_with_op(op - 1).?;
+                        assert(header_prev.checksum == header_next.parent);
+                    }
+                    break :op_min op;
+                } else if (self.primary_index(self.log_view) == self.replica) {
+                    assert(command == .do_view_change);
+                    // The replica was a primary during its latest log_view, so it may have gaps or
+                    // breaks in its log suffix iff:
+                    // - it didn't finish repairs before the next view change, and
+                    // - some uncommitted ops were truncated during the DVC (since this "moves" the
+                    //   suffix backwards).
+                    //
+                    // However, even though we may not have a full unbroken suffix of pipeline_max
+                    // ops, we know that our unbroken suffix includes all possibly-committed ops,
+                    // since otherwise the latest log_view would not have started.
+                    while (op > op_dvc_anchor) : (op -= 1) {
+                        const header_next = self.journal.header_with_op(op).?;
+                        // Exclude gaps since we cannot distinguish the gap from a break.
+                        const header_prev = self.journal.header_with_op(op - 1) orelse break;
+                        if (header_prev.checksum != header_next.parent) break;
+                    }
+                    break :op_min op;
+                } else {
+                    assert(command == .do_view_change);
+                    // The replica was a follower during its latest log_view.
+                    // Followers always load a full suffix of headers from the view's SV message.
+                    // So if there is now a gap in it the follower's suffix, this must be due to
+                    // missed prepares.
+                    //
+                    // Therefore, ops to the left of the gap (within the suffix) are part of the
+                    // suffix's hash chain.
+                    //
+                    // For example, consider a view change with DVCs (pipeline_max=3):
+                    //
+                    //   replica   headers                       log_view
+                    //         0   1 [2  3  4b]                  4     (new primary)
+                    //         1   1  2  3  4a  5  6 [   8  9]   5     (old follower, incorrect!)
+                    //         2  (1  2  3  4a  5  6  7  8  9)   5     (old primary, partitioned)
+                    //
+                    // This could cause a fork from 4a→4b. Instead replica 1 must include op 6 in
+                    // its DVC.
+                    var op_exists = op;
+                    while (op > op_dvc_anchor) : (op -= 1) {
+                        const header_next = self.journal.header_with_op(op) orelse continue;
+                        const header_prev = self.journal.header_with_op(op - 1) orelse continue;
+                        assert(header_prev.checksum == header_next.parent);
+                        op_exists = op;
+                    }
+                    break :op_min op_exists;
+                }
+            };
+            assert(op_suffix_min >= op_dvc_anchor or command == .start_view);
+            assert(op_suffix_min >= self.commit_min);
+            assert(op_suffix_min <= self.op);
+            assert(self.journal.header_with_op(op_suffix_min) != null);
+
+            // Include as many extra headers as possible, but with no additional gaps (since they
+            // cannot be differentiated from breaks).
+            // - This reduces the number of headers that the new primary will need to repair.
+            // - More importantly, this ensures that a replica which re-sends its DVC does not
+            //   alter the DVC's headers, even if the replica finished a commit (updating
+            //   commit_min, possibly modifying the suffix anchor) in the mean time.
+            //   (This is not required for correctness, but enables additional verification
+            //   in on_do_view_change().)
+            const op_min_unbroken = op_min: {
+                var op = op_suffix_min;
+                while (op > 0) : (op -= 1) {
+                    const header_next = self.journal.header_with_op(op).?;
+                    const header_prev = self.journal.header_with_op(op - 1) orelse break;
+                    if (header_prev.checksum != header_next.parent) break;
+                }
+                break :op_min op;
+            };
             assert(op_min_unbroken <= self.op);
+            assert(op_min_unbroken <= op_suffix_min);
+            assert(self.journal.header_with_op(op_min_unbroken) != null);
 
             const count = self.copy_latest_headers_and_set_size(
                 op_min_unbroken,
