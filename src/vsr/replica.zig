@@ -3268,35 +3268,22 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.log_view <= log_view_canonical);
 
-            if (self.log_view == log_view_canonical) return self.op;
+            if (self.log_view == log_view_canonical) {
+                return self.op;
+            } else {
+                const op_canonical_max = std.math.max(
+                    // Do not reset any ops that we have already committed.
+                    self.commit_min,
+                    // The number of uncommitted ops cannot be more than the length of the pipeline.
+                    // Do not reset any ops that we did not include in our do_view_change message.
+                    self.op -| constants.pipeline_max,
+                );
+                assert(op_canonical_max <= self.op);
+                assert(op_canonical_max >= self.commit_min);
+                assert(op_canonical_max + constants.pipeline_max >= self.op);
 
-            const uncanonical_op_count = std.math.min(
-                // Do not reset any ops that we have already committed.
-                self.op - self.commit_min,
-                // The number of uncommitted ops cannot be more than the length of the pipeline.
-                // Do not reset any ops that we did not include in our do_view_change message.
-                constants.pipeline_max,
-            );
-
-            assert(uncanonical_op_count <= constants.pipeline_max);
-            if (uncanonical_op_count == 0) return self.op;
-
-            // * When uncanonical_op_count = self.op - self.commit_min,
-            //   self.op - uncanonical_op_count = self.commit_min.
-            // * When uncanonical_op_count = constants.pipeline_max,
-            //   constants.pipeline_max < self.op - self.commit_min holds.
-            const canonical_op_max = self.op - uncanonical_op_count;
-
-            log.debug("{}: on_do_view_change: not canonical ops={}..{}", .{
-                self.replica,
-                canonical_op_max + 1,
-                self.op,
-            });
-
-            assert(canonical_op_max <= self.op);
-            assert(canonical_op_max >= self.commit_min);
-            assert(canonical_op_max + constants.pipeline_max >= self.op);
-            return canonical_op_max;
+                return op_canonical_max;
+            }
         }
 
         /// Discards uncommitted ops during a view change from after and including `op`.
@@ -5389,6 +5376,14 @@ pub fn ReplicaType(
             assert(op_canonical_primary <= self.op);
             assert(op_canonical_primary >= self.op -| constants.pipeline_max);
             assert(op_canonical_primary >= self.commit_min);
+
+            if (op_canonical_primary < self.op) {
+                log.debug("{}: on_do_view_change: not canonical ops={}..{}", .{
+                    self.replica,
+                    op_canonical_primary + 1,
+                    self.op,
+                });
+            }
 
             if (do_view_change_op_head > self.op_checkpoint_trigger()) {
                 // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
