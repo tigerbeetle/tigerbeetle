@@ -558,8 +558,7 @@ fn emit_u128_batch_accessors(
     // Get long:
     try buffer.writer().print(
         \\    /**
-        \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value is to be
-        \\     *        retrieved.
+        \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value is to be retrieved.
         \\     * @return a {{@code long}} representing the the first 8 bytes of the 128-bit value if
         \\     *         {{@link UInt128#LeastSignificant}} is informed, or the last 8 bytes if
         \\     *         {{@link UInt128#MostSignificant}}.
@@ -637,8 +636,7 @@ fn emit_u128_batch_accessors(
     // Set long:
     try buffer.writer().print(
         \\    /**
-        \\     * @param leastSignificant a {{@code long}} representing the the first 8 bytes of the 128-bit
-        \\     *        value.
+        \\     * @param leastSignificant a {{@code long}} representing the the first 8 bytes of the 128-bit value.
         \\     * @param mostSignificant a {{@code long}} representing the the last 8 bytes of the 128-bit value.
         \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
         \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
