@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 
 const log = std.log.scoped(.packet_simulator);
-const ReplicaHealth = @import("./cluster.zig").ReplicaHealth;
+const vsr = @import("../vsr.zig");
 
 pub const PacketSimulatorOptions = struct {
     replica_count: u8,
@@ -66,18 +66,6 @@ pub const PartitionMode = enum {
     isolate_single,
 };
 
-/// A fully connected network of nodes used for testing. Simulates the fault model:
-/// Packets may be dropped.
-/// Packets may be delayed.
-/// Packets may be replayed.
-pub const PacketStatistics = enum(u8) {
-    dropped_due_to_partition,
-    dropped_due_to_congestion,
-    dropped_due_to_node_down,
-    dropped,
-    replay,
-};
-
 pub fn PacketSimulatorType(comptime Packet: type) type {
     return struct {
         const Self = @This();
@@ -96,17 +84,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             clogged_till: u64 = 0,
         };
 
+        options: PacketSimulatorOptions,
+        prng: std.rand.DefaultPrng,
+        ticks: u64 = 0,
+
         /// A send and receive path between each node in the network.
         /// Indexed by path_index().
         links: []Link,
-        /// When false, all packets to the corresponding node are not delivered.
-        nodes: []bool,
-
-        ticks: u64 = 0,
-        options: PacketSimulatorOptions,
-        prng: std.rand.DefaultPrng,
-        stats: [@typeInfo(PacketStatistics).Enum.fields.len]u32 = [_]u32{0} **
-            @typeInfo(PacketStatistics).Enum.fields.len,
 
         /// Scratch space for automatically generating partitions.
         /// The "source of truth" for partitions is links[*].enabled.
@@ -120,10 +104,6 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             assert(options.one_way_delay_mean >= options.one_way_delay_min);
 
             const node_count_ = options.replica_count + options.client_count;
-            const nodes = try allocator.alloc(bool, @as(usize, node_count_));
-            errdefer allocator.free(nodes);
-            std.mem.set(bool, nodes, true);
-
             const links = try allocator.alloc(Link, @as(usize, node_count_) * node_count_);
             errdefer allocator.free(links);
 
@@ -145,10 +125,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             for (auto_partition_replicas) |*replica, i| replica.* = @intCast(u8, i);
 
             return Self{
-                .links = links,
-                .nodes = nodes,
                 .options = options,
                 .prng = std.rand.DefaultPrng.init(options.seed),
+                .links = links,
 
                 .auto_partition_active = false,
                 .auto_partition = auto_partition,
@@ -164,27 +143,8 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
 
             allocator.free(self.links);
-            allocator.free(self.nodes);
             allocator.free(self.auto_partition);
             allocator.free(self.auto_partition_replicas);
-        }
-
-        pub fn fault_reset(self: *Self, enabled: enum { enabled, disabled }) void {
-            for (self.nodes) |*node| node.* = enabled == .enabled;
-            for (self.links) |*link| link.enabled = enabled == .enabled;
-        }
-
-        pub fn fault_replica(self: *Self, replica: u8, enabled: enum { enabled, disabled }) void {
-            assert(replica < self.options.replica_count);
-            self.nodes[replica] = enabled == .enabled;
-        }
-
-        pub fn fault_client(self: *Self, client: u8, enabled: enum { enabled, disabled }) void {
-            self.nodes[self.options.replica_count + client] = enabled == .enabled;
-        }
-
-        pub fn fault_path(self: *Self, path: Path, enabled: enum { enabled, disabled }) void {
-            self.links[self.path_index(path)].enabled = enabled == .enabled;
         }
 
         fn order_packets(context: void, a: LinkPacket, b: LinkPacket) math.Order {
@@ -335,27 +295,14 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         if (link_packet.expiry > self.ticks) break;
                         _ = queue.remove();
 
-                        //if (self.partition_active and
-                        //    self.replicas_are_in_different_partitions(from, to))
                         if (!self.links[self.path_index(path)].enabled) {
-                            self.stats[@enumToInt(PacketStatistics.dropped_due_to_partition)] += 1;
                             log.warn("dropped packet (different partitions): from={} to={}", .{ from, to });
                             link_packet.packet.deinit();
                             continue;
                         }
 
                         if (self.should_drop()) {
-                            self.stats[@enumToInt(PacketStatistics.dropped)] += 1;
-                            log.warn("dropped packet from={} to={}.", .{ from, to });
-                            link_packet.packet.deinit();
-                            continue;
-                        }
-
-                        // TODO
-                        //if (to < self.options.replica_count and !self.nodes_up[to]) {
-                        if (!self.nodes[to]) {
-                            self.stats[@enumToInt(PacketStatistics.dropped_due_to_node_down)] += 1;
-                            log.warn("dropped packet (destination is down): from={} to={}", .{ from, to });
+                            log.warn("dropped packet from={} to={}", .{ from, to });
                             link_packet.packet.deinit();
                             continue;
                         }
@@ -364,7 +311,6 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                             self.submit_packet(link_packet.packet, link_packet.callback, path);
 
                             log.debug("replayed packet from={} to={}", .{ from, to });
-                            self.stats[@enumToInt(PacketStatistics.replay)] += 1;
 
                             link_packet.callback(link_packet.packet, path);
                         } else {

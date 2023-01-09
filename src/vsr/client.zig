@@ -86,7 +86,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         on_reply_context: ?*anyopaque = null,
         /// Used for testing. Called for replies to all operations (including `register`).
-        /// user_data is null for register messages.
         on_reply_callback: ?fn (
             client: *Self,
             request: *Message,

@@ -26,10 +26,6 @@ pub const Network = struct {
         network: *Network,
         message: *Message,
 
-        pub fn command(packet: *const Packet) vsr.Command {
-            return packet.message.header.command;
-        }
-
         pub fn deinit(packet: *const Packet) void {
             packet.network.message_pool.unref(packet.message);
         }
@@ -55,6 +51,7 @@ pub const Network = struct {
     //       network: *Network,
     //       ^
     buses: std.ArrayListUnmanaged(*MessageBus),
+    buses_enabled: std.ArrayListUnmanaged(bool),
     processes: std.ArrayListUnmanaged(u128),
     /// A pool of messages that are in the network (sent, but not yet delivered).
     message_pool: MessagePool,
@@ -70,6 +67,9 @@ pub const Network = struct {
 
         var buses = try std.ArrayListUnmanaged(*MessageBus).initCapacity(allocator, process_count);
         errdefer buses.deinit(allocator);
+
+        var buses_enabled = try std.ArrayListUnmanaged(bool).initCapacity(allocator, process_count);
+        errdefer buses_enabled.deinit(allocator);
 
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
         errdefer processes.deinit(allocator);
@@ -97,6 +97,7 @@ pub const Network = struct {
             .options = options,
             .packet_simulator = packet_simulator,
             .buses = buses,
+            .buses_enabled = buses_enabled,
             .processes = processes,
             .message_pool = message_pool,
         };
@@ -104,6 +105,7 @@ pub const Network = struct {
 
     pub fn deinit(network: *Network) void {
         network.buses.deinit(network.allocator);
+        network.buses_enabled.deinit(network.allocator);
         network.processes.deinit(network.allocator);
         network.packet_simulator.deinit(network.allocator);
         network.message_pool.deinit(network.allocator);
@@ -130,8 +132,17 @@ pub const Network = struct {
         } else {
             network.processes.appendAssumeCapacity(raw_process);
             network.buses.appendAssumeCapacity(message_bus);
+            network.buses_enabled.appendAssumeCapacity(true);
         }
         assert(network.processes.items.len == network.buses.items.len);
+    }
+
+    pub fn process_enable(network: *Network, process: Process) void {
+        network.buses_enabled.items[network.process_to_address(process)] = true;
+    }
+
+    pub fn process_disable(network: *Network, process: Process) void {
+        network.buses_enabled.items[network.process_to_address(process)] = false;
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {
@@ -159,7 +170,7 @@ pub const Network = struct {
         );
     }
 
-    fn process_to_address(network: *Network, process: Process) u8 {
+    fn process_to_address(network: *const Network, process: Process) u8 {
         for (network.processes.items) |p, i| {
             if (std.meta.eql(raw_process_to_process(p), process)) return @intCast(u8, i);
         }
@@ -172,6 +183,15 @@ pub const Network = struct {
 
     fn deliver_message(packet: Packet, path: PacketSimulatorPath) void {
         const network = packet.network;
+
+        if (!network.buses_enabled.items[path.target]) {
+            log.debug("deliver_message: {} > {}: {} (dropped; target is down)", .{
+                path.source,
+                path.target,
+                packet.message.header.command,
+            });
+            return;
+        }
 
         const target_bus = network.buses.items[path.target];
         const target_message = target_bus.get_message();
