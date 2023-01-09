@@ -27,7 +27,7 @@ var accounts = new[] {
     },     
 };
 
-var errors = await client.CreateAccounts(accounts);
+var errors = client.CreateAccounts(accounts);
 ```
 
 Successfully executed events return an empty array whilst unsuccessful ones return an array with errors for only the ones that failed. An error will point to the index in the submitted array of the failed event.
@@ -49,7 +49,7 @@ transfers = new[] {
     },
 }
 
-var errors = await client.CreateTransfers(accounts);
+var errors = await client.CreateTransfersAsync(accounts);
 ```
 
 ## Build from source
@@ -58,7 +58,7 @@ var errors = await client.CreateTransfers(accounts);
 
 [dotnet 6](https://dotnet.microsoft.com/en-us/download)
 
-> Dotnet 6 is needed only to build and run the tests, this library can be used from any [.Net Standard 2.1 compatible runtime](https://docs.microsoft.com/en-us/dotnet/standard/net-standard) (.Net Framework 4.8, .Net Core, Xamarin, etc)
+> Dotnet 6 is needed only to build and run the tests, this library can be used from any [.Net Standard 2.1 compatible runtime](https://docs.microsoft.com/en-us/dotnet/standard/net-standard) (.Net Core, Xamarin, etc)
 > For Windows users, there is a `.sln` solution file that can be opened with `Microsoft Visual Studio 2022`.
 
 ### 1. Clone this repository
@@ -87,15 +87,15 @@ cd tigerbeetle
 **Linux and macOS**
 
 ```bash
-cd src/clients/dotnet/src 
-dotnet test
+cd src/clients/dotnet
+dotnet build
 ```
 
 **Windows**
 
 ```cmd
-cd src\clients\dotnet\src 
-dotnet test
+cd src\clients\dotnet
+dotnet build
 ```
 
 ## License
