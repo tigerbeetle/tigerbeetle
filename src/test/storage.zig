@@ -183,7 +183,6 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
-        assert(storage.next_tick_queue.empty());
         allocator.free(storage.memory);
         storage.memory_written.deinit(allocator);
         storage.faults.deinit(allocator);
@@ -206,6 +205,7 @@ pub const Storage = struct {
         assert(storage.writes.len == 0);
 
         storage.reads.len = 0;
+        storage.next_tick_queue = .{};
     }
 
     /// Returns the number of bytes that have been written to, assuming that (the simulated)
@@ -473,15 +473,6 @@ pub const Storage = struct {
         assert(block_header.size <= constants.block_size);
 
         return storage.memory[block_offset..][0..constants.block_size];
-    }
-
-    pub fn fault_reset(storage: *Storage) void {
-        while (storage.faults.toggleFirstSet() != null) {}
-    }
-
-    pub fn fault_area(storage: *Storage, area: Area) void {
-        var sectors = area.sectors();
-        while (sectors.next()) |sector| storage.fault_sector(sector);
     }
 };
 

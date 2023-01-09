@@ -287,7 +287,7 @@ pub const Cluster = struct {
     pub fn restart_replica(cluster: *Cluster, replica_index: u8) void {
         assert(cluster.replica_health[replica_index] == .down);
 
-        cluster.network.packet_simulator.fault_replica(replica_index, .enabled);
+        cluster.network.process_enable(.{ .replica = replica_index });
         cluster.replica_health[replica_index] = .up;
     }
 
@@ -389,7 +389,7 @@ pub const Cluster = struct {
         cluster.storages[replica_index].reset();
         const replica_time = replica.time;
         replica.deinit(cluster.allocator);
-        cluster.network.packet_simulator.fault_replica(replica_index, .disabled);
+        cluster.network.process_disable(.{ .replica = replica_index });
 
         // Ensure that none of the replica's messages leaked when it was deinitialized.
         var messages_in_pool: usize = 0;

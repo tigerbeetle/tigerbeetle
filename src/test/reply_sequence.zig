@@ -98,7 +98,7 @@ pub const ReplySequence = struct {
         assert(reply_message.header.operation == request_message.header.operation);
 
         sequence.stalled_queue.add(.{
-            .client_index = client_index, // TODO don't include this???
+            .client_index = client_index,
             .request = sequence.clone_message(request_message),
             .reply = sequence.clone_message(reply_message),
         }) catch unreachable;

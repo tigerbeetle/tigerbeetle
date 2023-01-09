@@ -29,7 +29,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 results: Error![]const u8,
             ) void;
             user_data: u128,
-            callback: Callback, // TODO nullable (null when .register)
+            callback: Callback,
             message: *Message,
         };
 
@@ -85,7 +85,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         on_reply_context: ?*anyopaque = null,
         /// Used for testing. Called for replies to all operations (including `register`).
-        /// user_data is null for register messages.
         on_reply_callback: ?fn (
             client: *Self,
             request: *Message,
@@ -210,7 +209,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             };
 
             assert(self.request_number > 0);
-            self.request_number += 1; // TODO should this be after the request_queue.full() check?
+            self.request_number += 1;
 
             log.debug("{}: request: user_data={} request={} size={} {s}", .{
                 self.id,
