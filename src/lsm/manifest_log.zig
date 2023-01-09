@@ -404,14 +404,14 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 return;
             }
 
-            const block = manifest_log.blocks.head().?;
-            verify_block(block, null, null);
+            const block = manifest_log.blocks.head_ptr().?;
+            verify_block(block.*, null, null);
 
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            const address = Block.address(block);
+            const header = mem.bytesAsValue(vsr.Header, block.*[0..@sizeOf(vsr.Header)]);
+            const address = Block.address(block.*);
             assert(address > 0);
 
-            const entry_count = Block.entry_count(block);
+            const entry_count = Block.entry_count(block.*);
 
             if (manifest_log.blocks_closed == 1 and manifest_log.blocks.count == 1) {
                 // This might be the last block of a checkpoint, which can be a partial block.

@@ -61,7 +61,7 @@ pub fn CompactionType(
         const BlockPtrConst = Grid.BlockPtrConst;
         const BlockWrite = struct {
             write: Grid.Write = undefined,
-            block: BlockPtr = undefined,
+            block: *BlockPtr = undefined,
             writable: bool = false,
         };
 
@@ -358,7 +358,7 @@ pub fn CompactionType(
                     write_callback,
                     &block_write.write,
                     block_write.block,
-                    Table.block_address(block_write.block),
+                    Table.block_address(block_write.block.*),
                 );
             }
         }
@@ -469,7 +469,7 @@ pub fn CompactionType(
                 });
 
                 // Mark the finished data block as writable for the next compact_tick() call.
-                compaction.data.block = compaction.table_builder.data_block;
+                compaction.data.block = &compaction.table_builder.data_block;
                 assert(!compaction.data.writable);
                 compaction.data.writable = true;
             }
@@ -486,7 +486,7 @@ pub fn CompactionType(
                 });
 
                 // Mark the finished filter block as writable for the next compact_tick() call.
-                compaction.filter.block = compaction.table_builder.filter_block;
+                compaction.filter.block = &compaction.table_builder.filter_block;
                 assert(!compaction.filter.writable);
                 compaction.filter.writable = true;
             }
@@ -506,7 +506,7 @@ pub fn CompactionType(
                 compaction.manifest.insert_table(compaction.level_b, &table);
 
                 // Mark the finished index block as writable for the next compact_tick() call.
-                compaction.index.block = compaction.table_builder.index_block;
+                compaction.index.block = &compaction.table_builder.index_block;
                 assert(!compaction.index.writable);
                 compaction.index.writable = true;
 
