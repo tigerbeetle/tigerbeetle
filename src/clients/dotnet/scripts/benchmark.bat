@@ -46,7 +46,7 @@ timeout /t 2
 
 echo.
 echo Benchmarking...
-cd .\src\TigerBeetle.Benchmarks
+cd .\TigerBeetle.Benchmarks
 dotnet run -c Release
 cd ..\..
 exit /b %errorlevel%

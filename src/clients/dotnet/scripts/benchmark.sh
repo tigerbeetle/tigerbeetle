@@ -53,7 +53,7 @@ sleep 1
 
 echo ""
 echo "Benchmarking..."
-(cd src/TigerBeetle.Benchmarks && dotnet run -c Release)
+(cd TigerBeetle.Benchmarks && dotnet run -c Release)
 echo ""
 
 for I in 0
