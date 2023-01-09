@@ -1,3 +1,7 @@
+//! Constants are the configuration that the code actually imports — they include:
+//! - all of the configuration values (flattened)
+//! - derived configuration values,
+
 const std = @import("std");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");

@@ -634,11 +634,6 @@ const ClockSimulator = struct {
         t1: ?i64,
         clock_simulator: *ClockSimulator,
 
-        pub fn command(packet: *const Packet) Command {
-            _ = packet;
-            return .prepare;
-        }
-
         /// PacketSimulator requires this function, but we don't actually have anything to deinit.
         pub fn deinit(packet: *const Packet) void {
             _ = packet;

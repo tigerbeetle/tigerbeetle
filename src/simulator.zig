@@ -34,8 +34,6 @@ pub const log_level: std.log.Level = if (log_state_transitions_only) .info else 
 
 const cluster_id = 0;
 
-// TODO run a simulator unit test
-
 pub fn main() !void {
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
     log_buffer.unbuffered_writer = std.io.getStdErr().writer();
@@ -256,7 +254,7 @@ pub const Simulator = struct {
 
     /// Protect a replica from fast successive crash/restarts.
     replica_stability: []usize,
-    reply_sequence: ReplySequence, // "ReplySequence"
+    reply_sequence: ReplySequence,
 
     /// Total number of requests sent, including those that have not been delivered.
     /// Does not include `register` messages.

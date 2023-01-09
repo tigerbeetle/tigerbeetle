@@ -158,8 +158,8 @@ pub const StateChecker = struct {
             assert(commit.header.op == i);
             if (i > 0) {
                 const previous = state_checker.commits.items[i - 1].header;
-                assert(commit.header.parent == previous.header.checksum);
-                assert(commit.header.view >= previous.header.view);
+                assert(commit.header.parent == previous.checksum);
+                assert(commit.header.view >= previous.view);
             }
         }
         return true;
