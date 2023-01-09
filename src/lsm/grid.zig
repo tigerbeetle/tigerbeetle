@@ -44,60 +44,11 @@ pub fn GridType(comptime Storage: type) type {
     const block_size = constants.block_size;
     const SuperBlock = SuperBlockType(Storage);
 
-    const cache_interface = struct {
-        inline fn address_from_block(block: *const [block_size]u8) u64 {
-            const header_bytes = block[0..@sizeOf(vsr.Header)];
-            const header = mem.bytesAsValue(vsr.Header, header_bytes);
-            const address = header.op;
-            assert(address > 0);
-            return address;
-        }
-
-        inline fn set_address(block: *[block_size]u8, address: u64) void {
-            const header = mem.toBytes(vsr.Header{
-                .op = address,
-                .cluster = undefined,
-                .command = undefined,
-            });
-            const header_bytes = block[0..@sizeOf(vsr.Header)];
-            header_bytes.* = header;
-        }
-
-        inline fn hash_address(address: u64) u64 {
-            assert(address > 0);
-            return std.hash.Wyhash.hash(0, mem.asBytes(&address));
-        }
-
-        inline fn equal_addresses(a: u64, b: u64) bool {
-            return a == b;
-        }
-    };
-
-    const set_associative_cache_ways = 16;
-    const Cache = SetAssociativeCache(
-        u64,
-        [block_size]u8,
-        cache_interface.address_from_block,
-        cache_interface.hash_address,
-        cache_interface.equal_addresses,
-        .{
-            .ways = set_associative_cache_ways,
-            .value_alignment = constants.sector_size,
-        },
-    );
-
     return struct {
         const Grid = @This();
 
-        pub const read_iops_max = 15;
-        comptime {
-            // This + 1 ensures that it is always possible for writes to add the written block
-            // to the cache on completion, even if the maximum number of concurrent reads are in
-            // progress and have locked all but one way in the target set.
-            assert(read_iops_max + 1 <= set_associative_cache_ways);
-        }
-
-        // TODO put more thought into how low/high this limit should be.
+        // TODO put more thought into how low/high these limits should be.
+        pub const read_iops_max = 16;
         pub const write_iops_max = 16;
 
         pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
@@ -110,7 +61,7 @@ pub fn GridType(comptime Storage: type) type {
         pub const Write = struct {
             callback: fn (*Grid.Write) void,
             address: u64,
-            block: BlockPtrConst,
+            block: *BlockPtr,
 
             /// Link for the Grid.write_queue linked list.
             next: ?*Write = null,
@@ -146,15 +97,48 @@ pub fn GridType(comptime Storage: type) type {
         const ReadIOP = struct {
             completion: Storage.Read,
             read: *Read,
-            block: BlockPtr,
         };
 
+        const cache_interface = struct {
+            inline fn address_from_address(address: *const u64) u64 {
+                return address.*;
+            }
+
+            inline fn hash_address(address: u64) u64 {
+                assert(address > 0);
+                return std.hash.Wyhash.hash(0, mem.asBytes(&address));
+            }
+
+            inline fn equal_addresses(a: u64, b: u64) bool {
+                return a == b;
+            }
+        };
+
+        const set_associative_cache_ways = 16;
+
+        const Cache = SetAssociativeCache(
+            u64,
+            u64,
+            cache_interface.address_from_address,
+            cache_interface.hash_address,
+            cache_interface.equal_addresses,
+            .{
+                .ways = set_associative_cache_ways,
+                .value_alignment = @alignOf(u64),
+            },
+        );
+
         superblock: *SuperBlock,
+
+        // Each entry in cache has a corresponding block.
+        cache_blocks: []BlockPtr,
         cache: Cache,
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_queue: FIFO(Write) = .{},
 
+        // Each read_iops has a corresponding block.
+        read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
         read_queue: FIFO(Read) = .{},
 
@@ -168,19 +152,47 @@ pub fn GridType(comptime Storage: type) type {
         pub fn init(allocator: mem.Allocator, superblock: *SuperBlock) !Grid {
             // TODO Determine this at runtime based on runtime configured maximum
             // memory usage of tigerbeetle.
-            const blocks_in_cache = 2048;
+            const cache_blocks_count = 2048;
 
-            var cache = try Cache.init(allocator, blocks_in_cache);
+            const cache_blocks = try allocator.alloc(BlockPtr, cache_blocks_count);
+            errdefer allocator.free(cache_blocks);
+
+            for (cache_blocks) |*cache_block, i| {
+                errdefer for (cache_blocks[0..i]) |block| allocator.free(block);
+                cache_block.* = try alloc_block(allocator);
+            }
+
+            var cache = try Cache.init(allocator, cache_blocks_count);
             errdefer cache.deinit(allocator);
+
+            var read_iop_blocks: [read_iops_max]BlockPtr = undefined;
+
+            for (&read_iop_blocks) |*read_iop_block, i| {
+                errdefer for (read_iop_blocks[0..i]) |block| allocator.free(block);
+                read_iop_block.* = try alloc_block(allocator);
+            }
 
             return Grid{
                 .superblock = superblock,
+                .cache_blocks = cache_blocks,
                 .cache = cache,
+                .read_iop_blocks = read_iop_blocks,
             };
         }
 
+        pub fn alloc_block(allocator: mem.Allocator) !BlockPtr {
+            const block = try allocator.alignedAlloc(u8, constants.sector_size, block_size);
+            return block[0..block_size];
+        }
+
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
+            for (&grid.read_iop_blocks) |block| allocator.free(block);
+
             grid.cache.deinit(allocator);
+
+            for (grid.cache_blocks) |block| allocator.free(block);
+            allocator.free(grid.cache_blocks);
+
             grid.* = undefined;
         }
 
@@ -233,14 +245,14 @@ pub fn GridType(comptime Storage: type) type {
                 var it = grid.write_queue.peek();
                 while (it) |queued_write| : (it = queued_write.next) {
                     assert(address != queued_write.address);
-                    assert(block != queued_write.block);
+                    assert(block != queued_write.block.*);
                 }
             }
             {
                 var it = grid.write_iops.iterate();
                 while (it.next()) |iop| {
                     assert(address != iop.write.address);
-                    assert(block != iop.write.block);
+                    assert(block != iop.write.block.*);
                 }
             }
         }
@@ -262,21 +274,23 @@ pub fn GridType(comptime Storage: type) type {
                 var it = grid.read_iops.iterate();
                 while (it.next()) |iop| {
                     assert(address != iop.read.address);
-                    assert(block != iop.block);
+                    const iop_block = grid.read_iop_blocks[grid.read_iops.index(iop)];
+                    assert(block != iop_block);
                 }
             }
         }
 
+        /// NOTE: This will consume `block` and replace it with a fresh block.
         pub fn write_block(
             grid: *Grid,
             callback: fn (*Grid.Write) void,
             write: *Grid.Write,
-            block: BlockPtrConst,
+            block: *BlockPtr,
             address: u64,
         ) void {
             assert(address > 0);
-            grid.assert_not_writing(address, block);
-            grid.assert_not_reading(address, block);
+            grid.assert_not_writing(address, block.*);
+            grid.assert_not_reading(address, block.*);
 
             assert(grid.superblock.opened);
             assert(!grid.superblock.free_set.is_free(address));
@@ -305,7 +319,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.superblock.storage.write_sectors(
                 write_block_callback,
                 &iop.completion,
-                write.block,
+                write.block.*,
                 .grid,
                 block_offset(write.address),
             );
@@ -322,13 +336,13 @@ pub fn GridType(comptime Storage: type) type {
             // We can only update the cache if the Grid is not resolving callbacks with a cache block.
             assert(!grid.read_resolving);
 
-            const cached_block = grid.cache.insert_preserve_locked(
-                *Grid,
-                block_locked,
-                grid,
-                completed_write.address,
-            );
-            util.copy_disjoint(.exact, u8, cached_block, completed_write.block);
+            // Insert the write block into the cache, and give the evicted block to the writer.
+            const cache_index = grid.cache.insert_index(&completed_write.address);
+            const cache_block = &grid.cache_blocks[cache_index];
+            std.mem.swap(BlockPtr, cache_block, completed_write.block);
+            if (constants.verify) {
+                std.mem.set(u8, completed_write.block.*, undefined);
+            }
 
             // Start a queued write if possible *before* calling the completed
             // write's callback. This ensures that if the callback calls
@@ -399,9 +413,10 @@ pub fn GridType(comptime Storage: type) type {
             const grid = read.grid;
 
             // Try to resolve the read from the cache.
-            if (grid.cache.get(read.address)) |block| {
-                if (constants.verify) grid.verify_cached_read(read.address, block);
-                grid.read_block_resolve(read, block);
+            if (grid.cache.get_index(read.address)) |cache_index| {
+                const cache_block = grid.cache_blocks[cache_index];
+                if (constants.verify) grid.verify_cached_read(read.address, cache_block);
+                grid.read_block_resolve(read, cache_block);
                 return;
             }
 
@@ -422,50 +437,34 @@ pub fn GridType(comptime Storage: type) type {
             // We can only update the cache if the Grid is not resolving callbacks with a cache block.
             assert(!grid.read_resolving);
 
-            // Grab a block from the cache to read with.
-            // This also inserts the block into the cache at the address.
-            const block = grid.cache.insert_preserve_locked(
-                *Grid,
-                block_locked,
-                grid,
-                address,
-            );
-
-            // `block` will be initialized later when the read completes.
-            // This is safe because as long as `read` is in `grid.read_queue` or `grid.read_recovery_queue`
-            // we will never attempt to read from or overwrite this cache entry.
-            // However, we do have to immediately set the cache key to uphold the
-            // invariants of `SetAssociativeCache`.
-            cache_interface.set_address(block, address);
-
             iop.* = .{
                 .completion = undefined,
                 .read = read,
-                .block = block,
             };
+            const iop_block = grid.read_iop_blocks[grid.read_iops.index(iop)];
 
             grid.superblock.storage.read_sectors(
                 read_block_callback,
                 &iop.completion,
-                block,
+                iop_block,
                 .grid,
                 block_offset(address),
             );
         }
 
-        inline fn block_locked(grid: *Grid, block: BlockPtrConst) bool {
-            var it = grid.read_iops.iterate();
-            while (it.next()) |iop| {
-                if (block == iop.block) return true;
-            }
-            return false;
-        }
-
         fn read_block_callback(completion: *Storage.Read) void {
             const iop = @fieldParentPtr(ReadIOP, "completion", completion);
-            const block = iop.block;
             const read = iop.read;
             const grid = read.grid;
+            const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
+
+            // Insert the block into the cache, and give the evicted block to `iop`.
+            const cache_index = grid.cache.insert_index(&read.address);
+            const cache_block = &grid.cache_blocks[cache_index];
+            std.mem.swap(BlockPtr, iop_block, cache_block);
+            if (constants.verify) {
+                std.mem.set(u8, iop_block.*, undefined);
+            }
 
             // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {
@@ -476,8 +475,8 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // A valid block filled by storage means the reads for the address can be resolved
-            if (read_block_valid(read, block)) {
-                grid.read_block_resolve(read, block);
+            if (read_block_valid(read, cache_block.*)) {
+                grid.read_block_resolve(read, cache_block.*);
                 return;
             }
 
@@ -536,17 +535,17 @@ pub fn GridType(comptime Storage: type) type {
                 grid.read_resolving = false;
             }
 
+            // Remove the "root" read so that the address is no longer actively reading / locked.
+            grid.read_queue.remove(read);
+
             // Resolve all reads queued to the address with the block.
-            // Callbacks may queue more to read.resolves so it must drain any new/existing pendings.
             while (read.resolves.pop()) |pending| {
                 const pending_read = @fieldParentPtr(Read, "pending", pending);
                 pending_read.callback(pending_read, block);
             }
 
-            // Remove the "root" read so that the address is no longer actively reading / locked.
             // Then invoke the callback with the cache block (which should be valid for the duration
             // of the callback as any nested Grid calls cannot synchronously update the cache).
-            grid.read_queue.remove(read);
             read.callback(read, block);
         }
 
