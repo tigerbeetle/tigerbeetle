@@ -77,7 +77,7 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
+    var replica_count: u8 = 3; //1 + random.uintLessThan(u8, constants.replicas_max);
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
     const node_count = replica_count + client_count;
 

@@ -3950,6 +3950,7 @@ pub fn ReplicaType(
 
             // Request any missing or disconnected headers:
             // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
+            // TODO use commit_min_checksum?
             var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
             if (broken) |range| {
                 log.debug("{}: repair: break: view={} op_min={} op_max={} (commit={}..{} op={})", .{
