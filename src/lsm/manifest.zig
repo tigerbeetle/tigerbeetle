@@ -531,7 +531,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     .ascending,
                     KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
                 );
-                if (it.next() == null) {
+                if (it.next() != null) {
                     // If the range is being compacted into the last level then this is unreachable,
                     // as the last level has no subsequent levels and must always drop tombstones.
                     assert(level_b != constants.lsm_levels - 1);
