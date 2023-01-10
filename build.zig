@@ -134,6 +134,21 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests.addIncludeDir("src/clients/c/");
 
         const test_step = b.step("test", "Run the unit tests");
+
+        // Test that our demos compile, but don't run them.
+        inline for (.{
+            "demo_01_create_accounts",
+            "demo_02_lookup_accounts",
+            "demo_03_create_transfers",
+            "demo_04_create_pending_transfers",
+            "demo_05_post_pending_transfers",
+            "demo_06_void_pending_transfers",
+            "demo_07_lookup_transfers",
+        }) |demo| {
+            const demo_exe = b.addExecutable(demo, "src/demos/" ++ demo ++ ".zig");
+            demo_exe.addPackage(vsr_package);
+            test_step.dependOn(&demo_exe.step);
+        }
         test_step.dependOn(&unit_tests.step);
     }
 
