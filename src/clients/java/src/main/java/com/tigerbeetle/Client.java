@@ -23,7 +23,7 @@ public final class Client implements AutoCloseable {
      * @param maxConcurrency
      *
      * @throws InitializationException if an error occurred initializing this client. See
-     *         {@link InitializationException.Status} for more details.
+     *         {@link InitializationStatus} for more details.
      *
      * @throws IllegalArgumentException if {@code clusterID} is negative.
      * @throws IllegalArgumentException if {@code replicaAddresses} is empty or presented in
@@ -65,7 +65,7 @@ public final class Client implements AutoCloseable {
      * @param replicaAddresses
      *
      * @throws InitializationException if an error occurred initializing this client. See
-     *         {@link InitializationException.Status} for more details.
+     *         {@link InitializationStatus} for more details.
      *
      * @throws IllegalArgumentException if {@code clusterID} is negative.
      * @throws IllegalArgumentException if {@code replicaAddresses} is empty or presented in
@@ -93,8 +93,7 @@ public final class Client implements AutoCloseable {
      *        created.
      * @return a read-only {@link com.tigerbeetle.CreateAccountResultBatch batch} describing the
      *         result.
-     * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
-     *         details.
+     * @throws RequestException refer to {@link PacketStatus} for more details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
@@ -129,8 +128,7 @@ public final class Client implements AutoCloseable {
      *
      * @param batch an {@link com.tigerbeetle.IdBatch batch} containing all account ids.
      * @return a read-only {@link com.tigerbeetle.AccountBatch batch} containing all accounts found.
-     * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
-     *         details.
+     * @throws RequestException refer to {@link PacketStatus} for more details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
@@ -164,8 +162,7 @@ public final class Client implements AutoCloseable {
      *        created.
      * @return a read-only {@link com.tigerbeetle.CreateTransferResultBatch batch} describing the
      *         result.
-     * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
-     *         details.
+     * @throws RequestException refer to {@link PacketStatus} for more details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
@@ -200,8 +197,7 @@ public final class Client implements AutoCloseable {
      * @param batch a {@link com.tigerbeetle.IdBatch batch} containing all transfer ids.
      * @return a read-only {@link com.tigerbeetle.TransferBatch batch} containing all transfers
      *         found.
-     * @throws RequestException refer to {@link com.tigerbeetle.RequestException.Status} for more
-     *         details.
+     * @throws RequestException refer to {@link PacketStatus} for more details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.

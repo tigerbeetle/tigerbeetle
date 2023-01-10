@@ -93,6 +93,7 @@ public class IntegrationTest {
         }
     }
 
+    @Test
     public void testConstructorReplicaAddressesLimitExceeded() throws Throwable {
         var replicaAddresses = new String[100];
         for (int i = 0; i < replicaAddresses.length; i++)
@@ -101,28 +102,30 @@ public class IntegrationTest {
         try (var client = new Client(0, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
-            assertEquals(InitializationException.Status.ADDRESS_LIMIT_EXCEEDED,
+            assertEquals(InitializationStatus.AddressLimitExceeded.value,
                     initializationException.getStatus());
         }
     }
 
+    @Test
     public void testConstructorEmptyStringReplicaAddresses() throws Throwable {
         var replicaAddresses = new String[] {"", "", ""};
         try (var client = new Client(0, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
-            assertEquals(InitializationException.Status.ADDRESS_INVALID,
+            assertEquals(InitializationStatus.AddressInvalid.value,
                     initializationException.getStatus());
         }
     }
 
+    @Test
     public void testConstructorInvalidReplicaAddresses() throws Throwable {
 
         var replicaAddresses = new String[] {"127.0.0.1:99999"};
         try (var client = new Client(0, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
-            assertEquals(InitializationException.Status.ADDRESS_INVALID,
+            assertEquals(InitializationStatus.AddressInvalid.value,
                     initializationException.getStatus());
         }
     }
@@ -796,8 +799,7 @@ public class IntegrationTest {
                     assert false;
                 } catch (RequestException requestException) {
 
-                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
-                            requestException.getStatus());
+                    assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
 
                 }
 
@@ -840,8 +842,7 @@ public class IntegrationTest {
                     assertTrue(executionException.getCause() instanceof RequestException);
 
                     var requestException = (RequestException) executionException.getCause();
-                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
-                            requestException.getStatus());
+                    assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
 
                 }
 
@@ -878,8 +879,7 @@ public class IntegrationTest {
                     assert false;
                 } catch (RequestException requestException) {
 
-                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
-                            requestException.getStatus());
+                    assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
 
                 }
 
@@ -925,8 +925,7 @@ public class IntegrationTest {
                     assertTrue(executionException.getCause() instanceof RequestException);
 
                     var requestException = (RequestException) executionException.getCause();
-                    assertEquals(RequestException.Status.TOO_MUCH_DATA,
-                            requestException.getStatus());
+                    assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
 
                 }
 
@@ -938,7 +937,6 @@ public class IntegrationTest {
             throw any;
         }
     }
-
 
     /**
      * This test asserts that parallel threads will respect client's maxConcurrency.
@@ -1266,7 +1264,4 @@ public class IntegrationTest {
             }
         }
     }
-
-
-
 }

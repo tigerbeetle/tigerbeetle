@@ -49,13 +49,15 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getId());
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] id = null;
         transfers.setId(id);
+
+        assertArrayEquals(new byte[16], transfers.getId());
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -88,13 +90,15 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getDebitAccountId());
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testDebitAccountIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] debitAccountId = null;
         transfers.setDebitAccountId(debitAccountId);
+
+        assertArrayEquals(new byte[16], transfers.getDebitAccountId());
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -127,13 +131,15 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getCreditAccountId());
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testCreditAccountIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
         byte[] creditAccountId = null;
         transfers.setCreditAccountId(creditAccountId);
+
+        assertArrayEquals(new byte[16], transfers.getCreditAccountId());
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -184,6 +190,47 @@ public class TransferTest {
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         transfers.setUserData(id);
+        assert false;
+    }
+
+    @Test
+    public void testReserved() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setReserved(100, 200);
+        assertEquals(100L, transfers.getReserved(UInt128.LeastSignificant));
+        assertEquals(200L, transfers.getReserved(UInt128.MostSignificant));
+    }
+
+    @Test
+    public void testReservedAsBytes() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        var reserved = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
+        transfers.setReserved(reserved);
+        assertArrayEquals(reserved, transfers.getReserved());
+    }
+
+    @Test
+    public void testReservedNull() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        byte[] reserved = null;
+        transfers.setReserved(reserved);
+        assertEquals(0L, transfers.getReserved(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getReserved(UInt128.MostSignificant));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testReservedInvalid() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
+        transfers.setReserved(id);
         assert false;
     }
 
@@ -350,5 +397,4 @@ public class TransferTest {
         transfers.setTimestamp(1234567890);
         assertEquals((long) 1234567890, transfers.getTimestamp());
     }
-
 }

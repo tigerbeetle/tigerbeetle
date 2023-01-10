@@ -31,7 +31,6 @@ public class RequestMemcpyTest {
         assert false;
     }
 
-
     @Test
     public void testMemcpy() {
         var buffer = ByteBuffer.allocateDirect(4);
@@ -46,5 +45,4 @@ public class RequestMemcpyTest {
         buffer.putInt(0, 99);
         assertNotEquals(buffer.getInt(0), copy.getInt(0));
     }
-
 }

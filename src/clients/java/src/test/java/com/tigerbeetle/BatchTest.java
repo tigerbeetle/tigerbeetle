@@ -909,7 +909,6 @@ public class BatchTest {
         dummyCreateTransfersResultsStream.putInt(0).putInt(0); // Item 0 - OK
         dummyCreateTransfersResultsStream.putInt(1).putInt(37); // Item 1 - ExceedsDebits
 
-
         id1 = new byte[] {10, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0};
         id1LeastSignificant = 10;
         id1MostSignificant = 100;
@@ -921,9 +920,5 @@ public class BatchTest {
         dummyIdsStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
         dummyIdsStream.putLong(10).putLong(100); // Item (10,100)
         dummyIdsStream.putLong(2).putLong(20); // Item (2,20)
-
-
     }
-
-
 }
