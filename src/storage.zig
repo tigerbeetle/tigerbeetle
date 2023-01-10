@@ -7,7 +7,6 @@ const log = std.log.scoped(.storage);
 const IO = @import("io.zig").IO;
 const FIFO = @import("fifo.zig").FIFO;
 const constants = @import("constants.zig");
-const fatal = @import("cli.zig").fatal;
 const vsr = @import("vsr.zig");
 
 pub const Storage = struct {
