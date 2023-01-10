@@ -6,7 +6,6 @@ const constants = @import("constants.zig");
 const log = std.log;
 pub const log_level: std.log.Level = .err;
 
-const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
 
 const util = @import("util.zig");

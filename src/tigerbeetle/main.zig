@@ -7,29 +7,30 @@ const os = std.os;
 const log_main = std.log.scoped(.main);
 
 const build_options = @import("tigerbeetle_build_options");
-const constants = @import("constants.zig");
-const config = @import("config.zig").configs.current;
-const tracer = @import("tracer.zig");
+
+const vsr = @import("vsr");
+const constants = vsr.constants;
+const config = vsr.config.configs.current;
+const tracer = vsr.tracer;
 
 const cli = @import("cli.zig");
 const fatal = cli.fatal;
 
-const IO = @import("io.zig").IO;
-const Time = @import("time.zig").Time;
-const Storage = @import("storage.zig").Storage;
+const IO = vsr.io.IO;
+const Time = vsr.time.Time;
+const Storage = vsr.storage.Storage;
 
-const MessageBus = @import("message_bus.zig").MessageBusReplica;
-const MessagePool = @import("message_pool.zig").MessagePool;
-const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
+const MessageBus = vsr.message_bus.MessageBusReplica;
+const MessagePool = vsr.message_pool.MessagePool;
+const StateMachine = vsr.state_machine.StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
 });
 
-const vsr = @import("vsr.zig");
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
 
 const SuperBlock = vsr.SuperBlockType(Storage);
-const superblock_zone_size = @import("vsr/superblock.zig").superblock_zone_size;
-const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
+const superblock_zone_size = vsr.superblock.superblock_zone_size;
+const data_file_size_min = vsr.superblock.data_file_size_min;
 
 pub const log_level: std.log.Level = constants.log_level;
 pub const log = constants.log;
