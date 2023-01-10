@@ -90,6 +90,19 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
     };
 }
 
+//fn parse_bounded_array(comptime BoundedArray: type, tokens: *std.mem.TokenIterator(u8)) BoundedArray {
+//    var array = BoundedArray{ .buffer = undefined };
+//    const BoundedArrayItem = @typeInfo(BoundedArray.buffer).Array.child;
+//
+//    assert(eat(tokens, "["));
+//    while (!eat(tokens, "]")) {
+//        assert(array.len < array.buffer.len);
+//
+//        array.buffer[array.len] = parse_data(BoundedArrayItem, tokens);
+//        array.len += 1;
+//    }
+//}
+
 fn eat(tokens: *std.mem.TokenIterator(u8), token: []const u8) bool {
     var index_before = tokens.index;
     if (std.mem.eql(u8, tokens.next().?, token)) return true;
@@ -245,3 +258,21 @@ test "union" {
         \\e
     );
 }
+
+//test "std.BoundedArray" {
+//   try test_parse(struct {
+//       a: std.BoundedArray(u8, 4),
+//   }, &.{
+//       .{ .a = .{ .buffer = .{}, .len = 0 } },
+//       .{ .a = .{ .buffer = .{ 1 }, .len = 1 } },
+//       .{ .a = .{ .buffer = .{ 1, 2 }, .len = 2 } },
+//       .{ .a = .{ .buffer = .{ 1, 2, 4 }, .len = 3 } },
+//       .{ .a = .{ .buffer = .{ 1, 2, 4, 8 }, .len = 4 } },
+//   },
+//       \\ []
+//       \\ [1]
+//       \\ [1,2]
+//       \\ [1,2,4]
+//       \\ [1,2,4,8]
+//   );
+//}

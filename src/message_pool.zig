@@ -15,6 +15,7 @@ comptime {
 
 /// Add an extra sector_size bytes to allow a partially received subsequent
 /// message to be shifted to make space for 0 padding to vsr.sector_ceil.
+// TODO ???
 const message_size_max_padded = constants.message_size_max + constants.sector_size;
 
 /// The number of full-sized messages allocated at initialization by the replica message pool.

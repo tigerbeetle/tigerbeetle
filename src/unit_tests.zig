@@ -3,6 +3,7 @@ test {
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
     _ = @import("vsr/replica_format.zig");
+    _ = @import("vsr/replica_test2.zig");
     _ = @import("vsr/superblock.zig");
     _ = @import("vsr/superblock_free_set.zig");
     _ = @import("vsr/superblock_manifest.zig");

@@ -71,7 +71,7 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
+    var replica_count: u8 = 3; //1 + random.uintLessThan(u8, constants.replicas_max);
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
     const cluster_options = Cluster.Options{
@@ -137,7 +137,7 @@ pub fn main() !void {
     const simulator_options = Simulator.Options{
         .cluster = cluster_options,
         .workload = workload_options,
-        .replica_crash_probability = 0.000001,
+        .replica_crash_probability = 0.00001,
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
         .replica_restart_probability = 0.0001,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
