@@ -1,8 +1,10 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const build_options = @import("tigerbeetle_build_options");
 const root = @import("root");
+// Allow setting build-time config either via `build.zig` `Options`, or via a stuct in the root file.
+const build_options =
+    if (@hasDecl(root, "vsr_options")) root.vsr_options else @import("vsr_options");
 
 const vsr = @import("vsr.zig");
 const sector_size = @import("constants.zig").sector_size;
