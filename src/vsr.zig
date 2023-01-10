@@ -4,11 +4,27 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.vsr);
 
-const constants = @import("constants.zig");
-
-/// The version of our Viewstamped Replication protocol in use, including customizations.
-/// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
-pub const Version: u8 = 0;
+// vsr.zig is the root of a zig package, reexport all public APIs.
+//
+// Note that we don't promise any stability of these interfaces yet.
+pub const constants = @import("constants.zig");
+pub const io = @import("io.zig");
+pub const message_bus = @import("message_bus.zig");
+pub const message_pool = @import("message_pool.zig");
+pub const state_machine = @import("state_machine.zig");
+pub const storage = @import("storage.zig");
+pub const tigerbeetle = @import("tigerbeetle.zig");
+pub const time = @import("time.zig");
+pub const tracer = @import("tracer.zig");
+pub const config = @import("config.zig");
+pub const superblock = @import("vsr/superblock.zig");
+pub const lsm = .{
+    .tree = @import("lsm/tree.zig"),
+    .grid = @import("lsm/grid.zig"),
+    .groove = @import("lsm/groove.zig"),
+    .forest = @import("lsm/forest.zig"),
+    .posted_groove = @import("lsm/posted_groove.zig"),
+};
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const format = @import("vsr/replica_format.zig").format;
@@ -17,8 +33,12 @@ pub const Client = @import("vsr/client.zig").Client;
 pub const Clock = @import("vsr/clock.zig").Clock;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
-pub const SuperBlockType = @import("vsr/superblock.zig").SuperBlockType;
-pub const VSRState = @import("vsr/superblock.zig").SuperBlockSector.VSRState;
+pub const SuperBlockType = superblock.SuperBlockType;
+pub const VSRState = superblock.SuperBlockSector.VSRState;
+
+/// The version of our Viewstamped Replication protocol in use, including customizations.
+/// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
+pub const Version: u8 = 0;
 
 pub const ProcessType = enum { replica, client };
 
@@ -28,7 +48,7 @@ pub const Zone = enum {
     wal_prepares,
     grid,
 
-    const size_superblock = @import("vsr/superblock.zig").superblock_zone_size;
+    const size_superblock = superblock.superblock_zone_size;
     const size_wal_headers = constants.journal_size_headers;
     const size_wal_prepares = constants.journal_size_prepares;
 

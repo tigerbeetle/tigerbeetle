@@ -43,9 +43,16 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
-    const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
+    const vsr_package = std.build.Pkg{
+        .name = "vsr",
+        .path = .{ .path = "src/vsr.zig" },
+        .dependencies = &.{ options.getPackage("tigerbeetle_build_options") },
+    };
+
+    const tigerbeetle = b.addExecutable("tigerbeetle", "src/tigerbeetle/main.zig");
     tigerbeetle.setTarget(target);
     tigerbeetle.setBuildMode(mode);
+    tigerbeetle.addPackage(vsr_package);
     tigerbeetle.install();
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.omit_frame_pointer = false;
@@ -73,6 +80,7 @@ pub fn build(b: *std.build.Builder) void {
         const benchmark = b.addExecutable("benchmark", "src/benchmark.zig");
         benchmark.setTarget(target);
         benchmark.setBuildMode(mode);
+        benchmark.addPackage(vsr_package);
         benchmark.install();
         benchmark.addOptions("tigerbeetle_build_options", options);
         link_tracer_backend(benchmark, tracer_backend, target);
