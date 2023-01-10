@@ -83,19 +83,27 @@ const auto_generated_code_notice =
     \\
 ;
 
-fn java_type(comptime Type: type) []const u8 {
+fn java_type(
+    comptime Type: type,
+) []const u8 {
     switch (@typeInfo(Type)) {
-        .Enum => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
+        .Enum => return comptime get_mapped_type_name(Type) orelse @compileError(
+            "Type " ++ @typeName(Type) ++ " not mapped.",
+        ),
         .Struct => |info| switch (info.layout) {
             .Packed => return comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
-            else => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
+            else => return comptime get_mapped_type_name(Type) orelse @compileError(
+                "Type " ++ @typeName(Type) ++ " not mapped.",
+            ),
         },
         .Int => |info| {
+            // For better API ergonomy,
+            // we expose 16-bit unsigned integers in Java as "int" instead of "short".
+            // Even though, the backing fields are always stored as "short".
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "byte",
-                16 => "int",
-                32 => "int",
+                16, 32 => "int",
                 64 => "long",
                 else => @compileError("invalid int type"),
             };
@@ -112,7 +120,10 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
     } else return null;
 }
 
-fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal, upper }) []const u8 {
+fn to_case(
+    comptime input: []const u8,
+    comptime case: enum { camel, pascal, upper },
+) []const u8 {
     comptime {
         var output: [input.len]u8 = undefined;
         if (case == .upper) {
@@ -671,12 +682,18 @@ fn emit_u128_batch_accessors(
     });
 }
 
-pub fn generate_bindings(comptime ZigType: type, comptime mapping: TypeMapping, buffer: *std.ArrayList(u8)) !void {
+pub fn generate_bindings(
+    comptime ZigType: type,
+    comptime mapping: TypeMapping,
+    buffer: *std.ArrayList(u8),
+) !void {
     @setEvalBranchQuota(100_000);
 
     switch (@typeInfo(ZigType)) {
         .Struct => |info| switch (info.layout) {
-            .Auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
+            .Auto => @compileError(
+                "Only packed or extern structs are supported: " ++ @typeName(ZigType),
+            ),
             .Packed => try emit_packed_enum(
                 buffer,
                 info,

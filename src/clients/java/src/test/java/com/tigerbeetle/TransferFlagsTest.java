@@ -51,5 +51,4 @@ public class TransferFlagsTest {
                 TransferFlags.LINKED | TransferFlags.VOID_PENDING_TRANSFER));
 
     }
-
 }

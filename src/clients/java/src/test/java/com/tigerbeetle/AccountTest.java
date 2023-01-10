@@ -148,6 +148,7 @@ public class AccountTest {
         accounts.setCode(Integer.MAX_VALUE);
     }
 
+    @Test
     public void testReserved() {
         var accounts = new AccountBatch(1);
         accounts.add();

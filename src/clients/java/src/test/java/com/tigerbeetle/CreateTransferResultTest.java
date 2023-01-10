@@ -29,6 +29,4 @@ public class CreateTransferResultTest {
         var value = -1;
         CreateTransferResult.fromValue(value);
     }
-
-
 }

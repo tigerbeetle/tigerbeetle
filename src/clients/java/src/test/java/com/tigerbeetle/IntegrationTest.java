@@ -93,6 +93,7 @@ public class IntegrationTest {
         }
     }
 
+    @Test
     public void testConstructorReplicaAddressesLimitExceeded() throws Throwable {
         var replicaAddresses = new String[100];
         for (int i = 0; i < replicaAddresses.length; i++)
@@ -106,6 +107,7 @@ public class IntegrationTest {
         }
     }
 
+    @Test
     public void testConstructorEmptyStringReplicaAddresses() throws Throwable {
         var replicaAddresses = new String[] {"", "", ""};
         try (var client = new Client(0, replicaAddresses)) {
@@ -116,6 +118,7 @@ public class IntegrationTest {
         }
     }
 
+    @Test
     public void testConstructorInvalidReplicaAddresses() throws Throwable {
 
         var replicaAddresses = new String[] {"127.0.0.1:99999"};
@@ -935,7 +938,6 @@ public class IntegrationTest {
         }
     }
 
-
     /**
      * This test asserts that parallel threads will respect client's maxConcurrency.
      */
@@ -1262,7 +1264,4 @@ public class IntegrationTest {
             }
         }
     }
-
-
-
 }

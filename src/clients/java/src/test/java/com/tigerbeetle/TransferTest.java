@@ -49,6 +49,7 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getId());
     }
 
+    @Test
     public void testIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
@@ -89,6 +90,7 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getDebitAccountId());
     }
 
+    @Test
     public void testDebitAccountIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
@@ -129,6 +131,7 @@ public class TransferTest {
         assertArrayEquals(id, transfers.getCreditAccountId());
     }
 
+    @Test
     public void testCreditAccountIdNull() {
         var transfers = new TransferBatch(1);
         transfers.add();
@@ -189,7 +192,6 @@ public class TransferTest {
         transfers.setUserData(id);
         assert false;
     }
-
 
     @Test
     public void testReserved() {
@@ -395,5 +397,4 @@ public class TransferTest {
         transfers.setTimestamp(1234567890);
         assertEquals((long) 1234567890, transfers.getTimestamp());
     }
-
 }

@@ -35,5 +35,4 @@ public class JNILoaderTest {
         JNILoader.getResourcesPath(JNILoader.Arch.aarch64, JNILoader.OS.windows,
                 JNILoader.Abi.none);
     }
-
 }

@@ -281,7 +281,7 @@ public abstract class Batch {
 
     protected final void putUInt16(final int index, final int value) {
         if (value < 0 || value > Character.MAX_VALUE)
-            throw new IllegalArgumentException("");
+            throw new IllegalArgumentException("Value must be a 16-bit unsigned integer");
         buffer.putShort(index, (short) value);
     }
 

@@ -156,7 +156,6 @@ public class AsyncRequestTest {
         }
     }
 
-
     @Test(expected = AssertionError.class)
     public void testEndRequestWithNullBuffer() throws Throwable {
 
@@ -520,7 +519,6 @@ public class AsyncRequestTest {
         }
     }
 
-
     @Test
     public void testFailedFuture() throws InterruptedException {
 
@@ -581,7 +579,6 @@ public class AsyncRequestTest {
             assertEquals(PacketStatus.InvalidDataSize.value, requestException.getStatus());
         }
     }
-
 
     private class CallbackSimulator<T extends Batch> extends Thread {
 
