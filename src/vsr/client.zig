@@ -29,7 +29,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 results: Error![]const u8,
             ) void;
             user_data: u128,
-            callback: Callback,
+            // Null iff operation=register.
+            callback: ?Callback,
             message: *Message,
         };
 
@@ -370,7 +371,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
 
             if (inflight.message.header.operation != .register) {
-                inflight.callback(
+                inflight.callback.?(
                     inflight.user_data,
                     inflight.message.header.operation.cast(StateMachine),
                     reply.body(),
@@ -454,7 +455,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             self.request_queue.push_assume_capacity(.{
                 .user_data = 0,
-                .callback = undefined,
+                .callback = null,
                 .message = message.ref(),
             });
 
