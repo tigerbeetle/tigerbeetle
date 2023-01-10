@@ -46,7 +46,7 @@ pub fn build(b: *std.build.Builder) void {
     const vsr_package = std.build.Pkg{
         .name = "vsr",
         .path = .{ .path = "src/vsr.zig" },
-        .dependencies = &.{ options.getPackage("tigerbeetle_build_options") },
+        .dependencies = &.{options.getPackage("tigerbeetle_build_options")},
     };
 
     const tigerbeetle = b.addExecutable("tigerbeetle", "src/tigerbeetle/main.zig");
