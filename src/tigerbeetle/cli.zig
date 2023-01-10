@@ -7,11 +7,11 @@ const meta = std.meta;
 const net = std.net;
 const os = std.os;
 
-const constants = @import("constants.zig");
-const tigerbeetle = @import("tigerbeetle.zig");
-const vsr = @import("vsr.zig");
-const IO = @import("io.zig").IO;
-const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
+const vsr = @import("vsr");
+const constants = vsr.constants;
+const tigerbeetle = vsr.tigerbeetle;
+const IO = vsr.io.IO;
+const data_file_size_min = vsr.superblock.data_file_size_min;
 
 // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage
 const usage = fmt.comptimePrint(
