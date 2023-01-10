@@ -194,6 +194,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message_body_size: usize,
         ) void {
             self.register();
+            assert(self.request_number > 0);
 
             // We will set parent, context, view and checksums only when sending for the first time:
             message.header.* = .{
@@ -204,9 +205,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(u32, @sizeOf(Header) + message_body_size),
             };
-
-            assert(self.request_number > 0);
-            self.request_number += 1;
 
             log.debug("{}: request: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -223,6 +221,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             const was_empty = self.request_queue.empty();
 
+            self.request_number += 1;
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
