@@ -6,7 +6,7 @@ const mem = std.mem;
 const os = std.os;
 const log_main = std.log.scoped(.main);
 
-const build_options = @import("tigerbeetle_build_options");
+const build_options = @import("vsr_options");
 
 const vsr = @import("vsr");
 const constants = vsr.constants;

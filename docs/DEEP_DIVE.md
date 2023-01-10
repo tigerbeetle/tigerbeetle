@@ -65,14 +65,14 @@ Start the replica from the data file:
 Let's create some accounts and check their balances and limits:
 
 ```bash
-zig/zig run src/demo_01_create_accounts.zig
-zig/zig run src/demo_02_lookup_accounts.zig
+zig/zig run src/demos/demo_01_create_accounts.zig --pkg-begin vsr src/vsr.zig
+zig/zig run src/demos/demo_02_lookup_accounts.zig --pkg-begin vsr src/vsr.zig
 ```
 
 What happens if we create those accounts again?
 
 ```bash
-zig/zig run src/demo_01_create_accounts.zig
+zig/zig run src/demos/demo_01_create_accounts.zig --pkg-begin vsr src/vsr.zig
 ```
 
 ### Demo 3: Simple journal entries
@@ -80,10 +80,10 @@ zig/zig run src/demo_01_create_accounts.zig
 Let's create some simple double-entry accounting journal entries:
 
 ```bash
-zig/zig run src/demo_03_create_transfers.zig
+zig/zig run src/demos/demo_03_create_transfers.zig --pkg-begin vsr src/vsr.zig
 # Now let's look at both accounts and the transfers for those accounts:
-zig/zig run src/demo_02_lookup_accounts.zig
-zig/zig run src/demo_07_lookup_transfers.zig
+zig/zig run src/demos/demo_02_lookup_accounts.zig --pkg-begin vsr src/vsr.zig
+zig/zig run src/demos/demo_07_lookup_transfers.zig --pkg-begin vsr src/vsr.zig
 ```
 
 ### Demo 4, 5, 6: Two-phase transfer journal entries
@@ -95,8 +95,8 @@ Let's try full two-phase transfers (create and then post):
 You will see the second transfer is rejected with an error for tripping the debit reserved limit.
 
 ```bash
-zig/zig run src/demo_04_create_pending_transfers.zig
-zig/zig run src/demo_02_lookup_accounts.zig
+zig/zig run src/demos/demo_04_create_pending_transfers.zig --pkg-begin vsr src/vsr.zig
+zig/zig run src/demos/demo_02_lookup_accounts.zig --pkg-begin vsr src/vsr.zig
 ```
 
 You will see these two-phase transfers only update the reserved inflight limits.
@@ -106,15 +106,15 @@ Let's post (and accept):
 Again, the second transfer is rejected because it was never created.
 
 ```bash
-zig/zig run src/demo_05_post_pending_transfers.zig
+zig/zig run src/demos/demo_05_post_pending_transfers.zig --pkg-begin vsr src/vsr.zig
 # At this point, Account[1] has reached its credit limit (no more debit transfers allowed).
-zig/zig run src/demo_02_lookup_accounts.zig
+zig/zig run src/demos/demo_02_lookup_accounts.zig --pkg-begin vsr src/vsr.zig
 ```
 
 Let's also pretend someone else tried to void the pending transfer concurrently:
 
 ```bash
-zig/zig run src/demo_06_void_pending_transfers.zig
+zig/zig run src/demos/demo_06_void_pending_transfers.zig --pkg-begin vsr src/vsr.zig
 ```
 
 **From here, feel free to tweak these demos and see what happens. You can explore all our accounting invariants (and the DSL we created for these) in `src/state_machine.zig` by grepping the source for `fn create_account` or `fn create_transfer`.**
