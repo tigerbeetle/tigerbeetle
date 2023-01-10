@@ -28,6 +28,4 @@ public class CreateAccountResultTest {
         var value = -1;
         CreateAccountResult.fromValue(value);
     }
-
-
 }

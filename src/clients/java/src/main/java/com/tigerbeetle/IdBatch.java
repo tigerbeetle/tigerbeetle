@@ -37,19 +37,6 @@ public final class IdBatch extends Batch {
      * <p>
      * If successfully, moves the current {@link #setPosition position} to the newly created id.
      *
-     * @throws IllegalStateException if this batch is read-only.
-     * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
-     */
-    @Override
-    public void add() {
-        super.add();
-    }
-
-    /**
-     * Adds a new id at the end of this batch.
-     * <p>
-     * If successfully, moves the current {@link #setPosition position} to the newly created id.
-     *
      * @param id an array of 16 bytes representing the 128-bit value.
      *
      * @throws IllegalStateException if this batch is read-only.
