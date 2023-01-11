@@ -1,0 +1,8 @@
+required_approvals = 1
+status = [
+  "bors/clients/dotnet",
+  "bors/clients/go",
+  "bors/clients/java",
+  "bors/clients/node",
+  "bors/tigerbeetle"
+]
