@@ -199,8 +199,8 @@ pub fn ReplicaType(
         /// * checkpointing
         committing: bool = false,
 
-        /// Whether we are reading a prepare from storage in order to push to the pipeline.
-        repairing_pipeline: bool = false,
+        /// Whether we are reading a prepare from storage to construct the pipeline.
+        pipeline_repairing: bool = false,
 
         /// The pipeline is a queue for a replica which is the primary and in status=normal.
         /// At all other times the pipeline is a cache.
@@ -4199,15 +4199,15 @@ pub fn ReplicaType(
             assert(self.journal.dirty.count == 0);
             assert(self.pipeline == .cache);
 
-            if (self.repairing_pipeline) {
+            if (self.pipeline_repairing) {
                 log.debug("{}: primary_repair_pipeline: already repairing...", .{self.replica});
                 return .busy;
             }
 
             if (self.primary_repair_pipeline_op()) |_| {
                 log.debug("{}: primary_repair_pipeline: repairing", .{self.replica});
-                assert(!self.repairing_pipeline);
-                self.repairing_pipeline = true;
+                assert(!self.pipeline_repairing);
+                self.pipeline_repairing = true;
                 self.primary_repair_pipeline_read();
                 return .busy;
             }
@@ -4224,7 +4224,7 @@ pub fn ReplicaType(
             assert(self.journal.dirty.count == 0);
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
             assert(self.pipeline == .cache);
-            assert(!self.repairing_pipeline);
+            assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
             assert(self.commit_max + constants.pipeline_prepare_queue_max >= self.op);
 
@@ -4278,7 +4278,7 @@ pub fn ReplicaType(
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.pipeline == .cache);
-            assert(self.repairing_pipeline);
+            assert(self.pipeline_repairing);
 
             const op = self.primary_repair_pipeline_op().?;
             const op_checksum = self.journal.header_with_op(op).?.checksum;
@@ -4297,8 +4297,8 @@ pub fn ReplicaType(
         ) void {
             assert(destination_replica == null);
 
-            assert(self.repairing_pipeline);
-            self.repairing_pipeline = false;
+            assert(self.pipeline_repairing);
+            self.pipeline_repairing = false;
 
             if (prepare == null) {
                 log.debug("{}: repair_pipeline_read_callback: prepare == null", .{self.replica});
@@ -4352,8 +4352,8 @@ pub fn ReplicaType(
             if (prepare_old) |message_old| self.message_bus.unref(message_old);
 
             if (self.primary_repair_pipeline_op()) |_| {
-                assert(!self.repairing_pipeline);
-                self.repairing_pipeline = true;
+                assert(!self.pipeline_repairing);
+                self.pipeline_repairing = true;
                 self.primary_repair_pipeline_read();
             } else {
                 self.repair();
@@ -5301,7 +5301,7 @@ pub fn ReplicaType(
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
-            assert(!self.repairing_pipeline);
+            assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
 
             assert(self.commit_min == self.commit_max);
@@ -5434,7 +5434,7 @@ pub fn ReplicaType(
 
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
-                assert(!self.repairing_pipeline);
+                assert(!self.pipeline_repairing);
                 assert(self.pipeline == .queue);
                 assert(self.log_view == new_view);
 
