@@ -370,12 +370,16 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 on_reply_callback(self.on_reply_context, self, inflight.message, reply);
             }
 
-            if (inflight.message.header.operation != .register) {
-                inflight.callback.?(
+            if (inflight.callback) |callback| {
+                assert(inflight.message.header.operation != .register);
+
+                callback(
                     inflight.user_data,
                     inflight.message.header.operation.cast(StateMachine),
                     reply.body(),
                 );
+            } else {
+                assert(inflight.message.header.operation == .register);
             }
         }
 
