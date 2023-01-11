@@ -140,7 +140,8 @@ pub fn ReplicaType(
 
         /// The latest view where
         /// - the replica was a primary and acquired a DVC quorum, or
-        /// - the replica was a backup and received a SV message.
+        /// - the replica was a backup and processed a SV message.
+        /// i.e. the latest view in which this replica changed its head message.
         log_view: u32,
 
         /// The current status, either normal, view_change, or recovering:
