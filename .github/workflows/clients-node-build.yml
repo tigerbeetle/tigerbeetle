@@ -61,4 +61,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: CI succeeded
+        working-directory: ./
         run: exit 0
