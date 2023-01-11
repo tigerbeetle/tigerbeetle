@@ -49,3 +49,14 @@ jobs:
       - uses: actions/checkout@v3
       - run: echo "//registry.npmjs.org/:_authToken=${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}" > ~/.npmrc
       - run: PACKAGE_JSON_VERSION=$(jq -r '.version' package.json) && npm show "tigerbeetle-node@${PACKAGE_JSON_VERSION}" --json 2>/dev/null && echo "Package tigerbeetle-node@${PACKAGE_JSON_VERSION} already exists - not publishing" || (npm install && sha256sum dist/client.node > dist/.client.node.sha256 && npm publish)
+
+  bors_clients_node:
+    name: bors/clients/node
+    needs:
+      - shellcheck_scripts
+      - test_distro_install
+      - version_check
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        run: exit 0
