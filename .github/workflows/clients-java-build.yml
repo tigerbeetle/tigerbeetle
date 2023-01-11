@@ -5,7 +5,7 @@ name: "clients/java: Build"
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, staging, trying ]
     # paths:
     #   - src/clients/java/**
   pull_request:
@@ -46,13 +46,13 @@ jobs:
       run: mvn compile
 
     - name: Build
-      if: ${{ github.event_name == 'pull_request' }}
+      if: ${{ github.ref != 'refs/heads/main' }}
       working-directory: src/clients/java
       run: mvn -B package --file pom.xml
 
     - name: Save local package
       uses: actions/upload-artifact@v3
-      if: ${{ github.event_name == 'pull_request' }}
+      if: ${{ github.ref != 'refs/heads/main' }}
       with:
         name: jar-artifact
         path: |
@@ -79,9 +79,9 @@ jobs:
         server-id: github
         settings-path: ${{ github.workspace }}
 
-    ## If it's a pull request, the package wasn't uploaded, so we use a local version:
+    ## If it's not on main, the package wasn't uploaded, so we use a local version:
     - name: Restore local package
-      if: ${{ github.event_name == 'pull_request' }}
+      if: ${{ github.ref != 'refs/heads/main' }}
       uses: actions/download-artifact@v3
       with:
         name: jar-artifact
@@ -179,3 +179,16 @@ jobs:
     - name: Run validation
       run: |
         docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java
+
+  bors_clients_java:
+    name: bors/clients/java
+    needs:
+      - build
+      - prepare_validation_tests
+      - run_validation_tests
+      - run_validation_tests_on_containers
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        working-directory: ./
+        run: exit 0
