@@ -5,7 +5,7 @@ name: "clients/java: Build"
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, staging, trying ]
     # paths:
     #   - src/clients/java/**
   pull_request:
