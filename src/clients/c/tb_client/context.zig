@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const constants = @import("../../../constants.zig");
 const log = std.log.scoped(.tb_client_context);
 
-const util = @import("../../../util.zig");
+const stdx = @import("../../../stdx.zig");
 const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 
@@ -232,7 +232,7 @@ pub fn ContextType(
             }
 
             // Write the packet data to the message:
-            util.copy_disjoint(.inexact, u8, writable, readable);
+            stdx.copy_disjoint(.inexact, u8, writable, readable);
             const wrote = readable.len;
 
             // Submit the message for processing:

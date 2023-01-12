@@ -17,7 +17,7 @@ const meta = std.meta;
 const os = std.os;
 
 const constants = @import("../constants.zig");
-const div_ceil = @import("../util.zig").div_ceil;
+const div_ceil = @import("../stdx.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 
@@ -474,7 +474,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// other operations, only the following queue combinations are allowed:
         /// 1. A view change may queue on a checkpoint.
         /// 2. A checkpoint may queue on a view change.
-        /// 
+        ///
         /// There may only be a single caller queued at a time, to ensure that the VSR protocol is
         /// careful to submit at most one view change at a time.
         queue_head: ?*Context = null,

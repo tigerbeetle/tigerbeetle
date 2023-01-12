@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_journal_format);
 
 const constants = @import("../constants.zig");
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const journal = @import("./journal.zig");
 const fuzz = @import("../test/fuzz.zig");

@@ -4,8 +4,8 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const util = @import("../util.zig");
-const div_ceil = @import("../util.zig").div_ceil;
+const stdx = @import("../stdx.zig");
+const div_ceil = @import("../stdx.zig").div_ceil;
 const binary_search_values_raw = @import("binary_search.zig").binary_search_values_raw;
 const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 const Direction = @import("direction.zig").Direction;
@@ -280,13 +280,13 @@ fn SegmentedArrayType(
 
             const total = array.count(a) + @intCast(u32, elements.len);
             if (total <= node_capacity) {
-                util.copy_right(
+                stdx.copy_right(
                     .inexact,
                     T,
                     a_pointer[cursor.relative_index + elements.len ..],
                     a_pointer[cursor.relative_index..array.count(a)],
                 );
-                util.copy_disjoint(.inexact, T, a_pointer[cursor.relative_index..], elements);
+                stdx.copy_disjoint(.inexact, T, a_pointer[cursor.relative_index..], elements);
 
                 array.increment_indexes_after(a, @intCast(u32, elements.len));
                 return;
@@ -348,7 +348,7 @@ fn SegmentedArrayType(
 
             if (a_half < cursor.relative_index) {
                 // Move the part of `a` that is past the half-way point into `b`.
-                util.copy_right(
+                stdx.copy_right(
                     .inexact,
                     T,
                     b_half_pointer,
@@ -383,10 +383,10 @@ fn SegmentedArrayType(
             const source_a = source[0..target_a.len];
             const source_b = source[target_a.len..];
             if (target_b.ptr != source_b.ptr) {
-                util.copy_right(.exact, T, target_b, source_b);
+                stdx.copy_right(.exact, T, target_b, source_b);
             }
             if (target_a.ptr != source_a.ptr) {
-                util.copy_right(.exact, T, target_a, source_a);
+                stdx.copy_right(.exact, T, target_a, source_a);
             }
         }
 
@@ -395,13 +395,13 @@ fn SegmentedArrayType(
             assert(node <= array.node_count);
             assert(array.node_count + 1 <= node_count_max);
 
-            util.copy_right(
+            stdx.copy_right(
                 .exact,
                 ?*[node_capacity]T,
                 array.nodes[node + 1 .. array.node_count + 1],
                 array.nodes[node..array.node_count],
             );
-            util.copy_right(
+            stdx.copy_right(
                 .exact,
                 u32,
                 array.indexes[node + 1 .. array.node_count + 2],
@@ -470,7 +470,7 @@ fn SegmentedArrayType(
 
             // Remove elements from exactly one node:
             if (a_remaining + remove_count <= array.count(a)) {
-                util.copy_left(
+                stdx.copy_left(
                     .inexact,
                     T,
                     a_pointer[a_remaining..],
@@ -497,7 +497,7 @@ fn SegmentedArrayType(
             assert(a_remaining > 0 or b_remaining.len > 0);
 
             if (a_remaining >= half) {
-                util.copy_left(.inexact, T, b_pointer, b_remaining);
+                stdx.copy_left(.inexact, T, b_pointer, b_remaining);
 
                 array.indexes[b] = array.indexes[a] + a_remaining;
                 array.decrement_indexes_after(b, remove_count);
@@ -514,7 +514,7 @@ fn SegmentedArrayType(
                 assert(a_remaining < half and b_remaining.len < half);
                 assert(a_remaining + b_remaining.len <= node_capacity);
 
-                util.copy_disjoint(.inexact, T, a_pointer[a_remaining..], b_remaining);
+                stdx.copy_disjoint(.inexact, T, a_pointer[a_remaining..], b_remaining);
 
                 array.indexes[b] = array.indexes[a] + a_remaining + @intCast(u32, b_remaining.len);
                 array.decrement_indexes_after(b, remove_count);
@@ -576,7 +576,7 @@ fn SegmentedArrayType(
 
             const total = array.count(a) + @intCast(u32, b_elements.len);
             if (total <= node_capacity) {
-                util.copy_disjoint(.inexact, T, a_pointer[array.count(a)..], b_elements);
+                stdx.copy_disjoint(.inexact, T, a_pointer[array.count(a)..], b_elements);
 
                 array.indexes[b] = array.indexes[b + 1];
                 array.remove_empty_node_at(node_pool, b);
@@ -588,13 +588,13 @@ fn SegmentedArrayType(
                 assert(a_half >= b_half);
                 assert(a_half + b_half == total);
 
-                util.copy_disjoint(
+                stdx.copy_disjoint(
                     .exact,
                     T,
                     a_pointer[array.count(a)..a_half],
                     b_elements[0 .. a_half - array.count(a)],
                 );
-                util.copy_left(.inexact, T, b_pointer, b_elements[a_half - array.count(a) ..]);
+                stdx.copy_left(.inexact, T, b_pointer, b_elements[a_half - array.count(a) ..]);
 
                 array.indexes[b] = array.indexes[a] + a_half;
 
@@ -616,13 +616,13 @@ fn SegmentedArrayType(
                 @ptrCast(NodePool.Node, @alignCast(NodePool.node_alignment, array.nodes[node].?)),
             );
 
-            util.copy_left(
+            stdx.copy_left(
                 .exact,
                 ?*[node_capacity]T,
                 array.nodes[node .. array.node_count - 1],
                 array.nodes[node + 1 .. array.node_count],
             );
-            util.copy_left(
+            stdx.copy_left(
                 .exact,
                 u32,
                 array.indexes[node..array.node_count],

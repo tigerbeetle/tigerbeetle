@@ -30,7 +30,7 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
 const BlockType = @import("../lsm/grid.zig").BlockType;
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 
 const log = std.log.scoped(.storage);
 
@@ -257,7 +257,7 @@ pub const Storage = struct {
         assert(storage.size == origin.size);
 
         storage.ticks = origin.ticks;
-        util.copy_disjoint(.exact, u8, storage.memory, origin.memory);
+        stdx.copy_disjoint(.exact, u8, storage.memory, origin.memory);
         storage.memory_written.toggleSet(storage.memory_written);
         storage.memory_written.toggleSet(origin.memory_written);
         storage.faults.toggleSet(storage.faults);
@@ -343,7 +343,7 @@ pub const Storage = struct {
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
         const offset_in_storage = read.zone.offset(read.offset);
-        util.copy_disjoint(
+        stdx.copy_disjoint(
             .exact,
             u8,
             read.buffer,
@@ -417,7 +417,7 @@ pub const Storage = struct {
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
         const offset_in_storage = write.zone.offset(write.offset);
-        util.copy_disjoint(
+        stdx.copy_disjoint(
             .exact,
             u8,
             storage.memory[offset_in_storage..][0..write.buffer.len],
