@@ -328,8 +328,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     log.info("puts_since_compact_max = {}", .{Environment.puts_since_compact_max});
     log.info("compacts_per_checkpoint = {}", .{Environment.compacts_per_checkpoint});
 
-    var id_to_timestamp = std.hash_map.AutoHashMap(u128, u64).init(allocator);
-    defer id_to_timestamp.deinit();
+    var id_to_account = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+    defer id_to_account.deinit();
 
     var op: u64 = 1;
     var puts_since_compact: usize = 0;
@@ -359,12 +359,10 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             },
             .put_account => put_account: {
                 const id = random_id(random, u128);
-                // `timestamp` just needs to be unique, but we're not allowed to change the timestamp of an existing account.
-                const timestamp = id_to_timestamp.get(id) orelse fuzz_op_index;
-                try id_to_timestamp.put(id, timestamp);
-                break :put_account FuzzOp{ .put_account = Account{
+                var account = id_to_account.get(id) orelse Account{
                     .id = id,
-                    .timestamp = timestamp,
+                    // `timestamp` must be unique.
+                    .timestamp = fuzz_op_index,
                     .user_data = random_id(random, u128),
                     .reserved = [_]u8{0} ** 48,
                     .ledger = random_id(random, u32),
@@ -373,11 +371,20 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                         .debits_must_not_exceed_credits = random.boolean(),
                         .credits_must_not_exceed_debits = random.boolean(),
                     },
-                    .debits_pending = random.int(u64),
-                    .debits_posted = random.int(u64),
-                    .credits_pending = random.int(u64),
-                    .credits_posted = random.int(u64),
-                } };
+                    .debits_pending = 0,
+                    .debits_posted = 0,
+                    .credits_pending = 0,
+                    .credits_posted = 0,
+                };
+
+                // These are the only fields we are allowed to change on existing accounts.
+                account.debits_pending = random.int(u64);
+                account.debits_posted = random.int(u64);
+                account.credits_pending = random.int(u64);
+                account.credits_posted = random.int(u64);
+
+                try id_to_account.put(account.id, account);
+                break :put_account FuzzOp{ .put_account = account };
             },
             .get_account => FuzzOp{
                 .get_account = random_id(random, u128),
