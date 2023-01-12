@@ -2344,10 +2344,9 @@ pub fn ReplicaType(
         /// A function which calls `commit_journal()` to set `commit_max` must first call
         /// `view_jump()`. Otherwise, we may fork the log.
         fn commit_journal(self: *Self, commit: u64) void {
-            // TODO Restrict `view_change` status only to the primary purely as defense-in-depth.
-            // Be careful of concurrency when doing this, as successive view changes can happen quickly.
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
+            assert(!(self.status == .normal and self.primary()));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
             assert(self.commit_max <= self.op or self.commit_max > self.op);
@@ -2372,6 +2371,7 @@ pub fn ReplicaType(
                 log.debug("{}: commit_journal: already committing...", .{self.replica});
                 return;
             }
+            assert(!(self.status == .normal and self.primary()));
 
             // We check the hash chain before we read each op, rather than once upfront, because
             // it's possible for `commit_max` to change while we read asynchronously, after we
@@ -2393,6 +2393,8 @@ pub fn ReplicaType(
             assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.replica_count == 1));
+            assert(!(self.status == .normal and self.primary()));
+            assert(self.pipeline == .cache);
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
@@ -2477,7 +2479,15 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            self.commit_journal_next();
+            if (self.status == .normal and self.primary()) {
+                if (self.pipeline.queue.prepare_queue.empty()) {
+                    self.commit_ops_done();
+                } else {
+                    self.commit_pipeline_next();
+                }
+            } else {
+                self.commit_journal_next();
+            }
         }
 
         /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
@@ -2853,9 +2863,6 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
 
             if (self.status == .normal and self.primary()) {
-                if (self.pipeline.queue.prepare_queue.head_ptr()) |pipeline_head| {
-                    assert(pipeline_head.message.header.op == self.commit_min + 1);
-                }
                 self.commit_pipeline_next();
             } else {
                 self.commit_ops_done();
@@ -4193,7 +4200,6 @@ pub fn ReplicaType(
         fn primary_repair_pipeline(self: *Self) enum { done, busy } {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
-            assert(self.commit_max < self.op);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.journal.dirty.count == 0);
