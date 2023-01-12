@@ -2409,8 +2409,23 @@ pub fn ReplicaType(
             // Even a naive state transfer may fail to correct for this.
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
-                const checksum = self.journal.header_with_op(op).?.checksum;
-                self.journal.read_prepare(commit_journal_next_callback, op, checksum, null);
+                const header = self.journal.header_with_op(op).?;
+
+                if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.checksum)) |prepare| {
+                    log.debug("{}: commit_journal_next: cached prepare op={} checksum={}", .{
+                        self.replica,
+                        op,
+                        header.checksum,
+                    });
+                    self.commit_journal_next_callback(prepare, null);
+                } else {
+                    self.journal.read_prepare(
+                        commit_journal_next_callback,
+                        op,
+                        header.checksum,
+                        null,
+                    );
+                }
             } else {
                 self.commit_ops_done();
                 // This is an optimization to expedite the view change before the `repair_timeout`:
@@ -2438,14 +2453,6 @@ pub fn ReplicaType(
                 if (self.replica_count == 1) @panic("cannot recover corrupt prepare");
                 return;
             }
-
-            const slot = self.journal.slot_with_op_and_checksum(
-                prepare.?.header.op,
-                prepare.?.header.checksum,
-            ).?;
-            assert(self.journal.prepare_inhabited[slot.index]);
-            assert(self.journal.prepare_checksums[slot.index] == prepare.?.header.checksum);
-            assert(self.journal.has(prepare.?.header));
 
             switch (self.status) {
                 .normal => {},
@@ -3864,12 +3871,26 @@ pub fn ReplicaType(
         }
 
         fn pipeline_prepare_by_op_and_checksum(self: *Self, op: u64, checksum: ?u128) ?*Message {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.replica == self.primary_index(self.view) or checksum != null);
+
+            if (checksum == null) {
+                // The PipelineCache may hold messages that have been discarded, so we must be
+                // careful not to access it unless we can verify the entry's checksum.
+                //
+                // Only on_request_prepare() queries the pipeline with checksum=null.
+                // And primaries ignore request_prepare messages during their view change
+                // (during which time the pipeline is not yet repaired, and so is untrusted).
+                assert(self.primary());
+                assert(self.pipeline == .queue);
+            }
+
             return switch (self.pipeline) {
-                .queue => |*pipeline| if (pipeline.prepare_by_op_and_checksum(op, checksum)) |prepare|
+                .cache => |*cache| cache.prepare_by_op_and_checksum(op, checksum.?),
+                .queue => |*queue| if (queue.prepare_by_op_and_checksum(op, checksum)) |prepare|
                     prepare.message
                 else
                     null,
-                .cache => |*pipeline| pipeline.prepare_by_op_and_checksum(op, checksum),
             };
         }
 
@@ -6560,18 +6581,14 @@ const PipelineCache = struct {
         return prepare.header.op == header.op and prepare.header.checksum == header.checksum;
     }
 
-    fn prepare_by_op(pipeline: *PipelineCache, op: u64) ?*Message {
+    /// Unlike the PipelineQueue, cached messages may not belong to the current view.
+    /// Thus, a matching checksum is required.
+    fn prepare_by_op_and_checksum(pipeline: *PipelineCache, op: u64, checksum: u128) ?*Message {
         const slot = op % prepares_max;
         const prepare = pipeline.prepares[slot] orelse return null;
         if (prepare.header.op != op) return null;
+        if (prepare.header.checksum != checksum) return null;
         return prepare;
-    }
-
-    fn prepare_by_op_and_checksum(pipeline: *PipelineCache, op: u64, checksum: ?u128) ?*Message {
-        const prepare = pipeline.prepare_by_op(op) orelse return null;
-        if (checksum == null) return prepare;
-        if (checksum.? == prepare.header.checksum) return prepare;
-        return null;
     }
 
     /// Returns the message evicted from the cache, if any.
