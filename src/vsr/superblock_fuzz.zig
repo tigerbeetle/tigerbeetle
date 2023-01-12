@@ -298,7 +298,7 @@ const Environment = struct {
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum,
             .commit_min = env.superblock.staging.vsr_state.commit_min,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
-            .view_normal = env.superblock.staging.vsr_state.view_normal + 4,
+            .log_view = env.superblock.staging.vsr_state.log_view + 4,
             .view = env.superblock.staging.vsr_state.view + 5,
         };
 
@@ -326,7 +326,7 @@ const Environment = struct {
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
             .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
-            .view_normal = env.superblock.staging.vsr_state.view_normal + 1,
+            .log_view = env.superblock.staging.vsr_state.log_view + 1,
             .view = env.superblock.staging.vsr_state.view + 1,
         };
 

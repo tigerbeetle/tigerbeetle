@@ -138,13 +138,17 @@ pub fn ReplicaType(
         /// The current view, initially 0:
         view: u32,
 
-        /// The latest view, in which the replica's status was normal.
-        view_normal: u32,
+        /// The latest view where
+        /// - the replica was a primary and acquired a DVC quorum, or
+        /// - the replica was a backup and processed a SV message.
+        /// i.e. the latest view in which this replica changed its head message.
+        log_view: u32,
 
         /// The current status, either normal, view_change, or recovering:
         status: Status = .recovering,
 
         /// The op number assigned to the most recently prepared operation.
+        /// This op is sometimes referred to as the replica's "head" or "head op".
         ///
         /// Invariants (not applicable during status=recovering):
         /// * `replica.op` exists in the Journal.
@@ -504,7 +508,7 @@ pub fn ReplicaType(
                 .grid = self.grid,
                 .opened = self.opened,
                 .view = self.superblock.working.vsr_state.view,
-                .view_normal = self.superblock.working.vsr_state.view_normal,
+                .log_view = self.superblock.working.vsr_state.log_view,
                 .op = 0,
                 .op_checkpoint = self.superblock.working.vsr_state.commit_min,
                 .commit_min = self.superblock.working.vsr_state.commit_min,
@@ -1199,28 +1203,6 @@ pub fn ReplicaType(
         /// informs the other replicas of the completion of the view change by sending
         /// ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
         /// op number, and k is the commit number.
-        ///
-        /// For each DVC in the quorum:
-        ///
-        /// * The headers must all belong to the same hash chain. (Gaps are allowed).
-        ///   (Reason: the headers bundled with the DVC(s) with the highest view_normal will be
-        ///   loaded into the new primary with `replace_header()`, not `repair_header()`).
-        ///
-        /// Across all DVCs in the quorum:
-        ///
-        /// * The headers of every DVC with the same view_normal must agree. In other words:
-        ///   dvc₁.headers[i].op == dvc₂.headers[j].op implies
-        ///   dvc₁.headers[i].checksum == dvc₂.headers[j].checksum.
-        ///   (Reason: the headers bundled with the DVC(s) with the highest view_normal will be
-        ///   loaded into the new primary with `replace_header()`, not `repair_header()`).
-        ///
-        /// Perhaps unintuitively, it is safe to advertise a header before its message is prepared
-        /// (e.g. the write is still queued). The header is either:
-        ///
-        /// * committed — so another replica in the quorum must have a copy, according to the quorum
-        ///   intersection property. Or,
-        /// * uncommitted — if the header is chosen, but cannot be recovered from any replica, then
-        ///   it will be discarded by the nack protocol.
         fn on_do_view_change(self: *Self, message: *Message) void {
             if (self.ignore_view_change_message(message)) return;
 
@@ -1255,6 +1237,7 @@ pub fn ReplicaType(
 
             assert(count == threshold);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
+            DVCQuorum.verify(self.do_view_change_from_all_replicas);
             log.debug("{}: on_do_view_change: view={} quorum received", .{
                 self.replica,
                 self.view,
@@ -1265,6 +1248,13 @@ pub fn ReplicaType(
             self.do_view_change_quorum = true;
 
             self.primary_set_log_from_do_view_change_messages();
+            // We aren't status=normal yet, but our headers from our prior log_view may have been
+            // replaced. If we participate in another DVC (before reaching status=normal, which
+            // would update our log_view), we must disambiguate our (new) headers from the
+            // headers of any other replica with the same log_view so that the next primary can
+            // identify an unambiguous set of canonical headers.
+            self.log_view = self.view;
+
             assert(self.op >= self.commit_max);
             assert(self.state_machine.prepare_timestamp >=
                 self.journal.header_with_op(self.op).?.timestamp);
@@ -1307,7 +1297,9 @@ pub fn ReplicaType(
             assert(message.header.op == op_highest(message_body_as_headers(message)));
 
             self.set_op_and_commit_max(message.header.op, message.header.commit, "on_start_view");
-            self.replace_headers(message_body_as_headers(message));
+            for (message_body_as_headers_chain_consecutive(message)) |*header| {
+                self.replace_header(header);
+            }
 
             assert(self.op == message.header.op);
 
@@ -1397,17 +1389,17 @@ pub fn ReplicaType(
             // 5. Replica 0 fails (before replica 2 has a chance to repair its hash chain.)
             // 6. Replica 1 initiates a view change.
             // 7. Replica 1 collects a DVC quorum:
-            //      replica 1:  3, 4a, 5a (view_normal=latest)
-            //      replica 2: 5b, 7a, 8a (view_normal=latest)
-            //    Replicas 1 and 2 share the highest view_normal, so both sets of headers are canonical.
+            //      replica 1:  3, 4a, 5a (log_view=latest)
+            //      replica 2: 5b, 7a, 8a (log_view=latest)
+            //    Replicas 1 and 2 share the highest log_view, so both sets of headers are canonical.
             // 8. Replica 1 loads the canonical headers (via `replace_header()`) from both DVCs.
-            //    Messages 8a and 7a will be dropped via `do_view_change_op_max()` (due to the
-            //    gap at op 6). But there is a conflict at op=5. For correctness, replica 1 must
+            //    Messages 8a and 7a will be dropped via `primary_do_view_change_op_max()` (due to
+            //    the gap at op 6). But there is a conflict at op=5. For correctness, replica 1 must
             //    pick 5a — 5a may be committed by replica 0.
             //    Without replica 0's assistance, replica 1 has no way to pick between 5a/5b.
             //
             // Including at least as many headers in the recovery response as the DVC maintains the
-            // invariant: DVCs with the same view_normal must never disagree on the identity of a
+            // invariant: DVCs with the same log_view must never disagree on the identity of a
             // message.
             //
             // (DVCs can still safely include gaps — but they must be of the form [4a,__,6a],
@@ -1582,13 +1574,12 @@ pub fn ReplicaType(
             // TODO When the view is recovered from the superblock (instead of via the VSR recovery
             // protocol), if the view number indicates that this replica is a primary, it must
             // transition to status=view_change instead of status=normal.
-
-            const primary_headers = message_body_as_headers(primary_response.?);
+            const primary_headers = message_body_as_headers_chain_consecutive(primary_response.?);
             assert(primary_headers.len > 0);
 
             const commit = primary_response.?.header.commit;
             {
-                const op = op_highest(primary_headers);
+                const op = op_highest(message_body_as_headers(primary_response.?));
                 assert(op == primary_response.?.header.op);
 
                 self.set_op_and_commit_max(op, commit, "on_recovery_response");
@@ -1598,7 +1589,9 @@ pub fn ReplicaType(
                 // use the hash chain to figure out which headers to request. Maybe include our
                 // `op_checkpoint` in the recovery (request) message so that the response can give
                 // more useful (i.e. older) headers.
-                self.replace_headers(primary_headers);
+                for (primary_headers) |*header| {
+                    self.replace_header(header);
+                }
 
                 if (self.op < constants.journal_slot_count) {
                     if (self.journal.header_with_op(0)) |header| {
@@ -1609,7 +1602,7 @@ pub fn ReplicaType(
                         // Repair the root repair. This is necessary to maintain the invariant that
                         // the op=commit_min exists in-memory.
                         //
-                        // op=0 wouldn't have been repaired by replace_headers above, because it is
+                        // op=0 wouldn't have been repaired by replace_header() above, because it is
                         // already "checkpointed".
                         const header = Header.root_prepare(self.cluster);
                         self.journal.set_header_as_dirty(&header);
@@ -2642,7 +2635,7 @@ pub fn ReplicaType(
                 .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
                 .commit_min = vsr_state_commit_min,
                 .commit_max = self.commit_max,
-                .view_normal = self.view_normal,
+                .log_view = self.log_view,
                 .view = self.view,
             };
             assert(self.superblock.working.vsr_state.monotonic(vsr_state_new));
@@ -3021,12 +3014,16 @@ pub fn ReplicaType(
             assert(self.client_table().count() <= constants.clients_max);
         }
 
+        /// Construct a SV/DVC message, including attached headers from the current log_view.
+        ///
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_view_change_message(self: *Self, command: Command) *Message {
             assert(command == .do_view_change or command == .start_view);
 
             // We may send a start_view message in normal status to resolve a backup's view jump:
             assert(self.status == .normal or self.status == .view_change);
+            assert((self.status == .normal) == (command == .start_view));
+            assert((self.status == .view_change) == (command == .do_view_change));
 
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
@@ -3040,14 +3037,95 @@ pub fn ReplicaType(
                 // number contained in the prepare headers we include in the body. The former shows
                 // how recent a view change the replica participated in, which may be much higher.
                 // We use the `timestamp` field to send this in addition to the current view number:
-                .timestamp = if (command == .do_view_change) self.view_normal else 0,
+                .timestamp = if (command == .do_view_change) self.log_view else 0,
                 .op = self.op,
                 // See the comment in `on_do_view_change()` for why `commit_min` is crucial:
                 .commit = if (command == .do_view_change) self.commit_min else self.commit_max,
             };
 
+            // The DVC anchor: Within the log suffix following the anchor, we have additional
+            // guarantees about the state of the log headers which allow us to tolerate certain
+            // gaps (by locally guaranteeing that the gap does not hide a break).
+            // See Example 2/3 for more detail.
+            const op_dvc_anchor = std.math.max(
+                self.commit_min,
+                // +1: We can have a full pipeline, but not yet have performed any repair.
+                // In such a case, we want to send those pipeline_max headers in the DVC, but not
+                // the preceding op (which may belong to a different chain).
+                // This satisfies the DVC invariant because the first op in the pipeline is
+                // "connected" to the canonical chain (via its "parent" checksum).
+                //
+                // For example, as a follower, we might have received pipeline_max headers in the SV
+                // message, but not done any repair before the next view change.
+                1 + self.op -| constants.pipeline_max,
+            );
+
+            // How many headers should we send in the DVC?
+            // - The DVC "The headers must connect to the cluster's committed ops." must be upheld.
+            // - The headers may contains gaps.
+            // - The headers may not contain breaks.
+            const op_suffix_min = op_min: {
+                var op: u64 = self.op;
+
+                if (command == .start_view) {
+                    // The primary starting a new view has a pristine log suffix — no gaps or breaks.
+                    while (op > self.commit_min) : (op -= 1) {
+                        const header_next = self.journal.header_with_op(op).?;
+                        const header_prev = self.journal.header_with_op(op - 1).?;
+                        assert(header_prev.checksum == header_next.parent);
+                    }
+                    break :op_min op;
+                } else if (self.primary_index(self.log_view) == self.replica) {
+                    assert(command == .do_view_change);
+                    // See Example 2a.
+                    while (op > op_dvc_anchor) : (op -= 1) {
+                        const header_next = self.journal.header_with_op(op).?;
+                        // Exclude gaps since we cannot distinguish the gap from a break.
+                        const header_prev = self.journal.header_with_op(op - 1) orelse break;
+                        if (header_prev.checksum != header_next.parent) break;
+                    }
+                    break :op_min op;
+                } else {
+                    assert(command == .do_view_change);
+                    // See Example 2b.
+                    var op_exists = op;
+                    while (op > op_dvc_anchor) : (op -= 1) {
+                        const header_next = self.journal.header_with_op(op) orelse continue;
+                        const header_prev = self.journal.header_with_op(op - 1) orelse continue;
+                        assert(header_prev.checksum == header_next.parent);
+                        op_exists = op;
+                    }
+                    break :op_min op_exists;
+                }
+            };
+            assert(op_suffix_min >= op_dvc_anchor or command == .start_view);
+            assert(op_suffix_min >= self.commit_min);
+            assert(op_suffix_min <= self.op);
+            assert(self.journal.header_with_op(op_suffix_min) != null);
+
+            // Include as many extra headers as possible, but with no additional gaps (since they
+            // cannot be differentiated from breaks).
+            // - This reduces the number of headers that the new primary will need to repair.
+            // - More importantly, this ensures that a replica which re-sends its DVC does not
+            //   alter the DVC's headers, even if the replica finished a commit (updating
+            //   commit_min, possibly modifying the suffix anchor) in the mean time.
+            //   (This is not required for correctness, but enables additional verification
+            //   in on_do_view_change().)
+            const op_min_unbroken = op_min: {
+                var op = op_suffix_min;
+                while (op > 0) : (op -= 1) {
+                    const header_next = self.journal.header_with_op(op).?;
+                    const header_prev = self.journal.header_with_op(op - 1) orelse break;
+                    if (header_prev.checksum != header_next.parent) break;
+                }
+                break :op_min op;
+            };
+            assert(op_min_unbroken <= self.op);
+            assert(op_min_unbroken <= op_suffix_min);
+            assert(self.journal.header_with_op(op_min_unbroken) != null);
+
             const count = self.copy_latest_headers_and_set_size(
-                0,
+                op_min_unbroken,
                 self.op,
                 view_change_headers_count,
                 message,
@@ -3077,67 +3155,6 @@ pub fn ReplicaType(
             message.header.set_checksum();
 
             return message.ref();
-        }
-
-        /// Returns the op of the highest canonical message, according to this replica (the new
-        /// primary) prior to loading the current view change's DVC quorum headers.
-        /// When this replica participated in the last `view_normal`, this is just `replica.op`.
-        ///
-        /// - A *canonical* message was part of the last view_normal.
-        /// - An *uncanonical* message may have been removed/changed by a prior view.
-        /// - Canonical messages do not necessarily survive into the new view, but they take
-        ///   precedence over uncanonical messages.
-        /// - Canonical messages may be committed or uncommitted.
-        ///
-        /// Consider these logs:
-        ///
-        ///   replica 0: 4, 5, 6b, 7b, 8b  (commit_min=6b, primary, status=normal, view=X)
-        ///   replica 1: 4, 5, 6b, --, --  (commit_min=5, backup, status=normal, view=X)
-        ///   replica 2: 4, 5, 6a, --, 8b  (view<X)
-        ///
-        /// 1. Replica 0 crashes immediately after committing 6b.
-        /// 2. Replicas 1 and 2 must determine the new chain HEAD.
-        /// 3. 8b is discarded due to the gap in 7.
-        /// 4. To distinguish between 6a and 6b (and safely discard 6a), the new primary trusts ops
-        ///    from the DVC(s) with the greatest `view_normal`.
-        fn primary_op_canonical_max(self: *const Self, view_normal_canonical: u64) usize {
-            assert(self.replica_count > 1);
-            assert(self.status == .view_change);
-            assert(self.primary_index(self.view) == self.replica);
-            assert(self.do_view_change_quorum);
-            assert(!self.repair_timeout.ticking);
-            assert(self.journal.header_with_op(self.op) != null);
-            assert(self.view_normal <= view_normal_canonical);
-
-            if (self.view_normal == view_normal_canonical) return self.op;
-
-            const uncanonical_op_count = std.math.min(
-                // Do not reset any ops that we have already committed.
-                self.op - self.commit_min,
-                // The number of uncommitted ops cannot be more than the length of the pipeline.
-                // Do not reset any ops that we did not include in our do_view_change message.
-                constants.pipeline_max,
-            );
-
-            assert(uncanonical_op_count <= constants.pipeline_max);
-            if (uncanonical_op_count == 0) return self.op;
-
-            // * When uncanonical_op_count = self.op - self.commit_min,
-            //   self.op - uncanonical_op_count = self.commit_min.
-            // * When uncanonical_op_count = constants.pipeline_max,
-            //   constants.pipeline_max < self.op - self.commit_min holds.
-            const canonical_op_max = self.op - uncanonical_op_count;
-
-            log.debug("{}: on_do_view_change: not canonical ops={}..{}", .{
-                self.replica,
-                canonical_op_max + 1,
-                self.op,
-            });
-
-            assert(canonical_op_max <= self.op);
-            assert(canonical_op_max >= self.commit_min);
-            assert(canonical_op_max + constants.pipeline_max >= self.op);
-            return canonical_op_max;
         }
 
         /// Discards uncommitted ops during a view change from after and including `op`.
@@ -3192,8 +3209,8 @@ pub fn ReplicaType(
             //    asynchronous prepare_ok to itself.
             // 3. In on_start_view_change(), after receiving a quorum of start_view_change
             //    messages, the new primary sends a synchronous do_view_change to itself.
-            // 4. In start_view_as_the_new_primary(), the new primary sends itself a prepare_ok
-            //    message for each uncommitted message.
+            // 4. In primary_start_view_as_the_new_primary(), the new primary sends itself a
+            //    prepare_ok message for each uncommitted message.
             if (self.loopback_queue) |message| {
                 defer self.message_bus.unref(message);
 
@@ -3614,27 +3631,6 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op(self.op) == null);
         }
 
-        fn message_body_as_headers(message: *const Message) []const Header {
-            assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
-            assert(message.header.command == .do_view_change or
-                message.header.command == .start_view or
-                message.header.command == .headers or
-                message.header.command == .recovery_response);
-
-            const headers = std.mem.bytesAsSlice(
-                Header,
-                message.buffer[@sizeOf(Header)..message.header.size],
-            );
-
-            for (headers[0 .. headers.len - 1]) |header, index| {
-                // Headers must be provided in reverse order for the sake of `repair_header()`.
-                // Otherwise, headers may never be repaired where the hash chain never connects.
-                assert(header.op > headers[index + 1].op);
-            }
-
-            return headers;
-        }
-
         /// Returns whether the highest known op is certain.
         ///
         /// After recovering the WAL, there are 2 possible outcomes:
@@ -4005,7 +4001,7 @@ pub fn ReplicaType(
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
                 if (self.primary_repair_pipeline_op() != null) return self.primary_repair_pipeline();
                 // Start the view as the new primary:
-                self.start_view_as_the_new_primary();
+                self.primary_start_view_as_the_new_primary();
             }
         }
 
@@ -4638,25 +4634,6 @@ pub fn ReplicaType(
             }
         }
 
-        /// The caller must ensure that the headers are trustworthy.
-        ///
-        /// Asserts that sequential ops are hash-chained. (Gaps are permitted).
-        fn replace_headers(self: *Self, headers: []const Header) void {
-            for (headers) |*header, i| {
-                if (i > 0) {
-                    const next = &headers[i - 1];
-                    assert(next.view >= header.view);
-                    if (next.op == header.op + 1) {
-                        assert(next.parent == header.checksum);
-                    } else {
-                        assert(next.op > header.op);
-                    }
-                }
-
-                self.replace_header(header);
-            }
-        }
-
         /// Replaces the header if the header is different and not already committed.
         /// The caller must ensure that the header is trustworthy.
         fn replace_header(self: *Self, header: *const Header) void {
@@ -4920,6 +4897,7 @@ pub fn ReplicaType(
             // operations after the highest `commit_min` may yet have been committed before the old
             // primary crashed. The new primary will use the NACK protocol to be sure of a discard.
             assert(message.header.commit == self.commit_min);
+            DVCQuorum.verify_message(message);
 
             self.send_message_to_replica(self.primary_index(self.view), message);
         }
@@ -5201,48 +5179,87 @@ pub fn ReplicaType(
         /// where the new primary's headers depends on which of replica 1 and 2's DVC is used
         /// for repair before the other (i.e. whether they repair op 6 or 7 first).
         ///
-        /// For the above case to occur, replicas 0, 1, and 2 must all share the highest `view_normal`.
-        /// And since they share the latest `view_normal`, ops 5,6,7 were just installed by
+        /// For the above case to occur, replicas 0, 1, and 2 must all share the highest `log_view`.
+        /// And since they share the latest `log_view`, ops 5,6,7 were just installed by
         /// `replace_header`, which is order-independent (it doesn't use the hash chain).
         ///
-        /// (If replica 0's view_normal was greater than 1/2's, then replica 0 must have all
+        /// (If replica 0's log_view was greater than 1/2's, then replica 0 must have all
         /// headers from previous views. Which means 6,7 are from the current view. But since
-        /// replica 0 doesn't have 6/7, then replica 1/2 must share the latest view_normal. ∎)
+        /// replica 0 doesn't have 6/7, then replica 1/2 must share the latest log_view. ∎)
         fn primary_set_log_from_do_view_change_messages(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.replica_count > 1);
             assert(self.start_view_change_quorum);
             assert(self.do_view_change_quorum);
+            assert(self.do_view_change_from_all_replicas[self.replica] != null);
+            DVCQuorum.verify(self.do_view_change_from_all_replicas);
 
-            const do_view_change_head = self.do_view_change_quorum_head();
-            assert(do_view_change_head.view_normal >= self.view_normal);
-            assert(do_view_change_head.op >= self.commit_min);
-            assert(do_view_change_head.op >= do_view_change_head.commit_min_max);
-            assert(do_view_change_head.commit_min_max >= self.commit_min);
+            const dvcs_all = DVCQuorum.dvcs_all(self.do_view_change_from_all_replicas);
+            assert(dvcs_all.len == self.quorum_view_change);
+
+            const dvcs_canonical = DVCQuorum.dvcs_canonical(self.do_view_change_from_all_replicas);
+            assert(dvcs_canonical.len > 0);
+
+            for (dvcs_all.constSlice()) |message| {
+                log.debug(
+                    "{}: on_do_view_change: dvc: " ++
+                        "replica={} log_view={} op={} commit_min={}",
+                    .{
+                        self.replica,
+                        message.header.replica,
+                        @intCast(u32, message.header.timestamp),
+                        message.header.op,
+                        message.header.commit, // The `commit_min` of the replica.
+                    },
+                );
+            }
+
+            for (dvcs_canonical.constSlice()) |message| {
+                for (message_body_as_headers_chain_disjoint(message)) |*header| {
+                    log.debug(
+                        "{}: on_do_view_change: canonical: replica={} op={} checksum={}",
+                        .{
+                            self.replica,
+                            message.header.replica,
+                            header.op,
+                            header.checksum,
+                        },
+                    );
+                }
+            }
+
+            const do_view_change_commit_min_max = DVCQuorum.commit_min_max(
+                self.do_view_change_from_all_replicas,
+                .{
+                    .replica = self.replica,
+                    .commit_min = self.commit_min,
+                },
+            );
+            assert(do_view_change_commit_min_max >= self.commit_min);
 
             // The `prepare_timestamp` prevents a primary's own clock from running backwards.
             // Therefore, `prepare_timestamp`:
             // 1. is advanced if behind the cluster, but never reset if ahead of the cluster, i.e.
             // 2. may not always reflect the timestamp of the latest prepared op, and
             // 3. should be advanced before discarding the timestamps of any uncommitted headers.
-            if (self.state_machine.prepare_timestamp < do_view_change_head.timestamp) {
-                self.state_machine.prepare_timestamp = do_view_change_head.timestamp;
+            const timestamp_max = DVCQuorum.timestamp_max(self.do_view_change_from_all_replicas);
+            if (self.state_machine.prepare_timestamp < timestamp_max) {
+                self.state_machine.prepare_timestamp = timestamp_max;
             }
 
-            const view_normal_canonical = do_view_change_head.view_normal;
-            // `op_canonical` must be computed before calling `set_op_and_commit_max()`, since
-            // that may change `replica.op`.
-            //
-            // Don't remove the uncanonical headers yet — even though the removed headers are
-            // a subset of the DVC headers, removing and then adding them back would cause clean
-            // headers to become dirty.
-            const op_canonical = self.primary_op_canonical_max(view_normal_canonical);
-            assert(op_canonical <= self.op);
-            assert(op_canonical >= self.op -| constants.pipeline_max);
-            assert(op_canonical >= self.commit_min);
+            var headers_canonical = DVCQuorum.headers_canonical(self.do_view_change_from_all_replicas);
+            const header_head = headers_canonical.next().?;
+            assert(header_head.op == header_head.op);
+            assert(header_head.op >= do_view_change_commit_min_max);
+            assert(header_head.op >= self.op_checkpoint);
+            assert(header_head.op >= self.commit_min);
+            assert(header_head.op >= self.commit_max);
+            // At least one replica in the new quorum committed in the new replica.op's WAL wrap —
+            // wrapping implies a checkpoint (which implies a commit).
+            assert(header_head.op <= self.commit_max + constants.journal_slot_count);
 
-            if (do_view_change_head.op > self.op_checkpoint_trigger()) {
+            if (header_head.op > self.op_checkpoint_trigger()) {
                 // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
                 // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
                 // precluding recovery.
@@ -5253,32 +5270,40 @@ pub fn ReplicaType(
             }
 
             self.set_op_and_commit_max(
-                do_view_change_head.op,
-                // `set_op_and_commit_max()` expects the highest commit_max that we know of.
-                // But DVCs include replica's `commit_min`, not `commit_max`.
+                header_head.op,
                 std.math.max(
                     self.commit_max,
-                    do_view_change_head.commit_min_max,
+                    std.math.max(
+                        // `set_op_and_commit_max()` expects the highest commit_max that we know of.
+                        // But DVCs include replica's `commit_min`, not `commit_max`.
+                        do_view_change_commit_min_max,
+                        // An op cannot be uncommitted if it is definitely outside the pipeline.
+                        // Use `do_view_change_op_head` instead of `replica.op` since the former is
+                        // about to become the new `replica.op`.
+                        header_head.op -| constants.pipeline_max,
+                    ),
                 ),
                 "on_do_view_change",
             );
-            // "`replica.op` exists" invariant may be broken until after the canonical DVC headers
-            // are installed.
+            // "`replica.op` exists" invariant may be broken briefly between set_op_and_commit_max()
+            // and replace_header().
+            self.replace_header(&header_head);
+            assert(self.journal.header_with_op(self.op) != null);
 
-            // First, set all the canonical headers from the replica(s) with highest `view_normal`:
-            for (self.do_view_change_from_all_replicas) |received| {
-                if (received) |message| {
-                    const view_normal = @intCast(u32, message.header.timestamp);
-                    // The view in which this replica's status was normal must be before this view.
-                    assert(view_normal < message.header.view);
+            while (headers_canonical.next()) |header| {
+                assert(header.op < header_head.op);
+                self.replace_header(&header);
+            }
 
-                    if (view_normal < view_normal_canonical) continue;
-                    assert(view_normal == view_normal_canonical);
-
-                    const message_headers = message_body_as_headers(message);
-                    for (message_headers) |*header| {
+            const dvcs_uncanonical =
+                DVCQuorum.dvcs_uncanonical(self.do_view_change_from_all_replicas);
+            for (dvcs_uncanonical.constSlice()) |message| {
+                for (message_body_as_headers_chain_disjoint(message)) |*header| {
+                    // We must trust headers that other replicas have committed, because
+                    // repair_header() will not repair a header if the hash chain has a gap.
+                    if (header.op <= message.header.commit) {
                         log.debug(
-                            "{}: on_do_view_change: canonical: replica={} op={} checksum={}",
+                            "{}: on_do_view_change: committed: replica={} op={} checksum={}",
                             .{
                                 self.replica,
                                 message.header.replica,
@@ -5286,250 +5311,15 @@ pub fn ReplicaType(
                                 header.checksum,
                             },
                         );
-                    }
-                    self.replace_headers(message_headers);
-                }
-            }
-
-            // Since we used do_view_change_head to set the replica.op, it must have been loaded
-            // into the headers (if it wasn't present already).
-            assert(self.journal.header_with_op(self.op) != null);
-
-            // Now that the canonical headers are all in place, repair any other headers:
-            for (self.do_view_change_from_all_replicas) |received| {
-                if (received) |message| {
-                    const view_normal = @intCast(u32, message.header.timestamp);
-                    assert(view_normal < message.header.view);
-
-                    if (view_normal == view_normal_canonical) continue;
-                    assert(view_normal < view_normal_canonical);
-
-                    for (message_body_as_headers(message)) |*header| {
-                        // We must trust headers that other replicas have committed, because
-                        // repair_header() will not repair a header if the hash chain has a gap.
-                        if (header.op <= message.header.commit) {
-                            log.debug(
-                                "{}: on_do_view_change: committed: replica={} op={} checksum={}",
-                                .{
-                                    self.replica,
-                                    message.header.replica,
-                                    header.op,
-                                    header.checksum,
-                                },
-                            );
-                            self.replace_header(header);
-                        } else {
-                            _ = self.repair_header(header);
-                        }
+                        self.replace_header(header);
+                    } else {
+                        _ = self.repair_header(header);
                     }
                 }
             }
-
-            const op_max = self.do_view_change_op_max(op_canonical);
-            assert(op_max <= self.op);
-            assert(op_max >= self.commit_min);
-            if (op_max != self.op) {
-                log.debug("{}: primary_set_log_from_do_view_change_messages: discard op={}..{}", .{
-                    self.replica,
-                    op_max + 1,
-                    self.op,
-                });
-                self.journal.remove_entries_from(op_max + 1);
-                self.op = op_max;
-            }
-            assert(self.journal.header_with_op(self.op) != null);
         }
 
-        fn do_view_change_quorum_head(self: *const Self) struct {
-            /// The highest `view_normal` of any DVC.
-            ///
-            /// The headers bundled with DVCs with the highest `view_normal` are canonical, since
-            /// the replica has knowledge of previous view changes in which headers were replaced.
-            view_normal: u32,
-            /// The highest `commit_min` from any DVC (this is not a `commit_max`).
-            commit_min_max: u64,
-            /// The highest `op` from a DVC with the highest `view_normal`.
-            op: u64,
-            /// The higest timestamp from any DVC.
-            timestamp: u64,
-        } {
-            assert(self.status == .view_change);
-            assert(self.primary_index(self.view) == self.replica);
-            assert(self.replica_count > 1);
-            assert(self.start_view_change_quorum);
-            assert(self.do_view_change_quorum);
-            assert(self.do_view_change_from_all_replicas[self.replica] != null);
-
-            var v: ?u32 = null; // The highest `view_normal` from any replica.
-            var n: ?u64 = null; // The highest `op` for the highest `view_normal` from any replica.
-            var k: ?u64 = null; // The highest `commit_min` from any replica.
-            var t: ?u64 = null; // The highest `timestamp` from any replica.
-
-            for (self.do_view_change_from_all_replicas) |received, replica| {
-                if (received) |message| {
-                    assert(message.header.command == .do_view_change);
-                    assert(message.header.cluster == self.cluster);
-                    assert(message.header.replica == replica);
-                    assert(message.header.view == self.view);
-                    assert(message.header.op >= message.header.commit);
-                    assert(message.header.op - message.header.commit <= constants.journal_slot_count);
-
-                    // The view when this replica was last in normal status, which:
-                    // * may be higher than the view in any of the prepare headers.
-                    // * must be lower than the view of this view change.
-                    const view_normal = @intCast(u32, message.header.timestamp);
-                    assert(view_normal < message.header.view);
-
-                    if (replica == self.replica) {
-                        assert(view_normal == self.view_normal);
-                        assert(message.header.op == self.op);
-                        // We may have a newer commit than our DVC due to async commits (see below).
-                        assert(message.header.commit <= self.commit_min);
-                    }
-
-                    log.debug(
-                        "{}: on_do_view_change: " ++
-                            "replica={} view_normal={} op={} commit_min={}",
-                        .{
-                            self.replica,
-                            message.header.replica,
-                            view_normal,
-                            message.header.op,
-                            message.header.commit, // The `commit_min` of the replica.
-                        },
-                    );
-
-                    if (v == null or view_normal > v.?) {
-                        v = view_normal;
-                        n = message.header.op;
-                    } else if (view_normal == v.? and message.header.op > n.?) {
-                        n = message.header.op;
-                    }
-
-                    if (k == null or message.header.commit > k.?) k = message.header.commit;
-
-                    const message_headers = message_body_as_headers(message);
-                    if (t == null or t.? < message_headers[0].timestamp) {
-                        t = message_headers[0].timestamp;
-                    }
-                }
-            }
-
-            // Consider the case:
-            // 1. Start committing op=N…M.
-            // 2. Send `do_view_change` to self.
-            // 3. Finish committing op=N…M.
-            // 4. Remaining `do_view_change` messages arrive, completing the quorum.
-            // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
-            // Don't let the commit backtrack.
-            if (k.? < self.commit_min) {
-                assert(self.commit_min >
-                    self.do_view_change_from_all_replicas[self.replica].?.header.commit);
-                log.debug("{}: on_do_view_change: bump commit_min view={} commit={}..{}", .{
-                    self.replica,
-                    self.view,
-                    k.?,
-                    self.commit_min,
-                });
-                k = self.commit_min;
-            }
-
-            assert(v.? >= self.view_normal);
-            assert(k.? >= self.commit_min);
-
-            return .{
-                .view_normal = v.?,
-                .commit_min_max = k.?,
-                .op = n.?,
-                .timestamp = t.?,
-            };
-        }
-
-        /// Identify headers to discard during a view change before the primary starts the view.
-        /// This is required to maximize availability in the presence of storage faults.
-        /// Refer to the CTRL protocol from Protocol-Aware Recovery for Consensus-Based Storage.
-        ///
-        /// Returns the highest op that:
-        /// - precedes any hash chain breaks in the uncanonical headers, and
-        /// - precedes any gaps in the uncommitted headers.
-        ///
-        /// Breaks
-        ///
-        /// If there is a hash chain break, none of the headers from the canonical DVCs replaced
-        /// the broken (leftover uncanonical) op.
-        /// Removing these is necessary for correctness and liveness, to ensure that
-        /// disconnected headers do not remain in place in lieu of gaps.
-        ///
-        /// Gaps
-        ///
-        /// It is possible for the new primary to have done an op jump in a previous view, and
-        /// introduced a header gap for an op, which may have then been discarded by another primary
-        /// during a view change, before surviving into this view as a gap because our latest op was
-        /// set as the latest op for the quorum.
-        ///
-        /// In this case, it may be impossible for the new primary to repair the missing header as
-        /// the rest of the cluster may have already discarded it. We therefore iterate over our
-        /// uncommitted header gaps to discard any that may be impossible to repair.
-        ///
-        /// For example, if the old primary replicates ops=7,8,9 (all uncommitted) but only op=9 is
-        /// prepared on another replica before the old primary crashes, then this function finds a
-        /// gap for ops=7,8 and will attempt to discard ops 7,8,9.
-        fn do_view_change_op_max(self: *const Self, op_canonical: u64) u64 {
-            assert(self.replica_count > 1);
-            assert(self.status == .view_change);
-            assert(self.primary_index(self.view) == self.replica);
-            assert(self.do_view_change_quorum);
-            assert(!self.repair_timeout.ticking);
-            assert(self.op >= self.commit_max);
-            // At least one replica in the new quorum committed in the new replica.op's WAL wrap —
-            // wrapping implies a checkpoint (which implies a commit).
-            assert(self.op - self.commit_max <= constants.journal_slot_count);
-            assert(self.op - self.commit_min <= constants.journal_slot_count);
-
-            assert(op_canonical <= self.op);
-            assert(op_canonical >= self.commit_min);
-
-            // Any uncanonical ops remaining either:
-            // * Connect to the hash chain on the right.
-            // * Do not connect on the right (hash chain break).
-            //
-            // If there is a hash chain break, none of the headers from the canonical DVCs replaced
-            // the broken op. It is truncated like a gap.
-            //
-            // Removing these is necessary for correctness and liveness, to ensure that
-            // disconnected headers do not remain in place in lieu of gaps.
-            const op_before_break = blk: {
-                var op: u64 = op_canonical;
-                while (op < self.op) : (op += 1) {
-                    if (self.journal.header_with_op(op)) |header| {
-                        if (self.journal.header_with_op(op + 1)) |next| {
-                            // Broken hash chain.
-                            if (header.checksum != next.parent) break :blk op;
-                        }
-                    }
-                } else break :blk self.op;
-            };
-
-            // Find the beginning of the lowest gap.
-            //
-            // While iterating > commit_max does not in itself guarantee that an op is uncommitted
-            // (the old primary may have committed the op shortly before crashing), nevertheless,
-            // if it was committed it would have survived into the new view as a header not a gap.
-            const op_before_gap = blk: {
-                // An op cannot be uncommitted if it is definitely outside the pipeline.
-                const op_committed = std.math.max(self.commit_max, self.op -| constants.pipeline_max);
-                assert(op_committed <= self.op);
-
-                var op = op_committed;
-                while (op < self.op) : (op += 1) {
-                    if (self.journal.header_with_op(op + 1) == null) break :blk op;
-                } else break :blk self.op;
-            };
-
-            return std.math.min(op_before_break, op_before_gap);
-        }
-
-        fn start_view_as_the_new_primary(self: *Self) void {
+        fn primary_start_view_as_the_new_primary(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.do_view_change_quorum);
@@ -5545,9 +5335,6 @@ pub fn ReplicaType(
             assert(self.journal.faulty.count == 0);
             assert(self.nack_prepare_op == null);
 
-            const start_view = self.create_view_change_message(.start_view);
-            defer self.message_bus.unref(start_view);
-
             self.transition_to_normal_from_view_change_status(self.view);
             // Detect if the transition to normal status above accidentally resets the pipeline:
             assert(self.commit_max + self.pipeline.count == self.op);
@@ -5555,14 +5342,17 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
 
+            // Send prepare_ok messages to ourself to contribute to the pipeline.
+            self.send_prepare_oks_after_view_change();
+
+            const start_view = self.create_view_change_message(.start_view);
+            defer self.message_bus.unref(start_view);
+
             assert(start_view.references == 1);
             assert(start_view.header.command == .start_view);
             assert(start_view.header.view == self.view);
             assert(start_view.header.op == self.op);
             assert(start_view.header.commit == self.commit_max);
-
-            // Send prepare_ok messages to ourself to contribute to the pipeline.
-            self.send_prepare_oks_after_view_change();
 
             self.send_message_to_other_replicas(start_view);
         }
@@ -5574,7 +5364,7 @@ pub fn ReplicaType(
             assert(self.replica_count > 1 or new_view == 0);
             assert(self.journal.header_with_op(self.op) != null);
             self.view = new_view;
-            self.view_normal = new_view;
+            self.log_view = new_view;
             self.status = .normal;
 
             if (self.primary()) {
@@ -5624,7 +5414,6 @@ pub fn ReplicaType(
             assert(new_view >= self.view);
             assert(self.journal.header_with_op(self.op) != null);
             self.view = new_view;
-            self.view_normal = new_view;
             self.status = .normal;
 
             if (self.primary()) {
@@ -5638,6 +5427,7 @@ pub fn ReplicaType(
 
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
+                assert(self.log_view == new_view);
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
@@ -5657,6 +5447,7 @@ pub fn ReplicaType(
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.recovery_timeout.ticking);
 
+                self.log_view = new_view;
                 self.ping_timeout.start();
                 self.commit_timeout.stop();
                 self.normal_status_timeout.start();
@@ -5992,4 +5783,548 @@ pub fn ReplicaType(
             }
         }
     };
+}
+
+/// A do-view-change:
+/// - selects the view's head
+/// - discards uncommitted ops (to maximize availability in the presence of storage faults)
+/// - retains all committed ops
+/// - retains all possibly-committed ops (because they might be committed — we can't tell)
+///   (Some of these may be discarded during repair, via the nack protocol).
+/// Refer to the CTRL protocol from Protocol-Aware Recovery for Consensus-Based Storage.
+///
+/// Terminology:
+///
+/// - The *head* message (of a view) is the message (committed or uncommitted) within that view with
+///   the highest op.
+///
+/// - *gap*: There is a header for op X and X+n (n>1), but no header at op X+1.
+/// - *break*/*chain break*: The header for op X is not the parent of the header for op X+1.
+/// - *fork*: A correctness bug in which a committed (or possibly committed) message is discarded.
+///
+/// - An *uncanonical* message may have been removed/changed during a prior view.
+/// - A *canonical* message was part of the most recent log_view.
+///   - Canonical messages do not necessarily survive into the new view, but they take
+///     precedence over uncanonical messages.
+///   - Canonical messages may be committed or uncommitted.
+///
+/// - *DVC* refers to a command=do_view_change message.
+/// - *SV* refers to a command=start_view message.
+/// - The *pipeline suffix* is the last pipeline_max messages of the log (counting backwards from
+///   the head op). For example, when pipeline_max=3,
+///   - the pipeline suffix of log "1,2,3,4,5" is "3,4,5".
+///   - the pipeline suffix of log "1,2,3,5" is "3,5".
+///
+///
+/// Invariants:
+///
+/// For each DVC message:
+///
+/// - The headers all belong to the same hash chain.
+///   - Reason: If multiple replicas with the same canonical log_view disagree about an op, the new
+///     primary could not determine which is correct.
+///   - Gaps are permitted, but the DVC-sender is responsible for ensuring they do not conceal
+///     chain breaks.
+///   - For example,
+///     - a DVC of 6a,8a is valid (6a/8a belong to the same chain).
+///     - a DVC of 6b,8a is invalid (the gap at 7 conceal a chain break).
+///     - a DVC of 6b,7b,8a is invalid (7b/8a is a chain break)..
+///
+/// - The headers must connect to the cluster's committed ops (the "DVC anchor").
+///   This means that either:
+///   - the DVC includes the op=C header, or
+///   - the DVC includes the op=C+1 header (where C+1's parent is C).
+///   (Where `C = "DVC anchor" = max(replica.commit_min, replica.op -| pipeline_max)`).
+///   - Reason: The new primary may truncate the entire pipeline (6-9) due to a gap (6),
+///     but afterwards it still requires a head op to repair/chain backward from.
+///     (According to the intersection property, a gap in the pipeline indicates an
+///     uncommitted op).
+///   - For example, given pipeline_max=3:
+///     - a DVC of 7,8 is invalid if replica.commit_min=5.
+///     - a DVC of 7,8 is valid if replica.commit_min=6.
+///     - a DVC of 5,7,8 is valid. (5,_,7,8)
+///     - a DVC of 5,8 is valid.   (5,_,_,8)
+///     - a DVC of 0,1 is valid.
+///
+/// Across all DVCs in the quorum:
+///
+/// - The headers of every DVC with the same log_view must not conflict.
+///   - In other words:
+///     dvc₁.headers[i].op       == dvc₂.headers[j].op implies
+///     dvc₁.headers[i].checksum == dvc₂.headers[j].checksum.
+///   - Reason: the headers bundled with the DVC(s) with the highest log_view will be
+///     loaded into the new primary with `replace_header()`, not `repair_header()`.
+///
+/// Perhaps unintuitively, it is safe to advertise a header before its message is prepared
+/// (e.g. the write is still queued). The header is either:
+///
+/// - committed — so another replica in the quorum must have a copy, according to the quorum
+///   intersection property. Or,
+/// - uncommitted — if the header is chosen, but cannot be recovered from any replica, then
+///   it will be discarded by the nack protocol.
+///
+///
+/// Examples
+///
+/// In these examples:
+/// - pipeline_max=3
+/// - Brackets denote the suffix of the replica's log that is actually included in the DVC headers.
+/// - Parenthesis denote a replica that did not participate in the DVC (for example, because it is
+///   partitioned).
+///
+/// Example 1: No gap in canonical headers
+///
+/// Consider a view change with DVCs:
+///
+///   replica   headers                         log_view
+///         0   1  [2   3   4b]                 4          (new primary)
+///         1   1   2   3   4a  5   6  [7   8   9]   5
+///         2  (1   2   3   4a  5   6   7   8   9)   5     (partitioned)
+///
+/// Replica 1's headers are canonical, so replica 0 constructs the log:
+///
+///             1   2   3    4b         7   8   9
+///
+/// The 5/6 gap conceals a hash break — 4b should be 4a.
+/// The view must initially keeps all of these headers, and after the DVC quorum is handled, repairs
+/// backwards from 7. (If it instead discarded at the gap (5…9), the log would fork (4a→4b).)
+///
+///
+/// Example 2: Gap in pipeline suffix
+///
+/// Consider a set of replicas performing a DVC:
+///
+///   replica   headers                              log_view
+///         0   1  [2   3   4b]                      4     (new primary)
+///         1   1   2   3   4a  5   6       8   9    5
+///         2  (1   2   3   ?   ?   ?   ?   ?   ?)   5     (partitioned)
+///
+/// Which headers should replica 1 include in its DVC?
+/// The cases are be distinguished by `log_view % replica_count`.
+///
+/// (These examples are still applicable if the gap is not in the first op of the pipeline suffix).
+///
+///
+/// Example 2a: Gap in the pipeline suffix of a retired primary
+///
+/// The replica was a primary during its retired log_view.
+/// It may have gaps or breaks in its pipeline suffix iff:
+/// - it didn't finish repairs before the next view change, and
+/// - some uncommitted ops were truncated during the DVC (since this "moves" the suffix backwards).
+///
+/// We cannot send op 6 in the DVC because if repairs did not complete, it may be the wrong message.
+///
+/// However, even though we may not have a full unbroken suffix of pipeline_max messages, we know
+/// that our unbroken suffix (however long it may be) includes all possibly-committed messages,
+/// since otherwise the retired log_view would not have started.
+///
+/// Therefore, the retired primary sends a DVC with only the unbroken log suffix:
+///
+///   replica   headers
+///         1   1   2   3   4a  5   6      [8   9]         (retired primary)
+///
+///
+/// Example 2b: Gap in the pipeline suffix of a retired follower
+///
+/// The replica was a follower during its retired log_view.
+/// Followers always load a full suffix of headers from the view's SV message.
+/// If there is now a gap in it the follower's suffix, this must be due to missed prepares.
+///
+/// Therefore, ops to the left of the gap (where the gap is within the suffix) are part of the
+/// suffix's hash chain, even though we cannot test this by chaining checksum/parent.
+///
+/// Therefore, the retired follower sends the DVC:
+///
+///   replica   headers
+///         1   1   2   3   4a  5  [6       8   9]         (retired follower)
+///
+///
+/// Example 3: Break in pipeline suffix
+///
+/// Consider a set of replicas performing a DVC:
+///
+///   replica   headers                              log_view
+///         0   1  [2   3   4b]                      4     (new primary)
+///         1   1   2   3   4b  5a  6a  7a [8b  9b]  5
+///         2  (1   2   3   4b  5b  7b  7b  8b  9b)  5     (partitioned)
+///
+/// (Note the chain break at replica 1's 7a/8b.)
+/// This scenario is exactly analogous to Example 2, except that it can only occur on a retired
+/// primary, never a retired follower.
+///
+/// The retired primary sends a DVC with only the unbroken log suffix:
+///
+///   replica   headers
+///         1   1   2   3   4a  5   6   7a [8   9]         (retired primary)
+///
+const DVCQuorum = struct {
+    const DVCArray = std.BoundedArray(*const Message, constants.replicas_max);
+
+    fn verify(dvc_quorum: QuorumMessages) void {
+        const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
+        assert(dvcs.len >= 2);
+        for (dvcs.constSlice()) |message| verify_message(message);
+
+        var log_views_all = std.BoundedArray(u32, constants.replicas_max){ .buffer = undefined };
+        for (dvcs.constSlice()) |message| {
+            const log_view = @intCast(u32, message.header.timestamp);
+            if (std.mem.count(u32, log_views_all.constSlice(), &.{log_view}) == 0) {
+                log_views_all.appendAssumeCapacity(log_view);
+            }
+        }
+
+        // Verify that DVCs with the same log_view do not conflict.
+        for (log_views_all.constSlice()) |log_view| {
+            const view_dvcs = dvcs_with_log_view(dvc_quorum, log_view);
+            var view_headers = HeaderIterator.init(view_dvcs, null);
+            while (view_headers.next()) |_| {}
+        }
+    }
+
+    fn verify_message(message: *const Message) void {
+        assert(message.header.command == .do_view_change);
+        assert(message.header.op >= message.header.commit);
+        assert(message.header.op - message.header.commit <= constants.journal_slot_count);
+
+        // The view when this replica was last in normal status, which:
+        // * may be higher than the view in any of the prepare headers.
+        // * must be lower than the view of this view change.
+        const log_view = @intCast(u32, message.header.timestamp);
+        assert(log_view < message.header.view);
+
+        // Ignore the headers, but perform the validation.
+        _ = message_body_as_headers_chain_disjoint(message);
+    }
+
+    fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
+        var array = DVCArray{ .buffer = undefined };
+        for (dvc_quorum) |received, replica| {
+            if (received) |message| {
+                assert(message.header.command == .do_view_change);
+                assert(message.header.replica == replica);
+
+                array.appendAssumeCapacity(message);
+            }
+        }
+        return array;
+    }
+
+    fn dvcs_canonical(dvc_quorum: QuorumMessages) DVCArray {
+        return dvcs_with_log_view(dvc_quorum, DVCQuorum.log_view_max(dvc_quorum));
+    }
+
+    fn dvcs_with_log_view(dvc_quorum: QuorumMessages, log_view: u32) DVCArray {
+        var array = DVCArray{ .buffer = undefined };
+        const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
+        for (dvcs.constSlice()) |message| {
+            const message_log_view = @intCast(u32, message.header.timestamp);
+            if (message_log_view == log_view) {
+                array.appendAssumeCapacity(message);
+            }
+        }
+        return array;
+    }
+
+    fn dvcs_uncanonical(dvc_quorum: QuorumMessages) DVCArray {
+        const log_view_max_ = DVCQuorum.log_view_max(dvc_quorum);
+        var array = DVCArray{ .buffer = undefined };
+        const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
+        for (dvcs.constSlice()) |message| {
+            const log_view = @intCast(u32, message.header.timestamp);
+            assert(log_view <= log_view_max_);
+
+            if (log_view < log_view_max_) {
+                array.appendAssumeCapacity(message);
+            }
+        }
+        return array;
+    }
+
+    /// Returns the highest `log_view` of any DVC.
+    ///
+    /// The headers bundled with DVCs with the highest `log_view` are canonical, since
+    /// the replica has knowledge of previous view changes in which headers were replaced.
+    fn log_view_max(dvc_quorum: QuorumMessages) u32 {
+        var log_view_max_: ?u32 = null;
+        const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
+        for (dvcs.constSlice()) |message| {
+            // The view when this replica was last in normal status, which:
+            // * may be higher than the view in any of the prepare headers.
+            // * must be lower than the view of this view change.
+            const log_view = @intCast(u32, message.header.timestamp);
+            assert(log_view < message.header.view);
+
+            if (log_view_max_ == null or log_view_max_.? < log_view) {
+                log_view_max_ = log_view;
+            }
+        }
+        return log_view_max_.?;
+    }
+
+    /// Returns the highest `commit_min` from any DVC (this is not a `commit_max`).
+    fn commit_min_max(dvc_quorum: QuorumMessages, local: struct {
+        replica: u64,
+        commit_min: u64,
+    }) u64 {
+        assert(dvc_quorum[local.replica].?.header.commit <= local.commit_min);
+
+        var commit_min_max_: ?u64 = null;
+        const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
+        for (dvcs.constSlice()) |message| {
+            if (commit_min_max_ == null or commit_min_max_.? < message.header.commit) {
+                commit_min_max_ = message.header.commit;
+            }
+        }
+
+        // Consider the case:
+        // 1. Start committing op=N…M.
+        // 2. Send `do_view_change` to self.
+        // 3. Finish committing op=N…M.
+        // 4. Remaining `do_view_change` messages arrive, completing the quorum.
+        // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
+        // Don't let the commit backtrack.
+        if (commit_min_max_.? < local.commit_min) {
+            const dvc_old = dvc_quorum[local.replica].?;
+            assert(dvc_old.header.commit < local.commit_min);
+            assert(dvc_old.header.commit <= commit_min_max_.?);
+
+            log.debug("{}: on_do_view_change: bump commit_min commit={}..{}", .{
+                local.replica,
+                commit_min_max_.?,
+                local.commit_min,
+            });
+            commit_min_max_ = local.commit_min;
+        }
+
+        assert(commit_min_max_.? >= local.commit_min);
+        return commit_min_max_.?;
+    }
+
+    /// Returns the highest `timestamp` from any replica.
+    fn timestamp_max(dvc_quorum: QuorumMessages) u64 {
+        var timestamp_max_: ?u64 = null;
+        const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
+        for (dvcs.constSlice()) |message| {
+            const message_headers = message_body_as_headers_chain_disjoint(message);
+            if (timestamp_max_ == null or timestamp_max_.? < message_headers[0].timestamp) {
+                timestamp_max_ = message_headers[0].timestamp;
+            }
+        }
+        return timestamp_max_.?;
+    }
+
+    fn op_max_canonical(dvc_quorum: QuorumMessages) u64 {
+        var op_max: ?u64 = null;
+        const dvcs = DVCQuorum.dvcs_canonical(dvc_quorum);
+        for (dvcs.constSlice()) |message| {
+            if (op_max == null or op_max.? < message.header.op) {
+                op_max = message.header.op;
+            }
+        }
+        return op_max.?;
+    }
+
+    /// Return an iterator over the canonical DVC's headers, from high-to-low op.
+    /// The first header returned is the new head message.
+    fn headers_canonical(dvc_quorum: QuorumMessages) HeaderIterator {
+        const dvcs = DVCQuorum.dvcs_canonical(dvc_quorum);
+
+        const op_head_max = op_max_canonical(dvc_quorum);
+        // The number of uncommitted ops cannot be more than the length of the pipeline.
+        const op_suffix_min = op_head_max -| constants.pipeline_max;
+        assert(op_suffix_min <= op_head_max);
+
+        var op_head_min = op_suffix_min;
+        var ops_in_suffix = std.StaticBitSet(constants.pipeline_max).initEmpty();
+        for (dvcs.constSlice()) |message| {
+            const message_headers = message_body_as_headers_chain_disjoint(message);
+            for (message_headers) |header| {
+                if (header.op > op_suffix_min) {
+                    ops_in_suffix.set((header.op - op_suffix_min) - 1);
+                }
+            }
+            op_head_min = std.math.max(op_head_min, message_headers[message_headers.len - 1].op);
+        }
+        assert(op_head_max == 0 or ops_in_suffix.isSet((op_head_max - op_suffix_min) - 1));
+        assert(op_head_min >= op_suffix_min);
+        assert(op_head_min <= op_head_max);
+
+        const op_head = blk: {
+            var op = op_head_min + 1;
+            while (op < op_head_max) : (op += 1) {
+                if (!ops_in_suffix.isSet((op - op_suffix_min) - 1)) {
+                    break :blk op - 1;
+                }
+            } else {
+                break :blk op_head_max;
+            }
+        };
+        assert(op_head >= op_head_min);
+        assert(op_head <= op_head_max);
+
+        return HeaderIterator.init(dvcs, op_head);
+    }
+
+    /// Iterate the headers of a set of (same-log_view) DVCs, from high-to-low op.
+    const HeaderIterator = struct {
+        dvcs: DVCArray,
+        dvcs_offsets: std.BoundedArray(usize, constants.replicas_max),
+
+        child: ?struct {
+            op: u64,
+            parent: u128,
+        } = null,
+
+        fn init(dvcs: DVCArray, op_head: ?u64) HeaderIterator {
+            assert(dvcs.len > 0);
+
+            var dvcs_log_view: ?u32 = null;
+            for (dvcs.constSlice()) |message| {
+                const log_view = @intCast(u32, message.header.timestamp);
+                if (dvcs_log_view) |view| {
+                    assert(view == log_view);
+                } else {
+                    dvcs_log_view = log_view;
+                }
+            }
+
+            var dvcs_offsets = std.BoundedArray(usize, constants.replicas_max){
+                .buffer = undefined,
+            };
+
+            if (op_head) |op_head_| {
+                // Skip over discarded headers.
+                for (dvcs.constSlice()) |message| {
+                    const offset = for (message_body_as_headers_chain_disjoint(message)) |header, i| {
+                        if (header.op <= op_head_) break i;
+                    } else 0;
+                    dvcs_offsets.appendAssumeCapacity(offset);
+                }
+            } else {
+                for (dvcs.constSlice()) |_| dvcs_offsets.appendAssumeCapacity(0);
+            }
+            assert(dvcs.len == dvcs_offsets.len);
+
+            return .{
+                .dvcs = dvcs,
+                .dvcs_offsets = dvcs_offsets,
+            };
+        }
+
+        fn next(iterator: *HeaderIterator) ?Header {
+            const ReplicaSet = std.StaticBitSet(constants.replicas_max);
+            var next_header: ?*const Header = null;
+            var next_advance = ReplicaSet.initEmpty();
+
+            for (iterator.dvcs.constSlice()) |message, i| {
+                const message_headers = message_body_as_headers_chain_disjoint(message);
+                const message_headers_offset = iterator.dvcs_offsets.get(i);
+                if (message_headers_offset == message_headers.len) continue;
+
+                const header = &message_headers[message_headers_offset];
+                if (next_header == null or
+                    next_header.?.op < header.op)
+                {
+                    next_header = header;
+                    next_advance = ReplicaSet.initEmpty();
+                }
+                assert((next_header.?.op == header.op) ==
+                    (next_header.?.checksum == header.checksum));
+
+                if (next_header.?.op == header.op) {
+                    next_advance.set(i);
+                }
+            }
+            assert((next_advance.count() == 0) == (next_header == null));
+
+            var next_advance_iterator = next_advance.iterator(.{});
+            while (next_advance_iterator.next()) |i| {
+                iterator.dvcs_offsets.slice()[i] += 1;
+            }
+
+            if (next_header) |header| {
+                if (iterator.child) |child| {
+                    assert(child.op > header.op);
+                    assert((child.op == header.op + 1) == (child.parent == header.checksum));
+                }
+                iterator.child = .{ .op = header.op, .parent = header.parent };
+                return header.*;
+            } else {
+                return null;
+            }
+        }
+    };
+};
+
+/// Asserts that the headers are in descending op order.
+/// The headers may contain gaps and/or breaks.
+fn message_body_as_headers(message: *const Message) []const Header {
+    assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
+    assert(message.header.command == .do_view_change or
+        message.header.command == .start_view or
+        message.header.command == .headers or
+        message.header.command == .recovery_response);
+
+    const headers = std.mem.bytesAsSlice(
+        Header,
+        message.buffer[@sizeOf(Header)..message.header.size],
+    );
+
+    var child: ?*const Header = null;
+    for (headers) |*header| {
+        assert(header.cluster == message.header.cluster);
+        assert(header.command == .prepare);
+        assert(header.view <= message.header.view);
+
+        if (child) |child_header| {
+            // Headers must be provided in reverse order for the sake of `repair_header()`.
+            // Otherwise, headers may never be repaired where the hash chain never connects.
+            assert(header.op < child_header.op);
+        }
+        child = header;
+    }
+
+    return headers;
+}
+
+/// Asserts that the headers are in descending op order, and there are no breaks.
+/// The headers may contain gaps.
+fn message_body_as_headers_chain_disjoint(message: *const Message) []const Header {
+    assert(message.header.command == .do_view_change or
+        message.header.command == .start_view or
+        message.header.command == .recovery_response);
+
+    const message_headers = message_body_as_headers(message);
+    assert(message_headers.len > 0);
+    assert(message_headers[0].op == message.header.op);
+
+    var child: ?*const Header = null;
+    for (message_headers) |*header| {
+        assert(header.op <= message.header.op);
+
+        if (child) |child_header| {
+            assert(header.view <= child_header.view);
+            assert((header.op + 1 == child_header.op) == (header.checksum == child_header.parent));
+            assert(header.timestamp < child_header.timestamp);
+        }
+        child = header;
+    }
+    return message_headers;
+}
+
+/// Asserts that the headers are in descending op order, and there are no gaps or breaks.
+fn message_body_as_headers_chain_consecutive(message: *const Message) []const Header {
+    assert(message.header.command == .start_view or
+        message.header.command == .recovery_response);
+
+    const message_headers = message_body_as_headers_chain_disjoint(message);
+    var child: ?*const Header = null;
+    for (message_headers) |*header| {
+        if (child) |child_header| {
+            assert(header.op + 1 == child_header.op);
+            assert(header.checksum == child_header.parent);
+        }
+        child = header;
+    }
+    return message_headers;
 }

@@ -131,7 +131,7 @@ comptime {
     assert(journal_slot_count >= Config.Cluster.journal_slot_count_min);
     assert(journal_slot_count >= lsm_batch_multiple * 2);
     assert(journal_slot_count % lsm_batch_multiple == 0);
-    assert(journal_size_max == journal_size_headers + journal_size_prepares);
+    assert(journal_slot_count > pipeline_max);
 
     assert(journal_size_max == journal_size_headers + journal_size_prepares);
 }

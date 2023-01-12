@@ -227,10 +227,10 @@ pub const Cluster = struct {
                     if (cluster.health[i] == .down) continue;
                     if (other_replica.status == .recovering) continue;
 
-                    if (v == null or other_replica.view_normal > v.? or
-                        (other_replica.view_normal == v.? and other_replica.op > op_max.?))
+                    if (v == null or other_replica.log_view > v.? or
+                        (other_replica.log_view == v.? and other_replica.op > op_max.?))
                     {
-                        v = other_replica.view_normal;
+                        v = other_replica.log_view;
                         op_max = other_replica.op;
                         parent = other_replica.journal.header_with_op(op_max.?).?.checksum;
                     }
