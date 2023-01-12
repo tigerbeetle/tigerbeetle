@@ -7,7 +7,7 @@ const math = std.math;
 const constants = @import("../constants.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const IOPS = @import("../iops.zig").IOPS;
@@ -182,7 +182,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
         };
 
-        const HeaderChunks = std.StaticBitSet(util.div_ceil(slot_count, headers_per_message));
+        const HeaderChunks = std.StaticBitSet(stdx.div_ceil(slot_count, headers_per_message));
 
         storage: *Storage,
         replica: u8,
@@ -1022,7 +1022,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // that are invalid or corrupt). As the prepares are recovered, these will be replaced
             // or removed as necessary.
             const chunk_headers = std.mem.bytesAsSlice(Header, chunk_buffer);
-            util.copy_disjoint(
+            stdx.copy_disjoint(
                 .exact,
                 Header,
                 journal.headers_redundant[chunk_index * headers_per_message ..][0..chunk_headers.len],
@@ -1258,7 +1258,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             for (cases) |case, index| journal.recover_slot(Slot{ .index = index }, case);
             assert(cases.len == slot_count);
 
-            util.copy_disjoint(.exact, Header, journal.headers_redundant, journal.headers);
+            stdx.copy_disjoint(.exact, Header, journal.headers_redundant, journal.headers);
 
             log.debug("{}: recover_slots: dirty={} faulty={}", .{
                 journal.replica,

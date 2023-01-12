@@ -8,7 +8,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.test_conductor);
 
 const vsr = @import("../vsr.zig");
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const IdPermutation = @import("id.zig").IdPermutation;
 const MessagePool = @import("../message_pool.zig").MessagePool;
@@ -311,7 +311,7 @@ pub fn ConductorType(
         /// Returns the Conductor's message.
         fn clone_message(self: *Self, message_client: *const Message) *Message {
             const message_conductor = self.message_pool.get_message();
-            util.copy_disjoint(.exact, u8, message_conductor.buffer, message_client.buffer);
+            stdx.copy_disjoint(.exact, u8, message_conductor.buffer, message_client.buffer);
             return message_conductor;
         }
 
