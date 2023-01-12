@@ -1,7 +1,10 @@
-const tb = @import("tigerbeetle.zig");
+const vsr = @import("vsr");
+const tb = vsr.tigerbeetle;
 const demo = @import("demo.zig");
 
 const Transfer = tb.Transfer;
+
+pub const vsr_options = demo.vsr_options;
 
 pub fn main() !void {
     const transfers = [_]Transfer{
