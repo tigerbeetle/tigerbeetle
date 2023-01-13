@@ -11,9 +11,13 @@ pub fn MergeIteratorType(
     return struct {
         const Self = @This();
 
+        const Options = struct {
+            iterator_b_may_contain_tombstones: bool,
+        };
+
         iterator_a: *IteratorA,
         iterator_b: *IteratorB,
-        iterator_b_may_contain_tombstones: bool,
+        options: Options,
 
         empty_a: bool,
         empty_b: bool,
@@ -23,12 +27,12 @@ pub fn MergeIteratorType(
         pub fn init(
             iterator_a: *IteratorA,
             iterator_b: *IteratorB,
-            iterator_b_may_contain_tombstones: bool,
+            options: Options,
         ) Self {
             return Self{
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
-                .iterator_b_may_contain_tombstones = iterator_b_may_contain_tombstones,
+                .options = options,
                 .empty_a = false,
                 .empty_b = false,
                 .previous_key_popped = null,
@@ -57,7 +61,8 @@ pub fn MergeIteratorType(
                         },
                     };
                     const value_b = it.iterator_b.pop();
-                    assert(it.iterator_b_may_contain_tombstones or !Table.tombstone(&value_b));
+                    assert(it.options.iterator_b_may_contain_tombstones or
+                        !Table.tombstone(&value_b));
                     return value_b;
                 }
 
@@ -91,13 +96,15 @@ pub fn MergeIteratorType(
                     .lt => return it.iterator_a.pop(),
                     .gt => {
                         const value_b = it.iterator_b.pop();
-                        assert(it.iterator_b_may_contain_tombstones or !Table.tombstone(&value_b));
+                        assert(it.options.iterator_b_may_contain_tombstones or
+                            !Table.tombstone(&value_b));
                         return value_b;
                     },
                     .eq => {
                         const value_a = it.iterator_a.pop();
                         const value_b = it.iterator_b.pop();
-                        assert(it.iterator_b_may_contain_tombstones or !Table.tombstone(&value_b));
+                        assert(it.options.iterator_b_may_contain_tombstones or
+                            !Table.tombstone(&value_b));
                         switch (Table.usage) {
                             .general => return value_a,
                             .secondary_index => {
