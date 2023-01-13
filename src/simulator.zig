@@ -10,15 +10,13 @@ const Header = vsr.Header;
 
 const Client = @import("test/cluster.zig").Client;
 const Cluster = @import("test/cluster.zig").Cluster;
-const ClusterOptions = @import("test/cluster.zig").ClusterOptions;
 const Replica = @import("test/cluster.zig").Replica;
 const StateMachine = @import("test/cluster.zig").StateMachine;
-const StateChecker = @import("test/state_checker.zig").StateChecker;
-const StorageChecker = @import("test/storage_checker.zig").StorageChecker;
+const Failure = @import("test/cluster.zig").Failure;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
-const MessageBus = @import("test/message_bus.zig").MessageBus;
-const Conductor = @import("test/conductor.zig").ConductorType(Client, MessageBus, StateMachine);
+const ReplySequence = @import("test/reply_sequence.zig").ReplySequence;
 const IdPermutation = @import("test/id.zig").IdPermutation;
+const Message = @import("message_pool.zig").MessagePool.Message;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
 const output = std.log.scoped(.state_checker);
@@ -35,10 +33,6 @@ pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
 const cluster_id = 0;
-
-var cluster: *Cluster = undefined;
-var state_checker: *StateChecker = undefined;
-var storage_checker: *StorageChecker = undefined;
 
 pub fn main() !void {
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
@@ -79,51 +73,35 @@ pub fn main() !void {
 
     const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
-    const node_count = replica_count + client_count;
 
-    const ticks_max = 50_000_000;
-    const request_probability = 1 + random.uintLessThan(u8, 99);
-    const idle_on_probability = random.uintLessThan(u8, 20);
-    const idle_off_probability = 10 + random.uintLessThan(u8, 10);
-
-    // The maximum number of transitions from calling `client.request()`, not including
-    // `register` messages.
-    const requests_committed_max: usize = constants.journal_slot_count * 3;
-
-    const cluster_options: ClusterOptions = .{
-        .cluster = cluster_id,
+    const cluster_options = Cluster.Options{
+        .cluster_id = cluster_id,
         .replica_count = replica_count,
         .client_count = client_count,
         .storage_size_limit = vsr.sector_floor(
             constants.storage_size_max - random.uintLessThan(u64, constants.storage_size_max / 10),
         ),
         .seed = random.int(u64),
-        .on_change_state = on_replica_change_state,
-        .on_compact = on_replica_compact,
-        .on_checkpoint = on_replica_checkpoint,
-        .network_options = .{
-            .packet_simulator_options = .{
-                .replica_count = replica_count,
-                .client_count = client_count,
-                .node_count = node_count,
+        .network = .{
+            .replica_count = replica_count,
+            .client_count = client_count,
 
-                .seed = random.int(u64),
-                .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
-                .one_way_delay_min = random.uintLessThan(u16, 3),
-                .packet_loss_probability = random.uintLessThan(u8, 30),
-                .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
-                .path_clog_duration_mean = random.uintLessThan(u16, 500),
-                .path_clog_probability = random.uintLessThan(u8, 2),
-                .packet_replay_probability = random.uintLessThan(u8, 50),
+            .seed = random.int(u64),
+            .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
+            .one_way_delay_min = random.uintLessThan(u16, 3),
+            .packet_loss_probability = random.uintLessThan(u8, 30),
+            .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
+            .path_clog_duration_mean = random.uintLessThan(u16, 500),
+            .path_clog_probability = random.uintLessThan(u8, 2),
+            .packet_replay_probability = random.uintLessThan(u8, 50),
 
-                .partition_mode = random_partition_mode(random),
-                .partition_probability = random.uintLessThan(u8, 3),
-                .unpartition_probability = 1 + random.uintLessThan(u8, 10),
-                .partition_stability = 100 + random.uintLessThan(u32, 100),
-                .unpartition_stability = random.uintLessThan(u32, 20),
-            },
+            .partition_mode = random_partition_mode(random),
+            .partition_probability = random.uintLessThan(u8, 3),
+            .unpartition_probability = 1 + random.uintLessThan(u8, 10),
+            .partition_stability = 100 + random.uintLessThan(u32, 100),
+            .unpartition_stability = random.uintLessThan(u32, 20),
         },
-        .storage_options = .{
+        .storage = .{
             .seed = random.int(u64),
             .read_latency_min = random.uintLessThan(u16, 3),
             .read_latency_mean = 3 + random.uintLessThan(u16, 10),
@@ -132,16 +110,13 @@ pub fn main() !void {
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
+        },
+        .storage_fault_atlas = .{
             .faulty_superblock = true,
+            .faulty_wal_headers = replica_count > 1,
+            .faulty_wal_prepares = replica_count > 1,
         },
-        .health_options = .{
-            .crash_probability = 0.000001,
-            .crash_stability = random.uintLessThan(u32, 1_000),
-            .restart_probability = 0.0001,
-            .restart_stability = random.uintLessThan(u32, 1_000),
-        },
-        // TODO(dj) SimulatorType(StateMachine).init(state_machine_options)
-        .state_machine_options = switch (constants.state_machine) {
+        .state_machine = switch (constants.state_machine) {
             .testing => .{},
             .accounting => .{
                 .lsm_forest_node_count = 4096,
@@ -150,6 +125,26 @@ pub fn main() !void {
                 .cache_entries_posted = if (random.boolean()) 0 else 2048,
             },
         },
+    };
+
+    const workload_options = StateMachine.Workload.Options.generate(random, .{
+        .client_count = client_count,
+        // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity private.
+        // Also maybe make it dynamic (computed from the client_count instead of clients_max).
+        .in_flight_max = ReplySequence.stalled_queue_capacity,
+    });
+
+    const simulator_options = Simulator.Options{
+        .cluster = cluster_options,
+        .workload = workload_options,
+        .replica_crash_probability = 0.000001,
+        .replica_crash_stability = random.uintLessThan(u32, 1_000),
+        .replica_restart_probability = 0.0001,
+        .replica_restart_stability = random.uintLessThan(u32, 1_000),
+        .requests_max = constants.journal_slot_count * 3,
+        .request_probability = 1 + random.uintLessThan(u8, 99),
+        .request_idle_on_probability = random.uintLessThan(u8, 20),
+        .request_idle_off_probability = 10 + random.uintLessThan(u8, 10),
     };
 
     output.info(
@@ -185,98 +180,278 @@ pub fn main() !void {
         \\          restart_stability={} ticks
     , .{
         seed,
-        replica_count,
-        client_count,
-        request_probability,
-        idle_on_probability,
-        idle_off_probability,
-        cluster_options.network_options.packet_simulator_options.one_way_delay_mean,
-        cluster_options.network_options.packet_simulator_options.one_way_delay_min,
-        cluster_options.network_options.packet_simulator_options.packet_loss_probability,
-        cluster_options.network_options.packet_simulator_options.path_maximum_capacity,
-        cluster_options.network_options.packet_simulator_options.path_clog_duration_mean,
-        cluster_options.network_options.packet_simulator_options.path_clog_probability,
-        cluster_options.network_options.packet_simulator_options.packet_replay_probability,
-        cluster_options.network_options.packet_simulator_options.partition_mode,
-        cluster_options.network_options.packet_simulator_options.partition_probability,
-        cluster_options.network_options.packet_simulator_options.unpartition_probability,
-        cluster_options.network_options.packet_simulator_options.partition_stability,
-        cluster_options.network_options.packet_simulator_options.unpartition_stability,
-        cluster_options.storage_options.read_latency_min,
-        cluster_options.storage_options.read_latency_mean,
-        cluster_options.storage_options.write_latency_min,
-        cluster_options.storage_options.write_latency_mean,
-        cluster_options.storage_options.read_fault_probability,
-        cluster_options.storage_options.write_fault_probability,
-        cluster_options.health_options.crash_probability * 100,
-        cluster_options.health_options.crash_stability,
-        cluster_options.health_options.restart_probability * 100,
-        cluster_options.health_options.restart_stability,
+        cluster_options.replica_count,
+        cluster_options.client_count,
+        simulator_options.request_probability,
+        simulator_options.request_idle_on_probability,
+        simulator_options.request_idle_off_probability,
+        cluster_options.network.one_way_delay_mean,
+        cluster_options.network.one_way_delay_min,
+        cluster_options.network.packet_loss_probability,
+        cluster_options.network.path_maximum_capacity,
+        cluster_options.network.path_clog_duration_mean,
+        cluster_options.network.path_clog_probability,
+        cluster_options.network.packet_replay_probability,
+        cluster_options.network.partition_mode,
+        cluster_options.network.partition_probability,
+        cluster_options.network.unpartition_probability,
+        cluster_options.network.partition_stability,
+        cluster_options.network.unpartition_stability,
+        cluster_options.storage.read_latency_min,
+        cluster_options.storage.read_latency_mean,
+        cluster_options.storage.write_latency_min,
+        cluster_options.storage.write_latency_mean,
+        cluster_options.storage.read_fault_probability,
+        cluster_options.storage.write_fault_probability,
+        simulator_options.replica_crash_probability * 100,
+        simulator_options.replica_crash_stability,
+        simulator_options.replica_restart_probability * 100,
+        simulator_options.replica_restart_stability,
     });
 
-    cluster = try Cluster.create(allocator, random, cluster_options);
-    defer cluster.destroy();
+    var simulator = try Simulator.init(allocator, random, simulator_options);
+    defer simulator.deinit(allocator);
 
-    const workload_options = StateMachine.Workload.Options.generate(random, .{
-        .client_count = client_count,
-        .in_flight_max = Conductor.stalled_queue_capacity,
-    });
-
-    var workload = try StateMachine.Workload.init(allocator, random, workload_options);
-    defer workload.deinit(allocator);
-
-    var conductor = try Conductor.init(allocator, random, &workload, .{
-        .cluster = cluster_id,
-        .replica_count = replica_count,
-        .client_count = client_count,
-        .message_bus_options = .{ .network = &cluster.network },
-        .requests_max = requests_committed_max,
-        .request_probability = request_probability,
-        .idle_on_probability = idle_on_probability,
-        .idle_off_probability = idle_off_probability,
-    });
-    defer conductor.deinit(allocator);
-
-    for (conductor.clients) |*client| {
-        cluster.network.link(client.message_bus.process, &client.message_bus);
-    }
-
-    state_checker = try allocator.create(StateChecker);
-    defer allocator.destroy(state_checker);
-
-    state_checker.* = try StateChecker.init(
-        allocator,
-        cluster_id,
-        cluster.replicas,
-        conductor.clients,
-    );
-    defer state_checker.deinit();
-
-    storage_checker = try allocator.create(StorageChecker);
-    defer allocator.destroy(storage_checker);
-
-    storage_checker.* = StorageChecker.init(allocator);
-    defer storage_checker.deinit();
-
-    // The minimum number of healthy replicas required for a crashed replica to be able to recover.
-    const replica_normal_min = replicas: {
-        if (replica_count == 1) {
-            // A cluster of 1 can crash safely (as long as there is no disk corruption) since it
-            // does not run the recovery protocol.
-            break :replicas 0;
-        } else {
-            break :replicas cluster.replicas[0].quorum_view_change;
-        }
-    };
-
+    const ticks_max = 50_000_000;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
-        const health_options = &cluster.options.health_options;
-        // The maximum number of replicas that can crash, with the cluster still able to recover.
-        var crashes = cluster.replica_normal_count() -| replica_normal_min;
+        simulator.tick();
+        if (simulator.done()) break;
+    } else {
+        output.err("you can reproduce this failure with seed={}", .{seed});
+        fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
+    }
+    assert(simulator.done());
 
-        for (cluster.storages) |*storage, replica| {
-            if (cluster.replicas[replica].journal.status == .recovered) {
+    output.info("\n          PASSED ({} ticks)", .{tick});
+}
+
+pub const Simulator = struct {
+    pub const Options = struct {
+        cluster: Cluster.Options,
+        workload: StateMachine.Workload.Options,
+
+        /// Probability per tick that a crash will occur.
+        replica_crash_probability: f64,
+        /// Minimum duration of a crash.
+        replica_crash_stability: u32,
+        /// Probability per tick that a crashed replica will recovery.
+        replica_restart_probability: f64,
+        /// Minimum time a replica is up until it is crashed again.
+        replica_restart_stability: u32,
+
+        /// The total number of requests to send. Does not count `register` messages.
+        requests_max: usize,
+        request_probability: u8, // percent
+        request_idle_on_probability: u8, // percent
+        request_idle_off_probability: u8, // percent
+    };
+
+    random: std.rand.Random,
+    options: Options,
+    cluster: *Cluster,
+    workload: StateMachine.Workload,
+
+    /// Protect a replica from fast successive crash/restarts.
+    replica_stability: []usize,
+    reply_sequence: ReplySequence,
+
+    /// Total number of requests sent, including those that have not been delivered.
+    /// Does not include `register` messages.
+    requests_sent: usize = 0,
+    requests_idle: bool = false,
+
+    pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Simulator {
+        assert(options.replica_crash_probability < 1.0);
+        assert(options.replica_crash_probability >= 0.0);
+        assert(options.replica_restart_probability < 1.0);
+        assert(options.replica_restart_probability >= 0.0);
+        assert(options.requests_max > 0);
+        assert(options.request_probability > 0);
+        assert(options.request_probability <= 100);
+        assert(options.request_idle_on_probability <= 100);
+        assert(options.request_idle_off_probability > 0);
+        assert(options.request_idle_off_probability <= 100);
+
+        var cluster = try Cluster.init(allocator, on_cluster_reply, options.cluster);
+        errdefer cluster.deinit();
+
+        var workload = try StateMachine.Workload.init(allocator, random, options.workload);
+        errdefer workload.deinit(allocator);
+
+        var replica_stability = try allocator.alloc(usize, options.cluster.replica_count);
+        errdefer allocator.free(replica_stability);
+        std.mem.set(usize, replica_stability, 0);
+
+        var reply_sequence = try ReplySequence.init(allocator);
+        errdefer reply_sequence.deinit(allocator);
+
+        return Simulator{
+            .random = random,
+            .options = options,
+            .cluster = cluster,
+            .workload = workload,
+            .replica_stability = replica_stability,
+            .reply_sequence = reply_sequence,
+        };
+    }
+
+    pub fn deinit(simulator: *Simulator, allocator: std.mem.Allocator) void {
+        allocator.free(simulator.replica_stability);
+        simulator.reply_sequence.deinit(allocator);
+        simulator.workload.deinit(allocator);
+        simulator.cluster.deinit();
+    }
+
+    pub fn done(simulator: *Simulator) bool {
+        assert(simulator.requests_sent <= simulator.options.requests_max);
+
+        if (!simulator.cluster.state_checker.convergence()) return false;
+        if (!simulator.reply_sequence.empty()) return false;
+        if (simulator.requests_sent < simulator.options.requests_max) return false;
+
+        for (simulator.cluster.replica_health) |health| {
+            if (health == .down) return false;
+        }
+
+        for (simulator.cluster.clients) |*client| {
+            if (client.request_queue.count > 0) return false;
+        }
+        return true;
+    }
+
+    pub fn tick(simulator: *Simulator) void {
+        // TODO(Zig): Remove (see on_cluster_reply()).
+        simulator.cluster.context = simulator;
+
+        simulator.cluster.tick();
+        simulator.tick_requests();
+        simulator.tick_crash();
+    }
+
+    fn on_cluster_reply(
+        cluster: *Cluster,
+        reply_client: usize,
+        request: *Message,
+        reply: *Message,
+    ) void {
+        // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
+        const simulator = @ptrCast(*Simulator, @alignCast(@alignOf(Simulator), cluster.context.?));
+        simulator.reply_sequence.insert(reply_client, request, reply);
+
+        while (simulator.reply_sequence.peek()) |commit| {
+            defer simulator.reply_sequence.next();
+
+            const commit_client = simulator.cluster.clients[commit.client_index];
+            assert(commit.reply.references == 1);
+            assert(commit.reply.header.command == .reply);
+            assert(commit.reply.header.client == commit_client.id);
+            assert(commit.reply.header.request == commit.request.header.request);
+            assert(commit.reply.header.operation == commit.request.header.operation);
+
+            assert(commit.request.references == 1);
+            assert(commit.request.header.command == .request);
+            assert(commit.request.header.client == commit_client.id);
+
+            log_simulator.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
+                commit.reply.header.op,
+                commit.reply.header.operation,
+                commit.request.header.client,
+                commit.request.header.request,
+            });
+
+            if (commit.request.header.operation != .register) {
+                simulator.workload.on_reply(
+                    commit.client_index,
+                    commit.reply.header.operation,
+                    commit.reply.header.timestamp,
+                    commit.request.body(),
+                    commit.reply.body(),
+                );
+            }
+        }
+    }
+
+    /// Maybe send a request from one of the cluster's clients.
+    fn tick_requests(simulator: *Simulator) void {
+        if (simulator.requests_idle) {
+            if (chance(simulator.random, simulator.options.request_idle_off_probability)) {
+                simulator.requests_idle = false;
+            }
+        } else {
+            if (chance(simulator.random, simulator.options.request_idle_on_probability)) {
+                simulator.requests_idle = true;
+            }
+        }
+
+        if (simulator.requests_idle) return;
+        if (simulator.requests_sent == simulator.options.requests_max) return;
+        if (!chance(simulator.random, simulator.options.request_probability)) return;
+
+        const client_index =
+            simulator.random.uintLessThan(usize, simulator.options.cluster.client_count);
+        var client = &simulator.cluster.clients[client_index];
+
+        // Make sure that there is capacity in the client's request queue so that we never trigger
+        // error.TooManyOutstandingRequests.
+        if (client.request_queue.count + 1 > constants.client_request_queue_max) return;
+
+        // Messages aren't added to the ReplySequence until a reply arrives.
+        // Before sending a new message, make sure there will definitely be room for it.
+        var reserved: usize = 0;
+        for (simulator.cluster.clients) |*c| {
+            // Count the number of clients that are still waiting for a `register` to complete,
+            // since they may start one at any time.
+            reserved += @boolToInt(c.session == 0);
+            // Count the number of requests queued.
+            reserved += c.request_queue.count;
+        }
+        // +1 for the potential request — is there room in the sequencer's queue?
+        if (reserved + 1 > simulator.reply_sequence.free()) return;
+
+        var request_message = client.get_message();
+        defer client.unref(request_message);
+
+        const request_metadata = simulator.workload.build_request(
+            client_index,
+            @alignCast(
+                @alignOf(vsr.Header),
+                request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
+            ),
+        );
+        assert(request_metadata.size <= constants.message_size_max - @sizeOf(vsr.Header));
+
+        simulator.cluster.request(
+            client_index,
+            request_metadata.operation,
+            request_message,
+            request_metadata.size,
+        );
+        // Since we already checked the client's request queue for free space, `client.request()`
+        // should always queue the request.
+        assert(request_message == client.request_queue.tail_ptr().?.message);
+        assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
+        assert(request_message.header.operation.cast(StateMachine) == request_metadata.operation);
+
+        simulator.requests_sent += 1;
+        assert(simulator.requests_sent <= simulator.options.requests_max);
+    }
+
+    fn tick_crash(simulator: *Simulator) void {
+        // The maximum number of replicas that can crash, with the cluster still able to recover.
+        var crashes = blk: {
+            // The minimum number of healthy replicas required for a crashed replica to be able to
+            // recover. A cluster of 1 can crash safely (as long as there is no disk corruption)
+            // since it does not run the recovery protocol.
+            var replica_normal_min = if (simulator.options.cluster.replica_count == 1)
+                0
+            else
+                vsr.quorums(simulator.options.cluster.replica_count).view_change;
+            break :blk simulator.cluster.replica_normal_count() -| replica_normal_min;
+        };
+
+        for (simulator.cluster.storages) |*storage, replica| {
+            if (simulator.cluster.replicas[replica].journal.status == .recovered) {
                 // TODO Remove this workaround when VSR recovery protocol is disabled.
                 // When only the minimum number of replicas are healthy (no more crashes allowed),
                 // disable storage faults on all healthy replicas.
@@ -286,7 +461,7 @@ pub fn main() !void {
                 // not have the prepare. The two healthy replicas can never complete a view change,
                 // because two replicas are not enough to nack, and the unhealthy replica cannot
                 // complete the VSR recovery protocol either.
-                if (cluster.health[replica] == .up and crashes == 0) {
+                if (simulator.cluster.replica_health[replica] == .up and crashes == 0) {
                     if (storage.faulty) {
                         log_simulator.debug("{}: disable storage faults", .{replica});
                         storage.faulty = false;
@@ -302,73 +477,57 @@ pub fn main() !void {
             }
         }
 
-        for (cluster.replicas) |*replica, index| {
-            switch (cluster.health[replica.replica]) {
-                .up => |*ticks| {
-                    ticks.* -|= 1;
-                    replica.tick();
-                    cluster.storages[index].tick();
+        for (simulator.cluster.replicas) |*replica| {
+            simulator.replica_stability[replica.replica] -|= 1;
+            const stability = simulator.replica_stability[replica.replica];
+            if (stability > 0) continue;
 
-                    state_checker.check_state(replica.replica) catch |err| {
-                        fatal(.correctness, "state checker error: {}", .{err});
-                    };
-
-                    if (ticks.* != 0) continue;
+            switch (simulator.cluster.replica_health[replica.replica]) {
+                .up => {
                     if (crashes == 0) continue;
-                    if (cluster.storages[replica.replica].writes.count() == 0) {
-                        if (!chance_f64(random, health_options.crash_probability)) continue;
-                    } else {
-                        if (!chance_f64(random, health_options.crash_probability * 10.0)) continue;
-                    }
+                    const replica_writes = simulator.cluster.storages[replica.replica].writes.count();
+                    const crash_probability = simulator.options.replica_crash_probability *
+                        @as(f64, if (replica_writes == 0) 1.0 else 10.0);
+                    if (!chance_f64(simulator.random, crash_probability)) continue;
 
-                    if (!try cluster.crash_replica(replica.replica)) continue;
-                    log_simulator.debug("{}: crash replica", .{replica.replica});
-                    crashes -= 1;
+                    const replica_crashed = simulator.cluster.crash_replica(replica.replica) catch |err| {
+                        log_simulator.err("{}: crash replica: unable to open after crash (err={})", .{
+                            replica.replica,
+                            err,
+                        });
+                        unreachable;
+                    };
+                    if (replica_crashed) {
+                        log_simulator.debug("{}: crash replica", .{replica.replica});
+                        crashes -= 1;
+                        simulator.replica_stability[replica.replica] =
+                            simulator.options.replica_crash_stability;
+                    }
                 },
-                .down => |*ticks| {
-                    ticks.* -|= 1;
-                    // Keep ticking the time so that it won't have diverged too far to synchronize
-                    // when the replica restarts.
-                    replica.clock.time.tick();
+                .down => {
                     assert(replica.status == .recovering);
-                    if (ticks.* == 0 and chance_f64(random, health_options.restart_probability)) {
-                        cluster.health[replica.replica] = .{ .up = health_options.restart_stability };
+                    if (chance_f64(simulator.random, simulator.options.replica_restart_probability)) {
+                        simulator.cluster.restart_replica(replica.replica);
                         log_simulator.debug("{}: restart replica", .{replica.replica});
+                        simulator.replica_stability[replica.replica] =
+                            simulator.options.replica_restart_stability;
                     }
                 },
             }
         }
-
-        cluster.network.packet_simulator.tick(cluster.health);
-        conductor.tick();
-
-        if (state_checker.convergence() and conductor.done() and
-            cluster.replica_up_count() == replica_count)
-        {
-            break;
-        }
-    } else {
-        output.err("you can reproduce this failure with seed={}", .{seed});
-        fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
-
-    assert(state_checker.convergence());
-    assert(conductor.done());
-
-    output.info("\n          PASSED ({} ticks)", .{tick});
-}
-
-pub const ExitCode = enum(u8) {
-    ok = 0,
-    crash = 127, // Any assertion crash will be given an exit code of 127 by default.
-    liveness = 128,
-    correctness = 129,
 };
 
 /// Print an error message and then exit with an exit code.
-fn fatal(exit_code: ExitCode, comptime fmt_string: []const u8, args: anytype) noreturn {
+fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
     output.err(fmt_string, args);
-    std.os.exit(@enumToInt(exit_code));
+    std.os.exit(@enumToInt(failure));
+}
+
+/// Returns true, `p` percent of the time, else false.
+fn chance(random: std.rand.Random, p: u8) bool {
+    assert(p <= 100);
+    return random.uintLessThanBiased(u8, 100) < p;
 }
 
 /// Returns true, `p` percent of the time, else false.
@@ -383,29 +542,10 @@ fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]
     return err_or_bytes catch @panic("Unable to extract next value from args");
 }
 
-fn on_replica_change_state(replica: *const Replica) void {
-    state_checker.check_state(replica.replica) catch |err| {
-        fatal(.correctness, "state checker error: {}", .{err});
-    };
-}
-
-fn on_replica_compact(replica: *const Replica) void {
-    storage_checker.replica_compact(replica) catch |err| {
-        fatal(.correctness, "storage checker error: {}", .{err});
-    };
-}
-
-fn on_replica_checkpoint(replica: *const Replica) void {
-    storage_checker.replica_checkpoint(replica) catch |err| {
-        fatal(.correctness, "storage checker error: {}", .{err});
-    };
-}
-
-/// Returns a random partitioning mode, excluding .custom
+/// Returns a random partitioning mode.
 fn random_partition_mode(random: std.rand.Random) PartitionMode {
     const typeInfo = @typeInfo(PartitionMode).Enum;
-    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 2);
-    if (enumAsInt >= @enumToInt(PartitionMode.custom)) enumAsInt += 1;
+    var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @intToEnum(PartitionMode, enumAsInt);
 }
 
