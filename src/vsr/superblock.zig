@@ -663,8 +663,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         /// The vsr_state must update the commit_min and commit_min_checksum.
-        // TODO Will the replica ever update view/log_view by calling checkpoint() during a view
-        // change? If not, forbid it.
+        /// The vsr_state must not update view/log_view.
         pub fn checkpoint(
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
@@ -672,11 +671,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state: SuperBlockSector.VSRState,
         ) void {
             assert(superblock.opened);
-            // Checkpoint must advance commit_min, but never the view.
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
             assert(superblock.staging.vsr_state.commit_min < vsr_state.commit_min);
             assert(superblock.staging.vsr_state.commit_min_checksum !=
                 vsr_state.commit_min_checksum);
+            assert(superblock.staging.vsr_state.view == vsr_state.view);
+            assert(superblock.staging.vsr_state.log_view == vsr_state.log_view);
 
             context.* = .{
                 .superblock = superblock,
@@ -688,6 +688,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
+        /// The replica calls view_change() to persist its view/log_view — it cannot
+        /// advertise either value until it is certain they will never backtrack.
+        ///
+        /// The vsr_state must advance view/log_view (monotonically increasing).
         /// The vsr_state must not update the `commit_min` or `commit_min_checksum`.
         pub fn view_change(
             superblock: *SuperBlock,
@@ -696,10 +700,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state: SuperBlockSector.VSRState,
         ) void {
             assert(superblock.opened);
-            assert(vsr_state.commit_min == superblock.staging.vsr_state.commit_min);
-            assert(vsr_state.commit_min_checksum ==
-                superblock.staging.vsr_state.commit_min_checksum);
+            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
             assert(superblock.staging.vsr_state.monotonic(vsr_state));
+            assert(superblock.staging.vsr_state.commit_min == vsr_state.commit_min);
+            assert(superblock.staging.vsr_state.commit_min_checksum ==
+                vsr_state.commit_min_checksum);
+            assert(superblock.staging.vsr_state.view <= vsr_state.view);
+            assert(superblock.staging.vsr_state.log_view <= vsr_state.log_view);
+            assert(superblock.staging.vsr_state.log_view < vsr_state.log_view or
+                superblock.staging.vsr_state.view < vsr_state.view);
 
             log.debug(
                 "view_change: commit_min_checksum={}..{} commit_min={}..{} commit_max={}..{} " ++
@@ -731,16 +740,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .vsr_state = vsr_state,
             };
 
-            if (!superblock.staging.vsr_state.would_be_updated_by(context.vsr_state.?)) {
-                log.debug("view_change: no change", .{});
-                callback(context);
-                return;
-            }
-
             superblock.acquire(context);
         }
 
-        pub fn view_change_in_progress(superblock: *SuperBlock) bool {
+        pub fn view_change_in_progress(superblock: *const SuperBlock) bool {
             assert(superblock.opened);
 
             if (superblock.queue_head) |head| {
