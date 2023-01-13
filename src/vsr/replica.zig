@@ -134,19 +134,33 @@ pub fn ReplicaType(
         /// For executing service up-calls after an operation has been committed:
         state_machine: StateMachine,
 
-        // TODO Document.
+        /// Durably store VSR state, the "root" of the LSM tree, and other replica metadata.
         superblock: SuperBlock,
+
+        /// Context for SuperBlock.open() and .checkpoint().
         superblock_context: SuperBlock.Context = undefined,
+        /// Context for SuperBlock.view_change().
+        superblock_context_view_change: SuperBlock.Context = undefined,
+
         grid: Grid,
         opened: bool,
 
-        /// The current view, initially 0:
+        /// The current view.
+        /// Initialized from the superblock's VSRState.
+        ///
+        /// Invariants:
+        /// * `replica.view ≥ replica.log_view`
+        /// * `replica.view ≥ replica.view_durable`
+        /// * For replica_count=0, `view` is always 0.
         view: u32,
 
         /// The latest view where
         /// - the replica was a primary and acquired a DVC quorum, or
         /// - the replica was a backup and processed a SV message.
         /// i.e. the latest view in which this replica changed its head message.
+        ///
+        /// Initialized from the superblock's VSRState.
+        /// For replica_count=0, `log_view` is always 0.
         log_view: u32,
 
         /// The current status, either normal, view_change, or recovering:
@@ -1240,6 +1254,7 @@ pub fn ReplicaType(
             // headers of any other replica with the same log_view so that the next primary can
             // identify an unambiguous set of canonical headers.
             self.log_view = self.view;
+            self.view_durable_update();
 
             assert(self.op >= self.commit_max);
             assert(self.state_machine.prepare_timestamp >=
@@ -2645,8 +2660,8 @@ pub fn ReplicaType(
                 .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
                 .commit_min = vsr_state_commit_min,
                 .commit_max = self.commit_max,
-                .log_view = self.log_view,
-                .view = self.view,
+                .log_view = self.superblock.staging.vsr_state.log_view,
+                .view = self.superblock.staging.vsr_state.view,
             };
             assert(self.superblock.working.vsr_state.monotonic(vsr_state_new));
 
@@ -3303,7 +3318,8 @@ pub fn ReplicaType(
                         log.warn("{}: on_{s}: ignoring (no context)", .{ self.replica, command });
                         return true;
                     },
-                    else => {},
+                    .headers, .request_headers => {},
+                    else => unreachable,
                 }
             }
 
@@ -5097,11 +5113,170 @@ pub fn ReplicaType(
                 },
             }
 
+            if (replica != self.replica) {
+                // Critical: Do not advertise a view/log_view before it is durable.
+                // See view_durable()/log_view_durable().
+                if (self.view_durable() < message.header.view and message.header.command != .recovery) {
+                    log.debug("{}: send_message_to_replica: dropped {s} " ++
+                        "(view_durable={} message.view={})", .{
+                        self.replica,
+                        @tagName(message.header.command),
+                        self.view_durable(),
+                        message.header.view,
+                    });
+                    return;
+                }
+
+                if (message.header.command == .do_view_change) {
+                    const message_log_view = message.header.timestamp;
+                    if (self.log_view_durable() < message_log_view) {
+                        log.debug("{}: send_message_to_replica: dropped {s} " ++
+                            "(log_view_durable={} message.log_view={})", .{
+                            self.replica,
+                            @tagName(message.header.command),
+                            self.log_view_durable(),
+                            message_log_view,
+                        });
+                        return;
+                    }
+                }
+            }
+
             if (replica == self.replica) {
                 assert(self.loopback_queue == null);
                 self.loopback_queue = message.ref();
             } else {
                 self.message_bus.send_message_to_replica(replica, message);
+            }
+        }
+
+        /// The highest durable view.
+        /// A replica must not advertise a view higher than its durable view.
+        ///
+        /// The advertised `view` must never backtrack after a crash.
+        /// This ensures the old primary is isolated — if a backup's view backtracks, it could
+        /// ack a prepare to the old primary, forking the log. See VRR §8.2 for more detail.
+        ///
+        /// Equivalent to `superblock.working.vsr_state.view`.
+        fn view_durable(self: *const Self) u32 {
+            return self.superblock.working.vsr_state.view;
+        }
+
+        /// The highest durable log_view.
+        /// A replica must not advertise a log_view (in a DVC) higher than its durable log_view.
+        ///
+        /// A replica's advertised `log_view` must never backtrack after a crash.
+        /// (`log_view` is only advertised within DVC messages).
+        ///
+        /// To understand why, consider the following replica logs, where:
+        ///
+        ///   - numbers in replica rows denote the version of the op, and
+        ///   - a<b<c denotes the view in which the op was prepared.
+        ///
+        /// Replica 0 prepares some ops, but they never arrive at replica 1/2:
+        ///
+        ///       view=a
+        ///           op  │ 0  1  2
+        ///    replica 0  │ 1a 2a 3a (log_view=a, leader)
+        ///    replica 1  │ -  -  -  (log_view=a, follower — but never receives any prepares)
+        ///   (replica 2) │ -  -  -  (log_view=_, partitioned)
+        ///
+        /// After a view change, replica 1 prepares some ops, but they never arrive at replica 0/2:
+        ///
+        ///       view=b
+        ///           op  │ 0  1  2
+        ///   (replica 0) │ 1a 2a 3a (log_view=a, partitioned)
+        ///    replica 1  │ 4b 5b 6b (log_view=b, leader)
+        ///    replica 2  │ -  -  -  (log_view=b, follower — but never receives any prepares)
+        ///
+        /// After another view change, replica 2 loads replica 1's ops:
+        ///
+        ///       view=c
+        ///           op  │ 0  1  2
+        ///    replica 0  │ 1a 2a 3a (log_view=c, follower)
+        ///   (replica 1) │ 4b 5b 6b (log_view=b, partitioned)
+        ///    replica 2  │ 1c 2c 3c (log_view=c, leader)
+        ///
+        /// Suppose replica 0 crashes and its log_view regresses to a.
+        /// If replica 2 is partitioned, replicas 0 and 1 start view d with the DVCs:
+        ///
+        ///    replica 0  │ 1a 2a 3a (log_view=a, log_view backtracked!)
+        ///    replica 1  │ 4b 5b 6b (log_view=b)
+        ///
+        /// Replica 1's higher log_view is canonical, so 4b/5b/6b replace 1a/2a/3a even though
+        /// the latter may have been committed during view c. The log has forked.
+        ///
+        /// Therefore, a replica's log_view must never regress.
+        ///
+        /// Equivalent to `superblock.working.vsr_state.log_view`.
+        fn log_view_durable(self: *const Self) u32 {
+            return self.superblock.working.vsr_state.log_view;
+        }
+
+        fn view_durable_updating(self: *const Self) bool {
+            return self.superblock.view_change_in_progress();
+        }
+
+        /// Persist the current view and log_view to the superblock.
+        /// `view_durable` and `log_view_durable` will update asynchronously, when their respective
+        /// updates are durable.
+        fn view_durable_update(self: *Self) void {
+            assert(self.status != .recovering);
+            assert(self.view >= self.log_view);
+            assert(self.view >= self.view_durable());
+            assert(self.log_view >= self.log_view_durable());
+            assert(self.log_view > self.log_view_durable() or self.view > self.view_durable());
+
+            if (self.view_durable_updating()) return;
+
+            log.debug("{}: view_durable_update: view_durable={}..{} log_view_durable={}..{}", .{
+                self.replica,
+                self.view_durable(),
+                self.view,
+                self.log_view_durable(),
+                self.log_view,
+            });
+
+            self.superblock.view_change(
+                view_durable_update_callback,
+                &self.superblock_context_view_change,
+                .{
+                    .commit_min = self.superblock.staging.vsr_state.commit_min,
+                    .commit_min_checksum = self.superblock.staging.vsr_state.commit_min_checksum,
+                    .commit_max = self.commit_max,
+                    .view = self.view,
+                    .log_view = self.log_view,
+                },
+            );
+            assert(self.view_durable_updating());
+        }
+
+        fn view_durable_update_callback(context: *SuperBlock.Context) void {
+            const self = @fieldParentPtr(Self, "superblock_context_view_change", context);
+            assert(self.status != .recovering);
+            assert(!self.view_durable_updating());
+            assert(self.superblock.working.vsr_state.view <= self.view);
+            assert(self.superblock.working.vsr_state.log_view <= self.log_view);
+            assert(self.superblock.working.vsr_state.commit_min <= self.commit_min);
+            assert(self.superblock.working.vsr_state.commit_max <= self.commit_max);
+
+            log.debug("{}: view_durable_update_callback: " ++
+                "(view_durable={} log_view_durable={})", .{
+                self.replica,
+                self.view_durable(),
+                self.log_view_durable(),
+            });
+
+            assert(self.view_durable() <= self.view);
+            assert(self.log_view_durable() <= self.view_durable());
+            assert(self.log_view_durable() <= self.log_view);
+
+            if (self.view_durable() != self.view or
+                self.log_view_durable() != self.log_view)
+            {
+                // The view/log_view incremented while the previous view-change update was
+                // being saved.
+                self.view_durable_update();
             }
         }
 
@@ -5388,16 +5563,20 @@ pub fn ReplicaType(
             self.send_message_to_other_replicas(start_view);
         }
 
-        fn transition_to_normal_from_recovering_status(self: *Self, new_view: u32) void {
+        fn transition_to_normal_from_recovering_status(self: *Self, view_new: u32) void {
             assert(self.status == .recovering);
             assert(self.view == 0);
             assert(!self.committing);
-            assert(self.replica_count > 1 or new_view == 0);
+            assert(self.replica_count > 1 or view_new == 0);
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
-            self.view = new_view;
-            self.log_view = new_view;
+
             self.status = .normal;
+            self.view = view_new;
+            self.log_view = view_new;
+            if (self.view_durable() != view_new or self.log_view_durable() != view_new) {
+                self.view_durable_update();
+            }
 
             if (self.primary()) {
                 log.debug(
@@ -5442,13 +5621,13 @@ pub fn ReplicaType(
             }
         }
 
-        fn transition_to_normal_from_view_change_status(self: *Self, new_view: u32) void {
+        fn transition_to_normal_from_view_change_status(self: *Self, view_new: u32) void {
             // In the VRR paper it's possible to transition from normal to normal for the same view.
             // For example, this could happen after a state transfer triggered by an op jump.
             assert(self.status == .view_change);
-            assert(new_view >= self.view);
+            assert(view_new >= self.view);
             assert(self.journal.header_with_op(self.op) != null);
-            self.view = new_view;
+
             self.status = .normal;
 
             if (self.primary()) {
@@ -5464,7 +5643,10 @@ pub fn ReplicaType(
                 assert(!self.recovery_timeout.ticking);
                 assert(!self.pipeline_repairing);
                 assert(self.pipeline == .queue);
-                assert(self.log_view == new_view);
+                assert(self.view == view_new);
+                assert(self.log_view == view_new);
+                assert(self.view_durable_updating() or self.view_durable() == view_new);
+                assert(self.view_durable_updating() or self.log_view_durable() == view_new);
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
@@ -5485,7 +5667,10 @@ pub fn ReplicaType(
                 assert(!self.recovery_timeout.ticking);
                 assert(self.pipeline == .cache);
 
-                self.log_view = new_view;
+                self.view = view_new;
+                self.log_view = view_new;
+                self.view_durable_update();
+
                 self.ping_timeout.start();
                 self.commit_timeout.stop();
                 self.normal_status_timeout.start();
@@ -5508,16 +5693,18 @@ pub fn ReplicaType(
         /// where v identifies the new view. A replica notices the need for a view change either
         /// based on its own timer, or because it receives a start_view_change or do_view_change
         /// message for a view with a larger number than its own view.
-        fn transition_to_view_change_status(self: *Self, new_view: u32) void {
+        fn transition_to_view_change_status(self: *Self, view_new: u32) void {
             log.debug("{}: transition_to_view_change_status: view={}..{}", .{
                 self.replica,
                 self.view,
-                new_view,
+                view_new,
             });
             assert(self.status == .normal or self.status == .view_change);
-            assert(new_view > self.view);
-            self.view = new_view;
+            assert(view_new > self.view);
+
             self.status = .view_change;
+            self.view = view_new;
+            self.view_durable_update();
             if (self.pipeline == .queue) {
                 var queue = self.pipeline.queue;
                 self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
