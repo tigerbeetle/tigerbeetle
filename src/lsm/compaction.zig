@@ -401,6 +401,8 @@ pub fn CompactionType(
                 compaction.merge_iterator = MergeIterator.init(
                     &compaction.iterator_a,
                     &compaction.iterator_b,
+                    // level_b may only contain tombstones if we have ever inserted into level_b+1.
+                    compaction.level_b < compaction.manifest.level_inserted_max,
                 );
                 assert(!compaction.merge_iterator.?.empty());
             }

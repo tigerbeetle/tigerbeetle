@@ -3,8 +3,6 @@ const assert = std.debug.assert;
 
 const util = @import("../util.zig");
 
-const k_max = 2;
-
 pub fn MergeIteratorType(
     comptime Table: type,
     comptime IteratorA: type,
@@ -15,6 +13,7 @@ pub fn MergeIteratorType(
 
         iterator_a: *IteratorA,
         iterator_b: *IteratorB,
+        iterator_b_may_contain_tombstones: bool,
 
         empty_a: bool,
         empty_b: bool,
@@ -24,10 +23,12 @@ pub fn MergeIteratorType(
         pub fn init(
             iterator_a: *IteratorA,
             iterator_b: *IteratorB,
+            iterator_b_may_contain_tombstones: bool,
         ) Self {
             return Self{
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
+                .iterator_b_may_contain_tombstones = iterator_b_may_contain_tombstones,
                 .empty_a = false,
                 .empty_b = false,
                 .previous_key_popped = null,
@@ -55,7 +56,9 @@ pub fn MergeIteratorType(
                             continue;
                         },
                     };
-                    return it.iterator_b.pop();
+                    const value_b = it.iterator_b.pop();
+                    assert(it.iterator_b_may_contain_tombstones or !Table.tombstone(&value_b));
+                    return value_b;
                 }
 
                 if (it.empty_b) {
@@ -86,14 +89,20 @@ pub fn MergeIteratorType(
 
                 switch (Table.compare_keys(key_a, key_b)) {
                     .lt => return it.iterator_a.pop(),
-                    .gt => return it.iterator_b.pop(),
+                    .gt => {
+                        const value_b = it.iterator_b.pop();
+                        assert(it.iterator_b_may_contain_tombstones or !Table.tombstone(&value_b));
+                        return value_b;
+                    },
                     .eq => {
                         const value_a = it.iterator_a.pop();
                         const value_b = it.iterator_b.pop();
+                        assert(it.iterator_b_may_contain_tombstones or !Table.tombstone(&value_b));
                         switch (Table.usage) {
                             .general => return value_a,
                             .secondary_index => {
-                                // In secondary indexes, puts and removes alternate and can be safely cancelled out.
+                                // In secondary indexes, puts and removes alternate and
+                                // can be safely cancelled out.
                                 assert(Table.tombstone(&value_a) != Table.tombstone(&value_b));
                                 continue;
                             },
