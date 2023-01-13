@@ -354,6 +354,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .index_block_addresses = index_block_addresses,
                 .index_block_checksums = index_block_checksums,
 
+                .manifest_level_inserted_max = tree.manifest.level_inserted_max,
+
                 .callback = callback,
             };
 
@@ -375,6 +377,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             index_block_count: u8,
             index_block_addresses: [constants.lsm_levels]u64,
             index_block_checksums: [constants.lsm_levels]u128,
+
+            manifest_level_inserted_max: u8,
 
             data_block: ?struct {
                 address: u64,
@@ -451,6 +455,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 assert(context.index_block_count <= constants.lsm_levels);
 
                 if (Table.data_block_search(data_block, context.key)) |value| {
+                    if (context.index_block == context.manifest_level_inserted_max) {
+                        // If we have never inserted into level index_block+1,
+                        // then level index_block cannot contain tombstones.
+                        assert(!tombstone(value));
+                    }
                     context.callback(context, unwrap_tombstone(value));
                 } else {
                     // The key is not present in this table, check the next level.
