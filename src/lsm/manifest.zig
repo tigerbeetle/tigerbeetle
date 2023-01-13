@@ -123,6 +123,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         levels: [constants.lsm_levels]Level,
 
+        /// The maximum level in which we have ever inserted data, even if that level is now empty.
+        level_inserted_max: u8 = 0,
+
         // TODO Set this at startup when reading in the manifest.
         // This should be the greatest TableInfo.snapshot_min/snapshot_max (if deleted) or
         // registered snapshot seen so far.
@@ -180,6 +183,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             assert(level < constants.lsm_levels);
             manifest.levels[level].insert_table(manifest.node_pool, table);
+            manifest.level_inserted_max = @maximum(manifest.level_inserted_max, level);
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
@@ -206,6 +210,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             if (constants.verify) {
                 assert(manifest_level.contains(table));
             }
+
+            manifest.level_inserted_max = @maximum(manifest.level_inserted_max, level);
         }
 
         /// Updates the snapshot_max on the provide table for the given level.
@@ -225,6 +231,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // Append update changes to the manifest log
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
+
+            manifest.level_inserted_max = @maximum(manifest.level_inserted_max, level);
         }
 
         pub fn remove_invisible_tables(
@@ -587,7 +595,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn verify(manifest: *Manifest, snapshot: u64) void {
-            for (manifest.levels) |*level| {
+            for (manifest.levels) |*level, level_index| {
+                if (level_index > manifest.level_inserted_max) {
+                    // If we have never inserted into this level, it should be empty.
+                    assert(level.tables.node_count == 0);
+                }
                 var key_max_prev: ?Key = null;
                 var table_info_iter = level.iterator(
                     .visible,
