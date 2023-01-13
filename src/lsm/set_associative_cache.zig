@@ -8,7 +8,7 @@ const meta = std.meta;
 const Vector = meta.Vector;
 
 const constants = @import("../constants.zig");
-const div_ceil = @import("../util.zig").div_ceil;
+const div_ceil = @import("../stdx.zig").div_ceil;
 const verify = constants.verify;
 
 pub const Layout = struct {

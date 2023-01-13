@@ -15,7 +15,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock);
 
 const constants = @import("../constants.zig");
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../test/storage.zig").Storage;
 const MessagePool = @import("../message_pool.zig").MessagePool;
@@ -350,6 +350,6 @@ const Environment = struct {
 fn checksum_free_set(superblock: *const SuperBlock) u128 {
     const mask_bits = @bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt);
     const count_bits = superblock.free_set.blocks.bit_length;
-    const count_words = util.div_ceil(count_bits, mask_bits);
+    const count_words = stdx.div_ceil(count_bits, mask_bits);
     return vsr.checksum(std.mem.sliceAsBytes(superblock.free_set.blocks.masks[0..count_words]));
 }

@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
@@ -208,7 +208,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             // Copy the bytes read into a buffer owned by the iterator since the Grid
             // only guarantees the provided pointer to be valid in this callback.
-            util.copy_disjoint(.exact, u8, it.index_block, block);
+            stdx.copy_disjoint(.exact, u8, it.index_block, block);
 
             if (it.index_block_callback) |callback| {
                 it.index_block_callback = null;
@@ -240,7 +240,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
             // Copy the bytes read into a buffer owned by the iterator since the Grid
             // only guarantees the provided pointer to be valid in this callback.
-            util.copy_disjoint(.exact, u8, it.data_blocks.next_tail().?, block);
+            stdx.copy_disjoint(.exact, u8, it.data_blocks.next_tail().?, block);
 
             it.data_blocks.advance_tail();
             it.data_block_index += 1;
