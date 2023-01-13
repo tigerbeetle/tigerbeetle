@@ -8,7 +8,7 @@ const MaskInt = DynamicBitSetUnmanaged.MaskInt;
 const constants = @import("../constants.zig");
 
 const ewah = @import("../ewah.zig").ewah(usize);
-const div_ceil = @import("../util.zig").div_ceil;
+const div_ceil = @import("../stdx.zig").div_ceil;
 
 /// This is logically a range of addresses within the FreeSet, but its actual fields are block
 /// indexes for ease of calculation.

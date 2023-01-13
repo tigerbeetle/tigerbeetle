@@ -1,3 +1,5 @@
+//! Extensions to the standard library -- things which could have been in std, but aren't.
+
 const std = @import("std");
 const assert = std.debug.assert;
 

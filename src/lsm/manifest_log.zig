@@ -28,7 +28,7 @@ const log = std.log.scoped(.manifest_log);
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("grid.zig").GridType;
@@ -93,7 +93,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             tree.compaction_tables_input_max + // Remove.
             tree.compaction_tables_output_max);
 
-        const blocks_count_appends = util.div_ceil(compaction_appends_max, Block.entry_count_max);
+        const blocks_count_appends = stdx.div_ceil(compaction_appends_max, Block.entry_count_max);
 
         /// The upper-bound of manifest log blocks we must buffer.
         ///

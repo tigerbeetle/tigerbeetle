@@ -4,7 +4,7 @@ const mem = std.mem;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 
@@ -128,7 +128,7 @@ pub const ClientTable = struct {
         size = new_size;
 
         for (entries) |entry| {
-            util.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(entry.reply.header));
+            stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(entry.reply.header));
             size += @sizeOf(vsr.Header);
         }
 
@@ -138,7 +138,7 @@ pub const ClientTable = struct {
         size = new_size;
 
         for (entries) |entry| {
-            util.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entry.session));
+            stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entry.session));
             size += @sizeOf(u64);
         }
 
@@ -150,7 +150,7 @@ pub const ClientTable = struct {
         for (entries) |entry| {
             const body = entry.reply.body();
             assert(body.len == (entry.reply.header.size - @sizeOf(vsr.Header)));
-            util.copy_disjoint(.inexact, u8, target[size..], body);
+            stdx.copy_disjoint(.inexact, u8, target[size..], body);
             size += body.len;
         }
 
@@ -159,7 +159,7 @@ pub const ClientTable = struct {
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
-        util.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entries_count));
+        stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entries_count));
         size += @sizeOf(u32);
 
         assert(size <= encode_size_max);
@@ -169,7 +169,7 @@ pub const ClientTable = struct {
     pub fn decode(client_table: *ClientTable, source: []align(@alignOf(vsr.Header)) const u8) void {
         // Read the entry count at the end of the buffer to determine how many there are.
         var entries_count: u32 = undefined;
-        util.copy_disjoint(.exact, u8, mem.asBytes(&entries_count), source[source.len - @sizeOf(u32) ..]);
+        stdx.copy_disjoint(.exact, u8, mem.asBytes(&entries_count), source[source.len - @sizeOf(u32) ..]);
         assert(entries_count <= client_table.sorted.len);
 
         assert(client_table.count() == 0);
@@ -214,7 +214,7 @@ pub const ClientTable = struct {
 
             // Read the message body for the entry.
             assert(bodies.len >= body_size);
-            util.copy_disjoint(.exact, u8, body, bodies[0..body_size]);
+            stdx.copy_disjoint(.exact, u8, body, bodies[0..body_size]);
             bodies = bodies[body_size..];
             assert(entry.reply.header.valid_checksum_body(body));
 
