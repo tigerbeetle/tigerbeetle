@@ -6,7 +6,7 @@ const log = std.log.scoped(.superblock_manifest);
 const mem = std.mem;
 
 const constants = @import("../constants.zig");
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 
 // TODO Compute & use the upper bound of manifest blocks (per tree) to size the trailer zone.
 
@@ -100,7 +100,7 @@ pub const Manifest = struct {
         var size: u64 = 0;
 
         const trees = target[size..][0 .. manifest.count * @sizeOf(u128)];
-        util.copy_disjoint(
+        stdx.copy_disjoint(
             .exact,
             u128,
             mem.bytesAsSlice(u128, trees),
@@ -109,7 +109,7 @@ pub const Manifest = struct {
         size += trees.len;
 
         const checksums = target[size..][0 .. manifest.count * @sizeOf(u128)];
-        util.copy_disjoint(
+        stdx.copy_disjoint(
             .exact,
             u128,
             mem.bytesAsSlice(u128, checksums),
@@ -118,7 +118,7 @@ pub const Manifest = struct {
         size += checksums.len;
 
         const addresses = target[size..][0 .. manifest.count * @sizeOf(u64)];
-        util.copy_disjoint(
+        stdx.copy_disjoint(
             .exact,
             u64,
             mem.bytesAsSlice(u64, addresses),
@@ -144,7 +144,7 @@ pub const Manifest = struct {
         var size: u64 = 0;
 
         const trees = source[size..][0 .. manifest.count * @sizeOf(u128)];
-        util.copy_disjoint(
+        stdx.copy_disjoint(
             .exact,
             u128,
             manifest.trees[0..manifest.count],
@@ -153,7 +153,7 @@ pub const Manifest = struct {
         size += trees.len;
 
         const checksums = source[size..][0 .. manifest.count * @sizeOf(u128)];
-        util.copy_disjoint(
+        stdx.copy_disjoint(
             .exact,
             u128,
             manifest.checksums[0..manifest.count],
@@ -162,7 +162,7 @@ pub const Manifest = struct {
         size += checksums.len;
 
         const addresses = source[size..][0 .. manifest.count * @sizeOf(u64)];
-        util.copy_disjoint(
+        stdx.copy_disjoint(
             .exact,
             u64,
             manifest.addresses[0..manifest.count],
@@ -224,9 +224,9 @@ pub const Manifest = struct {
         manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
 
         const tail = manifest.count - (index + 1);
-        util.copy_left(.inexact, u128, manifest.trees[index..], manifest.trees[index + 1 ..][0..tail]);
-        util.copy_left(.inexact, u128, manifest.checksums[index..], manifest.checksums[index + 1 ..][0..tail]);
-        util.copy_left(.inexact, u64, manifest.addresses[index..], manifest.addresses[index + 1 ..][0..tail]);
+        stdx.copy_left(.inexact, u128, manifest.trees[index..], manifest.trees[index + 1 ..][0..tail]);
+        stdx.copy_left(.inexact, u128, manifest.checksums[index..], manifest.checksums[index + 1 ..][0..tail]);
+        stdx.copy_left(.inexact, u64, manifest.addresses[index..], manifest.addresses[index + 1 ..][0..tail]);
         manifest.count -= 1;
 
         manifest.trees[manifest.count] = 0;

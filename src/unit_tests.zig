@@ -19,7 +19,7 @@ test {
 
     _ = @import("io.zig");
     _ = @import("ewah.zig");
-    _ = @import("util.zig");
+    _ = @import("stdx.zig");
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client_header_test.zig");

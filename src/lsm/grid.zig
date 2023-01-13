@@ -10,7 +10,7 @@ const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 
 const log = std.log.scoped(.grid);
 

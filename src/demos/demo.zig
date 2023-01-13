@@ -11,7 +11,7 @@ const Transfer = tb.Transfer;
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
-const util = vsr.util;
+const stdx = vsr.stdx;
 const IO = vsr.io.IO;
 const Storage = vsr.storage.Storage;
 const MessagePool = vsr.message_pool.MessagePool;
@@ -68,7 +68,7 @@ pub fn request(
     defer client.unref(message);
 
     const body = std.mem.asBytes(&batch);
-    util.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(Header)..], body);
+    stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(Header)..], body);
 
     client.request(
         0,

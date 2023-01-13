@@ -61,7 +61,7 @@ const log = std.log.scoped(.tracer);
 
 const constants = @import("./constants.zig");
 const Time = @import("./time.zig").Time;
-const util = @import("util.zig");
+const stdx = @import("stdx.zig");
 
 /// All strings in Event must be comptime constants to ensure that they live until after `tracer.deinit` is called.
 pub const Event = union(enum) {
@@ -411,7 +411,7 @@ const TracerTracy = struct {
         c.___tracy_fiber_enter(event_group.name());
         const name = std.fmt.bufPrint(&print_buffer, "{}", .{event}) catch name: {
             const dots = "...";
-            util.copy_disjoint(.exact, u8, print_buffer[print_buffer.len - dots.len ..], dots);
+            stdx.copy_disjoint(.exact, u8, print_buffer[print_buffer.len - dots.len ..], dots);
             break :name &print_buffer;
         };
         // TODO The alloc_srcloc here is not free and should be unnecessary,
@@ -454,7 +454,7 @@ const TracerTracy = struct {
             args,
         ) catch message: {
             const dots = "...";
-            util.copy_disjoint(.exact, u8, print_buffer[print_buffer.len - dots.len ..], dots);
+            stdx.copy_disjoint(.exact, u8, print_buffer[print_buffer.len - dots.len ..], dots);
             break :message &print_buffer;
         };
         c.___tracy_fiber_enter((EventGroup{ .main = {} }).name());
