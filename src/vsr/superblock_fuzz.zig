@@ -15,9 +15,10 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock);
 
 const constants = @import("../constants.zig");
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../test/storage.zig").Storage;
+const StorageFaultAtlas = @import("../test/storage.zig").ClusterFaultAtlas;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("superblock.zig").data_file_size_min;
@@ -44,7 +45,14 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
+    const storage_fault_atlas = StorageFaultAtlas.init(1, random, .{
+        .faulty_superblock = true,
+        .faulty_wal_headers = false,
+        .faulty_wal_prepares = false,
+    });
+
     const storage_options = .{
+        .replica_index = 0,
         .seed = random.int(u64),
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
         .read_latency_min = 1,
@@ -56,7 +64,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .read_fault_probability = 25 + random.uintLessThan(u8, 76),
         .write_fault_probability = 25 + random.uintLessThan(u8, 76),
         .crash_fault_probability = 50 + random.uintLessThan(u8, 51),
-        .faulty_superblock = true,
+        .fault_atlas = &storage_fault_atlas,
     };
 
     var storage = try Storage.init(allocator, superblock_zone_size, storage_options);
@@ -298,7 +306,7 @@ const Environment = struct {
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum,
             .commit_min = env.superblock.staging.vsr_state.commit_min,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
-            .view_normal = env.superblock.staging.vsr_state.view_normal + 4,
+            .log_view = env.superblock.staging.vsr_state.log_view + 4,
             .view = env.superblock.staging.vsr_state.view + 5,
         };
 
@@ -326,7 +334,7 @@ const Environment = struct {
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
             .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
-            .view_normal = env.superblock.staging.vsr_state.view_normal + 1,
+            .log_view = env.superblock.staging.vsr_state.log_view + 1,
             .view = env.superblock.staging.vsr_state.view + 1,
         };
 
@@ -350,6 +358,6 @@ const Environment = struct {
 fn checksum_free_set(superblock: *const SuperBlock) u128 {
     const mask_bits = @bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt);
     const count_bits = superblock.free_set.blocks.bit_length;
-    const count_words = util.div_ceil(count_bits, mask_bits);
+    const count_words = stdx.div_ceil(count_bits, mask_bits);
     return vsr.checksum(std.mem.sliceAsBytes(superblock.free_set.blocks.masks[0..count_words]));
 }

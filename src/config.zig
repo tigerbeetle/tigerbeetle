@@ -1,8 +1,18 @@
+//! Raw configuration values.
+//!
+//! Code which needs these values should use `constants.zig` instead.
+//! Configuration values are set from a combination of:
+//! - default values
+//! - `root.tigerbeetle_config`
+//! - `@import("tigerbeetle_options")`
+
 const builtin = @import("builtin");
 const std = @import("std");
 
-const build_options = @import("tigerbeetle_build_options");
 const root = @import("root");
+// Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root file.
+const build_options =
+    if (@hasDecl(root, "vsr_options")) root.vsr_options else @import("vsr_options");
 
 const vsr = @import("vsr.zig");
 const sector_size = @import("constants.zig").sector_size;
@@ -168,7 +178,7 @@ pub const configs = struct {
         .cluster = .{
             .clients_max = 4,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
-            .message_size_max = Config.Cluster.message_size_max_min(2),
+            .message_size_max = Config.Cluster.message_size_max_min(4),
             .storage_size_max = 1024 * 1024 * 1024,
 
             .block_size = sector_size,

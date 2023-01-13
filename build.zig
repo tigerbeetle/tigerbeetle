@@ -46,7 +46,7 @@ pub fn build(b: *std.build.Builder) void {
     const vsr_package = std.build.Pkg{
         .name = "vsr",
         .path = .{ .path = "src/vsr.zig" },
-        .dependencies = &.{options.getPackage("tigerbeetle_build_options")},
+        .dependencies = &.{options.getPackage("vsr_options")},
     };
 
     const tigerbeetle = b.addExecutable("tigerbeetle", "src/tigerbeetle/main.zig");
@@ -56,7 +56,7 @@ pub fn build(b: *std.build.Builder) void {
     tigerbeetle.install();
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.omit_frame_pointer = false;
-    tigerbeetle.addOptions("tigerbeetle_build_options", options);
+    tigerbeetle.addOptions("vsr_options", options);
     link_tracer_backend(tigerbeetle, tracer_backend, target);
 
     {
@@ -82,7 +82,7 @@ pub fn build(b: *std.build.Builder) void {
         benchmark.setBuildMode(mode);
         benchmark.addPackage(vsr_package);
         benchmark.install();
-        benchmark.addOptions("tigerbeetle_build_options", options);
+        benchmark.addOptions("vsr_options", options);
         link_tracer_backend(benchmark, tracer_backend, target);
 
         const run_cmd = benchmark.run();
@@ -111,7 +111,7 @@ pub fn build(b: *std.build.Builder) void {
     // Executable which generates src/clients/c/tb_client.h
     const tb_client_header_generate = blk: {
         const tb_client_header = b.addExecutable("tb_client_header", "src/clients/c/tb_client_header.zig");
-        tb_client_header.addOptions("tigerbeetle_build_options", options);
+        tb_client_header.addOptions("vsr_options", options);
         tb_client_header.setMainPkgPath("src");
         break :blk tb_client_header.run();
     };
@@ -120,7 +120,7 @@ pub fn build(b: *std.build.Builder) void {
         const unit_tests = b.addTest("src/unit_tests.zig");
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
-        unit_tests.addOptions("tigerbeetle_build_options", options);
+        unit_tests.addOptions("vsr_options", options);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
         unit_tests.setFilter(b.option(
             []const u8,
@@ -134,6 +134,21 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests.addIncludeDir("src/clients/c/");
 
         const test_step = b.step("test", "Run the unit tests");
+
+        // Test that our demos compile, but don't run them.
+        inline for (.{
+            "demo_01_create_accounts",
+            "demo_02_lookup_accounts",
+            "demo_03_create_transfers",
+            "demo_04_create_pending_transfers",
+            "demo_05_post_pending_transfers",
+            "demo_06_void_pending_transfers",
+            "demo_07_lookup_transfers",
+        }) |demo| {
+            const demo_exe = b.addExecutable(demo, "src/demos/" ++ demo ++ ".zig");
+            demo_exe.addPackage(vsr_package);
+            test_step.dependOn(&demo_exe.step);
+        }
         test_step.dependOn(&unit_tests.step);
     }
 
@@ -167,7 +182,7 @@ pub fn build(b: *std.build.Builder) void {
     {
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
-        simulator.addOptions("tigerbeetle_build_options", options);
+        simulator.addOptions("vsr_options", options);
         link_tracer_backend(simulator, tracer_backend, target);
 
         const run_cmd = simulator.run();
@@ -192,7 +207,7 @@ pub fn build(b: *std.build.Builder) void {
         vopr.setTarget(target);
         // Ensure that we get stack traces even in release builds.
         vopr.omit_frame_pointer = false;
-        vopr.addOptions("tigerbeetle_build_options", options);
+        vopr.addOptions("vsr_options", options);
         link_tracer_backend(vopr, tracer_backend, target);
 
         const run_cmd = vopr.run();
@@ -260,7 +275,7 @@ pub fn build(b: *std.build.Builder) void {
         exe.setTarget(target);
         exe.setBuildMode(mode);
         exe.omit_frame_pointer = false;
-        exe.addOptions("tigerbeetle_build_options", options);
+        exe.addOptions("vsr_options", options);
         link_tracer_backend(exe, tracer_backend, target);
 
         const run_cmd = exe.run();
@@ -291,7 +306,7 @@ pub fn build(b: *std.build.Builder) void {
         exe.setTarget(target);
         exe.setBuildMode(.ReleaseSafe);
         exe.setMainPkgPath("src");
-        exe.addOptions("tigerbeetle_build_options", options);
+        exe.addOptions("vsr_options", options);
         link_tracer_backend(exe, tracer_backend, target);
 
         const build_step = b.step("build_" ++ benchmark.name, "Build " ++ benchmark.description ++ " benchmark");
@@ -379,7 +394,7 @@ fn go_client(
     );
 
     const bindings = b.addExecutable("go_bindings", "src/clients/go/go_bindings.zig");
-    bindings.addOptions("tigerbeetle_build_options", options);
+    bindings.addOptions("vsr_options", options);
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
@@ -405,7 +420,7 @@ fn go_client(
 
         lib.setOutputDir("src/clients/go/pkg/native/" ++ platform);
 
-        lib.addOptions("tigerbeetle_build_options", options);
+        lib.addOptions("vsr_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         lib.step.dependOn(&install_header.step);
@@ -459,7 +474,7 @@ fn java_client(
             lib.linkSystemLibrary("advapi32");
         }
 
-        lib.addOptions("tigerbeetle_build_options", options);
+        lib.addOptions("vsr_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);
@@ -481,7 +496,7 @@ fn dotnet_client(
     }
 
     const bindings = b.addExecutable("dotnet_bindings", "src/clients/dotnet/dotnet_bindings.zig");
-    bindings.addOptions("tigerbeetle_build_options", options);
+    bindings.addOptions("vsr_options", options);
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
@@ -511,7 +526,7 @@ fn dotnet_client(
             lib.linkSystemLibrary("advapi32");
         }
 
-        lib.addOptions("tigerbeetle_build_options", options);
+        lib.addOptions("vsr_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);

@@ -97,7 +97,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             while (self.request_queue.pop()) |inflight| {
                 defer self.unref(inflight.message);
 
-                inflight.callback(
+                inflight.callback.?(
                     inflight.user_data,
                     inflight.message.header.operation.cast(Self.StateMachine),
                     inflight.message.body(),

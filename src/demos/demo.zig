@@ -1,29 +1,35 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const constants = @import("constants.zig");
+const vsr = @import("vsr");
+const constants = vsr.constants;
 
-const tb = @import("tigerbeetle.zig");
+const tb = vsr.tigerbeetle;
 const Account = tb.Account;
 const Transfer = tb.Transfer;
 
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
-const util = @import("util.zig");
-const IO = @import("io.zig").IO;
-const Storage = @import("storage.zig").Storage;
-const MessagePool = @import("message_pool.zig").MessagePool;
-const MessageBus = @import("message_bus.zig").MessageBusClient;
-const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
+const stdx = vsr.stdx;
+const IO = vsr.io.IO;
+const Storage = vsr.storage.Storage;
+const MessagePool = vsr.message_pool.MessagePool;
+const MessageBus = vsr.message_bus.MessageBusClient;
+const StateMachine = vsr.state_machine.StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
 });
 
-const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 const Client = vsr.Client(StateMachine, MessageBus);
 
 pub const log_level: std.log.Level = .alert;
+
+pub const vsr_options = .{
+    .config_base = vsr.config.ConfigBase.default,
+    .config_cluster_state_machine = vsr.config.StateMachine.accounting,
+    .tracer_backend = vsr.config.TracerBackend.none,
+};
 
 pub fn request(
     operation: StateMachine.Operation,
@@ -62,7 +68,7 @@ pub fn request(
     defer client.unref(message);
 
     const body = std.mem.asBytes(&batch);
-    util.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(Header)..], body);
+    stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(Header)..], body);
 
     client.request(
         0,

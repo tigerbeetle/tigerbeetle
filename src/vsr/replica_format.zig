@@ -194,7 +194,7 @@ test "format" {
         try std.testing.expectEqual(sector.vsr_state.commit_min, 0);
         try std.testing.expectEqual(sector.vsr_state.commit_max, 0);
         try std.testing.expectEqual(sector.vsr_state.view, 0);
-        try std.testing.expectEqual(sector.vsr_state.view_normal, 0);
+        try std.testing.expectEqual(sector.vsr_state.log_view, 0);
     }
 
     // Verify the WAL headers and prepares zones.

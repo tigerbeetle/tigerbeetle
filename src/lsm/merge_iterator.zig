@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 
 pub fn MergeIteratorType(
     comptime Table: type,

@@ -8,7 +8,7 @@ const log = std.log;
 
 const simulator = @import("simulator.zig");
 const vsr = @import("vsr.zig");
-const util = @import("util.zig");
+const stdx = @import("stdx.zig");
 
 // TODO use DNS instead since hard-coding an IP address isn't ideal.
 const default_send_address = net.Address.initIp4([4]u8{ 65, 21, 207, 251 }, 5555);
@@ -375,7 +375,7 @@ fn create_report(allocator: mem.Allocator, bug: Bug, seed: u64) Report {
 
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(std.mem.asBytes(&message)[@sizeOf(u128)..45], hash[0..], .{});
-    util.copy_disjoint(.exact, u8, message.checksum[0..], hash[0..message.checksum.len]);
+    stdx.copy_disjoint(.exact, u8, message.checksum[0..], hash[0..message.checksum.len]);
 
     return message;
 }
