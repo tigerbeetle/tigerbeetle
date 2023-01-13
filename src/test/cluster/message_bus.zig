@@ -1,10 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
+const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
-const Header = @import("../vsr.zig").Header;
-const ProcessType = @import("../vsr.zig").ProcessType;
+const Header = @import("../../vsr.zig").Header;
+const ProcessType = @import("../../vsr.zig").ProcessType;
 
 const Network = @import("network.zig").Network;
 

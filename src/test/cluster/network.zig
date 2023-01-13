@@ -3,25 +3,23 @@ const math = std.math;
 const mem = std.mem;
 const assert = std.debug.assert;
 
-const constants = @import("../constants.zig");
-const vsr = @import("../vsr.zig");
-const stdx = @import("../stdx.zig");
+const constants = @import("../../constants.zig");
+const vsr = @import("../../vsr.zig");
+const stdx = @import("../../stdx.zig");
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
+const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Process = @import("message_bus.zig").Process;
 
-const PacketSimulator = @import("packet_simulator.zig").PacketSimulator;
-const PacketSimulatorOptions = @import("packet_simulator.zig").PacketSimulatorOptions;
-const PacketSimulatorPath = @import("packet_simulator.zig").Path;
+const PacketSimulatorType = @import("../packet_simulator.zig").PacketSimulatorType;
+const PacketSimulatorOptions = @import("../packet_simulator.zig").PacketSimulatorOptions;
+const PacketSimulatorPath = @import("../packet_simulator.zig").Path;
 
 const log = std.log.scoped(.network);
 
-pub const NetworkOptions = struct {
-    packet_simulator_options: PacketSimulatorOptions,
-};
+pub const NetworkOptions = PacketSimulatorOptions;
 
 pub const Network = struct {
     pub const Packet = struct {
@@ -41,10 +39,10 @@ pub const Network = struct {
     allocator: std.mem.Allocator,
 
     options: NetworkOptions,
-    packet_simulator: PacketSimulator(Packet),
+    packet_simulator: PacketSimulatorType(Packet),
 
     // TODO(Zig) If this stored a ?*MessageBus, then a process's bus could be set to `null` while
-    // the replica is crashed, and replaced when it is destroy. Zig complains:
+    // the replica is crashed, and replaced when it is destroyed. But Zig complains:
     //
     //   ./src/test/message_bus.zig:20:24: error: struct 'test.message_bus.MessageBus' depends on itself
     //   pub const MessageBus = struct {
@@ -53,6 +51,7 @@ pub const Network = struct {
     //       network: *Network,
     //       ^
     buses: std.ArrayListUnmanaged(*MessageBus),
+    buses_enabled: std.ArrayListUnmanaged(bool),
     processes: std.ArrayListUnmanaged(u128),
     /// A pool of messages that are in the network (sent, but not yet delivered).
     message_pool: MessagePool,
@@ -69,13 +68,13 @@ pub const Network = struct {
         var buses = try std.ArrayListUnmanaged(*MessageBus).initCapacity(allocator, process_count);
         errdefer buses.deinit(allocator);
 
+        var buses_enabled = try std.ArrayListUnmanaged(bool).initCapacity(allocator, process_count);
+        errdefer buses_enabled.deinit(allocator);
+
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
         errdefer processes.deinit(allocator);
 
-        var packet_simulator = try PacketSimulator(Packet).init(
-            allocator,
-            options.packet_simulator_options,
-        );
+        var packet_simulator = try PacketSimulatorType(Packet).init(allocator, options);
         errdefer packet_simulator.deinit(allocator);
 
         // Count:
@@ -89,8 +88,7 @@ pub const Network = struct {
             allocator,
             // +1 so we can allocate an extra packet when all packet queues are at capacity,
             // so that `PacketSimulator.submit_packet` can choose which packet to drop.
-            1 + @as(usize, options.packet_simulator_options.path_maximum_capacity) *
-                path_count,
+            1 + @as(usize, options.path_maximum_capacity) * path_count,
         );
         errdefer message_pool.deinit(allocator);
 
@@ -99,6 +97,7 @@ pub const Network = struct {
             .options = options,
             .packet_simulator = packet_simulator,
             .buses = buses,
+            .buses_enabled = buses_enabled,
             .processes = processes,
             .message_pool = message_pool,
         };
@@ -106,9 +105,14 @@ pub const Network = struct {
 
     pub fn deinit(network: *Network) void {
         network.buses.deinit(network.allocator);
+        network.buses_enabled.deinit(network.allocator);
         network.processes.deinit(network.allocator);
         network.packet_simulator.deinit(network.allocator);
         network.message_pool.deinit(network.allocator);
+    }
+
+    pub fn tick(network: *Network) void {
+        network.packet_simulator.tick();
     }
 
     pub fn link(network: *Network, process: Process, message_bus: *MessageBus) void {
@@ -128,8 +132,19 @@ pub const Network = struct {
         } else {
             network.processes.appendAssumeCapacity(raw_process);
             network.buses.appendAssumeCapacity(message_bus);
+            network.buses_enabled.appendAssumeCapacity(true);
         }
         assert(network.processes.items.len == network.buses.items.len);
+    }
+
+    pub fn process_enable(network: *Network, process: Process) void {
+        assert(!network.buses_enabled.items[network.process_to_address(process)]);
+        network.buses_enabled.items[network.process_to_address(process)] = true;
+    }
+
+    pub fn process_disable(network: *Network, process: Process) void {
+        assert(network.buses_enabled.items[network.process_to_address(process)]);
+        network.buses_enabled.items[network.process_to_address(process)] = false;
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {
@@ -157,7 +172,7 @@ pub const Network = struct {
         );
     }
 
-    fn process_to_address(network: *Network, process: Process) u8 {
+    fn process_to_address(network: *const Network, process: Process) u8 {
         for (network.processes.items) |p, i| {
             if (std.meta.eql(raw_process_to_process(p), process)) return @intCast(u8, i);
         }
@@ -170,6 +185,15 @@ pub const Network = struct {
 
     fn deliver_message(packet: Packet, path: PacketSimulatorPath) void {
         const network = packet.network;
+
+        if (!network.buses_enabled.items[path.target]) {
+            log.debug("deliver_message: {} > {}: {} (dropped; target is down)", .{
+                path.source,
+                path.target,
+                packet.message.header.command,
+            });
+            return;
+        }
 
         const target_bus = network.buses.items[path.target];
         const target_message = target_bus.get_message();

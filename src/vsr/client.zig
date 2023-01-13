@@ -87,7 +87,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         on_reply_context: ?*anyopaque = null,
         /// Used for testing. Called for replies to all operations (including `register`).
         on_reply_callback: ?fn (
-            context: ?*anyopaque,
             client: *Self,
             request: *Message,
             reply: *Message,
@@ -194,6 +193,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message: *Message,
             message_body_size: usize,
         ) void {
+            assert(operation != .reserved);
+            assert(operation != .root);
+            assert(operation != .register);
+
             self.register();
             assert(self.request_number > 0);
 
@@ -367,7 +370,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
 
             if (self.on_reply_callback) |on_reply_callback| {
-                on_reply_callback(self.on_reply_context, self, inflight.message, reply);
+                on_reply_callback(self, inflight.message, reply);
             }
 
             if (inflight.callback) |callback| {
