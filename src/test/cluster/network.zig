@@ -138,10 +138,12 @@ pub const Network = struct {
     }
 
     pub fn process_enable(network: *Network, process: Process) void {
+        assert(!network.buses_enabled.items[network.process_to_address(process)]);
         network.buses_enabled.items[network.process_to_address(process)] = true;
     }
 
     pub fn process_disable(network: *Network, process: Process) void {
+        assert(network.buses_enabled.items[network.process_to_address(process)]);
         network.buses_enabled.items[network.process_to_address(process)] = false;
     }
 
