@@ -218,7 +218,7 @@ pub const Network = struct {
             const sector_ceil = vsr.sector_ceil(target_message.header.size);
             if (target_message.header.size != sector_ceil) {
                 assert(target_message.header.size < sector_ceil);
-                assert(target_message.buffer.len == constants.message_size_max + constants.sector_size);
+                assert(target_message.buffer.len == constants.message_size_max);
                 mem.set(u8, target_message.buffer[target_message.header.size..sector_ceil], 0);
             }
         }
