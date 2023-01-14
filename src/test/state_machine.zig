@@ -91,12 +91,14 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             state_machine: *StateMachine,
             client: u128,
             op: u64,
+            timestamp: u64,
             operation: Operation,
             input: []const u8,
             output: []u8,
         ) usize {
             _ = state_machine;
             _ = client;
+            _ = timestamp;
             _ = input;
             _ = output;
             assert(op != 0);

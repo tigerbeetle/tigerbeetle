@@ -34,6 +34,11 @@ The [`Transfer.flags.linked`](../transfers.md#flagslinked) flag was set on the l
 batch, which is not legal. (`flags.linked` indicates that the chain continues to the next
 operation).
 
+### `timestamp_must_be_zero`
+The transfer was not created.
+The [`Transfer.timestamp`](../accounts.md#timestamp) is nonzero, but must be zero.
+The cluster is responsible for setting this field.
+
 ### `reserved_flag`
 The transfer was not created.
 [`Transfer.flags.reserved`](../transfers.md#flagsreserved) is nonzero, but must be zero.
