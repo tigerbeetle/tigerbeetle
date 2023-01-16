@@ -31,6 +31,7 @@ const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
 const BlockType = @import("../lsm/grid.zig").BlockType;
 const stdx = @import("../stdx.zig");
+const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
 
 const log = std.log.scoped(.storage);
 
@@ -137,8 +138,8 @@ pub const Storage = struct {
     /// This is used to disable faults during the replica's first startup.
     faulty: bool = true,
 
-    reads: std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
-    writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
+    reads: PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
+    writes: PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
     next_tick_queue: FIFO(NextTick) = .{},
@@ -161,11 +162,11 @@ pub const Storage = struct {
         var faults = try std.DynamicBitSetUnmanaged.initEmpty(allocator, sector_count);
         errdefer faults.deinit(allocator);
 
-        var reads = std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than).init(allocator, {});
+        var reads = PriorityQueue(*Storage.Read, void, Storage.Read.less_than).init(allocator, {});
         errdefer reads.deinit();
         try reads.ensureTotalCapacity(constants.iops_read_max);
 
-        var writes = std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
+        var writes = PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
         errdefer writes.deinit();
         try writes.ensureTotalCapacity(constants.iops_write_max);
 

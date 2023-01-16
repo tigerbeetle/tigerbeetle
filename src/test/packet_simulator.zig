@@ -4,6 +4,7 @@ const math = std.math;
 
 const log = std.log.scoped(.packet_simulator);
 const vsr = @import("../vsr.zig");
+const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
 
 pub const PacketSimulatorOptions = struct {
     replica_count: u8,
@@ -77,7 +78,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         };
 
         const Link = struct {
-            queue: std.PriorityQueue(LinkPacket, void, Self.order_packets),
+            queue: PriorityQueue(LinkPacket, void, Self.order_packets),
             /// When false, packets sent on the path are not delivered.
             enabled: bool = true,
             /// We can arbitrary clog a path until a tick.
@@ -110,7 +111,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             for (links) |*link, i| {
                 errdefer for (links[0..i]) |l| l.queue.deinit();
 
-                const queue = std.PriorityQueue(LinkPacket, void, Self.order_packets).init(allocator, {});
+                const queue = PriorityQueue(LinkPacket, void, Self.order_packets).init(allocator, {});
                 try link.queue.ensureTotalCapacity(options.path_maximum_capacity);
                 link.* = .{ .queue = queue };
             }
