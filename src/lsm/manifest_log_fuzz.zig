@@ -198,7 +198,7 @@ fn generate_events(
         event.* = switch (event_type) {
             .insert_new => insert: {
                 const level = random.uintLessThan(u7, constants.lsm_levels);
-                const table = .{
+                const table = TableInfo{
                     .checksum = 0,
                     .address = i + 1,
                     .snapshot_min = 1,
@@ -210,10 +210,11 @@ fn generate_events(
                     .level = level,
                     .table = table,
                 });
-                break :insert ManifestEvent{ .insert = .{
+                const insert = ManifestEvent{ .insert = .{
                     .level = level,
                     .table = table,
                 } };
+                break :insert insert;
             },
 
             .insert_change_level => insert: {
@@ -223,27 +224,30 @@ fn generate_events(
                 }
 
                 table.level += 1;
-                break :insert ManifestEvent{ .insert = .{
+                const insert = ManifestEvent{ .insert = .{
                     .level = table.level,
                     .table = table.table,
                 } };
+                break :insert insert;
             },
 
             .insert_change_snapshot => insert: {
                 const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
                 table.table.snapshot_max += 1;
-                break :insert ManifestEvent{ .insert = .{
+                const insert = ManifestEvent{ .insert = .{
                     .level = table.level,
                     .table = table.table,
                 } };
+                break :insert insert;
             },
 
             .remove => remove: {
                 const table = tables.swapRemove(random.uintLessThan(usize, tables.items.len));
-                break :remove ManifestEvent{ .remove = .{
+                const remove = ManifestEvent{ .remove = .{
                     .level = table.level,
                     .table = table.table,
                 } };
+                break :remove remove;
             },
 
             .compact => ManifestEvent{ .compact = {} },
