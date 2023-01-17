@@ -17,7 +17,7 @@
 //! 6. Compaction must compact partially full blocks, even where it must rewrite all entries to the
 //!    tail end of the log.
 //!
-//! 7.  If a remove is dropped from the log, then all prior inserts must already have been dropped.
+//! 7. If a remove is dropped from the log, then all prior inserts must already have been dropped.
 //!
 //! 8. A `table_info.address` is never released from the grid until all references in the log have
 //!    been dropped. Otherwise it's possible for the address to be reused in a different log,
