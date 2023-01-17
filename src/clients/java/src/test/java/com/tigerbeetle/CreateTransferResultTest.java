@@ -7,7 +7,7 @@ public class CreateTransferResultTest {
 
     @Test
     public void testFromValue() {
-        var value = 8;
+        var value = CreateTransferResult.DebitAccountIdMustNotBeIntMax.value;
         Assert.assertEquals(CreateTransferResult.DebitAccountIdMustNotBeIntMax,
                 CreateTransferResult.fromValue(value));
     }
