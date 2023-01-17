@@ -78,6 +78,8 @@ We know that what we ship is solid. We may lack crucial features, but what we ha
 
 * Appreciate, from day one, **all compiler warnings at the compiler's strictest setting**.
 
+* Whenever your program has to interact with external entities, **don't do things directly in reaction to external events**. Instead, your program should run at its own pace. Not only does this make your program safer by keeping the control flow of your program under your control, it also improves performance for the same reason (you get to batch, instead of context switching on every event). Additionally, this makes it easier to maintain bounds on work done per time period.
+
 Beyond these rules:
 
 * Compound conditions that evaluate multiple booleans make it difficult for the reader to verify that all cases are handled. Split compound conditions into simple conditions using nested `if/else` branches. Split complex `else if` chains into `else { if { } }` trees. This makes the branches and cases clear. Again, consider whether a single `if` does not also need a matching `else` branch, to ensure that the positive and negative spaces are handled or asserted.
