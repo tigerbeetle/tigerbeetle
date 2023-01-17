@@ -615,7 +615,7 @@ fn verify_manifest(
     try std.testing.expect(std.mem.eql(u64, expect.addresses[0..c], actual.addresses[0..c]));
 
     try std.testing.expect(hash_map_equals(
-        u64,
+        SuperBlock.Manifest.TableExtentKey,
         SuperBlock.Manifest.TableExtent,
         &expect.tables,
         &actual.tables,
