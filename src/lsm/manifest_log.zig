@@ -255,7 +255,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 const label = labels_used[entry];
                 const table = &tables_used[entry];
 
-                if (manifest.insert_table_extent(table.address, block_reference.address, entry)) {
+                if (manifest.insert_table_extent(manifest_log.tree_hash, table.address, block_reference.address, entry)) {
                     switch (label.event) {
                         .insert => manifest_log.open_event(manifest_log, label.level, table),
                         .remove => manifest.queue_for_compaction(block_reference.address),
@@ -332,7 +332,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
             const address = Block.address(block);
-            if (manifest.update_table_extent(table.address, address, entry)) |previous_block| {
+            if (manifest.update_table_extent(manifest_log.tree_hash, table.address, address, entry)) |previous_block| {
                 manifest.queue_for_compaction(previous_block);
                 if (label.event == .remove) manifest.queue_for_compaction(address);
             } else {
@@ -547,7 +547,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 // Remove the extent if the table is the latest version.
                 // We must iterate entries in forward order to drop the extent here.
                 // Otherwise, stale versions earlier in the block may reappear.
-                if (manifest.remove_table_extent(table.address, block_reference.address, entry)) {
+                if (manifest.remove_table_extent(manifest_log.tree_hash, table.address, block_reference.address, entry)) {
                     switch (label.event) {
                         // Append the table, updating the table extent:
                         .insert => manifest_log.append(label, table),

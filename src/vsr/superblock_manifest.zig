@@ -29,13 +29,20 @@ pub const Manifest = struct {
     /// A map from table address to the manifest block and entry that is the latest extent version.
     /// Used to determine whether a table should be dropped in a compaction.
     /// Shared by all trees and sized to accommodate all possible tables.
-    tables: std.AutoHashMapUnmanaged(u64, TableExtent),
+    tables: Tables,
 
     /// A set of block addresses that have free entries.
     /// Used to determine whether a block should be compacted.
     /// Note: Some of these block addresses may yet to be appended to the manifest through a flush.
     /// This enables us to track fragmentation even in unflushed blocks.
     compaction_set: std.AutoHashMapUnmanaged(u64, void),
+
+    pub const Tables = std.AutoHashMapUnmanaged(TableExtentKey, TableExtent);
+
+    pub const TableExtentKey = struct {
+        tree_hash: u128,
+        table: u64,
+    };
 
     pub const TableExtent = struct {
         block: u64, // ManifestLog block address.
@@ -60,7 +67,7 @@ pub const Manifest = struct {
         const addresses = try allocator.alloc(u64, manifest_block_count_max);
         errdefer allocator.free(addresses);
 
-        var tables = std.AutoHashMapUnmanaged(u64, TableExtent){};
+        var tables = Tables{};
         try tables.ensureTotalCapacity(allocator, forest_table_count_max);
         errdefer tables.deinit(allocator);
 
@@ -293,11 +300,14 @@ pub const Manifest = struct {
 
     /// Inserts the table extent if it does not yet exist, and returns true.
     /// Otherwise, returns false.
-    pub fn insert_table_extent(manifest: *Manifest, table: u64, block: u64, entry: u32) bool {
+    pub fn insert_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) bool {
         assert(table > 0);
         assert(block > 0);
 
-        var extent = manifest.tables.getOrPutAssumeCapacity(table);
+        var extent = manifest.tables.getOrPutAssumeCapacity(.{
+            .tree_hash = tree_hash,
+            .table = table,
+        });
         if (extent.found_existing) return false;
 
         extent.value_ptr.* = .{
@@ -311,11 +321,14 @@ pub const Manifest = struct {
     /// Inserts or updates the table extent, and returns the previous block address if any.
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-    pub fn update_table_extent(manifest: *Manifest, table: u64, block: u64, entry: u32) ?u64 {
+    pub fn update_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) ?u64 {
         assert(table > 0);
         assert(block > 0);
 
-        var extent = manifest.tables.getOrPutAssumeCapacity(table);
+        var extent = manifest.tables.getOrPutAssumeCapacity(.{
+            .tree_hash = tree_hash,
+            .table = table,
+        });
         const previous_block = if (extent.found_existing) extent.value_ptr.block else null;
 
         extent.value_ptr.* = .{
@@ -328,13 +341,19 @@ pub const Manifest = struct {
 
     /// Removes the table extent if { block, entry } is the latest version, and returns true.
     /// Otherwise, returns false.
-    pub fn remove_table_extent(manifest: *Manifest, table: u64, block: u64, entry: u32) bool {
+    pub fn remove_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) bool {
         assert(table > 0);
         assert(block > 0);
 
-        const extent = manifest.tables.getPtr(table).?;
+        const extent = manifest.tables.getPtr(.{
+            .tree_hash = tree_hash,
+            .table = table,
+        }).?;
         if (extent.block == block and extent.entry == entry) {
-            assert(manifest.tables.remove(table));
+            assert(manifest.tables.remove(.{
+                .tree_hash = tree_hash,
+                .table = table,
+            }));
 
             return true;
         } else {
