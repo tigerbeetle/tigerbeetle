@@ -433,6 +433,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 block,
                 address,
             );
+            manifest_log.blocks.advance_head();
         }
 
         fn write_block_callback(write: *Grid.Write) void {
@@ -441,7 +442,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.writing);
 
             manifest_log.blocks_closed -= 1;
-            manifest_log.blocks.advance_head();
             assert(manifest_log.blocks_closed <= manifest_log.blocks.count);
 
             manifest_log.write_block();
