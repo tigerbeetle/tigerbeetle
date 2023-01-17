@@ -32,6 +32,7 @@ const superblock = @import("../vsr/superblock.zig");
 const BlockType = @import("../lsm/grid.zig").BlockType;
 const stdx = @import("../stdx.zig");
 const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
+const fuzz = @import("./fuzz.zig");
 
 const log = std.log.scoped(.storage);
 
@@ -392,7 +393,7 @@ pub const Storage = struct {
     }
 
     fn latency(storage: *Storage, min: u64, mean: u64) u64 {
-        return min + @floatToInt(u64, @intToFloat(f64, mean - min) * storage.prng.random().floatExp(f64));
+        return min + fuzz.random_int_exponential(storage.prng.random(), u64, mean - min);
     }
 
     /// Return true with probability x/100.
