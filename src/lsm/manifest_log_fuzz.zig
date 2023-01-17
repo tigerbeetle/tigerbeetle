@@ -45,23 +45,12 @@ pub fn main() !void {
         fuzz.random_int_exponential(prng.random(), usize, 1e4),
     );
 
-    const events = try generate_events(allocator, prng.random(), events_count);
-    defer allocator.free(events);
-
-    try run_fuzz(allocator, prng.random(), events);
-}
-
-fn run_fuzz(
-    allocator: std.mem.Allocator,
-    random: std.rand.Random,
-    events: []const ManifestEvent,
-) !void {
     const storage_options = .{
-        .seed = random.int(u64),
+        .seed = prng.random().int(u64),
         .read_latency_min = 1,
-        .read_latency_mean = 1 + random.uintLessThan(u64, 40),
+        .read_latency_mean = 1 + prng.random().uintLessThan(u64, 40),
         .write_latency_min = 1,
-        .write_latency_mean = 1 + random.uintLessThan(u64, 40),
+        .write_latency_mean = 1 + prng.random().uintLessThan(u64, 40),
     };
 
     var storage = try Storage.init(allocator, constants.storage_size_max, storage_options);
@@ -100,17 +89,25 @@ fn run_fuzz(
     });
     defer env.deinit(allocator);
 
-    {
-        env.format_superblock();
-        env.wait(&env.manifest_log);
+    env.format_superblock();
+    env.wait(&env.manifest_log);
 
-        env.open_superblock();
-        env.wait(&env.manifest_log);
+    env.open_superblock();
+    env.wait(&env.manifest_log);
 
-        env.open();
-        env.wait(&env.manifest_log);
-    }
+    env.open();
+    env.wait(&env.manifest_log);
 
+    const events = try generate_events(allocator, &env, prng.random(), events_count);
+    defer allocator.free(events);
+
+    try run_fuzz(&env, events);
+}
+
+fn run_fuzz(
+    env: *Environment,
+    events: []const ManifestEvent,
+) !void {
     for (events) |event| {
         log.debug("event={}", .{event});
         switch (event) {
@@ -134,6 +131,7 @@ const ManifestEvent = union(enum) {
 
 fn generate_events(
     allocator: std.mem.Allocator,
+    env: *Environment,
     random: std.rand.Random,
     events_count: usize,
 ) ![]const ManifestEvent {
@@ -173,9 +171,12 @@ fn generate_events(
     }).init(allocator);
     defer tables.deinit();
 
+    const reservation = env.grid.reserve(events.len).?;
+    defer env.grid.forfeit(reservation);
+
     // The number of appends since the last flush (compact or checkpoint).
     var append_count: usize = 0;
-    for (events) |*event, i| {
+    for (events) |*event| {
         const event_type = blk: {
             if (append_count == ManifestLog.compaction_appends_max) {
                 // We must compact or checkpoint periodically to avoid overfilling the ManifestLog.
@@ -200,7 +201,7 @@ fn generate_events(
                 const level = random.uintLessThan(u7, constants.lsm_levels);
                 const table = .{
                     .checksum = 0,
-                    .address = i + 1,
+                    .address = env.grid.acquire(reservation),
                     .snapshot_min = 1,
                     .snapshot_max = 2,
                     .key_min = 0,
@@ -277,6 +278,7 @@ const TableInfo = extern struct {
 
 const Environment = struct {
     allocator: std.mem.Allocator,
+    grid: *Grid,
     superblock_context: SuperBlock.Context = undefined,
     manifest_log: ManifestLog,
     manifest_log_verify: ManifestLog,
@@ -303,6 +305,7 @@ const Environment = struct {
         errdefer manifest_log_verify.deinit(allocator);
 
         return Environment{
+            .grid = options.grid,
             .allocator = allocator,
             .manifest_log = manifest_log,
             .manifest_log_verify = manifest_log_verify,
@@ -638,6 +641,10 @@ fn verify_manifest_compaction_set(
     var blocks = superblock.free_set.blocks.iterator(.{ .kind = .set });
     while (blocks.next()) |block_index| {
         const block_address = block_index + 1;
+        if (!superblock.storage.grid_block_written(block_address)) {
+            // We acquire all the grid blocks in advance, but may not have used some of them yet.
+            continue;
+        }
         const block = superblock.storage.grid_block(block_address);
         const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
         try std.testing.expectEqual(BlockType.manifest.operation(), block_header.operation);
