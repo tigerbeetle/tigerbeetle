@@ -457,6 +457,12 @@ pub const Storage = struct {
         return mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]);
     }
 
+    pub fn grid_block_written(storage: *const Storage, address: u64) bool {
+        assert(address > 0);
+        const block_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
+        return storage.memory_written.isSet(@divExact(block_offset, constants.sector_size));
+    }
+
     pub fn grid_block(
         storage: *const Storage,
         address: u64,
