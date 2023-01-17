@@ -2,22 +2,27 @@
 //!
 //! Invariants:
 //!
-//! * Checkpointing the manifest log must flush all buffered log blocks.
+//! 1. Checkpointing the manifest log must flush all buffered log blocks.
 //!
-//! * Opening the manifest log must emit only the latest TableInfo's to be inserted.
+//! 2. Opening the manifest log must emit only the latest TableInfo's to be inserted.
 //!
-//! * Opening the manifest log after a crash must result in exactly the same `compaction_set` in
-//!   `SuperBlock.Manifest` as before the crash assuming that the crash was exactly at a checkpoint.
+//! 3. Opening the manifest log after a crash must result in exactly the same `compaction_set` in
+//!    `SuperBlock.Manifest` as before the crash assuming that the crash was exactly at a checkpoint.
 //!
-//! * The latest version of a table must never be dropped from the log through a compaction, unless
-//!   the table was removed.
+//! 4. The latest version of a table must never be dropped from the log through a compaction, unless
+//!    the table was removed.
 //!
-//! * Removes that are recorded in a log block must also queue that log block for compaction.
+//! 5. Removes that are recorded in a log block must also queue that log block for compaction.
 //!
-//! * Compaction must compact partially full blocks, even where it must rewrite all entries to the
-//!   tail end of the log.
+//! 6. Compaction must compact partially full blocks, even where it must rewrite all entries to the
+//!    tail end of the log.
 //!
-//! * If a remove is dropped from the log, then all prior inserts must already have been dropped.
+//! 7.  If a remove is dropped from the log, then all prior inserts must already have been dropped.
+//!
+//! 8. A `table_info.address` is never released from the grid until all references in the log have
+//!    been dropped. Otherwise it's possible for the address to be reused in a different log,
+//!    causing racy updates to superblock_manifest.
+//!    Eg https://github.com/tigerbeetledb/tigerbeetle/issues/390#issuecomment-1384543042
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -559,6 +564,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 } else {
                     // The table is not the latest version and can dropped.
                     frees += 1;
+                }
+                if (label.event == .remove) {
+                    // Once we've compacted the remove for `table`
+                    // we can safely reuse `table.address` elsewhere.
+                    // (See invariant 8).
+                    manifest_log.grid.release(table.address);
                 }
             }
 

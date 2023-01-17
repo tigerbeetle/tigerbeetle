@@ -301,7 +301,7 @@ pub fn CompactionType(
             for (Table.index_filter_addresses_used(index_block)) |address| {
                 grid.release(address);
             }
-            grid.release(Table.index_block_address(index_block));
+            // The index block itself will be released later by manifest_log during compaction.
         }
 
         pub fn compact_tick(compaction: *Compaction, callback: Callback) void {
