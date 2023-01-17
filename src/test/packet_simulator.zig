@@ -5,6 +5,7 @@ const math = std.math;
 const log = std.log.scoped(.packet_simulator);
 const vsr = @import("../vsr.zig");
 const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
+const fuzz = @import("./fuzz.zig");
 
 pub const PacketSimulatorOptions = struct {
     replica_count: u8,
@@ -206,7 +207,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         fn one_way_delay(self: *Self) u64 {
             const min = self.options.one_way_delay_min;
             const mean = self.options.one_way_delay_mean;
-            return min + @floatToInt(u64, @intToFloat(f64, mean - min) * self.prng.random().floatExp(f64));
+            return min + fuzz.random_int_exponential(self.prng.random(), u64, mean - min);
         }
 
         /// Partitions the network. Guaranteed to isolate at least one replica.
@@ -326,7 +327,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     if (self.should_clog(reverse_path)) {
                         log.debug("reverse path clogged", .{});
                         const mean = @intToFloat(f64, self.options.path_clog_duration_mean);
-                        const ticks = @floatToInt(u64, mean * self.prng.random().floatExp(f64));
+                        const ticks = fuzz.random_int_exponential(self.prng.random(), u64, mean);
                         self.clog_for(reverse_path, ticks);
                     }
                 }
