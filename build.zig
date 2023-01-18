@@ -43,6 +43,13 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
+    const hash_log_mode = b.option(
+        config.HashLogMode,
+        "hash-log-mode",
+        "Log hashes (used for debugging non-deterministic executions).",
+    ) orelse .none;
+    options.addOption(config.HashLogMode, "hash_log_mode", hash_log_mode);
+
     const vsr_package = std.build.Pkg{
         .name = "vsr",
         .path = .{ .path = "src/vsr.zig" },
