@@ -1,10 +1,12 @@
 name: Docker CI
 
 on:
-  # Run CI against any commits pushed to 'main'.
+  # Run CI against any commits pushed to 'main', as well as 'staging' and 'trying' for bors.
   push:
     branches:
       - 'main'
+      - 'staging'
+      - 'trying'
   # Run CI for any PRs that target 'main' when they are opened or updated.
   pull_request:
     branches:
@@ -262,3 +264,33 @@ jobs:
     needs: [test_format, test_on_linux]
     steps:
       - run: echo "done"
+
+  bors_tigerbeetle:
+    name: bors/tigerbeetle
+    needs:
+      - validate_docs
+      - shellcheck_scripts
+      - test_format
+      - test_on_linux
+      - test_on_alpine
+      - test_on_macos
+      - benchmark_on_linux
+      - benchmark_on_macos
+      - benchmark_on_windows
+      - fuzz_ewah
+      - fuzz_lsm_manifest_log
+      - fuzz_lsm_segmented_array
+      - fuzz_lsm_tree
+      - fuzz_vsr_journal_format
+      - fuzz_vsr_superblock
+      - fuzz_vsr_superblock_free_set
+      - fuzz_vsr_superblock_quorums
+      - build-tools
+      - build-and-push
+      - build-and-push-debug
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        working-directory: ./
+        run: exit 0

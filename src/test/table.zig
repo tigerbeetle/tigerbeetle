@@ -66,6 +66,13 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
             }
             return data;
         },
+        .Array => |info| {
+            var values: Data = undefined;
+            for (values[0..]) |*value| {
+                value.* = parse_data(info.child, tokens);
+            }
+            return values;
+        },
         .Union => |info| {
             const variant_string = tokens.next().?;
             inline for (info.fields) |variant_field| {
@@ -203,6 +210,20 @@ test "struct (nested)" {
     }, &.{
         .{ .a = 1, .b = .{ .b1 = 2, .b2 = 3 }, .c = 4 },
         .{ .a = 5, .b = .{ .b1 = 6, .b2 = 7 }, .c = 8 },
+    },
+        \\ 1 2 3 4
+        \\ 5 6 7 8
+    );
+}
+
+test "array" {
+    try test_parse(struct {
+        a: u32,
+        b: [2]u32,
+        c: u32,
+    }, &.{
+        .{ .a = 1, .b = .{ 2, 3 }, .c = 4 },
+        .{ .a = 5, .b = .{ 6, 7 }, .c = 8 },
     },
         \\ 1 2 3 4
         \\ 5 6 7 8

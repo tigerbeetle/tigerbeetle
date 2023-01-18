@@ -3,7 +3,7 @@ demos/bitcast/decode
 demos/bitcast/transfers
 dist/
 journal
-main
+/main
 simulator
 /tigerbeetle
 /tigerbeetle.exe

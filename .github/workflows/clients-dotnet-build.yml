@@ -1,0 +1,148 @@
+name: "clients/dotnet: Build"
+
+on:
+  # Run CI against any commits pushed to 'main', as well as 'staging' and 'trying' for bors.
+  push:
+    branches:
+      - 'main'
+      - 'staging'
+      - 'trying'
+  # Run CI for any PRs that target 'main' when they are opened or updated.
+  pull_request:
+    branches:
+      - 'main'
+    types:
+      - opened
+      - synchronize
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: |
+            3.1.x
+            6.0.x
+   
+      - name: Install zig
+        run: ./scripts/install_zig.sh
+
+      - name: Build dotnet
+        working-directory: src/clients/dotnet
+        run: dotnet build -c Release
+
+      - name: Tests
+        working-directory: src/clients/dotnet
+        run: dotnet test /p:CollectCoverage=true /p:Threshold=\"95,85,95\" /p:ThresholdType=\"line,branch,method\"
+
+      - name: Pack
+        working-directory: src/clients/dotnet
+        run: dotnet pack -c Release
+
+      - name: Save nuget package
+        uses: actions/upload-artifact@v3
+        ## if: ${{ github.event_name == 'pull_request' }}
+        with:
+          name: nuget-artifact
+          path: src/clients/dotnet/TigerBeetle/bin/Release/*.nupkg
+
+  prepare_validation_tests:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Prepare validation tests
+    steps:  
+      - name: Create a simple test project
+        run: |
+          cat <<"EOF" > Program.cs
+          using System;
+          public class Program {
+            public static void Main() {
+              new TigerBeetle.Client(0, new [] {"3001"}).Dispose();
+              Console.WriteLine("SUCCESS");
+            }
+          }
+          EOF
+      - uses: actions/upload-artifact@v3
+        with:
+          name: test-project-artifact
+          path: Program.cs          
+
+  run_validation_tests:
+    needs: prepare_validation_tests
+    name: Validate OS
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, windows-latest]
+        dotnet: [ 7.0.x, 6.0.x, 3.1.x]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ matrix.dotnet }}
+      - uses: actions/download-artifact@v3
+        with:
+          name: nuget-artifact
+          path: ./nuget
+      - name: Create test project
+        run: |
+          mkdir test-project && cd test-project
+          dotnet nuget add source ../nuget
+          dotnet new console
+          dotnet add package tigerbeetle-dotnet -s ../nuget
+      - uses: actions/download-artifact@v3
+        with:
+          name: test-project-artifact
+          path: ./test-project          
+      - name: Test nuget package
+        working-directory: ./test-project
+        run: dotnet run       
+
+  run_validation_tests_on_containers:
+    needs: prepare_validation_tests
+    name: Validate dotnet runtime
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: 
+          - "7.0"
+          - "6.0"
+          - "3.1"
+          - "7.0-alpine"
+          - "6.0-alpine"
+          - "3.1-alpine"
+    runs-on: ubuntu-latest
+    steps:   
+      - uses: actions/download-artifact@v3
+        with:
+          name: nuget-artifact
+          path: ./nuget          
+      - uses: actions/download-artifact@v3
+        with:
+          name: test-project-artifact
+          path: ./
+      - name: Test nuget package
+        run: |
+          docker run -v $(pwd)/nuget:/nuget -v $(pwd)/Program.cs:/Program.cs mcr.microsoft.com/dotnet/sdk:${{ matrix.tag }} sh -c "
+          mkdir test-project && cd test-project
+          dotnet nuget add source /nuget
+          dotnet new console
+          dotnet add package tigerbeetle-dotnet -s /nuget
+          cp -f /Program.cs .
+          dotnet run
+          "
+
+  bors_clients_dotnet:
+    name: bors/clients/dotnet
+    needs:
+      - build
+      - prepare_validation_tests
+      - run_validation_tests
+      - run_validation_tests_on_containers
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        working-directory: ./
+        run: exit 0

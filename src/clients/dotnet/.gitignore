@@ -1,5 +1,8 @@
 .vs/
 bin/
 obj/
-src/TigerBeetle/native
+cobertura/
+TestResults/
+TigerBeetle/runtimes/
+TigerBeetle.Tests/coverage.*.json
 *tigerbeetle.benchmark

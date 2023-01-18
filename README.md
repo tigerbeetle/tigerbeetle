@@ -264,6 +264,7 @@ For further reading:
 * For Node.js: [tigerbeetle-node](./src/clients/node)
 * For Golang: [tigerbeetle-go](./src/clients/go)
 * For Java: [tigerbeetle-java](./src/clients/java)
+* For C# and Dotnet: [tigerbeetle-dotnet](./src/clients/dotnet)
 
 ## Community
 

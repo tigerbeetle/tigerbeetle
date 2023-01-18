@@ -74,11 +74,11 @@ pub const AccountingAuditor = struct {
         transfers_pending_max: usize,
 
         /// From the Auditor's point-of-view, all stalled requests are still in-flight, even if
-        /// their reply has actually arrived at the Conductor.
+        /// their reply has actually arrived at the ReplySequence.
         ///
         /// A request stops being "in-flight" when `on_reply` is called.
         ///
-        /// This should equal the Conductor's `stalled_queue_capacity`.
+        /// This should equal the ReplySequence's `stalled_queue_capacity`.
         in_flight_max: usize,
     };
 

@@ -18,10 +18,8 @@ test {
     _ = @import("ring_buffer.zig");
 
     _ = @import("io.zig");
-
-    _ = @import("cli.zig");
     _ = @import("ewah.zig");
-    _ = @import("util.zig");
+    _ = @import("stdx.zig");
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
@@ -36,4 +34,9 @@ test {
     _ = @import("test/table.zig");
 
     _ = @import("clients/go/go_bindings_test.zig");
+    _ = @import("clients/dotnet/dotnet_bindings_test.zig");
+    _ = @import("clients/java/java_bindings.zig");
+
+    // This one is a bit sketchy: we rely on tests not actually using the `vsr` package.
+    _ = @import("tigerbeetle/cli.zig");
 }
