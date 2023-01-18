@@ -15,8 +15,8 @@ if [[ -z "$BRANCH" ]]; then
 fi
 
 REPO="https://github.com/tigerbeetledb/tigerbeetle"
-if [[ -n "$GITHUB_REPOSITORY" ]]; then
-    REPO="https://github.com/${GITHUB_REPOSITORY}"
+if [[ -n "$SOURCE_REPO" ]]; then
+    REPO="${SOURCE_REPO}"
 fi
 
 ( cd docs_website && npm install && ./scripts/build.sh "$BRANCH" "$REPO" )
