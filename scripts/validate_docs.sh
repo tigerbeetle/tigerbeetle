@@ -15,7 +15,7 @@ if [[ -z "$BRANCH" ]]; then
 fi
 
 REPO="https://github.com/tigerbeetledb/tigerbeetle"
-if ! [[ -z "GITHUB_REPOSITORY" ]]; then
+if [[ -n "$GITHUB_REPOSITORY" ]]; then
     REPO="https://github.com/${GITHUB_REPOSITORY}"
 fi
 
