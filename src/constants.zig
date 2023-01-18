@@ -163,6 +163,9 @@ comptime {
     assert(message_size_max >= @sizeOf(vsr.Header));
     assert(message_size_max >= sector_size);
     assert(message_size_max >= Config.Cluster.message_size_max_min(clients_max));
+
+    // Ensure that DVC/SV messages can fit all necessary headers.
+    assert(message_body_size_max >= view_change_headers_max * @sizeOf(vsr.Header));
 }
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
@@ -188,6 +191,21 @@ comptime {
     assert(pipeline_prepare_queue_max + pipeline_request_queue_max <= clients_max);
     assert(pipeline_prepare_queue_max > 0);
     assert(pipeline_request_queue_max >= 0);
+}
+
+/// The number of prepare headers to include in the body of a DVC/SV.
+///
+/// CRITICAL:
+/// We must provide enough headers to cover all uncommitted headers so that the new
+/// primary (if we are in a view change) can decide whether to discard uncommitted headers
+/// that cannot be repaired because they are gaps. See DVCQuorum for more detail.
+pub const view_change_headers_max = config.cluster.view_change_headers_max;
+
+comptime {
+    assert(view_change_headers_max > 0);
+    assert(view_change_headers_max >= pipeline_prepare_queue_max);
+    assert(view_change_headers_max <= journal_slot_count);
+    assert(view_change_headers_max <= @divFloor(message_body_size_max, @sizeOf(vsr.Header)));
 }
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
