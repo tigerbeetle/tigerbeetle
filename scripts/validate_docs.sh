@@ -13,5 +13,11 @@ if [[ -z "$BRANCH" ]]; then
     # Otherwise fall back to git rev-parse
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
 fi
-( cd docs_website && npm install && ./scripts/build.sh "$BRANCH" )
+
+REPO="https://github.com/tigerbeetledb/tigerbeetle"
+if ! [[ -z "GITHUB_REPOSITORY" ]]; then
+    REPO="https://github.com/${GITHUB_REPOSITORY}"
+fi
+
+( cd docs_website && npm install && ./scripts/build.sh "$BRANCH" "$REPO" )
 rm -rf docs_website
