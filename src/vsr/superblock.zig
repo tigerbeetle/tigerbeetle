@@ -3,7 +3,7 @@
 //!   * vsr_state
 //!     - vsr_state.commit_min is initially 0 (for a newly-formatted replica).
 //!     - vsr_state.commit_min ≤ vsr_state.commit_max
-//!     - vsr_state.view_normal ≤ vsr_state.view
+//!     - vsr_state.log_view ≤ vsr_state.view
 //!     - checkpoint() must advance the superblock's vsr_state.commit_min.
 //!     - view_change() must not advance the superblock's vsr_state.commit_min.
 //!     - All fields of vsr_state except commit_min_checksum are monotonically increasing over
@@ -17,7 +17,7 @@ const meta = std.meta;
 const os = std.os;
 
 const constants = @import("../constants.zig");
-const div_ceil = @import("../util.zig").div_ceil;
+const div_ceil = @import("../stdx.zig").div_ceil;
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 
@@ -110,7 +110,7 @@ pub const SuperBlockSector = extern struct {
         commit_max: u64,
 
         /// The last view in which the replica's status was normal.
-        view_normal: u32,
+        log_view: u32,
 
         /// The view number of the replica.
         view: u32,
@@ -128,13 +128,13 @@ pub const SuperBlockSector = extern struct {
                 .commit_min_checksum = vsr.Header.root_prepare(cluster).checksum,
                 .commit_min = 0,
                 .commit_max = 0,
-                .view_normal = 0,
+                .log_view = 0,
                 .view = 0,
             };
         }
 
         pub fn internally_consistent(state: VSRState) bool {
-            return state.commit_max >= state.commit_min and state.view >= state.view_normal;
+            return state.commit_max >= state.commit_min and state.view >= state.log_view;
         }
 
         pub fn monotonic(old: VSRState, new: VSRState) bool {
@@ -146,7 +146,7 @@ pub const SuperBlockSector = extern struct {
                 (old.commit_min_checksum == 0 and old.commit_min == 0));
 
             if (old.view > new.view) return false;
-            if (old.view_normal > new.view_normal) return false;
+            if (old.log_view > new.log_view) return false;
             if (old.commit_min > new.commit_min) return false;
             if (old.commit_max > new.commit_max) return false;
 
@@ -312,7 +312,7 @@ pub const superblock_trailer_size_max = blk: {
 
 // A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
 // These references are stored in struct-of-arrays layout in the trailer for the sake of alignment.
-pub const superblock_trailer_manifest_size_max = blk: {
+const superblock_trailer_manifest_size_max = blk: {
     assert(SuperBlockManifest.BlockReferenceSize == 16 + 16 + 8);
 
     // Use a multiple of sector * reference so that the size is exactly divisible without padding:
@@ -321,14 +321,14 @@ pub const superblock_trailer_manifest_size_max = blk: {
     break :blk 16 * constants.sector_size * SuperBlockManifest.BlockReferenceSize;
 };
 
-pub const superblock_trailer_free_set_size_max = blk: {
+const superblock_trailer_free_set_size_max = blk: {
     const encode_size_max = SuperBlockFreeSet.encode_size_max(block_count_max);
     assert(encode_size_max > 0);
 
     break :blk vsr.sector_ceil(encode_size_max);
 };
 
-pub const superblock_trailer_client_table_size_max = blk: {
+const superblock_trailer_client_table_size_max = blk: {
     const encode_size_max = SuperBlockClientTable.encode_size_max;
     assert(encode_size_max > 0);
 
@@ -474,7 +474,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// other operations, only the following queue combinations are allowed:
         /// 1. A view change may queue on a checkpoint.
         /// 2. A checkpoint may queue on a view change.
-        /// 
+        ///
         /// There may only be a single caller queued at a time, to ensure that the VSR protocol is
         /// careful to submit at most one view change at a time.
         queue_head: ?*Context = null,
@@ -615,7 +615,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .commit_min_checksum = 0,
                     .commit_min = 0,
                     .commit_max = 0,
-                    .view_normal = 0,
+                    .log_view = 0,
                     .view = 0,
                 },
                 .snapshots = undefined,
@@ -663,7 +663,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         /// The vsr_state must update the commit_min and commit_min_checksum.
-        // TODO Will the replica ever update view/view_normal by calling checkpoint() during a view
+        // TODO Will the replica ever update view/log_view by calling checkpoint() during a view
         // change? If not, forbid it.
         pub fn checkpoint(
             superblock: *SuperBlock,
@@ -703,7 +703,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             log.debug(
                 "view_change: commit_min_checksum={}..{} commit_min={}..{} commit_max={}..{} " ++
-                    "view_normal={}..{} view={}..{}",
+                    "log_view={}..{} view={}..{}",
                 .{
                     superblock.staging.vsr_state.commit_min_checksum,
                     vsr_state.commit_min_checksum,
@@ -714,8 +714,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     superblock.staging.vsr_state.commit_max,
                     vsr_state.commit_max,
 
-                    superblock.staging.vsr_state.view_normal,
-                    vsr_state.view_normal,
+                    superblock.staging.vsr_state.log_view,
+                    vsr_state.log_view,
 
                     superblock.staging.vsr_state.view,
                     vsr_state.view,
@@ -838,7 +838,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = Layout.offset_manifest(context.copy.?);
+            const offset = areas.manifest.offset(context.copy.?);
 
             mem.set(u8, buffer[superblock.staging.manifest_size..], 0); // Zero sector padding.
 
@@ -881,7 +881,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = Layout.offset_free_set(context.copy.?);
+            const offset = areas.free_set.offset(context.copy.?);
 
             mem.set(u8, buffer[superblock.staging.free_set_size..], 0); // Zero sector padding.
 
@@ -924,7 +924,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = Layout.offset_client_table(context.copy.?);
+            const offset = areas.client_table.offset(context.copy.?);
 
             mem.set(u8, buffer[superblock.staging.client_table_size..], 0); // Zero sector padding.
 
@@ -986,7 +986,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.valid_checksum());
 
             const buffer = mem.asBytes(superblock.staging);
-            const offset = Layout.offset_sector(context.copy.?);
+            const offset = areas.sector.offset(context.copy.?);
 
             log.debug("{}: {s}: write_sector: checksum={x} sequence={} copy={} size={} offset={}", .{
                 superblock.staging.replica,
@@ -1065,7 +1065,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.read_threshold != null);
 
             const buffer = mem.asBytes(&superblock.reading[context.copy.?]);
-            const offset = Layout.offset_sector(context.copy.?);
+            const offset = areas.sector.offset(context.copy.?);
 
             log.debug("{s}: read_sector: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1125,7 +1125,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         vsr.Header.root_prepare(working.cluster).checksum);
                     assert(working.vsr_state.commit_min == 0);
                     assert(working.vsr_state.commit_max == 0);
-                    assert(working.vsr_state.view_normal == 0);
+                    assert(working.vsr_state.log_view == 0);
                     assert(working.vsr_state.view == 0);
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
@@ -1137,7 +1137,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
                         "replica={} size={} " ++
                         "commit_min_checksum={} commit_min={} commit_max={} " ++
-                        "view_normal={} view={}",
+                        "log_view={} view={}",
                     .{
                         @tagName(context.caller),
                         superblock.working.checksum,
@@ -1148,7 +1148,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.vsr_state.commit_min_checksum,
                         superblock.working.vsr_state.commit_min,
                         superblock.working.vsr_state.commit_max,
-                        superblock.working.vsr_state.view_normal,
+                        superblock.working.vsr_state.log_view,
                         superblock.working.vsr_state.view,
                     },
                 );
@@ -1187,7 +1187,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_manifest_size_max);
 
             const buffer = superblock.manifest_buffer[0..size];
-            const offset = Layout.offset_manifest(context.copy.?);
+            const offset = areas.manifest.offset(context.copy.?);
 
             log.debug("{s}: read_manifest: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1254,7 +1254,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_free_set_size_max);
 
             const buffer = superblock.free_set_buffer[0..size];
-            const offset = Layout.offset_free_set(context.copy.?);
+            const offset = areas.free_set.offset(context.copy.?);
 
             log.debug("{s}: read_free_set: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1328,7 +1328,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(size <= superblock_trailer_client_table_size_max);
 
             const buffer = superblock.client_table_buffer[0..size];
-            const offset = Layout.offset_client_table(context.copy.?);
+            const offset = areas.client_table.offset(context.copy.?);
 
             log.debug("{s}: read_client_table: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1497,26 +1497,42 @@ pub fn SuperBlockType(comptime Storage: type) type {
     };
 }
 
-pub const Layout = struct {
-    pub fn offset_sector(copy: u8) u64 {
-        assert(copy < constants.superblock_copies);
-        return superblock_copy_size * @as(u64, copy);
-    }
+pub const Area = enum {
+    sector,
+    manifest,
+    free_set,
+    client_table,
+};
 
-    pub fn offset_manifest(copy: u8) u64 {
-        assert(copy < constants.superblock_copies);
-        return offset_sector(copy) + @sizeOf(SuperBlockSector);
-    }
+pub const areas = struct {
+    pub const sector = AreaRange{
+        .base = 0,
+        .size_max = @sizeOf(SuperBlockSector),
+    };
 
-    pub fn offset_free_set(copy: u8) u64 {
-        assert(copy < constants.superblock_copies);
-        return offset_manifest(copy) + superblock_trailer_manifest_size_max;
-    }
+    pub const manifest = AreaRange{
+        .base = sector.base + sector.size_max,
+        .size_max = superblock_trailer_manifest_size_max, // TODO inline these constants?
+    };
 
-    pub fn offset_client_table(copy: u8) u64 {
-        assert(copy < constants.superblock_copies);
-        return offset_free_set(copy) + superblock_trailer_free_set_size_max;
-    }
+    pub const free_set = AreaRange{
+        .base = manifest.base + manifest.size_max,
+        .size_max = superblock_trailer_free_set_size_max,
+    };
+
+    pub const client_table = AreaRange{
+        .base = free_set.base + free_set.size_max,
+        .size_max = superblock_trailer_client_table_size_max,
+    };
+
+    const AreaRange = struct {
+        base: u64,
+        size_max: u64,
+
+        pub fn offset(area: AreaRange, copy: u8) u64 {
+            return superblock_copy_size * @as(u64, copy) + area.base;
+        }
+    };
 };
 
 test "SuperBlockSector" {

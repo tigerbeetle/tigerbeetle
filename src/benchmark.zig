@@ -6,10 +6,9 @@ const constants = @import("constants.zig");
 const log = std.log;
 pub const log_level: std.log.Level = .err;
 
-const cli = @import("cli.zig");
 const IO = @import("io.zig").IO;
 
-const util = @import("util.zig");
+const stdx = @import("stdx.zig");
 const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
@@ -23,7 +22,7 @@ const Client = vsr.Client(StateMachine, MessageBus);
 
 const tb = @import("tigerbeetle.zig");
 
-const batches_count = 100;
+const batches_count = 1000;
 
 const transfers_per_batch: u32 = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
@@ -151,7 +150,8 @@ pub fn main() !void {
 
     const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
     try stdout.print("============================================\n", .{});
-    try stdout.print("{} transfers per second\n\n", .{result});
+    try stdout.print("{} batches in {} ms\n", .{ batches_count, ms });
+    try stdout.print("{} transfers per second\n", .{result});
     try stdout.print("max p100 latency per {} transfers = {}ms\n", .{
         transfers_per_batch,
         queue.transfers_latency_max,
@@ -211,7 +211,7 @@ const TimedQueue = struct {
             const message = self.client.get_message();
             defer self.client.unref(message);
 
-            util.copy_disjoint(
+            stdx.copy_disjoint(
                 .inexact,
                 u8,
                 message.buffer[@sizeOf(vsr.Header)..],
@@ -279,7 +279,7 @@ const TimedQueue = struct {
             const message = self.client.get_message();
             defer self.client.unref(message);
 
-            util.copy_disjoint(
+            stdx.copy_disjoint(
                 .inexact,
                 u8,
                 message.buffer[@sizeOf(vsr.Header)..],

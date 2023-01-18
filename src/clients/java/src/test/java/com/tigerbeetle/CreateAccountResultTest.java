@@ -7,13 +7,13 @@ public class CreateAccountResultTest {
 
     @Test
     public void testFromValue() {
-        var value = 18;
+        final var value = CreateAccountResult.Exists.value;
         Assert.assertEquals(CreateAccountResult.Exists, CreateAccountResult.fromValue(value));
     }
 
     @Test
     public void testOrdinal() {
-        var value = 18;
+        final var value = CreateAccountResult.Exists.value;
         Assert.assertEquals(CreateAccountResult.Exists.ordinal(), value);
     }
 
@@ -28,6 +28,4 @@ public class CreateAccountResultTest {
         var value = -1;
         CreateAccountResult.fromValue(value);
     }
-
-
 }

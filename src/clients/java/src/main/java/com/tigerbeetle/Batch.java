@@ -101,7 +101,16 @@ public abstract class Batch {
         return buffer.isReadOnly();
     }
 
-    void add() {
+    /**
+     * Adds a new element at the end of this batch.
+     * <p>
+     * If successfully, moves the current {@link #setPosition position} to the newly created
+     * element.
+     *
+     * @throws IllegalStateException if this batch is read-only.
+     * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
+     */
+    public final void add() {
 
         if (isReadOnly())
             throw new IllegalStateException("Cannot add an element in a read-only batch");
@@ -272,7 +281,18 @@ public abstract class Batch {
 
     protected final void putUInt16(final int index, final int value) {
         if (value < 0 || value > Character.MAX_VALUE)
-            throw new IllegalArgumentException("");
+            throw new IllegalArgumentException("Value must be a 16-bit unsigned integer");
         buffer.putShort(index, (short) value);
+    }
+
+    protected final byte[] getArray(final int index, final int len) {
+        byte[] array = new byte[len];
+        buffer.position(index).get(array);
+        return array;
+    }
+
+    protected final void putArray(final int index, final byte[] value) {
+        Objects.requireNonNull(value);
+        buffer.position(index).put(value);
     }
 }

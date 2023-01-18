@@ -5,10 +5,12 @@ defaults:
     working-directory: ./src/clients/node
 
 on:
-  # Run CI against any commits pushed to 'main'.
+  # Run CI against any commits pushed to 'main', as well as 'staging' and 'trying' for bors.
   push:
     branches:
       - 'main'
+      - 'staging'
+      - 'trying'
   # Run CI for any PRs that target 'main' when they are opened or updated.
   pull_request:
     branches:
@@ -34,18 +36,33 @@ jobs:
       - uses: actions/checkout@v3
       - run: ./scripts/test_install_on_${{ matrix.distro }}.sh
 
-  version_check:
-    needs: [shellcheck_scripts, test_distro_install]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - run: npm install && ./scripts/version_check.sh
+# Disable version check for now, as it basically requires us to bump version in package.json for every chage.
+# Now that bors enforces that our CI is green, that becomes very painful.
+#
+#  version_check:
+#    needs: [shellcheck_scripts, test_distro_install]
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v3
+#      - run: npm install && ./scripts/version_check.sh
 
   publish:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [version_check]
+#    needs: [version_check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - run: echo "//registry.npmjs.org/:_authToken=${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}" > ~/.npmrc
       - run: PACKAGE_JSON_VERSION=$(jq -r '.version' package.json) && npm show "tigerbeetle-node@${PACKAGE_JSON_VERSION}" --json 2>/dev/null && echo "Package tigerbeetle-node@${PACKAGE_JSON_VERSION} already exists - not publishing" || (npm install && sha256sum dist/client.node > dist/.client.node.sha256 && npm publish)
+
+  bors_clients_node:
+    name: bors/clients/node
+    needs:
+      - shellcheck_scripts
+      - test_distro_install
+#      - version_check
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        working-directory: ./
+        run: exit 0

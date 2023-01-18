@@ -107,7 +107,7 @@ public class BlockingRequestTest {
 
         // Invalid operation, should be CREATE_TRANSFERS
         request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, dummyBuffer, 1,
-                RequestException.Status.OK);
+                PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -130,7 +130,7 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         // Unknown operation
-        request.endRequest(UNKNOWN, dummyBuffer, 1, RequestException.Status.OK);
+        request.endRequest(UNKNOWN, dummyBuffer, 1, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -150,7 +150,7 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value, null, 1,
-                RequestException.Status.OK);
+                PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -172,7 +172,7 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value, invalidBuffer, 1,
-                RequestException.Status.OK);
+                PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -195,7 +195,7 @@ public class BlockingRequestTest {
 
         assertFalse(request.isDone());
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value, dummyBuffer, NULL,
-                RequestException.Status.OK);
+                PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -231,7 +231,7 @@ public class BlockingRequestTest {
 
         var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResultBatch.Struct.SIZE);
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value, dummyBuffer, 1,
-                RequestException.Status.TOO_MUCH_DATA);
+                PacketStatus.TooMuchData.value);
 
 
         assertTrue(request.isDone());
@@ -240,7 +240,7 @@ public class BlockingRequestTest {
             request.waitForResult();
             assert false;
         } catch (RequestException e) {
-            assertEquals(RequestException.Status.TOO_MUCH_DATA, e.getStatus());
+            assertEquals(PacketStatus.TooMuchData.value, e.getStatus());
         }
     }
 
@@ -259,7 +259,7 @@ public class BlockingRequestTest {
 
         var request = BlockingRequest.createAccounts(client, batch);
         request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, RequestException.Status.OK);
+                1, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         request.waitForResult();
@@ -281,14 +281,14 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, RequestException.Status.OK);
+                1, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(1, result.getLength());
 
         request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, RequestException.Status.OK);
+                1, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -314,7 +314,7 @@ public class BlockingRequestTest {
         dummyReplyBuffer.putInt(CreateAccountResult.Exists.ordinal());
 
         request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, RequestException.Status.OK);
+                1, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
@@ -347,7 +347,7 @@ public class BlockingRequestTest {
         dummyReplyBuffer.putInt(CreateTransferResult.Exists.ordinal());
 
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value, dummyReplyBuffer.position(0),
-                1, RequestException.Status.OK);
+                1, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
@@ -378,7 +378,7 @@ public class BlockingRequestTest {
         dummyReplyBuffer.position(AccountBatch.Struct.SIZE).putLong(200).putLong(2000);
 
         request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, RequestException.Status.OK);
+                1, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
@@ -409,7 +409,7 @@ public class BlockingRequestTest {
         dummyReplyBuffer.position(TransferBatch.Struct.SIZE).putLong(200).putLong(2000);
 
         request.endRequest(Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0),
-                1, RequestException.Status.OK);
+                1, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
@@ -442,7 +442,7 @@ public class BlockingRequestTest {
         var callback =
                 new CallbackSimulator<TransferBatch>(BlockingRequest.lookupTransfers(client, batch),
                         Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
-                        RequestException.Status.OK, 500);
+                        PacketStatus.Ok.value, 500);
 
         callback.start();
 
@@ -472,7 +472,7 @@ public class BlockingRequestTest {
         var callback =
                 new CallbackSimulator<TransferBatch>(BlockingRequest.lookupTransfers(client, batch),
                         Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
-                        RequestException.Status.TOO_MUCH_DATA, 250);
+                        PacketStatus.TooMuchData.value, 250);
 
         callback.start();
 
@@ -481,7 +481,7 @@ public class BlockingRequestTest {
             assert false;
         } catch (RequestException requestException) {
 
-            assertEquals(RequestException.Status.TOO_MUCH_DATA, requestException.getStatus());
+            assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
         }
 
     }

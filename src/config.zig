@@ -1,8 +1,18 @@
+//! Raw configuration values.
+//!
+//! Code which needs these values should use `constants.zig` instead.
+//! Configuration values are set from a combination of:
+//! - default values
+//! - `root.tigerbeetle_config`
+//! - `@import("tigerbeetle_options")`
+
 const builtin = @import("builtin");
 const std = @import("std");
 
-const build_options = @import("tigerbeetle_build_options");
 const root = @import("root");
+// Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root file.
+const build_options =
+    if (@hasDecl(root, "vsr_options")) root.vsr_options else @import("vsr_options");
 
 const vsr = @import("vsr.zig");
 const sector_size = @import("constants.zig").sector_size;
@@ -68,6 +78,7 @@ const ConfigProcess = struct {
 const ConfigCluster = struct {
     cache_line_size: comptime_int = 64,
     clients_max: usize,
+    pipeline_prepare_queue_max: usize = 8,
     quorum_replication_max: u8 = 3,
     journal_slot_count: usize = 1024,
     message_size_max: usize = 1 * 1024 * 1024,
@@ -91,7 +102,7 @@ const ConfigCluster = struct {
     pub const clients_max_min = 1;
 
     /// The smallest possible message_size_max (for use in the simulator to improve performance).
-    /// The message body must have room for pipeline_max headers in the DVC.
+    /// The message body must have room for pipeline_prepare_queue_max headers in the DVC.
     pub fn message_size_max_min(clients_max: usize) usize {
         return std.math.max(
             sector_size,
@@ -166,10 +177,11 @@ pub const configs = struct {
             .verify = true,
         },
         .cluster = .{
-            .clients_max = 4,
+            .clients_max = 4 + 3,
+            .pipeline_prepare_queue_max = 4,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
-            .message_size_max = Config.Cluster.message_size_max_min(2),
-            .storage_size_max = 1024 * 1024 * 1024,
+            .message_size_max = Config.Cluster.message_size_max_min(4),
+            .storage_size_max = 4 * 1024 * 1024 * 1024,
 
             .block_size = sector_size,
             .lsm_growth_factor = 4,

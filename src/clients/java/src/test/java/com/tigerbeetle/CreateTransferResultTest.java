@@ -7,28 +7,26 @@ public class CreateTransferResultTest {
 
     @Test
     public void testFromValue() {
-        var value = 8;
+        var value = CreateTransferResult.DebitAccountIdMustNotBeIntMax.value;
         Assert.assertEquals(CreateTransferResult.DebitAccountIdMustNotBeIntMax,
                 CreateTransferResult.fromValue(value));
     }
 
     @Test
     public void testOrdinal() {
-        var value = 16;
+        var value = CreateTransferResult.AmountMustNotBeZero.value;
         Assert.assertEquals(CreateTransferResult.AmountMustNotBeZero.ordinal(), value);
     }
 
-    @Test(expected = AssertionError.class)
+    @Test(expected = IllegalArgumentException.class)
     public void testInvalidValue() {
         var value = 999;
         CreateTransferResult.fromValue(value);
     }
 
-    @Test(expected = AssertionError.class)
+    @Test(expected = IllegalArgumentException.class)
     public void testNegativeValue() {
         var value = -1;
         CreateTransferResult.fromValue(value);
     }
-
-
 }

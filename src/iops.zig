@@ -19,9 +19,15 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
 
         pub fn release(self: *Self, item: *T) void {
             item.* = undefined;
-            const i = (@ptrToInt(item) - @ptrToInt(&self.items)) / @sizeOf(T);
+            const i = self.index(item);
             assert(!self.free.isSet(i));
             self.free.set(i);
+        }
+
+        pub fn index(self: *Self, item: *T) usize {
+            const i = (@ptrToInt(item) - @ptrToInt(&self.items)) / @sizeOf(T);
+            assert(i < size);
+            return i;
         }
 
         /// Returns the count of IOPs available.
