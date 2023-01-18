@@ -443,7 +443,7 @@ fn java_client(
     }
 
     const bindings = b.addExecutable("java_bindings", "src/clients/java/java_bindings.zig");
-    bindings.addOptions("tigerbeetle_build_options", options);
+    bindings.addOptions("vsr_options", options);
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
