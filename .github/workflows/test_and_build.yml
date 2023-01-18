@@ -24,6 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/validate_docs.sh
+    env:
+      SOURCE_REPO: ${{ github.event.pull_request.head.repo.clone_url }}
 
   shellcheck_scripts:
     runs-on: ubuntu-latest
