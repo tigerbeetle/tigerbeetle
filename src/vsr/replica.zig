@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
+const stdx = @import("../stdx.zig");
 
 const StaticAllocator = @import("../static_allocator.zig");
 const GridType = @import("../lsm/grid.zig").GridType;
@@ -69,21 +70,6 @@ const quorum_messages_null = [_]?*Message{null} ** constants.replicas_max;
 
 const QuorumCounter = std.StaticBitSet(constants.replicas_max);
 const quorum_counter_null = QuorumCounter.initEmpty();
-
-// CRITICAL: The number of prepare headers to include in the body:
-// We must provide enough headers to cover all uncommitted headers so that the new
-// primary (if we are in a view change) can decide whether to discard uncommitted headers
-// that cannot be repaired because they are gaps, and this must be relative to the
-// cluster as a whole (not relative to the difference between our op and commit number)
-// as otherwise we would break correctness.
-const view_change_headers_count = constants.pipeline_prepare_queue_max;
-
-comptime {
-    assert(view_change_headers_count > 0);
-    assert(view_change_headers_count >= constants.pipeline_prepare_queue_max);
-    assert(view_change_headers_count <=
-        @divFloor(constants.message_size_max - @sizeOf(Header), @sizeOf(Header)));
-}
 
 pub fn ReplicaType(
     comptime StateMachine: type,
@@ -1408,7 +1394,7 @@ pub fn ReplicaType(
             const count = self.copy_latest_headers_and_set_size(
                 0,
                 self.op,
-                view_change_headers_count,
+                constants.view_change_headers_max,
                 response,
             );
             assert(count > 0); // We expect that self.op always exists.
@@ -2906,9 +2892,7 @@ pub fn ReplicaType(
         ) usize {
             assert(op_max >= op_min);
             assert(count_max == null or count_max.? > 0);
-            assert(message.header.command == .do_view_change or
-                message.header.command == .start_view or
-                message.header.command == .headers or
+            assert(message.header.command == .headers or
                 message.header.command == .recovery_response);
 
             const body_size_max = @sizeOf(Header) * std.math.min(
@@ -3041,12 +3025,13 @@ pub fn ReplicaType(
         ///
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_view_change_message(self: *Self, command: Command) *Message {
-            assert(command == .do_view_change or command == .start_view);
-
             // We may send a start_view message in normal status to resolve a backup's view jump:
             assert(self.status == .normal or self.status == .view_change);
             assert((self.status == .normal) == (command == .start_view));
             assert((self.status == .view_change) == (command == .do_view_change));
+
+            assert(command != .do_view_change or self.log_view < self.view);
+            assert(command != .start_view or self.log_view == self.view);
 
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
@@ -3083,48 +3068,49 @@ pub fn ReplicaType(
                 1 + self.op -| constants.pipeline_prepare_queue_max,
             );
 
+            const Headers = std.BoundedArray(Header, constants.view_change_headers_max);
+            var headers = Headers{ .buffer = undefined };
+            headers.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
+
             // How many headers should we send in the DVC?
             // - The DVC "The headers must connect to the cluster's committed ops." must be upheld.
             // - The headers may contains gaps.
             // - The headers may not contain breaks.
-            const op_suffix_min = op_min: {
+            if (command == .start_view) {
+                // The primary starting a new view has a pristine log suffix — no gaps or breaks.
                 var op: u64 = self.op;
+                while (op > self.commit_min) : (op -= 1) {
+                    const header_next = self.journal.header_with_op(op).?;
+                    const header_prev = self.journal.header_with_op(op - 1).?;
+                    assert(header_prev.checksum == header_next.parent);
 
-                if (command == .start_view) {
-                    // The primary starting a new view has a pristine log suffix — no gaps or breaks.
-                    while (op > self.commit_min) : (op -= 1) {
-                        const header_next = self.journal.header_with_op(op).?;
-                        const header_prev = self.journal.header_with_op(op - 1).?;
-                        assert(header_prev.checksum == header_next.parent);
-                    }
-                    break :op_min op;
-                } else if (self.primary_index(self.log_view) == self.replica) {
-                    assert(command == .do_view_change);
-                    // See Example 2a.
-                    while (op > op_dvc_anchor) : (op -= 1) {
-                        const header_next = self.journal.header_with_op(op).?;
-                        // Exclude gaps since we cannot distinguish the gap from a break.
-                        const header_prev = self.journal.header_with_op(op - 1) orelse break;
-                        if (header_prev.checksum != header_next.parent) break;
-                    }
-                    break :op_min op;
-                } else {
-                    assert(command == .do_view_change);
-                    // See Example 2b.
-                    var op_exists = op;
-                    while (op > op_dvc_anchor) : (op -= 1) {
-                        const header_next = self.journal.header_with_op(op) orelse continue;
-                        const header_prev = self.journal.header_with_op(op - 1) orelse continue;
-                        assert(header_prev.checksum == header_next.parent);
-                        op_exists = op;
-                    }
-                    break :op_min op_exists;
+                    headers.append(header_prev.*) catch break;
                 }
-            };
-            assert(op_suffix_min >= op_dvc_anchor or command == .start_view);
-            assert(op_suffix_min >= self.commit_min);
-            assert(op_suffix_min <= self.op);
-            assert(self.journal.header_with_op(op_suffix_min) != null);
+            } else if (self.primary_index(self.log_view) == self.replica) {
+                assert(command == .do_view_change);
+                // See Example 2a.
+                var op: u64 = self.op;
+                while (op > op_dvc_anchor) : (op -= 1) {
+                    const header_next = self.journal.header_with_op(op).?;
+                    // Exclude gaps since we cannot distinguish the gap from a break.
+                    const header_prev = self.journal.header_with_op(op - 1) orelse break;
+                    if (header_prev.checksum != header_next.parent) break;
+
+                    headers.append(header_prev.*) catch break;
+                }
+            } else {
+                assert(command == .do_view_change);
+                // See Example 2b.
+                var op: u64 = self.op;
+                while (op > op_dvc_anchor) : (op -= 1) {
+                    const header_next = self.journal.header_with_op(op) orelse continue;
+                    const header_prev = self.journal.header_with_op(op - 1) orelse continue;
+                    assert(header_prev.checksum == header_next.parent);
+
+                    headers.append(header_prev.*) catch break;
+                }
+            }
+            assert(command == .start_view or headers.get(headers.len - 1).op >= op_dvc_anchor);
 
             // Include as many extra headers as possible, but with no additional gaps (since they
             // cannot be differentiated from breaks).
@@ -3134,28 +3120,22 @@ pub fn ReplicaType(
             //   commit_min, possibly modifying the suffix anchor) in the mean time.
             //   (This is not required for correctness, but enables additional verification
             //   in on_do_view_change().)
-            const op_min_unbroken = op_min: {
-                var op = op_suffix_min;
-                while (op > 0) : (op -= 1) {
-                    const header_next = self.journal.header_with_op(op).?;
-                    const header_prev = self.journal.header_with_op(op - 1) orelse break;
-                    if (header_prev.checksum != header_next.parent) break;
-                }
-                break :op_min op;
-            };
-            assert(op_min_unbroken <= self.op);
-            assert(op_min_unbroken <= op_suffix_min);
-            assert(self.journal.header_with_op(op_min_unbroken) != null);
+            var op = headers.get(headers.len - 1).op;
+            while (op > 0 and headers.len < constants.view_change_headers_max) : (op -= 1) {
+                const header_next = self.journal.header_with_op(op).?;
+                const header_prev = self.journal.header_with_op(op - 1) orelse break;
+                if (header_prev.checksum != header_next.parent) break;
 
-            const count = self.copy_latest_headers_and_set_size(
-                op_min_unbroken,
-                self.op,
-                view_change_headers_count,
-                message,
+                headers.appendAssumeCapacity(header_prev.*);
+            }
+
+            message.header.size = @intCast(u32, @sizeOf(Header) * (1 + headers.len));
+            stdx.copy_disjoint(
+                .exact,
+                Header,
+                std.mem.bytesAsSlice(Header, message.body()),
+                headers.constSlice(),
             );
-            assert(count > 0); // We expect that self.op always exists.
-            assert(@divExact(message.header.size, @sizeOf(Header)) == 1 + count);
-
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
