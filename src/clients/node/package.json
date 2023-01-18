@@ -18,6 +18,7 @@
     "package.json",
     "package-lock.json",
     "scripts/download_node_headers.sh",
+    "scripts/build_lib.sh",
     "src/c.zig",
     "src/benchmark.ts",
     "src/index.ts",
@@ -40,7 +41,7 @@
     "download_node_headers": "sh ./scripts/download_node_headers.sh",
     "build": "npm run build_tsc && npm run build_lib",
     "build_tsc": "./node_modules/typescript/bin/tsc",
-    "build_lib": "./scripts/build_lib.sh",
+    "build_lib": "sh ./scripts/build_lib.sh",
     "prepack": "npm run build_tsc",
     "clean": "rm -rf build dist node_modules src/zig-cache zig"
   },
