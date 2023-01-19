@@ -8,7 +8,7 @@ set -e
 # Cut everything after the second `.` in the target query result
 # because the rest of it doesn't always seem to be valid when passed
 # back in to `-target`.
-target="$(zig targets | jq -r '.native.triple' | cut -d '.' -f 1,2)"
+target="$(./zig/zig targets | grep triple |cut -d '"' -f 4 | cut -d '.' -f 1,2)"
 if [[ "$target" == "aarch64-macos.13" ]]; then
     target="native-macos.11"
 fi
@@ -17,7 +17,7 @@ echo "Building for $target"
 
 mkdir -p dist
 
-zig/zig build-lib \
+./zig/zig build-lib \
 	-mcpu=baseline \
 	-OReleaseSafe \
 	-dynamic \
