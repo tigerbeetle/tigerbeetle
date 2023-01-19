@@ -292,6 +292,12 @@ pub fn GridType(comptime Storage: type) type {
             grid.assert_not_writing(address, block.*);
             grid.assert_not_reading(address, block.*);
 
+            if (constants.verify) {
+                for (grid.cache_blocks) |cache_block| {
+                    assert(cache_block != block.*);
+                }
+            }
+
             assert(grid.superblock.opened);
             assert(!grid.superblock.free_set.is_free(address));
 
