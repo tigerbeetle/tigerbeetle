@@ -71,6 +71,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         };
 
         pub const constants = struct {
+            pub const message_body_size_max = constants_.message_body_size_max;
+
             /// The maximum number of objects within a batch, by operation.
             pub const batch_max = struct {
                 pub const create_accounts = operation_batch_max(.create_accounts);
@@ -86,7 +88,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 }
 
                 fn operation_batch_max(comptime operation: Operation) usize {
-                    return @divFloor(constants_.message_body_size_max, std.math.max(
+                    return @divFloor(message_body_size_max, std.math.max(
                         @sizeOf(Event(operation)),
                         @sizeOf(Result(operation)),
                     ));
@@ -386,7 +388,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
-            output: []align(16) u8,
+            output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             _ = client;
             assert(op != 0);
@@ -465,7 +467,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             self: *StateMachine,
             comptime operation: Operation,
             input: []align(16) const u8,
-            output: []align(16) u8,
+            output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(operation != .lookup_accounts and operation != .lookup_transfers);
 
@@ -571,7 +573,11 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         }
 
         // Accounts that do not fit in the response are omitted.
-        fn execute_lookup_accounts(self: *StateMachine, input: []const u8, output: []u8) usize {
+        fn execute_lookup_accounts(
+            self: *StateMachine,
+            input: []const u8,
+            output: *align(16) [constants.message_body_size_max]u8,
+        ) usize {
             const batch = mem.bytesAsSlice(u128, input);
             const output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
             const results = mem.bytesAsSlice(Account, output[0..output_len]);
@@ -586,7 +592,11 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         }
 
         // Transfers that do not fit in the response are omitted.
-        fn execute_lookup_transfers(self: *StateMachine, input: []const u8, output: []u8) usize {
+        fn execute_lookup_transfers(
+            self: *StateMachine,
+            input: []const u8,
+            output: *align(16) [constants.message_body_size_max]u8,
+        ) usize {
             const batch = mem.bytesAsSlice(u128, input);
             const output_len = @divFloor(output.len, @sizeOf(Transfer)) * @sizeOf(Transfer);
             const results = mem.bytesAsSlice(Transfer, output[0..output_len]);
@@ -1399,7 +1409,7 @@ fn check(comptime test_table: []const u8) !void {
                     1,
                     commit_operation,
                     request.items,
-                    reply_actual_buffer,
+                    reply_actual_buffer[0..TestContext.message_body_size_max],
                 );
                 var reply_actual = reply_actual_buffer[0..reply_actual_size];
 
