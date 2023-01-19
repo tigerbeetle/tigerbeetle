@@ -1629,7 +1629,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // The underlying header memory must be owned by the buffer and not by journal.headers:
             // Otherwise, concurrent writes may modify the memory of the pointer while we write.
-            assert(@ptrToInt(message.header) == @ptrToInt(message.buffer.ptr));
+            assert(@ptrToInt(message.header) == @ptrToInt(message.buffer));
 
             const slot = journal.slot_with_header(message.header).?;
 
