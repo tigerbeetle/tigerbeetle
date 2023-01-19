@@ -771,7 +771,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     const sector_ceil = vsr.sector_ceil(message.header.size);
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);
-                        assert(message.buffer.len == constants.message_size_max + constants.sector_size);
+                        assert(message.buffer.len == constants.message_size_max);
                         mem.set(u8, message.buffer[message.header.size..sector_ceil], 0);
                     }
                 }

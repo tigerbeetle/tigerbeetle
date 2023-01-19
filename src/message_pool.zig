@@ -13,10 +13,6 @@ comptime {
     assert(constants.message_size_max % constants.sector_size == 0);
 }
 
-/// Add an extra sector_size bytes to allow a partially received subsequent
-/// message to be shifted to make space for 0 padding to vsr.sector_ceil.
-const message_size_max_padded = constants.message_size_max + constants.sector_size;
-
 /// The number of full-sized messages allocated at initialization by the replica message pool.
 /// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
 pub const messages_max_replica = messages_max: {
@@ -106,7 +102,7 @@ pub const MessagePool = struct {
                 const buffer = try allocator.allocAdvanced(
                     u8,
                     constants.sector_size,
-                    message_size_max_padded,
+                    constants.message_size_max,
                     .exact,
                 );
                 const message = try allocator.create(Message);
