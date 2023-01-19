@@ -15,6 +15,8 @@ fi
 
 echo "Building for $target"
 
+mkdir -p dist
+
 zig/zig build-lib \
 	-mcpu=baseline \
 	-OReleaseSafe \
