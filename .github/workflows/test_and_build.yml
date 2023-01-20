@@ -151,6 +151,17 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build fuzz_vsr_superblock_quorums -- --seed 123
 
+  # This both checks that the hash_log builds and acts as a regression test for 
+  # https://github.com/tigerbeetledb/tigerbeetle/issues/404
+  fuzz_hash_log:
+    name: 'Fuzz LSM Forest with hash_log'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build fuzz_lsm_forest -Dhash-log-mode=create -Drelease-safe -- --seed 16319736705930193193 --events-max 10000
+      - run: zig/zig build fuzz_lsm_forest -Dhash-log-mode=check -- --seed 16319736705930193193 --events-max 10000
+
   # This is just a canary to make sure that the simulator compiles
   # (and passes for at least a single seed).
   # simulator:
@@ -287,6 +298,7 @@ jobs:
       - fuzz_vsr_superblock
       - fuzz_vsr_superblock_free_set
       - fuzz_vsr_superblock_quorums
+      - fuzz_hash_log
       - build-tools
       - build-and-push
       - build-and-push-debug
