@@ -36,6 +36,15 @@ pub const BlockType = enum(u8) {
     }
 };
 
+// Leave this outside GridType so we can call it from modules that don't know about Storage.
+pub fn alloc_block(
+    allocator: mem.Allocator,
+) !*align(constants.sector_size) [constants.block_size]u8 {
+    const block = try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
+    mem.set(u8, block, 0);
+    return block[0..constants.block_size];
+}
+
 /// The Grid provides access to on-disk blocks (blobs of `block_size` bytes).
 /// Each block is identified by an "address" (`u64`, beginning at 1).
 ///
@@ -178,11 +187,6 @@ pub fn GridType(comptime Storage: type) type {
                 .cache = cache,
                 .read_iop_blocks = read_iop_blocks,
             };
-        }
-
-        pub fn alloc_block(allocator: mem.Allocator) !BlockPtr {
-            const block = try allocator.alignedAlloc(u8, constants.sector_size, block_size);
-            return block[0..block_size];
         }
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
