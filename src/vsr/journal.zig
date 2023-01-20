@@ -1666,12 +1666,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const buffer = message.buffer[0..vsr.sector_ceil(message.header.size)];
             const offset = Ring.prepares.offset(slot);
 
-            if (builtin.mode == .Debug) {
-                // Assert that any sector padding has already been zeroed:
-                var sum_of_sector_padding_bytes: u8 = 0;
-                for (buffer[message.header.size..]) |byte| sum_of_sector_padding_bytes |= byte;
-                assert(sum_of_sector_padding_bytes == 0);
-            }
+            // Assert that any sector padding has already been zeroed:
+            var sum_of_sector_padding_bytes: u8 = 0;
+            for (buffer[message.header.size..]) |byte| sum_of_sector_padding_bytes |= byte;
+            assert(sum_of_sector_padding_bytes == 0);
 
             journal.prepare_inhabited[slot.index] = false;
             journal.prepare_checksums[slot.index] = 0;
