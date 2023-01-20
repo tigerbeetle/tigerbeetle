@@ -9,9 +9,9 @@ const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
 const Client = @import("test/cluster.zig").Client;
-const Cluster = @import("test/cluster.zig").Cluster;
+const Cluster = @import("test/cluster.zig").ClusterType(constants.StateMachineType);
 const Replica = @import("test/cluster.zig").Replica;
-const StateMachine = @import("test/cluster.zig").StateMachine;
+const StateMachine = Cluster.StateMachine;
 const Failure = @import("test/cluster.zig").Failure;
 const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
 const ReplySequence = @import("test/reply_sequence.zig").ReplySequence;
