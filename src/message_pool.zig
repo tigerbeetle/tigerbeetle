@@ -148,7 +148,7 @@ pub const MessagePool = struct {
     pub fn unref(pool: *MessagePool, message: *Message) void {
         message.references -= 1;
         if (message.references == 0) {
-            if (builtin.mode == .Debug) mem.set(u8, message.buffer, undefined);
+            mem.set(u8, message.buffer, 0);
             message.next = pool.free_list;
             pool.free_list = message;
         }
