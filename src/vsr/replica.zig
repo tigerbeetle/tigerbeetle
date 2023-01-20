@@ -135,9 +135,10 @@ pub fn ReplicaType(
         /// Initialized from the superblock's VSRState.
         ///
         /// Invariants:
+        /// * `replica.view = replica.log_view` when status=normal
         /// * `replica.view ≥ replica.log_view`
         /// * `replica.view ≥ replica.view_durable`
-        /// * For replica_count=0, `view` is always 0.
+        /// * `replica.view = 0` when replica_count=1.
         view: u32,
 
         /// The latest view where
@@ -146,7 +147,10 @@ pub fn ReplicaType(
         /// i.e. the latest view in which this replica changed its head message.
         ///
         /// Initialized from the superblock's VSRState.
-        /// For replica_count=0, `log_view` is always 0.
+        ///
+        /// Invariants (see `view` for others):
+        /// * `replica.log_view ≥ replica.log_view_durable`
+        /// * `replica.log_view = 0` when replica_count=1.
         log_view: u32,
 
         /// The current status, either normal, view_change, or recovering:
@@ -1308,6 +1312,7 @@ pub fn ReplicaType(
             if (self.ignore_repair_message(message)) return;
 
             assert(self.status == .normal);
+            assert(self.view == self.log_view);
             assert(message.header.view == self.view);
             assert(message.header.replica != self.replica);
             assert(self.primary());
@@ -2642,19 +2647,15 @@ pub fn ReplicaType(
             // Therefore, only ops "A..D" are committed to disk.
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_commit_min = self.op_checkpoint_next();
-            const vsr_state_new = .{
-                .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
-                .commit_min = vsr_state_commit_min,
-                .commit_max = self.commit_max,
-                .log_view = self.superblock.staging.vsr_state.log_view,
-                .view = self.superblock.staging.vsr_state.view,
-            };
-            assert(self.superblock.working.vsr_state.monotonic(vsr_state_new));
 
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
-                vsr_state_new,
+                .{
+                    .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
+                    .commit_min = vsr_state_commit_min,
+                    .commit_max = self.commit_max,
+                },
             );
         }
 
@@ -3029,6 +3030,8 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert((self.status == .normal) == (command == .start_view));
             assert((self.status == .view_change) == (command == .do_view_change));
+            assert(self.view >= self.view_durable());
+            assert(self.log_view >= self.log_view_durable());
 
             assert(command != .do_view_change or self.log_view < self.view);
             assert(command != .start_view or self.log_view == self.view);
@@ -3036,7 +3039,12 @@ pub fn ReplicaType(
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
+            const headers = self.create_view_change_headers();
+            assert(headers.len > 0);
+            assert(headers.get(0).op == self.op);
+
             message.header.* = .{
+                .size = @intCast(u32, @sizeOf(Header) * (1 + headers.len)),
                 .command = command,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -3051,66 +3059,105 @@ pub fn ReplicaType(
                 .commit = if (command == .do_view_change) self.commit_min else self.commit_max,
             };
 
-            // The DVC anchor: Within the log suffix following the anchor, we have additional
-            // guarantees about the state of the log headers which allow us to tolerate certain
-            // gaps (by locally guaranteeing that the gap does not hide a break).
-            // See Example 2/3 for more detail.
-            const op_dvc_anchor = std.math.max(
-                self.commit_min,
-                // +1: We can have a full pipeline, but not yet have performed any repair.
-                // In such a case, we want to send those pipeline_prepare_queue_max headers in the
-                // DVC, but not the preceding op (which may belong to a different chain).
-                // This satisfies the DVC invariant because the first op in the pipeline is
-                // "connected" to the canonical chain (via its "parent" checksum).
-                //
-                // For example, as a follower, we might have received pipeline_prepare_queue_max
-                // headers in the SV message, but not done any repair before the next view change.
-                1 + self.op -| constants.pipeline_prepare_queue_max,
+            stdx.copy_disjoint(
+                .exact,
+                Header,
+                std.mem.bytesAsSlice(Header, message.body()),
+                headers.constSlice(),
             );
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
 
-            const Headers = std.BoundedArray(Header, constants.view_change_headers_max);
-            var headers = Headers{ .buffer = undefined };
+            return message.ref();
+        }
+
+        fn create_view_change_headers(self: *const Self) vsr.ViewChangeHeaders {
+            assert(self.status == .normal or self.status == .view_change);
+            assert(self.view >= self.log_view);
+            assert(self.view >= self.view_durable());
+            assert(self.log_view >= self.log_view_durable());
+
+            var headers = vsr.ViewChangeHeaders{ .buffer = undefined };
+
+            // Always include the head message.
             headers.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
 
-            // How many headers should we send in the DVC?
-            // - The DVC "The headers must connect to the cluster's committed ops." must be upheld.
-            // - The headers may contains gaps.
-            // - The headers may not contain breaks.
-            if (command == .start_view) {
-                // The primary starting a new view has a pristine log suffix — no gaps or breaks.
-                var op: u64 = self.op;
-                while (op > self.commit_min) : (op -= 1) {
-                    const header_next = self.journal.header_with_op(op).?;
-                    const header_prev = self.journal.header_with_op(op - 1).?;
-                    assert(header_prev.checksum == header_next.parent);
+            if (self.view == self.log_view) {
+                // Construct SV message headers. (On the backup, these are only stored in the
+                // superblock).
+                if (self.primary_index(self.view) == self.replica and self.status == .normal) {
+                    assert(self.op >= self.commit_max);
 
-                    headers.append(header_prev.*) catch break;
-                }
-            } else if (self.primary_index(self.log_view) == self.replica) {
-                assert(command == .do_view_change);
-                // See Example 2a.
-                var op: u64 = self.op;
-                while (op > op_dvc_anchor) : (op -= 1) {
-                    const header_next = self.journal.header_with_op(op).?;
-                    // Exclude gaps since we cannot distinguish the gap from a break.
-                    const header_prev = self.journal.header_with_op(op - 1) orelse break;
-                    if (header_prev.checksum != header_next.parent) break;
+                    // The primary starting a new view has a pristine log suffix.
+                    //
+                    // +1 because commit_min may have been overwritten (and not repaired) if it
+                    // fell on a checkpoint boundary.
+                    var op = self.op;
+                    while (op > self.commit_min + 1) : (op -= 1) {
+                        const header_next = self.journal.header_with_op(op).?;
+                        const header_prev = self.journal.header_with_op(op - 1).?;
+                        assert(header_prev.checksum == header_next.parent);
 
-                    headers.append(header_prev.*) catch break;
+                        headers.append(header_prev.*) catch break;
+                    }
+                } else {
+                    // Either:
+                    // - The primary started a new view but has not finished repair.
+                    // - The backup joining a new view has a pristine log suffix — it just
+                    //   loaded a SV.
+                    //
+                    // In each case we send as much of a suffix as is available (fallthrough).
                 }
             } else {
-                assert(command == .do_view_change);
-                // See Example 2b.
-                var op: u64 = self.op;
-                while (op > op_dvc_anchor) : (op -= 1) {
-                    const header_next = self.journal.header_with_op(op) orelse continue;
-                    const header_prev = self.journal.header_with_op(op - 1) orelse continue;
-                    assert(header_prev.checksum == header_next.parent);
+                // Construct DVC message headers.
+                assert(self.view > self.log_view);
 
-                    headers.append(header_prev.*) catch break;
+                // The DVC anchor: Within the log suffix following the anchor, we have additional
+                // guarantees about the state of the log headers which allow us to tolerate certain
+                // gaps (by locally guaranteeing that the gap does not hide a break).
+                // See Example 2/3 for more detail.
+                const op_dvc_anchor = std.math.max(
+                    self.commit_min,
+                    // +1: We can have a full pipeline, but not yet have performed any repair.
+                    // In such a case, we want to send those pipeline_prepare_queue_max headers in
+                    // the DVC, but not the preceding op (which may belong to a different chain).
+                    // This satisfies the DVC invariant because the first op in the pipeline is
+                    // "connected" to the canonical chain (via its "parent" checksum).
+                    //
+                    // For example, as a follower, we might have received pipeline_prepare_queue_max
+                    // headers in the SV message, but not done any repair before the next view
+                    // change.
+                    1 + self.op -| constants.pipeline_prepare_queue_max,
+                );
+
+                if (self.primary_index(self.log_view) == self.replica) {
+                    // Retired primary: see Example 2a.
+                    var op = self.op;
+                    while (op > op_dvc_anchor) : (op -= 1) {
+                        const header_next = self.journal.header_with_op(op).?;
+                        // Exclude gaps since we cannot distinguish the gap from a break.
+                        const header_prev = self.journal.header_with_op(op - 1) orelse break;
+                        if (header_prev.checksum != header_next.parent) break;
+
+                        headers.append(header_prev.*) catch break;
+                    }
+                } else {
+                    // Retired backup: see Example 2b.
+                    var op = self.op;
+                    while (op > self.commit_min) : (op -= 1) {
+                        const header_prev = self.journal.header_with_op(op - 1) orelse continue;
+                        const header_next = self.journal.header_with_op(op);
+                        assert(header_next == null or header_prev.checksum == header_next.?.parent);
+
+                        headers.append(header_prev.*) catch break;
+
+                        // Stop once we connect to the anchor.
+                        if (header_prev.op <= op_dvc_anchor + 1) break;
+                    } else {
+                        assert(self.commit_min == self.op);
+                    }
                 }
             }
-            assert(command == .start_view or headers.get(headers.len - 1).op >= op_dvc_anchor);
 
             // Include as many extra headers as possible, but with no additional gaps (since they
             // cannot be differentiated from breaks).
@@ -3128,18 +3175,7 @@ pub fn ReplicaType(
 
                 headers.appendAssumeCapacity(header_prev.*);
             }
-
-            message.header.size = @intCast(u32, @sizeOf(Header) * (1 + headers.len));
-            stdx.copy_disjoint(
-                .exact,
-                Header,
-                std.mem.bytesAsSlice(Header, message.body()),
-                headers.constSlice(),
-            );
-            message.header.set_checksum_body(message.body());
-            message.header.set_checksum();
-
-            return message.ref();
+            return headers;
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -5119,6 +5155,11 @@ pub fn ReplicaType(
                         });
                         return;
                     }
+                    assert(std.mem.eql(
+                        u8,
+                        message.body(),
+                        std.mem.sliceAsBytes(self.superblock.working.vsr_headers()),
+                    ));
                 }
             }
 
@@ -5221,11 +5262,10 @@ pub fn ReplicaType(
                 view_durable_update_callback,
                 &self.superblock_context_view_change,
                 .{
-                    .commit_min = self.superblock.staging.vsr_state.commit_min,
-                    .commit_min_checksum = self.superblock.staging.vsr_state.commit_min_checksum,
                     .commit_max = self.commit_max,
                     .view = self.view,
                     .log_view = self.log_view,
+                    .headers = self.create_view_change_headers(),
                 },
             );
             assert(self.view_durable_updating());
@@ -6176,7 +6216,7 @@ const DVCQuorum = struct {
         assert(message.header.op >= message.header.commit);
         assert(message.header.op - message.header.commit <= constants.journal_slot_count);
 
-        // The view when this replica was last in normal status, which:
+        // The log_view:
         // * may be higher than the view in any of the prepare headers.
         // * must be lower than the view of this view change.
         const log_view = @intCast(u32, message.header.timestamp);
