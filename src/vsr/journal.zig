@@ -1442,6 +1442,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         /// Repair the redundant headers for slots with decision=fix, one sector at a time.
         fn recover_fix(journal: *Journal) void {
+            const replica = @fieldParentPtr(Replica, "journal", journal);
             assert(journal.status == .recovering);
             assert(journal.writes.executing() == 0);
             assert(journal.dirty.count >= journal.faulty.count);
@@ -1451,11 +1452,15 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var dirty_iterator = journal.dirty.bits.iterator(.{ .kind = .set });
             while (dirty_iterator.next()) |dirty_slot| {
                 if (journal.faulty.bit(Slot{ .index = dirty_slot })) continue;
-                assert(journal.prepare_inhabited[dirty_slot]);
-                assert(journal.prepare_checksums[dirty_slot] ==
-                    journal.headers[dirty_slot].checksum);
-                assert(journal.prepare_checksums[dirty_slot] ==
-                    journal.headers_redundant[dirty_slot].checksum);
+                if (journal.prepare_inhabited[dirty_slot]) {
+                    assert(journal.prepare_checksums[dirty_slot] ==
+                        journal.headers[dirty_slot].checksum);
+                    assert(journal.prepare_checksums[dirty_slot] ==
+                        journal.headers_redundant[dirty_slot].checksum);
+                } else {
+                    // Case @D for R=1.
+                    assert(replica.replica_count == 1);
+                }
 
                 const dirty_slot_sector = @divFloor(dirty_slot, headers_per_sector);
                 if (fix_sector) |fix_sector_| {
@@ -2020,7 +2025,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 /// Case @B may be caused by crashing while writing the prepare (torn write).
 ///
 /// @D:
-/// This is possibly a torn prepare to the redundant headers, so when replica_count=1 we must
+/// This is possibly a torn write to the redundant headers, so when replica_count=1 we must
 /// repair this locally. The probability that this results in an incorrect recovery is:
 ///   P(crash during first WAL wrap)
 ///     × P(redundant header is corrupt)
