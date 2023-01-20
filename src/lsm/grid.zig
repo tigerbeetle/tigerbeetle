@@ -470,9 +470,7 @@ pub fn GridType(comptime Storage: type) type {
             const cache_index = grid.cache.insert_index(&read.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, iop_block, cache_block);
-            if (constants.verify) {
-                std.mem.set(u8, iop_block.*, undefined);
-            }
+            std.mem.set(u8, iop_block.*, 0);
 
             // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {
