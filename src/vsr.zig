@@ -36,6 +36,7 @@ pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
 pub const VSRState = superblock.SuperBlockSector.VSRState;
+pub const ViewChangeHeaders = std.BoundedArray(Header, constants.view_change_headers_max);
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).

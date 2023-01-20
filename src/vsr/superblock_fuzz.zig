@@ -334,8 +334,8 @@ const Environment = struct {
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
             .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
-            .log_view = env.superblock.staging.vsr_state.log_view + 1,
-            .view = env.superblock.staging.vsr_state.view + 1,
+            .log_view = env.superblock.staging.vsr_state.log_view,
+            .view = env.superblock.staging.vsr_state.view,
         };
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
