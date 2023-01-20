@@ -62,77 +62,48 @@ const Environment = struct {
     ) catch unreachable;
 
     const State = enum {
-        uninit,
         init,
-        formatted,
+        superblock_format,
         superblock_open,
+        forest_init,
         forest_open,
-        forest_compacting,
-        forest_checkpointing,
-        superblock_checkpointing,
+        fuzzing,
+        forest_compact,
+        forest_checkpoint,
+        superblock_checkpoint,
     };
 
     state: State,
     storage: *Storage,
     message_pool: MessagePool,
     superblock: SuperBlock,
-    superblock_context: SuperBlock.Context = undefined,
+    superblock_context: SuperBlock.Context,
     grid: Grid,
     forest: Forest,
-    // We need @fieldParentPtr() of forest, so we can't use an optional Forest.
-    forest_exists: bool,
-    checkpoint_op: ?u64 = null,
+    checkpoint_op: ?u64,
 
-    fn init(env: *Environment, storage: *Storage) !void {
-        env.state = .uninit;
-
+    pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
+        var env: Environment = undefined;
+        env.state = .init;
         env.storage = storage;
-        errdefer env.storage.deinit(allocator);
 
         env.message_pool = try MessagePool.init(allocator, .replica);
-        errdefer env.message_pool.deinit(allocator);
+        defer env.message_pool.deinit(allocator);
 
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = env.storage,
             .storage_size_limit = constants.storage_size_max,
             .message_pool = &env.message_pool,
         });
-        errdefer env.superblock.deinit(allocator);
+        defer env.superblock.deinit(allocator);
 
         env.grid = try Grid.init(allocator, &env.superblock);
-        errdefer env.grid.deinit(allocator);
+        defer env.grid.deinit(allocator);
 
-        // Forest must be initialized with an open superblock.
         env.forest = undefined;
-        env.forest_exists = false;
+        env.checkpoint_op = null;
 
-        env.state = .init;
-    }
-
-    fn deinit(env: *Environment) void {
-        assert(env.state != .uninit);
-
-        if (env.forest_exists) {
-            env.forest.deinit(allocator);
-            env.forest_exists = false;
-        }
-        env.grid.deinit(allocator);
-        env.superblock.deinit(allocator);
-        env.message_pool.deinit(allocator);
-
-        env.state = .uninit;
-    }
-
-    fn tick(env: *Environment) void {
-        // env.grid.tick();
-        env.storage.tick();
-    }
-
-    fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
-        // Sometimes IO completes synchronously (eg if cached), so we might already be in next_state before ticking.
-        assert(env.state == current_state or env.state == next_state);
-        while (env.state == current_state) env.tick();
-        assert(env.state == next_state);
+        try env.open_then_apply(fuzz_ops);
     }
 
     fn change_state(env: *Environment, current_state: State, next_state: State) void {
@@ -140,79 +111,88 @@ const Environment = struct {
         env.state = next_state;
     }
 
-    pub fn format(storage: *Storage) !void {
-        var env: Environment = undefined;
+    fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
+        // Sometimes operations complete synchronously so we might already be in next_state before ticking.
+        //assert(env.state == current_state or env.state == next_state);
+        while (env.state == current_state) env.storage.tick();
+        assert(env.state == next_state);
+    }
 
-        try env.init(storage);
-        defer env.deinit();
-
-        assert(env.state == .init);
+    pub fn open_then_apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
+        env.change_state(.init, .superblock_format);
         env.superblock.format(superblock_format_callback, &env.superblock_context, .{
             .cluster = cluster,
             .replica = replica,
         });
-        env.tick_until_state_change(.init, .formatted);
+        
+        env.tick_until_state_change(.superblock_format, .superblock_open);
+        env.superblock.open(superblock_open_callback, &env.superblock_context);
+
+        env.tick_until_state_change(.superblock_open, .forest_init);
+        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
+        defer env.forest.deinit(allocator);
+
+        env.change_state(.forest_init, .forest_open);
+        env.forest.open(forest_open_callback);
+
+        env.tick_until_state_change(.forest_open, .fuzzing);
+        try env.apply(fuzz_ops);
     }
 
     fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-        env.change_state(.init, .formatted);
-    }
-
-    pub fn open(env: *Environment) void {
-        assert(env.state == .init);
-        env.superblock.open(superblock_open_callback, &env.superblock_context);
-        env.tick_until_state_change(.init, .forest_open);
+        env.change_state(.superblock_format, .superblock_open);
     }
 
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-        env.change_state(.init, .superblock_open);
-        env.forest = Forest.init(allocator, &env.grid, node_count, forest_options) catch unreachable;
-        env.forest_exists = true;
-        env.forest.open(forest_open_callback);
+        env.change_state(.superblock_open, .forest_init);
     }
 
     fn forest_open_callback(forest: *Forest) void {
         const env = @fieldParentPtr(@This(), "forest", forest);
-        env.change_state(.superblock_open, .forest_open);
+        env.change_state(.forest_open, .fuzzing);
     }
 
     pub fn compact(env: *Environment, op: u64) void {
-        env.change_state(.forest_open, .forest_compacting);
+        env.change_state(.fuzzing, .forest_compact);
         env.forest.compact(forest_compact_callback, op);
-        env.tick_until_state_change(.forest_compacting, .forest_open);
+        env.tick_until_state_change(.forest_compact, .fuzzing);
     }
 
     fn forest_compact_callback(forest: *Forest) void {
         const env = @fieldParentPtr(@This(), "forest", forest);
-        env.change_state(.forest_compacting, .forest_open);
+        env.change_state(.forest_compact, .fuzzing);
     }
 
     pub fn checkpoint(env: *Environment, op: u64) void {
+        assert(env.checkpoint_op == null);
         env.checkpoint_op = op - constants.lsm_batch_multiple;
-        env.change_state(.forest_open, .forest_checkpointing);
+
+        env.change_state(.fuzzing, .forest_checkpoint);
         env.forest.checkpoint(forest_checkpoint_callback);
-        env.tick_until_state_change(.forest_checkpointing, .superblock_checkpointing);
-        env.tick_until_state_change(.superblock_checkpointing, .forest_open);
+        env.tick_until_state_change(.forest_checkpoint, .superblock_checkpoint);
+        env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
     }
 
     fn forest_checkpoint_callback(forest: *Forest) void {
         const env = @fieldParentPtr(@This(), "forest", forest);
-        env.change_state(.forest_checkpointing, .superblock_checkpointing);
+        const op = env.checkpoint_op.?;
+        env.checkpoint_op = null;
+
+        env.change_state(.forest_checkpoint, .superblock_checkpoint);
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
             .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
-            .commit_min = env.checkpoint_op.?,
-            .commit_max = env.checkpoint_op.? + 1,
+            .commit_min = op,
+            .commit_max = op + 1,
             .log_view = 0,
             .view = 0,
         });
-        env.checkpoint_op = null;
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-        env.change_state(.superblock_checkpointing, .forest_open);
+        env.change_state(.superblock_checkpoint, .fuzzing);
     }
 
     fn prefetch_account(env: *Environment, id: u128) void {
@@ -230,31 +210,27 @@ const Environment = struct {
         groove.prefetch_setup(null);
         groove.prefetch_enqueue(id);
         groove.prefetch(Getter.prefetch_callback, &getter.prefetch_context);
-        while (!getter.finished) env.tick();
+        while (!getter.finished) env.storage.tick();
     }
 
-    fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
-        var env: Environment = undefined;
-
-        try env.init(storage);
-        defer env.deinit();
-
-        // Open the superblock then forest.
-        env.open();
-
+    fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
         // The forest should behave like a simple key-value data-structure.
         // We'll compare it to a hash map.
         var model = std.hash_map.AutoHashMap(u128, Account).init(allocator);
         defer model.deinit();
 
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
+            assert(env.state == .fuzzing);
             log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
-            const storage_size_used = storage.size_used();
-            log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
+
+            const storage_size_used = env.storage.size_used();
+            log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
+
             const model_size = model.count() * @sizeOf(Account);
             log.debug("space_amplification = {d:.2}", .{
                 @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
             });
+
             // Apply fuzz_op to the forest and the model.
             switch (fuzz_op) {
                 .compact => |compact| {
@@ -294,7 +270,6 @@ pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) 
     var storage = try Storage.init(allocator, constants.storage_size_max, storage_options);
     defer storage.deinit(allocator);
 
-    try Environment.format(&storage);
     try Environment.run(&storage, fuzz_ops);
 }
 
