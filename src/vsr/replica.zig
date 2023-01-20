@@ -25,25 +25,6 @@ const tracer = @import("../tracer.zig");
 pub const Status = enum {
     normal,
     view_change,
-    // Recovery (for replica_count > 1):
-    //
-    // 1. Open the replica:
-    //    a. At replica start: `status=recovering`.
-    //    b. Recover the WAL. Mark questionable entries as faulty.
-    //    c. If the WAL has no entries (besides the initial commit), skip to step 3 with view 0.
-    // 2. Run VSR recovery protocol:
-    //    a. Send a `recovery` message to every replica (except self).
-    //    b. Wait for f+1 `recovery_response` messages from replicas in `normal` status.
-    //       Each `recovery_response` includes the current view number.
-    //       Each `recovery_response` must include a nonce matching the `recovery` message.
-    //    c. Wait for a `recovery_response` from the primary of the highest known view.
-    // 3. Transition to `status=normal` with the discovered view number:
-    //    * Set `op` to the highest op in the primary's recovery response.
-    //    * Repair faulty messages.
-    //    * Commit through to the discovered `commit_max`.
-    //    * Set `state_machine.prepare_timeout` to the current op's timestamp.
-    //
-    // TODO Document state transfer in this progression.
     recovering,
 };
 
@@ -232,9 +213,6 @@ pub fn ReplicaType(
         /// Unique nack_prepare messages for the same view from OTHER replicas (excluding ourself).
         nack_prepare_from_other_replicas: QuorumCounter = quorum_counter_null,
 
-        /// Unique recovery_response messages from OTHER replicas (excluding ourself).
-        recovery_response_from_other_replicas: QuorumMessages = quorum_messages_null,
-
         /// Whether a replica has received a quorum of start_view_change messages for the view change:
         start_view_change_quorum: bool = false,
 
@@ -271,9 +249,6 @@ pub fn ReplicaType(
 
         /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
         repair_timeout: Timeout,
-
-        /// The number of ticks before attempting to send another set of `recovery` messages.
-        recovery_timeout: Timeout,
 
         /// The nonce of the `recovery` messages.
         recovery_nonce: Nonce,
@@ -383,24 +358,60 @@ pub fn ReplicaType(
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
 
-            if (self.journal.is_empty()) {
-                // The data file is brand new — no messages have ever been written.
-                // Transition to normal status; no need to run the VSR recovery protocol.
-                assert(self.journal.dirty.count == 0);
-                assert(self.journal.faulty.count == 0);
-                assert(self.commit_min == 0);
-                assert(self.commit_max == 0);
-                assert(self.op_checkpoint == 0);
-                assert(self.op == 0);
-                assert(self.view == 0);
+            const vsr_headers = self.superblock.working.vsr_headers();
+            var op_head: u64 = 0;
+            for (self.journal.headers) |*header| {
+                if (header.command == .prepare and header.op > op_head) {
+                    assert(header.view <= self.log_view);
+                    op_head = header.op;
+                }
 
-                log.debug("{}: open: empty data file", .{self.replica});
-                self.transition_to_normal_from_recovering_status(0);
-                assert(self.status == .normal);
-            } else if (self.replica_count == 1) {
-                if (self.journal.faulty.count != 0) @panic("journal is corrupt");
+                // The view & op checks here are just to avoid looping vsr_headers unnecessarily.
+                if (header.command == .prepare and
+                    header.view < vsr_headers[0].view and
+                    header.op >= vsr_headers[vsr_headers.len - 1].op)
+                {
+                    for (vsr_headers) |*vsr_header| {
+                        if (header.op > vsr_header.op and
+                            header.view < vsr_header.view)
+                        {
+                            log.warn("{}: open: remove leaked header={}", .{
+                                self.replica,
+                                header.*,
+                            });
+                            self.journal.remove_entry(self.journal.slot_with_header(header).?);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            self.op = std.math.max(vsr_headers[0].op, op_head);
+            self.journal.remove_entries_from(self.op + 1);
+
+            for (vsr_headers) |*header| self.replace_header(header);
+
+            if (self.replica_count == 1) {
+                if (self.journal.faulty.count > 0) {
+                    @panic("journal is corrupt");
+                }
+
+                if (self.commit_min < self.op) {
+                    self.commit_journal(self.op);
+                } else {
+                    self.transition_to_normal_from_recovering_status();
+                }
             } else {
-                assert(self.status == .recovering);
+                if (self.view == self.log_view) {
+                    if (self.primary_index(self.view) == self.replica) {
+                        self.transition_to_view_change_status(self.view + 1);
+                    } else {
+                        self.transition_to_normal_from_recovering_status();
+                    }
+                } else {
+                    assert(self.view > self.log_view);
+                    self.transition_to_view_change_status(self.view);
+                }
             }
         }
 
@@ -564,11 +575,6 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
-                .recovery_timeout = Timeout{
-                    .name = "recovery_timeout",
-                    .id = replica_index,
-                    .after = 200,
-                },
                 .recovery_nonce = recovery_nonce,
                 .prng = std.rand.DefaultPrng.init(replica_index),
             };
@@ -630,10 +636,6 @@ pub fn ReplicaType(
             for (self.do_view_change_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
             }
-
-            for (self.recovery_response_from_other_replicas) |message| {
-                if (message) |m| self.message_bus.unref(m);
-            }
         }
 
         /// The client table records for each client the latest session and the latest committed reply.
@@ -653,35 +655,7 @@ pub fn ReplicaType(
 
             // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
-            // self.grid.tick();
             self.message_bus.tick();
-
-            if (self.status == .recovering) {
-                if (self.recovery_timeout.ticking) {
-                    // Continue running the VSR recovery protocol.
-                    self.recovery_timeout.tick();
-                    if (self.recovery_timeout.fired()) self.on_recovery_timeout();
-                } else if (self.replica_count == 1) {
-                    // A cluster-of-one does not run the VSR recovery protocol.
-                    if (self.committing) return;
-                    assert(self.journal.faulty.count == 0);
-                    assert(self.op == 0);
-                    // TODO Assert that this path isn't taken more than once.
-                    self.op = self.journal.op_maximum();
-                    assert(self.op >= self.commit_min);
-                    assert(self.op >= self.op_checkpoint);
-                    assert(self.op <= self.op_checkpoint_trigger());
-                    assert(self.journal.header_with_op(self.op) != null);
-                    self.commit_journal(self.op);
-                    // The recovering→normal transition is deferred until all ops are committed.
-                } else {
-                    // The journal just finished recovery.
-                    // Now try to learn the current view via the VSR recovery protocol.
-                    self.recovery_timeout.start();
-                    self.recover();
-                }
-                return;
-            }
 
             self.ping_timeout.tick();
             self.prepare_timeout.tick();
@@ -749,8 +723,6 @@ pub fn ReplicaType(
                 .start_view_change => self.on_start_view_change(message),
                 .do_view_change => self.on_do_view_change(message),
                 .start_view => self.on_start_view(message),
-                .recovery => self.on_recovery(message),
-                .recovery_response => self.on_recovery_response(message),
                 .request_start_view => self.on_request_start_view(message),
                 .request_prepare => self.on_request_prepare(message),
                 .request_headers => self.on_request_headers(message),
@@ -1329,308 +1301,6 @@ pub fn ReplicaType(
             self.send_message_to_replica(message.header.replica, start_view);
         }
 
-        fn on_recovery(self: *Self, message: *const Message) void {
-            assert(self.replica_count > 1);
-
-            if (self.status != .normal) {
-                log.debug("{}: on_recovery: ignoring ({})", .{ self.replica, self.status });
-                return;
-            }
-
-            if (message.header.replica == self.replica) {
-                log.warn("{}: on_recovery: ignoring (self)", .{self.replica});
-                return;
-            }
-
-            const response = self.message_bus.get_message();
-            defer self.message_bus.unref(response);
-
-            log.debug("{}: on_recovery: view={} op={} commit={} nonce={}", .{
-                self.replica,
-                self.view,
-                self.op,
-                self.commit_max,
-                message.header.context,
-            });
-
-            response.header.* = .{
-                .command = .recovery_response,
-                .cluster = self.cluster,
-                .context = message.header.context, // Echo the request's nonce.
-                .replica = self.replica,
-                .view = self.view,
-                .op = self.op,
-                .commit = self.commit_max,
-            };
-
-            // A recovery response attaches at least as many headers as a DVC message attaches.
-            // To understand why, consider this scenario, where:
-            //
-            //                   replica_count   3
-            //      do_view_change.headers.len   3 (= pipeline_prepare_queue_max)
-            //   recovery_response.headers.len   2 (!)
-            //                   replica 0 log   3, 4a, 5a, 6a, 7a, 8a  (status=normal, primary)
-            //                   replica 1 log   3, 4a, 5a, --, --, --  (status=normal, backup)
-            //                   replica 2 log   3, 4b, 5b, --, --, --  (status=recovering)
-            //
-            // 1. Replica 2 receives a recovery_response quorum.
-            // 2. Replica 2 sets `replica.op` to 8a.
-            // 3. Replica 2 sets its headers from the primary's recovery_response (8a, 7a)
-            //    (via `replace_header()`).
-            // 4. Replica 2 transitions to status=normal.
-            // 5. Replica 0 fails (before replica 2 has a chance to repair its hash chain.)
-            // 6. Replica 1 initiates a view change.
-            // 7. Replica 1 collects a DVC quorum:
-            //      replica 1:  3, 4a, 5a (log_view=latest)
-            //      replica 2: 5b, 7a, 8a (log_view=latest)
-            //    Replicas 1 and 2 share the highest log_view, so both sets of headers are canonical.
-            // 8. Replica 1 loads the canonical headers (via `replace_header()`) from both DVCs.
-            //    Messages 8a and 7a will be dropped via `primary_do_view_change_op_max()` (due to
-            //    the gap at op 6). But there is a conflict at op=5. For correctness, replica 1 must
-            //    pick 5a — 5a may be committed by replica 0.
-            //    Without replica 0's assistance, replica 1 has no way to pick between 5a/5b.
-            //
-            // Including at least as many headers in the recovery response as the DVC maintains the
-            // invariant: DVCs with the same log_view must never disagree on the identity of a
-            // message.
-            //
-            // (DVCs can still safely include gaps — but they must be of the form [4a,__,6a],
-            // not [4a,__,6b]).
-            const count = self.copy_latest_headers_and_set_size(
-                0,
-                self.op,
-                constants.view_change_headers_max,
-                response,
-            );
-            assert(count > 0); // We expect that self.op always exists.
-            assert(@divExact(response.header.size, @sizeOf(Header)) == 1 + count);
-
-            response.header.set_checksum_body(response.body());
-            response.header.set_checksum();
-
-            assert(self.status == .normal);
-            // The checksum for a recovery message is deterministic, and cannot be used as a nonce:
-            assert(response.header.context != message.header.checksum);
-
-            self.send_message_to_replica(message.header.replica, response);
-        }
-
-        fn on_recovery_response(self: *Self, message: *Message) void {
-            assert(self.replica_count > 1);
-
-            if (self.status != .recovering) {
-                log.debug("{}: on_recovery_response: ignoring ({})", .{
-                    self.replica,
-                    self.status,
-                });
-                return;
-            }
-
-            if (message.header.replica == self.replica) {
-                log.warn("{}: on_recovery_response: ignoring (self)", .{self.replica});
-                return;
-            }
-
-            if (message.header.context != self.recovery_nonce) {
-                log.warn("{}: on_recovery_response: ignoring (different nonce)", .{self.replica});
-                return;
-            }
-
-            var responses: *QuorumMessages = &self.recovery_response_from_other_replicas;
-            if (responses[message.header.replica]) |existing| {
-                assert(message.header.replica == existing.header.replica);
-
-                if (message.header.checksum == existing.header.checksum) {
-                    // The response was replayed by the network; ignore it.
-                    log.debug("{}: on_recovery_response: ignoring (duplicate message)", .{
-                        self.replica,
-                    });
-                    return;
-                }
-
-                // We received a second (distinct) response from a replica. Possible causes:
-                // * We retried the `recovery` message, because we had not yet received a quorum.
-                // * The `recovery` message was duplicated/misdirected by the network, and the
-                //   receiver's state changed in the mean time.
-
-                log.debug(
-                    "{}: on_recovery_response: replacing response replica={} view={}..{} op={}..{} commit={}..{}",
-                    .{
-                        self.replica,
-                        existing.header.replica,
-                        existing.header.view,
-                        message.header.view,
-                        existing.header.op,
-                        message.header.op,
-                        existing.header.commit,
-                        message.header.commit,
-                    },
-                );
-
-                if (message.header.view < existing.header.view or
-                    (message.header.view == existing.header.view and
-                    message.header.op < existing.header.op) or
-                    (message.header.view == existing.header.view and
-                    message.header.op == existing.header.op and
-                    message.header.commit < existing.header.commit))
-                {
-                    // The second message is older than the first one (reordered packets).
-                    log.debug("{}: on_recovery_response: ignoring (older)", .{self.replica});
-                    return;
-                }
-
-                // The second message is newer than the first one.
-                assert(message.header.view >= existing.header.view);
-                // The op number may regress if an uncommitted op was discarded in a higher view.
-                assert(message.header.op >= existing.header.op or
-                    message.header.view > existing.header.view);
-                assert(message.header.commit >= existing.header.commit);
-
-                self.message_bus.unref(existing);
-                responses[message.header.replica] = null;
-            } else {
-                log.debug(
-                    "{}: on_recovery_response: replica={} view={} op={} commit={}",
-                    .{
-                        self.replica,
-                        message.header.replica,
-                        message.header.view,
-                        message.header.op,
-                        message.header.commit,
-                    },
-                );
-            }
-
-            assert(responses[message.header.replica] == null);
-            responses[message.header.replica] = message.ref();
-
-            // Wait until we have:
-            // * at least `f + 1` messages for quorum (not including ourself), and
-            // * a response from the primary of the highest discovered view.
-            const count = self.count_quorum(responses, .recovery_response, self.recovery_nonce);
-            assert(count <= self.replica_count - 1);
-
-            const threshold = self.quorum_view_change;
-            if (count < threshold) {
-                log.debug("{}: on_recovery_response: waiting for quorum ({}/{})", .{
-                    self.replica,
-                    count,
-                    threshold,
-                });
-                return;
-            }
-
-            const view = blk: { // The latest known view.
-                var view: u32 = 0;
-                for (self.recovery_response_from_other_replicas) |received, replica| {
-                    if (received) |response| {
-                        assert(replica != self.replica);
-                        assert(response.header.replica == replica);
-                        assert(response.header.context == self.recovery_nonce);
-
-                        view = std.math.max(view, response.header.view);
-                    }
-                }
-                break :blk view;
-            };
-
-            const primary_response = responses[self.primary_index(view)];
-            if (primary_response == null) {
-                log.debug(
-                    "{}: on_recovery_response: ignoring (awaiting response from primary of view={})",
-                    .{
-                        self.replica,
-                        view,
-                    },
-                );
-                return;
-            }
-
-            if (primary_response.?.header.view != view) {
-                // The primary (according to the view quorum) isn't the primary (according to itself).
-                // The `recovery_timeout` will retry shortly with another round.
-                log.debug(
-                    "{}: on_recovery_response: ignoring (primary view={} != quorum view={})",
-                    .{
-                        self.replica,
-                        primary_response.?.header.view,
-                        view,
-                    },
-                );
-                return;
-            }
-
-            // This recovering→normal status transition occurs exactly once.
-            // All further `recovery_response` messages are ignored.
-
-            // TODO When the view is recovered from the superblock (instead of via the VSR recovery
-            // protocol), if the view number indicates that this replica is a primary, it must
-            // transition to status=view_change instead of status=normal.
-            const primary_headers = message_body_as_headers_chain_consecutive(primary_response.?);
-            assert(primary_headers.len > 0);
-
-            const commit = primary_response.?.header.commit;
-            {
-                const op = op_highest(message_body_as_headers(primary_response.?));
-                assert(op == primary_response.?.header.op);
-
-                self.set_op_and_commit_max(op, commit, "on_recovery_response");
-
-                // TODO If the view's primary is >1 WAL ahead of us, these headers could cause
-                // problems. We don't want to jump this far ahead to repair, but we still need to
-                // use the hash chain to figure out which headers to request. Maybe include our
-                // `op_checkpoint` in the recovery (request) message so that the response can give
-                // more useful (i.e. older) headers.
-                for (primary_headers) |*header| {
-                    self.replace_header(header);
-                }
-
-                if (self.op < constants.journal_slot_count) {
-                    if (self.journal.header_with_op(0)) |header| {
-                        assert(header.command == .prepare);
-                        assert(header.operation == .root);
-                    } else {
-                        // This is the first wrap of the log, and the root prepare is corrupt.
-                        // Repair the root repair. This is necessary to maintain the invariant that
-                        // the op=commit_min exists in-memory.
-                        //
-                        // op=0 wouldn't have been repaired by replace_header() above, because it is
-                        // already "checkpointed".
-                        const header = Header.root_prepare(self.cluster);
-                        self.journal.set_header_as_dirty(&header);
-                        log.debug("{}: on_recovery_response: repair root op", .{self.replica});
-                    }
-                }
-
-                assert(self.op == op);
-                assert(self.journal.header_with_op(self.op) != null);
-            }
-
-            assert(self.status == .recovering);
-            self.transition_to_normal_from_recovering_status(view);
-            assert(self.status == .normal);
-            assert(self.backup());
-
-            log.info("{}: on_recovery_response: recovery done responses={} view={} headers={}..{}" ++
-                " commit={} dirty={} faulty={}", .{
-                self.replica,
-                count,
-                view,
-                primary_headers[primary_headers.len - 1].op,
-                primary_headers[0].op,
-                commit,
-                self.journal.dirty.count,
-                self.journal.faulty.count,
-            });
-
-            self.state_machine.prepare_timestamp = self.journal.header_with_op(self.op).?.timestamp;
-            // `state_machine.commit_timestamp` is updated as messages are committed.
-
-            self.reset_quorum_recovery_response();
-            self.commit_journal(commit);
-            self.repair();
-        }
-
         /// If the requested prepare has been guaranteed by this replica:
         /// * Read the prepare from storage, and forward it to the replica that requested it.
         /// * Otherwise send no reply — it isn't safe to nack.
@@ -2093,13 +1763,6 @@ pub fn ReplicaType(
             self.repair();
         }
 
-        fn on_recovery_timeout(self: *Self) void {
-            assert(self.status == .recovering);
-            assert(self.replica_count > 1);
-            self.recovery_timeout.reset();
-            self.recover();
-        }
-
         fn reference_message_and_receive_quorum_exactly_once(
             self: *Self,
             messages: *QuorumMessages,
@@ -2441,7 +2104,7 @@ pub fn ReplicaType(
                     assert(self.replica_count == 1);
                     assert(self.commit_min == self.commit_max);
                     assert(self.commit_min == self.op);
-                    self.transition_to_normal_from_recovering_status(0);
+                    self.transition_to_normal_from_recovering_status();
                 } else {
                     // We expect that a cluster-of-one only calls commit_journal() in recovering status.
                     assert(self.replica_count > 1);
@@ -2893,8 +2556,7 @@ pub fn ReplicaType(
         ) usize {
             assert(op_max >= op_min);
             assert(count_max == null or count_max.? > 0);
-            assert(message.header.command == .headers or
-                message.header.command == .recovery_response);
+            assert(message.header.command == .headers);
 
             const body_size_max = @sizeOf(Header) * std.math.min(
                 @divExact(message.buffer.len - @sizeOf(Header), @sizeOf(Header)),
@@ -2935,7 +2597,6 @@ pub fn ReplicaType(
                     assert(m.header.replica == replica);
                     switch (command) {
                         .do_view_change => assert(m.header.view == self.view),
-                        .recovery_response => assert(m.header.replica != self.replica),
                         else => unreachable,
                     }
                     count += 1;
@@ -3181,9 +2842,7 @@ pub fn ReplicaType(
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_message_from_header(self: *Self, header: Header) *Message {
             assert(header.replica == self.replica);
-            assert(header.view == self.view or
-                header.command == .request_start_view or
-                header.command == .recovery);
+            assert(header.view == self.view or header.command == .request_start_view);
             assert(header.size == @sizeOf(Header));
 
             const message = self.message_bus.pool.get_message();
@@ -3925,23 +3584,6 @@ pub fn ReplicaType(
                 else
                     null,
             };
-        }
-
-        fn recover(self: *Self) void {
-            assert(self.status == .recovering);
-            assert(self.replica_count > 1);
-
-            log.debug("{}: recover: sending recovery messages nonce={}", .{
-                self.replica,
-                self.recovery_nonce,
-            });
-
-            self.send_header_to_other_replicas(.{
-                .command = .recovery,
-                .cluster = self.cluster,
-                .context = self.recovery_nonce,
-                .replica = self.replica,
-            });
         }
 
         /// Starting from the latest journal entry, backfill any missing or disconnected headers.
@@ -4805,16 +4447,6 @@ pub fn ReplicaType(
             self.start_view_change_quorum = false;
         }
 
-        fn reset_quorum_recovery_response(self: *Self) void {
-            for (self.recovery_response_from_other_replicas) |*received, replica| {
-                if (received.*) |message| {
-                    assert(replica != self.replica);
-                    self.message_bus.unref(message);
-                    received.* = null;
-                }
-            }
-        }
-
         fn send_prepare_ok(self: *Self, header: *const Header) void {
             assert(header.command == .prepare);
             assert(header.cluster == self.cluster);
@@ -5069,18 +4701,6 @@ pub fn ReplicaType(
                     },
                     else => unreachable,
                 },
-                .recovery => {
-                    assert(self.status == .recovering);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                    assert(message.header.context == self.recovery_nonce);
-                },
-                .recovery_response => {
-                    assert(self.status == .normal);
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                },
                 .headers => {
                     assert(self.status == .normal or self.status == .view_change);
                     assert(message.header.view == self.view);
@@ -5132,7 +4752,9 @@ pub fn ReplicaType(
             if (replica != self.replica) {
                 // Critical: Do not advertise a view/log_view before it is durable.
                 // See view_durable()/log_view_durable().
-                if (self.view_durable() < message.header.view and message.header.command != .recovery) {
+                if (message.header.view > self.view_durable() and
+                    message.header.command != .request_start_view)
+                {
                     log.debug("{}: send_message_to_replica: dropped {s} " ++
                         "(view_durable={} message.view={})", .{
                         self.replica,
@@ -5583,20 +5205,15 @@ pub fn ReplicaType(
             self.send_message_to_other_replicas(start_view);
         }
 
-        fn transition_to_normal_from_recovering_status(self: *Self, view_new: u32) void {
+        fn transition_to_normal_from_recovering_status(self: *Self) void {
             assert(self.status == .recovering);
-            assert(self.view == 0);
+            assert(self.view == self.log_view);
             assert(!self.committing);
-            assert(self.replica_count > 1 or view_new == 0);
+            assert(self.replica_count > 1 or self.commit_min == self.op);
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
 
             self.status = .normal;
-            self.view = view_new;
-            self.log_view = view_new;
-            if (self.view_durable() != view_new or self.log_view_durable() != view_new) {
-                self.view_durable_update();
-            }
 
             if (self.primary()) {
                 log.debug(
@@ -5616,7 +5233,6 @@ pub fn ReplicaType(
                 self.ping_timeout.start();
                 self.commit_timeout.start();
                 self.repair_timeout.start();
-                self.recovery_timeout.stop();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
                 self.pipeline = .{ .queue = .{} };
@@ -5637,7 +5253,6 @@ pub fn ReplicaType(
                 self.ping_timeout.start();
                 self.normal_status_timeout.start();
                 self.repair_timeout.start();
-                self.recovery_timeout.stop();
             }
         }
 
@@ -5660,7 +5275,6 @@ pub fn ReplicaType(
                 );
 
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.recovery_timeout.ticking);
                 assert(!self.pipeline_repairing);
                 assert(self.pipeline == .queue);
                 assert(self.view == view_new);
@@ -5684,7 +5298,6 @@ pub fn ReplicaType(
                 });
 
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.recovery_timeout.ticking);
                 assert(self.pipeline == .cache);
 
                 self.view = view_new;
@@ -5719,12 +5332,19 @@ pub fn ReplicaType(
                 self.view,
                 view_new,
             });
-            assert(self.status == .normal or self.status == .view_change);
-            assert(view_new > self.view);
+            assert(self.status == .normal or self.status == .view_change or self.status == .recovering);
 
+            const status_from = self.status;
             self.status = .view_change;
-            self.view = view_new;
-            self.view_durable_update();
+
+            if (self.view == view_new) {
+                assert(status_from == .recovering);
+            } else {
+                assert(view_new > self.view);
+                self.view = view_new;
+                self.view_durable_update();
+            }
+
             if (self.pipeline == .queue) {
                 var queue = self.pipeline.queue;
                 self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
@@ -5738,7 +5358,6 @@ pub fn ReplicaType(
             self.view_change_message_timeout.start();
             self.repair_timeout.stop();
             self.prepare_timeout.stop();
-            assert(!self.recovery_timeout.ticking);
 
             // Do not reset quorum counters only on entering a view, assuming that the view will be
             // followed only by a single subsequent view change to the next view, because multiple
@@ -6492,8 +6111,7 @@ fn message_body_as_headers(message: *const Message) []const Header {
     assert(message.header.size > @sizeOf(Header)); // Body must contain at least one header.
     assert(message.header.command == .do_view_change or
         message.header.command == .start_view or
-        message.header.command == .headers or
-        message.header.command == .recovery_response);
+        message.header.command == .headers);
 
     const headers = std.mem.bytesAsSlice(
         Header,
@@ -6520,9 +6138,7 @@ fn message_body_as_headers(message: *const Message) []const Header {
 /// Asserts that the headers are in descending op order, and there are no breaks.
 /// The headers may contain gaps.
 fn message_body_as_headers_chain_disjoint(message: *const Message) []const Header {
-    assert(message.header.command == .do_view_change or
-        message.header.command == .start_view or
-        message.header.command == .recovery_response);
+    assert(message.header.command == .do_view_change or message.header.command == .start_view);
 
     const message_headers = message_body_as_headers(message);
     assert(message_headers.len > 0);
@@ -6544,8 +6160,7 @@ fn message_body_as_headers_chain_disjoint(message: *const Message) []const Heade
 
 /// Asserts that the headers are in descending op order, and there are no gaps or breaks.
 fn message_body_as_headers_chain_consecutive(message: *const Message) []const Header {
-    assert(message.header.command == .start_view or
-        message.header.command == .recovery_response);
+    assert(message.header.command == .start_view);
 
     const message_headers = message_body_as_headers_chain_disjoint(message);
     var child: ?*const Header = null;

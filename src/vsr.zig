@@ -104,9 +104,6 @@ pub const Command = enum(u8) {
     do_view_change,
     start_view,
 
-    recovery,
-    recovery_response,
-
     request_start_view,
     request_headers,
     request_prepare,
@@ -321,8 +318,6 @@ pub const Header = extern struct {
             .start_view_change => self.invalid_start_view_change(),
             .do_view_change => self.invalid_do_view_change(),
             .start_view => self.invalid_start_view(),
-            .recovery => self.invalid_recovery(),
-            .recovery_response => self.invalid_recovery_response(),
             .request_start_view => self.invalid_request_start_view(),
             .request_headers => self.invalid_request_headers(),
             .request_prepare => self.invalid_request_prepare(),
@@ -519,29 +514,6 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_recovery(self: *const Header) ?[]const u8 {
-        assert(self.command == .recovery);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_recovery_response(self: *const Header) ?[]const u8 {
-        assert(self.command == .recovery_response);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
