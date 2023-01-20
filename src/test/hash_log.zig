@@ -6,10 +6,12 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
+const panic = std.debug.panic;
 
 const constants = @import("../constants.zig");
 
 var file: ?std.fs.File = null;
+var hash_count: usize = 0;
 
 fn ensure_init() void {
     if (file != null) return;
@@ -35,14 +37,23 @@ fn emit_never_inline(hash: u128) void {
         .create => {
             ensure_init();
             std.fmt.format(file.?.writer(), "{x:0>32}\n", .{hash}) catch unreachable;
+            hash_count += 1;
         },
         .check => {
             ensure_init();
             var buffer: [33]u8 = undefined;
             const bytes_read = file.?.readAll(&buffer) catch unreachable;
-            assert(bytes_read == 33);
+            if (bytes_read != 33) {
+                panic("Unexpected end of hash_log at hash_count={}. Expected EOF, found {x:0>32}.", .{ hash_count, hash });
+            }
             const expected_hash = std.fmt.parseInt(u128, buffer[0..32], 16) catch unreachable;
-            assert(hash == expected_hash);
+            if (hash != expected_hash) {
+                panic(
+                    "Hash mismatch at hash_count={}. Expected {x:0>32}, found {x:0>32}.",
+                    .{ hash_count, expected_hash, hash },
+                );
+            }
+            hash_count += 1;
         },
     }
 }
