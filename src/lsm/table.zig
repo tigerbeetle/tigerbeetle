@@ -661,6 +661,8 @@ pub fn TableType(
                 assert(builder.data_block_empty());
                 assert(options.address > 0);
 
+                mem.set(u8, builder.filter_block[filter.padding_offset..][0..filter.padding_size], 0);
+
                 const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
                 header.* = .{
