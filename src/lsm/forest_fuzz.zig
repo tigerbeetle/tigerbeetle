@@ -124,7 +124,7 @@ const Environment = struct {
             .cluster = cluster,
             .replica = replica,
         });
-        
+
         env.tick_until_state_change(.superblock_format, .superblock_open);
         env.superblock.open(superblock_open_callback, &env.superblock_context);
 
