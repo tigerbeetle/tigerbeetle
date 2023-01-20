@@ -35,6 +35,7 @@ pub const Config = struct {
 const ConfigProcess = struct {
     log_level: std.log.Level = .info,
     tracer_backend: TracerBackend = .none,
+    hash_log_mode: HashLogMode = .none,
     verify: bool,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
@@ -127,6 +128,12 @@ pub const TracerBackend = enum {
     perfetto,
     // Sends data to https://github.com/wolfpld/tracy.
     tracy,
+};
+
+pub const HashLogMode = enum {
+    none,
+    create,
+    check,
 };
 
 pub const StateMachine = enum {
@@ -225,6 +232,13 @@ pub const configs = struct {
             // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
             // but a different type from a nominal typing perspective.
             @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
+
+        base.process.hash_log_mode = if (@hasDecl(root, "decode_events"))
+            // TODO(DJ) This is a hack to work around the absense of tigerbeetle_build_options.
+            // This should be removed once the node client is built using `zig build`.
+            .none
+        else
+            @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
 
         break :current base;
     };
