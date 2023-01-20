@@ -29,6 +29,7 @@ pub const vsr_options = .{
     .config_base = vsr.config.ConfigBase.default,
     .config_cluster_state_machine = vsr.config.StateMachine.accounting,
     .tracer_backend = vsr.config.TracerBackend.none,
+    .hash_log_mode = vsr.config.HashLogMode.none,
 };
 
 pub fn request(
