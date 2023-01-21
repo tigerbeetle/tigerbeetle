@@ -3644,36 +3644,43 @@ pub fn ReplicaType(
             }
 
             // Request any missing or disconnected headers:
-            // TODO Snapshots: Ensure that self.commit_min op always exists in the journal.
-            var broken = self.journal.find_latest_headers_break_between(self.commit_min, self.op);
-            if (broken) |range| {
-                log.debug("{}: repair: break: view={} op_min={} op_max={} (commit={}..{} op={})", .{
-                    self.replica,
-                    self.view,
-                    range.op_min,
-                    range.op_max,
-                    self.commit_min,
-                    self.commit_max,
+            if (self.commit_min != self.op) {
+                var broken = self.journal.find_latest_headers_break_between(
+                    self.commit_min + 1,
                     self.op,
-                });
-                assert(range.op_min > self.commit_min);
-                assert(range.op_max < self.op);
-                // A range of `op_min=0` or `op_max=0` should be impossible as a header break:
-                // This is the root op that is prepared when the cluster is initialized.
-                assert(range.op_min > 0);
-                assert(range.op_max > 0);
+                );
+                if (broken) |range| {
+                    log.debug(
+                        "{}: repair: break: view={} op_min={} op_max={} (commit={}..{} op={})",
+                        .{
+                            self.replica,
+                            self.view,
+                            range.op_min,
+                            range.op_max,
+                            self.commit_min,
+                            self.commit_max,
+                            self.op,
+                        },
+                    );
+                    assert(range.op_min > self.commit_min);
+                    assert(range.op_max < self.op);
+                    // A range of `op_min=0` or `op_max=0` should be impossible as a header break:
+                    // This is the root op that is prepared when the cluster is initialized.
+                    assert(range.op_min > 0);
+                    assert(range.op_max > 0);
 
-                if (self.choose_any_other_replica()) |replica| {
-                    self.send_header_to_replica(replica, .{
-                        .command = .request_headers,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        .view = self.view,
-                        .commit = range.op_min,
-                        .op = range.op_max,
-                    });
+                    if (self.choose_any_other_replica()) |replica| {
+                        self.send_header_to_replica(replica, .{
+                            .command = .request_headers,
+                            .cluster = self.cluster,
+                            .replica = self.replica,
+                            .view = self.view,
+                            .commit = range.op_min,
+                            .op = range.op_max,
+                        });
+                    }
+                    return;
                 }
-                return;
             }
 
             // Assert that all headers are now present and connected with a perfect hash chain:
