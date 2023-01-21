@@ -65,7 +65,7 @@ comptime {
 const Slot = struct { index: usize };
 
 /// An inclusive, non-empty range of slots.
-const SlotRange = struct {
+pub const SlotRange = struct {
     head: Slot,
     tail: Slot,
 
@@ -76,7 +76,7 @@ const SlotRange = struct {
     /// * `head < tail` → `  head··tail  `
     /// * `head > tail` → `··tail  head··` (The range wraps around).
     /// * `head = tail` → panic            (Caller must handle this case separately).
-    fn contains(range: *const SlotRange, slot: Slot) bool {
+    pub fn contains(range: *const SlotRange, slot: Slot) bool {
         // To avoid confusion, the empty range must be checked separately by the caller.
         assert(range.head.index != range.tail.index);
 
