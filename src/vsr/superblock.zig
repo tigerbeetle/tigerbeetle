@@ -214,6 +214,7 @@ pub const SuperBlockSector = extern struct {
     comptime {
         assert(@sizeOf(SuperBlockSector) % constants.sector_size == 0);
         assert(@divExact(@sizeOf(SuperBlockSector), constants.sector_size) >= 2);
+        assert(@offsetOf(SuperBlockSector, "vsr_headers_all") == constants.sector_size);
         // Assert that there is no implicit padding in the struct.
         assert(@bitSizeOf(SuperBlockSector) == @sizeOf(SuperBlockSector) * 8);
     }

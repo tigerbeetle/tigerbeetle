@@ -598,9 +598,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Finds the latest break in headers between `op_min` and `op_max` (both inclusive).
         /// A break is a missing header or a header not connected to the next header by hash chain.
         /// On finding the highest break, extends the range downwards to cover as much as possible.
-        /// We expect that `op_min` and `op_max` (`replica.commit_min` and `replica.op`) must exist.
-        /// A range will never include `op_min` because this is already committed.
+        ///
+        /// We expect that `op_max` (`replica.op`) must exist.
+        /// `op_min` may exist or not.
+        ///
         /// A range will never include `op_max` because this must be up to date as the latest op.
+        /// A range may include `op_min`.
         /// We must therefore first resolve any op uncertainty so that we can trust `op_max` here.
         ///
         /// For example: If ops 3, 9 and 10 are missing, returns: `{ .op_min = 9, .op_max = 10 }`.
@@ -613,7 +616,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             op_max: u64,
         ) ?HeaderRange {
             assert(journal.status == .recovered);
-            assert(journal.header_with_op(op_min) != null);
             assert(journal.header_with_op(op_max) != null);
             assert(op_max >= op_min);
             assert(op_max - op_min + 1 <= slot_count);
@@ -647,7 +649,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                             } else if (a.checksum == b.parent) {
                                 // A is connected to B, but B is disconnected, add A to range:
                                 assert(a.view <= b.view);
-                                assert(a.op > op_min);
                                 r.op_min = a.op;
                             } else if (a.view < b.view) {
                                 // A is not connected to B, and A is older than B, add A to range:
@@ -664,7 +665,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                             assert(a.view <= b.view);
                         } else if (a.view != b.view) {
                             // A is not connected to B, open range:
-                            assert(a.op > op_min);
                             assert(b.op <= op_max);
                             range = .{ .op_min = a.op, .op_max = a.op };
                         } else {
@@ -683,7 +683,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         }
                     }
                 } else {
-                    assert(op > op_min);
                     assert(op < op_max);
 
                     // A does not exist, or A has an older (or newer if reordered) op number:
@@ -702,8 +701,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
 
             if (range) |r| {
-                // We can never repair op_min (replica.commit_min) since that is already committed:
-                assert(r.op_min > op_min);
+                assert(r.op_min >= op_min);
                 // We can never repair op_max (replica.op) since that is the latest op:
                 // We can assume this because any existing view jump barrier must first be resolved.
                 assert(r.op_max < op_max);
