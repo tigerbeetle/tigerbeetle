@@ -26,6 +26,7 @@ pub const Status = enum {
     normal,
     view_change,
     recovering,
+    recovering_head,
 };
 
 const Nonce = u128;
@@ -366,6 +367,8 @@ pub fn ReplicaType(
                     op_head = header.op;
                 }
 
+                // Remove entries from prior views that were truncated but not overwritten.
+                // This is necessary to ensure that generated DVC headers are complete.
                 // The view & op checks here are just to avoid looping vsr_headers unnecessarily.
                 if (header.command == .prepare and
                     header.view < vsr_headers[0].view and
@@ -388,13 +391,16 @@ pub fn ReplicaType(
 
             self.op = std.math.max(vsr_headers[0].op, op_head);
             self.journal.remove_entries_from(self.op + 1);
+            assert(self.op >= self.op_checkpoint);
 
             for (vsr_headers) |*header| self.replace_header(header);
+            assert(self.journal.header_with_op(self.op) != null);
 
             if (self.replica_count == 1) {
                 if (self.journal.faulty.count > 0) {
                     @panic("journal is corrupt");
                 }
+                assert(self.op_head_certain());
 
                 if (self.commit_min < self.op) {
                     self.commit_journal(self.op);
@@ -402,15 +408,19 @@ pub fn ReplicaType(
                     self.transition_to_normal_from_recovering_status();
                 }
             } else {
-                if (self.view == self.log_view) {
-                    if (self.primary_index(self.view) == self.replica) {
-                        self.transition_to_view_change_status(self.view + 1);
+                if (self.op_head_certain()) {
+                    if (self.view == self.log_view) {
+                        if (self.primary_index(self.view) == self.replica) {
+                            self.transition_to_view_change_status(self.view + 1);
+                        } else {
+                            self.transition_to_normal_from_recovering_status();
+                        }
                     } else {
-                        self.transition_to_normal_from_recovering_status();
+                        assert(self.view > self.log_view);
+                        self.transition_to_view_change_status(self.view);
                     }
                 } else {
-                    assert(self.view > self.log_view);
-                    self.transition_to_view_change_status(self.view);
+                    self.transition_to_recovering_head();
                 }
             }
         }
@@ -1248,7 +1258,9 @@ pub fn ReplicaType(
                 unreachable;
             }
 
-            assert(self.status == .view_change or self.status == .normal);
+            assert(self.status == .view_change or
+                self.status == .normal or
+                self.status == .recovering_head);
             assert(message.header.view >= self.view);
             assert(message.header.replica != self.replica);
             assert(message.header.replica == self.primary_index(message.header.view));
@@ -1266,9 +1278,17 @@ pub fn ReplicaType(
 
             assert(self.op == message.header.op);
 
-            if (self.status == .view_change) {
-                self.transition_to_normal_from_view_change_status(message.header.view);
-                self.send_prepare_oks_after_view_change();
+            switch (self.status) {
+                .normal => {},
+                .view_change => {
+                    self.transition_to_normal_from_view_change_status(message.header.view);
+                    self.send_prepare_oks_after_view_change();
+                },
+                .recovering_head => {
+                    self.transition_to_normal_from_recovering_status();
+                    self.send_prepare_oks_after_view_change();
+                },
+                .recovering => unreachable,
             }
 
             assert(self.status == .normal);
@@ -2142,6 +2162,7 @@ pub fn ReplicaType(
                     assert(self.replica_count == 1);
                     assert(self.primary_index(self.view) == self.replica);
                 },
+                .recovering_head => unreachable,
             }
 
             const op = self.commit_min + 1;
@@ -2752,7 +2773,7 @@ pub fn ReplicaType(
                     // The primary starting a new view has a pristine log suffix.
                     //
                     // +1 because commit_min may have been overwritten (and not repaired) if it
-                    // fell on a checkpoint boundary.
+                    // falls on a checkpoint boundary.
                     var op = self.op;
                     while (op > self.commit_min + 1) : (op -= 1) {
                         const header_next = self.journal.header_with_op(op).?;
@@ -3248,7 +3269,10 @@ pub fn ReplicaType(
 
             const command: []const u8 = @tagName(message.header.command);
 
-            // 4.3 Recovery
+            if (self.status == .recovering_head and message.header.command != .start_view) {
+                return true;
+            }
+
             // While a replica's status is recovering it does not participate in either the request
             // processing protocol or the view change protocol.
             // This is critical for correctness (to avoid data loss):
@@ -3341,7 +3365,7 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op(self.op) == null);
         }
 
-        /// Returns whether the highest known op is certain.
+        /// Returns whether the head op is certain.
         ///
         /// After recovering the WAL, there are 2 possible outcomes:
         /// * All entries valid. The highest op is certain, and safe to set as `replica.op`.
@@ -3369,36 +3393,25 @@ pub fn ReplicaType(
         /// * ` ✓ ✗ o `: View change is safe.
         /// * ` ✓ = o `: View change is unsafe if any slots are faulty.
         ///              (`replica.op_checkpoint` == `replica.op`).
-        // TODO Use this function once we switch from recovery protocol to the superblock.
-        // If there is an "unsafe" fault, we will need to request a start_view from the primary to
-        // learn the op.
-        fn op_certain(self: *const Self) bool {
+        fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
             assert(self.op_checkpoint <= self.op);
 
-            const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint).index;
-            const slot_op = self.journal.slot_with_op(self.op).?.index;
+            const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint);
+            const slot_op_head = self.journal.slot_with_op(self.op).?;
             const slot_known_range = vsr.SlotRange{
                 .head = slot_op_checkpoint,
-                .tail = slot_op,
+                .tail = slot_op_head,
             };
 
             var iterator = self.journal.faulty.bits.iterator(.{ .kind = .set });
             while (iterator.next()) |slot| {
-                // The command is `reserved` when the entry was found faulty during WAL recovery.
-                // Faults found after WAL recovery are not relevant, because we know their op.
-                if (self.journal.headers[slot.index].command == .reserved) {
-                    if (slot_op_checkpoint == slot_op or
-                        !slot_known_range.contains(slot))
-                    {
-                        log.warn("{}: op_certain: op not known (faulty_slot={}, op={}, op_checkpoint={})", .{
-                            self.replica,
-                            slot.index,
-                            self.op,
-                            self.op_checkpoint,
-                        });
-                        return false;
-                    }
+                assert(self.journal.headers[slot].command == .reserved);
+
+                if (slot_op_checkpoint.index == slot_op_head.index or
+                    !slot_known_range.contains(.{ .index = slot }))
+                {
+                    return false;
                 }
             }
             return true;
@@ -4940,6 +4953,7 @@ pub fn ReplicaType(
                     // It will be set shortly, when we transition to normal status.
                     assert(self.view == 0);
                 },
+                .recovering_head => unreachable,
             }
 
             // Uncommitted ops may not survive a view change so we must assert `op` against
@@ -5212,8 +5226,29 @@ pub fn ReplicaType(
             self.send_message_to_other_replicas(start_view);
         }
 
-        fn transition_to_normal_from_recovering_status(self: *Self) void {
+        fn transition_to_recovering_head(self: *Self) void {
             assert(self.status == .recovering);
+            assert(self.view >= self.log_view);
+            assert(self.op >= self.commit_min);
+            assert(!self.committing);
+            assert(self.replica_count > 1);
+            assert(self.journal.header_with_op(self.op) != null);
+            assert(self.pipeline == .cache);
+
+            log.warn("{}: transition_to_recovering_head: op_checkpoint={} op_head={}", .{
+                self.replica,
+                self.op_checkpoint,
+                self.op,
+            });
+
+            var view = self.view;
+            if (self.primary_index(view) == self.replica) view += 1;
+
+            self.status = .recovering_head;
+        }
+
+        fn transition_to_normal_from_recovering_status(self: *Self) void {
+            assert(self.status == .recovering or self.status == .recovering_head);
             assert(self.view == self.log_view);
             assert(!self.committing);
             assert(self.replica_count > 1 or self.commit_min == self.op);
@@ -5339,13 +5374,16 @@ pub fn ReplicaType(
                 self.view,
                 view_new,
             });
-            assert(self.status == .normal or self.status == .view_change or self.status == .recovering);
+            assert(self.status == .normal or
+                self.status == .view_change or
+                self.status == .recovering or
+                self.status == .recovering_head);
 
             const status_from = self.status;
             self.status = .view_change;
 
             if (self.view == view_new) {
-                assert(status_from == .recovering);
+                assert(status_from == .recovering or self.status == .recovering_head);
             } else {
                 assert(view_new > self.view);
                 self.view = view_new;
@@ -5508,7 +5546,10 @@ pub fn ReplicaType(
                 else => unreachable,
             };
 
-            if (self.status != .normal and self.status != .view_change) return;
+            switch (self.status) {
+                .normal, .view_change, .recovering_head => {},
+                .recovering => return,
+            }
 
             if (header.view < self.view) return;
 
@@ -5532,18 +5573,20 @@ pub fn ReplicaType(
                     .view_change => if (header.view == self.view) return,
                     else => unreachable,
                 },
+                .recovering_head => {},
                 else => unreachable,
             }
 
             switch (to) {
                 .normal => {
                     if (header.view == self.view) {
-                        assert(self.status == .view_change);
+                        assert(self.status == .view_change or self.status == .recovering_head);
 
                         log.debug("{}: view_jump: waiting to exit view change", .{self.replica});
                     } else {
                         assert(header.view > self.view);
-                        assert(self.status == .view_change or self.status == .normal);
+                        assert(self.status == .view_change or self.status == .recovering_head or
+                            self.status == .normal);
 
                         log.debug("{}: view_jump: waiting to jump to newer view", .{self.replica});
                     }
@@ -5558,8 +5601,10 @@ pub fn ReplicaType(
                     });
                 },
                 .view_change => {
-                    assert(header.view > self.view);
-                    assert(self.status == .view_change or self.status == .normal);
+                    assert(self.status == .recovering_head or header.view > self.view);
+                    assert(self.status != .recovering_head or header.command == .start_view);
+                    assert(self.status == .recovering_head or self.status == .view_change or
+                        self.status == .normal);
 
                     if (header.view == self.view + 1) {
                         log.debug("{}: view_jump: jumping to view change", .{self.replica});
