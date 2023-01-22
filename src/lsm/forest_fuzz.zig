@@ -204,8 +204,6 @@ const Environment = struct {
             .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
             .commit_min = env.checkpoint_op.?,
             .commit_max = env.checkpoint_op.? + 1,
-            .log_view = 0,
-            .view = 0,
         });
         env.checkpoint_op = null;
     }
