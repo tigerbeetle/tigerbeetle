@@ -202,15 +202,16 @@ const Environment = struct {
 
         log.debug("forest checkpointing completed!", .{});
 
-        var vsr_state = env.superblock.staging.vsr_state;
-        vsr_state.commit_min += 1;
-        vsr_state.commit_min_checkpoint += 1;
+        const vsr_state = &env.superblock.staging.vsr_state;
 
         env.state = .superblock_checkpointing;
         env.superblock.checkpoint(
             superblock_checkpoint_callback,
             &env.superblock_context,
-            vsr_state,
+            .{
+                .commit_min_checkpoint += = vsr_state.commit_min_checkpoint + 1,
+                .commit_min = vsr_state.commit_min + 1,
+            },
         );
     }
 
