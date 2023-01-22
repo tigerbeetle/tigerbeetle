@@ -283,6 +283,7 @@ pub const SuperBlockSector = extern struct {
     }
 
     pub fn vsr_headers(superblock: *const SuperBlockSector) []const vsr.Header {
+        assert(superblock.vsr_headers_count > 0);
         return superblock.vsr_headers_all[0..superblock.vsr_headers_count];
     }
 };
@@ -751,7 +752,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.vsr_state.view < update.view);
 
             assert(update.view >= update.log_view);
-            for (update.headers.constSlice()) |*h| assert(h.view <= update.view);
+            var op = update.headers.get(0).op + 1;
+            for (update.headers.constSlice()) |*h| {
+                assert(h.view <= update.view);
+                assert(h.op < op);
+                op = h.op;
+            }
 
             const vsr_state = SuperBlockSector.VSRState{
                 .commit_min_checksum = superblock.staging.vsr_state.commit_min_checksum,
