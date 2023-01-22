@@ -4087,7 +4087,7 @@ pub fn ReplicaType(
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
-            assert(self.op - self.commit_min + 1 <= constants.journal_slot_count);
+            assert(self.op - self.commit_min <= constants.journal_slot_count);
 
             // Request enough prepares to utilize our max IO depth:
             var budget = self.journal.writes.available();
@@ -5379,11 +5379,11 @@ pub fn ReplicaType(
                 self.status == .recovering or
                 self.status == .recovering_head);
 
-            const status_from = self.status;
+            const status_before = self.status;
             self.status = .view_change;
 
             if (self.view == view_new) {
-                assert(status_from == .recovering or self.status == .recovering_head);
+                assert(status_before == .recovering or status_before == .recovering_head);
             } else {
                 assert(view_new > self.view);
                 self.view = view_new;
