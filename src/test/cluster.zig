@@ -142,7 +142,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 storage_options.replica_index = @intCast(u8, replica_index);
                 storage_options.fault_atlas = storage_fault_atlas;
                 storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
-                // Disable most faults at startup, so that the replicas don't get stuck in recovery mode.
+                // Disable most faults at startup, so that the replicas don't get stuck recovering_head.
                 storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
             }
             errdefer for (storages) |*storage| storage.deinit(allocator);
@@ -301,99 +301,17 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         ///
         /// Returns whether the replica was crashed.
         /// Returns an error when the replica was unable to recover (open).
-        pub fn crash_replica(cluster: *Self, replica_index: u8) !bool {
+        pub fn crash_replica(cluster: *Self, replica_index: u8) !void {
             assert(cluster.replica_health[replica_index] == .up);
-
-            const replica = &cluster.replicas[replica_index];
-            if (replica.op == 0) {
-                // Only crash when `replica.op > 0` — an empty WAL would skip recovery after a crash.
-                return false;
-            }
-
-            // TODO Remove this workaround when VSR recovery protocol is disabled.
-            for (replica.journal.prepare_inhabited) |inhabited, i| {
-                if (i == 0) {
-                    // Ignore the root header.
-                } else {
-                    if (inhabited) break;
-                }
-            } else {
-                // Only crash when at least one header has been written to the WAL.
-                // An empty WAL would skip recovery after a crash.
-                return false;
-            }
-
-            // Ensure that the cluster can eventually recover without this replica.
-            // Verify that each op is recoverable by the current healthy cluster (minus the replica we
-            // are trying to crash).
-            // TODO Remove this workaround when VSR recovery protocol is disabled.
-            if (cluster.options.replica_count != 1) {
-                var parent: u128 = undefined;
-                const cluster_op_max = op_max: {
-                    var v: ?u32 = null;
-                    var op_max: ?u64 = null;
-                    for (cluster.replicas) |other_replica, i| {
-                        if (cluster.replica_health[i] == .down) continue;
-                        if (other_replica.status == .recovering) continue;
-
-                        if (v == null or other_replica.log_view > v.? or
-                            (other_replica.log_view == v.? and other_replica.op > op_max.?))
-                        {
-                            v = other_replica.log_view;
-                            op_max = other_replica.op;
-                            parent = other_replica.journal.header_with_op(op_max.?).?.checksum;
-                        }
-                    }
-                    break :op_max op_max.?;
-                };
-
-                // This whole workaround doesn't handle log wrapping correctly.
-                // If the log has wrapped, don't crash the replica.
-                if (cluster_op_max >= constants.journal_slot_count) {
-                    return false;
-                }
-
-                var op: u64 = cluster_op_max + 1;
-                while (op > 0) {
-                    op -= 1;
-
-                    var cluster_op_known: bool = false;
-                    for (cluster.replicas) |other_replica, i| {
-                        // Ignore replicas that are ineligible to assist recovery.
-                        if (replica_index == i) continue;
-                        if (cluster.replica_health[i] == .down) continue;
-                        if (other_replica.status == .recovering) continue;
-
-                        if (other_replica.journal.header_with_op_and_checksum(op, parent)) |header| {
-                            parent = header.parent;
-                            if (!other_replica.journal.dirty.bit(.{ .index = op })) {
-                                // The op is recoverable if this replica crashes.
-                                break;
-                            }
-                            cluster_op_known = true;
-                        }
-                    } else {
-                        if (op == cluster_op_max and !cluster_op_known) {
-                            // The replica can crash; it will be able to truncate the last op.
-                        } else {
-                            // The op isn't recoverable if this replica is crashed.
-                            return false;
-                        }
-                    }
-                }
-
-                // We can't crash this replica because without it we won't be able to repair a broken
-                // hash chain.
-                if (parent != 0) return false;
-            }
-
-            cluster.replica_health[replica_index] = .down;
 
             // Reset the storage before the replica so that pending writes can (partially) finish.
             cluster.storages[replica_index].reset();
+
+            const replica = &cluster.replicas[replica_index];
             const replica_time = replica.time;
             replica.deinit(cluster.allocator);
             cluster.network.process_disable(.{ .replica = replica_index });
+            cluster.replica_health[replica_index] = .down;
 
             // Ensure that none of the replica's messages leaked when it was deinitialized.
             var messages_in_pool: usize = 0;
@@ -411,18 +329,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             // Pass the old replica's Time through to the new replica. It will continue to tick while
             // the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
             try cluster.open_replica(replica_index, replica_time);
-
-            return true;
-        }
-
-        /// Returns the number of replicas capable of helping a crashed node recover (i.e. with
-        /// replica.status=normal).
-        pub fn replica_normal_count(cluster: *const Self) u8 {
-            var count: u8 = 0;
-            for (cluster.replicas) |*replica| {
-                if (replica.status == .normal) count += 1;
-            }
-            return count;
         }
 
         fn open_replica(cluster: *Self, replica_index: u8, time: Time) !void {
