@@ -358,39 +358,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        /// Returns whether this is a fresh database WAL; no prepares (except the root) have ever
-        /// been written. This determines whether a replica can transition immediately to normal
-        /// status, or if it needs to run recovery protocol.
-        ///
-        /// Called by the replica immediately after WAL recovery completes, but before the replica
-        /// issues any I/O from handling messages.
-        pub fn is_empty(journal: *const Journal) bool {
-            assert(journal.status == .recovered);
-            assert(journal.writes.executing() == 0);
-
-            if (!journal.headers[0].valid_checksum()) return false;
-            if (journal.headers[0].operation != .root) return false;
-
-            const replica = @fieldParentPtr(Replica, "journal", journal);
-            assert(journal.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
-            assert(journal.headers[0].checksum == journal.prepare_checksums[0]);
-            assert(journal.prepare_inhabited[0]);
-
-            // If any message is faulty, we must fall back to VSR recovery protocol (i.e. treat
-            // this as a non-empty WAL) since that message may have been a prepare.
-            if (journal.faulty.count > 0) return false;
-
-            for (journal.headers[1..]) |*header| {
-                if (header.command == .prepare) return false;
-            }
-
-            for (journal.prepare_inhabited[1..]) |inhabited| {
-                if (inhabited) return false;
-            }
-
-            return true;
-        }
-
         pub fn slot_for_op(_: *const Journal, op: u64) Slot {
             return Slot{ .index = op % slot_count };
         }
