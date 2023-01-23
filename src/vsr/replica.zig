@@ -394,6 +394,15 @@ pub fn ReplicaType(
             assert(self.op >= self.op_checkpoint);
 
             for (vsr_headers) |*header| self.replace_header(header);
+
+            if (self.op == 0 and self.op_checkpoint == 0 and
+                self.journal.header_with_op(self.op) == null)
+            {
+                // Empty log, but slot 0 is corrupt.
+                // replace_header() didn't repair it because op 0 is "committed".
+                const root_prepare = Header.root_prepare(self.superblock.working.cluster);
+                self.journal.set_header_as_dirty(&root_prepare);
+            }
             assert(self.journal.header_with_op(self.op) != null);
 
             if (self.replica_count == 1) {
@@ -5266,7 +5275,7 @@ pub fn ReplicaType(
                     },
                 );
 
-                assert(self.journal.is_empty() or self.replica_count == 1);
+                assert(self.replica_count == 1);
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.normal_status_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
