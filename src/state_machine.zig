@@ -206,6 +206,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
 
+            // NOTE: prefetch(.register)'s callback should end up calling commit()
+            // (which is always async) instead of recursing, so this inline callback is fine.
             if (operation == .register) {
                 callback(self);
                 return;
