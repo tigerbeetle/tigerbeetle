@@ -151,7 +151,7 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build fuzz_vsr_superblock_quorums -- --seed 123
 
-  # This both checks that the hash_log builds and acts as a regression test for 
+  # This both checks that the hash_log builds and acts as a regression test for
   # https://github.com/tigerbeetledb/tigerbeetle/issues/404
   fuzz_hash_log:
     name: 'Fuzz LSM Forest with hash_log'
@@ -163,16 +163,18 @@ jobs:
       - run: zig/zig build fuzz_lsm_forest -Dhash-log-mode=check -- --seed 16319736705930193193 --events-max 10000
 
   # This is just a canary to make sure that the simulator compiles
-  # (and passes for at least a single seed).
-  # simulator:
-  #   name: 'Simulator canary'
-  #   runs-on: ubuntu-latest
-  #   matrix:
-  #     state_machine: [accounting, test]
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - run: ./scripts/install_zig.sh
-  #     - run: zig/zig run -OReleaseSafe -Dconfig-cluster-state-machine=${{matrix.state_machine}} src/simulator.zig -- 123
+  # It would be a good idea to also _run_ a single iteration,
+  # but that currently has some false failures :-)
+  simulator:
+    name: 'Simulator canary'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        state_machine: [accounting, testing]
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build simulator -Dconfig-cluster-state-machine=${{matrix.state_machine}}
 
   # Verify that these build without errors:
   build-tools:
@@ -181,7 +183,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: git submodule init
-      - run: git submodule update      
+      - run: git submodule update
       - run: ./scripts/install_zig.sh
       - run: zig/zig build go_client
       - run: zig/zig build java_client
@@ -299,6 +301,7 @@ jobs:
       - fuzz_vsr_superblock_free_set
       - fuzz_vsr_superblock_quorums
       - fuzz_hash_log
+      - simulator
       - build-tools
       - build-and-push
       - build-and-push-debug
