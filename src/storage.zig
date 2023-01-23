@@ -77,6 +77,7 @@ pub const Storage = struct {
     fd: os.fd_t,
 
     next_tick_queue: FIFO(NextTick) = .{},
+    next_tick_completion_scheduled: bool = false,
     next_tick_completion: IO.Completion = undefined,
 
     pub fn init(io: *IO, fd: os.fd_t) !Storage {
@@ -105,11 +106,10 @@ pub const Storage = struct {
         next_tick: *Storage.NextTick,
     ) void {
         next_tick.* = .{ .callback = callback };
-
-        const was_empty = storage.next_tick_queue.empty();
         storage.next_tick_queue.push(next_tick);
 
-        if (was_empty) {
+        if (!storage.next_tick_completion_scheduled) {
+            storage.next_tick_completion_scheduled = true;
             storage.io.timeout(
                 *Storage,
                 storage,
@@ -130,6 +130,13 @@ pub const Storage = struct {
             error.Canceled => unreachable,
             error.Unexpected => unreachable,
         };
+
+        // Reset the scheduled flag after processing all tick entries
+        assert(storage.next_tick_completion_scheduled);
+        defer {
+            assert(storage.next_tick_completion_scheduled);
+            storage.next_tick_completion_scheduled = false;
+        }
 
         while (storage.next_tick_queue.pop()) |next_tick| {
             next_tick.callback(next_tick);
