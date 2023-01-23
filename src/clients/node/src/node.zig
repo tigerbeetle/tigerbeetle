@@ -161,7 +161,7 @@ const Context = struct {
                 .io = context.io,
             },
         );
-        defer context.client.deinit(allocator);
+        errdefer context.client.deinit(allocator);
 
         return try translate.create_external(env, context);
     }
