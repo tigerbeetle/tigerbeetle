@@ -263,9 +263,9 @@ pub const Storage = struct {
             storage.write_sectors_finish(write);
         }
 
-        var queue = storage.next_tick_queue;
-        storage.next_tick_queue = .{};
-        while (queue.pop()) |next_tick| next_tick.callback(next_tick);
+        while (storage.next_tick_queue.pop()) |next_tick| {
+            next_tick.callback(next_tick);
+        }
     }
 
     pub fn on_next_tick(
