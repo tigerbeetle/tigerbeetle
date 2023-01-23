@@ -150,7 +150,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             state_machine.grid.write_block(
                 next_tick_callback,
                 &state_machine.grid_write,
-                state_machine.grid_block,
+                &state_machine.grid_block,
                 address,
             );
         }
