@@ -21,12 +21,18 @@ pub const MessageBus = struct {
 
     cluster: u32,
     process: Process,
+    view: u32 = 0,
 
     /// The callback to be called when a message is received.
     on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
 
+    //check_send_to_replica: []const Options.CheckSendToReplica,
+
     pub const Options = struct {
         network: *Network,
+        check_send_to_replica: []const CheckSendToReplica = &.{},
+
+        const CheckSendToReplica = fn (replica: u8, message: *const Message) void;
     };
 
     pub fn init(
@@ -60,8 +66,19 @@ pub const MessageBus = struct {
     }
 
     pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
-        // Messages sent by a process to itself should never be passed to the message bus
-        if (bus.process == .replica) assert(replica != bus.process.replica);
+        if (bus.process == .replica) {
+            // Messages sent by a process to itself should never be passed to the message bus.
+            assert(replica != bus.process.replica);
+
+            // Verify that the replica's advertised view never backtracks.
+            if (message.header.command != .request and
+                message.header.command != .prepare and
+                message.header.command != .request_start_view)
+            {
+                bus.view = std.math.max(bus.view, message.header.view);
+                assert(bus.view == message.header.view);
+            }
+        }
 
         bus.network.send_message(message, .{
             .source = bus.process,
