@@ -583,8 +583,10 @@ pub const ClusterFaultAtlas = struct {
     };
 
     /// This is the maximum number of faults per-area that can be safely injected on a read
-    /// or write to the superblock zone. (It does not include the additional "torn write" fault
-    /// injected upon a crash.)
+    /// or write to the superblock zone.
+    ///
+    /// - It does not include the additional "torn write" fault injected upon a crash.
+    /// - These faults must be split between the superblock sector and the trailers.
     ///
     /// For SuperBlockSector, checkpoint() and view_change() require 3/4 valid sectors (1
     /// fault). Trailers are likewise 3/4 + 1 fault — consider if two faults were injected:
@@ -625,9 +627,21 @@ pub const ClusterFaultAtlas = struct {
 
         var atlas = ClusterFaultAtlas{ .options = options };
 
-        for (&atlas.faulty_superblock_areas.values) |*copies| {
+        // Split the faults between sector and trailers to avoid this case:
+        // - B₀ (ok),      manifest (ok)
+        // - B₁ (corrupt), manifest (ok)
+        // - A₂ (ok),      manifest (corrupt)
+        // - A₃ (ok),      manifest (torn)
+        const sector_faults_max = random.uintLessThan(usize, superblock_area_faults_max);
+        const trailer_faults_max = superblock_area_faults_max - sector_faults_max;
+        for (&atlas.faulty_superblock_areas.values) |*copies, area| {
+            const faults_max = if (area == @enumToInt(superblock.Area.sector))
+                sector_faults_max
+            else
+                trailer_faults_max;
+
             var area_faults: usize = 0;
-            while (area_faults < superblock_area_faults_max) : (area_faults += 1) {
+            while (area_faults < faults_max) : (area_faults += 1) {
                 copies.set(random.uintLessThan(usize, constants.superblock_copies));
             }
         }
@@ -638,12 +652,6 @@ pub const ClusterFaultAtlas = struct {
         const faults_max = if (replica_count == 2) 1 else replica_count - quorums.replication;
         assert(faults_max < replica_count);
         assert(faults_max > 0 or replica_count == 1);
-
-        // TODO Is this still necessary?
-        // Allow at most `f` faulty replicas to ensure the view change can succeed.
-        // TODO Allow more than `f` faulty replicas when the fault is to the right of the
-        // highest known replica.op (and to the left of the last checkpointed op).
-        //if (quorum_view_change <= options.replica_index) return null;
 
         var wal_header_sectors = [_]ReplicaSet{ReplicaSet.initEmpty()} ** header_sectors;
         for (wal_header_sectors) |*wal_header_sector, sector| {

@@ -360,8 +360,7 @@ const Environment = struct {
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
-            .vsr_headers = vsr.ViewChangeHeaders.fromSlice(env.superblock.staging.vsr_headers())
-                catch unreachable,
+            .vsr_headers = vsr.ViewChangeHeaders.fromSlice(env.superblock.staging.vsr_headers()) catch unreachable,
             .free_set = checksum_free_set(env.superblock),
         });
 

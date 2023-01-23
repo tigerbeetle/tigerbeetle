@@ -1310,12 +1310,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 // We do not repair padding.
                 context.copy = 0;
                 superblock.read_free_set(context);
-            } else if (copy + 1 == constants.superblock_copies) {
-                @panic("superblock manifest lost");
             } else {
                 log.debug("open: read_manifest: corrupt copy={}", .{copy});
-                context.copy = copy + 1;
-                superblock.read_manifest(context);
+                if (copy + 1 == constants.superblock_copies) {
+                    @panic("superblock manifest lost");
+                } else {
+                    context.copy = copy + 1;
+                    superblock.read_manifest(context);
+                }
             }
         }
 

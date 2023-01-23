@@ -209,7 +209,7 @@ const Environment = struct {
             superblock_checkpoint_callback,
             &env.superblock_context,
             .{
-                .commit_min_checkpoint += = vsr_state.commit_min_checkpoint + 1,
+                .commit_min_checkpoint = vsr_state.commit_min_checkpoint + 1,
                 .commit_min = vsr_state.commit_min + 1,
             },
         );
