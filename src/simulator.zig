@@ -467,7 +467,7 @@ pub const Simulator = struct {
                     replica.superblock.storage.faulty = fault;
                     recoverable_count -= @boolToInt(replica.status == .recovering_head);
 
-                    log_simulator.debug("{}: crash replica (faults={})", .{replica.replica, fault});
+                    log_simulator.debug("{}: crash replica (faults={})", .{ replica.replica, fault });
                     simulator.cluster.crash_replica(replica.replica) catch unreachable;
                     replica.superblock.storage.faulty = true;
                     assert(replica.status != .recovering_head or fault);
