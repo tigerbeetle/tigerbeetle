@@ -2,7 +2,7 @@
 
 Performance:
 
-* [ ] Compare `zig benchmark` before and after this pr.
+* [ ] Compare `zig benchmark` on linux before and after this pr.
     ``` sh
     # benchmark results before
     ...
