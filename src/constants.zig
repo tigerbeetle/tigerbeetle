@@ -28,12 +28,6 @@ pub const hash_log_mode = config.process.hash_log_mode;
 /// The maximum number of replicas allowed in a cluster.
 pub const replicas_max = 6;
 
-pub const state_machine = config.cluster.state_machine;
-pub const StateMachineType = switch (config.cluster.state_machine) {
-    .accounting => @import("state_machine.zig").StateMachineType,
-    .testing => @import("test/state_machine.zig").StateMachineType,
-};
-
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.
 /// This determines the size of the VR client table used to cache replies to clients by client ID.
