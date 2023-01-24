@@ -8,8 +8,14 @@ const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
+const state_machine = @import("vsr_simulator_options").state_machine;
+const StateMachineType = switch (state_machine) {
+    .accounting => @import("state_machine.zig").StateMachineType,
+    .testing => @import("test/state_machine.zig").StateMachineType,
+};
+
 const Client = @import("test/cluster.zig").Client;
-const Cluster = @import("test/cluster.zig").ClusterType(constants.StateMachineType);
+const Cluster = @import("test/cluster.zig").ClusterType(StateMachineType);
 const Replica = @import("test/cluster.zig").Replica;
 const StateMachine = Cluster.StateMachine;
 const Failure = @import("test/cluster.zig").Failure;
@@ -116,7 +122,7 @@ pub fn main() !void {
             .faulty_wal_headers = replica_count > 1,
             .faulty_wal_prepares = replica_count > 1,
         },
-        .state_machine = switch (constants.state_machine) {
+        .state_machine = switch (state_machine) {
             .testing => .{},
             .accounting => .{
                 .lsm_forest_node_count = 4096,
