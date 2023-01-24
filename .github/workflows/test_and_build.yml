@@ -174,7 +174,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build simulator -Dconfig-cluster-state-machine=${{matrix.state_machine}}
+      - run: zig/zig build simulator -Dsimulator-state-machine=${{matrix.state_machine}}
 
   # Verify that these build without errors:
   build-tools:

@@ -92,7 +92,6 @@ const ConfigCluster = struct {
     lsm_batch_multiple: comptime_int = 4,
     lsm_snapshots_max: usize = 32,
     lsm_value_to_key_layout_ratio_min: comptime_int = 16,
-    state_machine: StateMachine = .accounting,
 
     /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them all to
     /// a single torn write. A replica needs at least one valid redundant header to determine an
@@ -134,11 +133,6 @@ pub const HashLogMode = enum {
     none,
     create,
     check,
-};
-
-pub const StateMachine = enum {
-    accounting,
-    testing,
 };
 
 pub const configs = struct {
@@ -214,13 +208,6 @@ pub const configs = struct {
             .development => default_development,
             .test_min => test_min,
         };
-
-        base.cluster.state_machine = if (@hasDecl(root, "decode_events"))
-            // TODO(DJ) This is a hack to work around the absense of tigerbeetle_build_options.
-            // This should be removed once the node client is built using `zig build`.
-            .accounting
-        else
-            @intToEnum(StateMachine, @enumToInt(build_options.config_cluster_state_machine));
 
         // TODO Use additional build options to overwrite other fields.
         base.process.tracer_backend = if (@hasDecl(root, "tracer_backend"))
