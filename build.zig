@@ -26,16 +26,6 @@ pub fn build(b: *std.build.Builder) void {
         b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
     );
 
-    options.addOption(
-        config.StateMachine,
-        "config_cluster_state_machine",
-        b.option(
-            config.StateMachine,
-            "config-cluster-state-machine",
-            "State machine.",
-        ) orelse .accounting,
-    );
-
     const tracer_backend = b.option(
         config.TracerBackend,
         "tracer-backend",
@@ -187,9 +177,23 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const simulator_options = b.addOptions();
+
+        const StateMachine = enum { testing, accounting };
+        simulator_options.addOption(
+            StateMachine,
+            "state_machine",
+            b.option(
+                StateMachine,
+                "simulator-state-machine",
+                "State machine.",
+            ) orelse .accounting,
+        );
+
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
         simulator.addOptions("vsr_options", options);
+        simulator.addOptions("vsr_simulator_options", simulator_options);
         link_tracer_backend(simulator, tracer_backend, target);
 
         const run_cmd = simulator.run();
