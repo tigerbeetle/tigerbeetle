@@ -5311,11 +5311,8 @@ pub fn ReplicaType(
 
             if (self.primary()) {
                 log.debug(
-                    "{}: transition_to_normal_from_view_change_status: view={} primary",
-                    .{
-                        self.replica,
-                        self.view,
-                    },
+                    "{}: transition_to_normal_from_view_change_status: view={}..{} primary",
+                    .{ self.replica, self.view, view_new },
                 );
 
                 assert(!self.prepare_timeout.ticking);
@@ -5336,17 +5333,23 @@ pub fn ReplicaType(
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
                 if (self.pipeline.queue.prepare_queue.count > 0) self.prepare_timeout.start();
             } else {
-                log.debug("{}: transition_to_normal_from_view_change_status: view={} backup", .{
+                log.debug("{}: transition_to_normal_from_view_change_status: view={}..{} backup", .{
                     self.replica,
                     self.view,
+                    view_new,
                 });
 
                 assert(!self.prepare_timeout.ticking);
                 assert(self.pipeline == .cache);
 
-                self.view = view_new;
-                self.log_view = view_new;
-                self.view_durable_update();
+                if (self.log_view == view_new and self.view == view_new) {
+                    // We recovered into the same view we crashed in, with a detour through
+                    // status=recovering_head.
+                } else {
+                    self.view = view_new;
+                    self.log_view = view_new;
+                    self.view_durable_update();
+                }
 
                 self.ping_timeout.start();
                 self.commit_timeout.stop();
