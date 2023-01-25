@@ -350,50 +350,23 @@ pub fn ReplicaType(
             // Open the (Forest inside) StateMachine:
             self.opened = false;
             self.state_machine.open(state_machine_open_callback);
-            while (!self.opened) {
-                // self.grid.tick();
-                self.superblock.storage.tick();
-            }
+            while (!self.opened) self.superblock.storage.tick();
 
             self.opened = false;
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
 
             const vsr_headers = self.superblock.working.vsr_headers();
-            var op_head: u64 = 0;
+            var op_head: u64 = vsr_headers.slice[0].op;
             for (self.journal.headers) |*header| {
                 if (header.command == .prepare and header.op > op_head) {
                     assert(header.view <= self.log_view);
                     op_head = header.op;
                 }
-
-                // Remove entries from prior views that were truncated but not overwritten.
-                // This is necessary to ensure that generated DVC headers are complete.
-                // The view & op checks here are just to avoid looping vsr_headers unnecessarily.
-                if (header.command == .prepare and
-                    header.view < vsr_headers[0].view and
-                    header.op >= vsr_headers[vsr_headers.len - 1].op)
-                {
-                    for (vsr_headers) |*vsr_header| {
-                        if (header.op > vsr_header.op and
-                            header.view < vsr_header.view)
-                        {
-                            log.warn("{}: open: remove leaked header={}", .{
-                                self.replica,
-                                header.*,
-                            });
-                            self.journal.remove_entry(self.journal.slot_with_header(header).?);
-                            break;
-                        }
-                    }
-                }
             }
 
-            self.op = std.math.max(vsr_headers[0].op, op_head);
-            self.journal.remove_entries_from(self.op + 1);
-            assert(self.op >= self.op_checkpoint);
-
-            for (vsr_headers) |*header| self.replace_header(header);
+            self.op = op_head;
+            for (vsr_headers.slice) |*header| self.replace_header(header);
 
             if (self.op == 0 and self.op_checkpoint == 0 and
                 self.journal.header_with_op(self.op) == null)
@@ -403,7 +376,9 @@ pub fn ReplicaType(
                 const root_prepare = Header.root_prepare(self.superblock.working.cluster);
                 self.journal.set_header_as_dirty(&root_prepare);
             }
-            assert(self.journal.header_with_op(self.op) != null);
+
+            const header_head = self.journal.header_with_op(self.op).?;
+            assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
             if (self.replica_count == 1) {
                 if (self.journal.faulty.count > 0) {
@@ -2721,6 +2696,7 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert((self.status == .normal) == (command == .start_view));
             assert((self.status == .view_change) == (command == .do_view_change));
+            assert(self.view >= self.log_view);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
 
@@ -2762,13 +2738,13 @@ pub fn ReplicaType(
             return message.ref();
         }
 
-        fn create_view_change_headers(self: *const Self) vsr.ViewChangeHeaders {
+        fn create_view_change_headers(self: *const Self) vsr.ViewChangeHeaders.BoundedArray {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.view >= self.log_view);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
 
-            var headers = vsr.ViewChangeHeaders{ .buffer = undefined };
+            var headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
 
             // Always include the head message.
             headers.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
@@ -2866,6 +2842,8 @@ pub fn ReplicaType(
 
                 headers.appendAssumeCapacity(header_prev.*);
             }
+
+            vsr.ViewChangeHeaders.verify(headers.constSlice());
             return headers;
         }
 
@@ -4809,7 +4787,7 @@ pub fn ReplicaType(
                     assert(std.mem.eql(
                         u8,
                         message.body(),
-                        std.mem.sliceAsBytes(self.superblock.working.vsr_headers()),
+                        std.mem.sliceAsBytes(self.superblock.working.vsr_headers().slice),
                     ));
                 }
             }

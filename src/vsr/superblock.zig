@@ -282,9 +282,10 @@ pub const SuperBlockSector = extern struct {
         return true;
     }
 
-    pub fn vsr_headers(superblock: *const SuperBlockSector) []const vsr.Header {
-        assert(superblock.vsr_headers_count > 0);
-        return superblock.vsr_headers_all[0..superblock.vsr_headers_count];
+    pub fn vsr_headers(superblock: *const SuperBlockSector) vsr.ViewChangeHeaders {
+        return vsr.ViewChangeHeaders.init(
+            superblock.vsr_headers_all[0..superblock.vsr_headers_count],
+        );
     }
 };
 
@@ -437,7 +438,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             /// Used by format(), checkpoint(), and view_change().
             vsr_state: ?SuperBlockSector.VSRState = null,
             /// Used by format() and view_change().
-            vsr_headers: ?vsr.ViewChangeHeaders = null,
+            vsr_headers: ?vsr.ViewChangeHeaders.BoundedArray = null,
             repairs: ?Quorums.RepairIterator = null, // Used by open().
         };
 
@@ -654,7 +655,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.working.set_checksum();
 
-            var vsr_headers = vsr.ViewChangeHeaders{ .buffer = undefined };
+            var vsr_headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
             vsr_headers.appendAssumeCapacity(vsr.Header.root_prepare(options.cluster));
 
             context.* = .{
@@ -730,7 +731,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
             log_view: u32,
             view: u32,
-            headers: vsr.ViewChangeHeaders,
+            headers: vsr.ViewChangeHeaders.BoundedArray,
         };
 
         /// The replica calls view_change() to persist its view/log_view — it cannot
@@ -751,13 +752,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.vsr_state.log_view < update.log_view or
                 superblock.staging.vsr_state.view < update.view);
 
+            vsr.ViewChangeHeaders.verify(update.headers.constSlice());
             assert(update.view >= update.log_view);
-            var op = update.headers.get(0).op + 1;
-            for (update.headers.constSlice()) |*h| {
-                assert(h.view <= update.view);
-                assert(h.op < op);
-                op = h.op;
-            }
 
             const vsr_state = SuperBlockSector.VSRState{
                 .commit_min_checksum = superblock.staging.vsr_state.commit_min_checksum,
@@ -780,7 +776,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.vsr_state.view,
                 update.view,
 
-                superblock.staging.vsr_headers()[0].checksum,
+                superblock.staging.vsr_headers().slice[0].checksum,
                 update.headers.get(0).checksum,
             });
 
@@ -1201,6 +1197,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
                     assert(working.vsr_state.view == 0);
+                    assert(working.vsr_headers_count == 1);
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
                 }
@@ -1226,6 +1223,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.vsr_state.view,
                     },
                 );
+                for (superblock.working.vsr_headers().slice) |*header| {
+                    log.debug("{s}: vsr_header: {}", .{ @tagName(context.caller), header.* });
+                }
 
                 if (context.caller == .open) {
                     if (context.repairs) |_| {
