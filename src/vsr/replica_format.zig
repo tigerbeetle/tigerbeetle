@@ -151,7 +151,7 @@ test "format" {
     const superblock_zone_size = @import("./superblock.zig").superblock_zone_size;
     const data_file_size_min = @import("./superblock.zig").data_file_size_min;
     const MessagePool = @import("../message_pool.zig").MessagePool;
-    const Storage = @import("../test/storage.zig").Storage;
+    const Storage = @import("../testing/storage.zig").Storage;
     const SuperBlock = vsr.SuperBlockType(Storage);
     const allocator = std.testing.allocator;
     const cluster = 0;

@@ -11,17 +11,17 @@ const Header = vsr.Header;
 const state_machine = @import("vsr_simulator_options").state_machine;
 const StateMachineType = switch (state_machine) {
     .accounting => @import("state_machine.zig").StateMachineType,
-    .testing => @import("test/state_machine.zig").StateMachineType,
+    .testing => @import("testing/state_machine.zig").StateMachineType,
 };
 
-const Client = @import("test/cluster.zig").Client;
-const Cluster = @import("test/cluster.zig").ClusterType(StateMachineType);
-const Replica = @import("test/cluster.zig").Replica;
+const Client = @import("testing/cluster.zig").Client;
+const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
+const Replica = @import("testing/cluster.zig").Replica;
 const StateMachine = Cluster.StateMachine;
-const Failure = @import("test/cluster.zig").Failure;
-const PartitionMode = @import("test/packet_simulator.zig").PartitionMode;
-const ReplySequence = @import("test/reply_sequence.zig").ReplySequence;
-const IdPermutation = @import("test/id.zig").IdPermutation;
+const Failure = @import("testing/cluster.zig").Failure;
+const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
+const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
+const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.

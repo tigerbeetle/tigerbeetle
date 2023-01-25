@@ -27,7 +27,7 @@ pub const lsm = .{
     .posted_groove = @import("lsm/posted_groove.zig"),
 };
 pub const testing = .{
-    .cluster = @import("test/cluster.zig"),
+    .cluster = @import("testing/cluster.zig"),
 };
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;

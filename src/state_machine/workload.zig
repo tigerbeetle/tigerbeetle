@@ -26,11 +26,11 @@ const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
 const accounting_auditor = @import("auditor.zig");
 const Auditor = accounting_auditor.AccountingAuditor;
-const IdPermutation = @import("../test/id.zig").IdPermutation;
-const fuzz = @import("../test/fuzz.zig");
+const IdPermutation = @import("../testing/id.zig").IdPermutation;
+const fuzz = @import("../testing/fuzz.zig");
 
 // TODO(zig) This won't be necessary in Zig 0.10.
-const PriorityQueue = @import("../test/priority_queue.zig").PriorityQueue;
+const PriorityQueue = @import("../testing/priority_queue.zig").PriorityQueue;
 
 const TransferOutcome = enum {
     /// The transfer is guaranteed to commit.

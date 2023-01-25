@@ -137,7 +137,7 @@ pub inline fn binary_search_keys(
 }
 
 const test_binary_search = struct {
-    const fuzz = @import("../test/fuzz.zig");
+    const fuzz = @import("../testing/fuzz.zig");
 
     const log = false;
 

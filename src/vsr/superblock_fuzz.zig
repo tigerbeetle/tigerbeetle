@@ -17,15 +17,15 @@ const log = std.log.scoped(.fuzz_vsr_superblock);
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
-const Storage = @import("../test/storage.zig").Storage;
-const StorageFaultAtlas = @import("../test/storage.zig").ClusterFaultAtlas;
+const Storage = @import("../testing/storage.zig").Storage;
+const StorageFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("superblock.zig").data_file_size_min;
 const VSRState = @import("superblock.zig").SuperBlockSector.VSRState;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlock = SuperBlockType(Storage);
-const fuzz = @import("../test/fuzz.zig");
+const fuzz = @import("../testing/fuzz.zig");
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 

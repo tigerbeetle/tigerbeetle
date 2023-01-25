@@ -6,7 +6,7 @@ const superblock = @import("./superblock.zig");
 const SuperBlockSector = superblock.SuperBlockSector;
 const SuperBlockVersion = superblock.SuperBlockVersion;
 
-const fuzz = @import("../test/fuzz.zig");
+const fuzz = @import("../testing/fuzz.zig");
 const superblock_quorums = @import("superblock_quorums.zig");
 const QuorumsType = superblock_quorums.QuorumsType;
 
