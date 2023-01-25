@@ -28,6 +28,11 @@ The [`Account.flags.linked`](../accounts.md#flagslinked) flag was set on the las
 batch, which is not legal. (`flags.linked` indicates that the chain continues to the next
 operation).
 
+### `timestamp_must_be_zero`
+The account was not created.
+The [`Account.timestamp`](../accounts.md#timestamp) is nonzero, but must be zero.
+The cluster is responsible for setting this field.
+
 ### `reserved_flag`
 The account was not created.
 [`Account.flags.reserved`](../accounts.md#flagsreserved) is nonzero, but must be zero.

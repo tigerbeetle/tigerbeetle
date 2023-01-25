@@ -95,6 +95,7 @@ pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
     linked_event_chain_open,
+    timestamp_must_be_zero,
 
     reserved_flag,
     reserved_field,
@@ -121,6 +122,7 @@ pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
     linked_event_chain_open,
+    timestamp_must_be_zero,
 
     reserved_flag,
     reserved_field,

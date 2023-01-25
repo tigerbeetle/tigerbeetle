@@ -22,14 +22,11 @@ else
 // Default is `.none`.
 pub const tracer_backend = config.process.tracer_backend;
 
+// Which mode to use for ./test/hash_log.zig.
+pub const hash_log_mode = config.process.hash_log_mode;
+
 /// The maximum number of replicas allowed in a cluster.
 pub const replicas_max = 6;
-
-pub const state_machine = config.cluster.state_machine;
-pub const StateMachineType = switch (config.cluster.state_machine) {
-    .accounting => @import("state_machine.zig").StateMachineType,
-    .testing => @import("test/state_machine.zig").StateMachineType,
-};
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.

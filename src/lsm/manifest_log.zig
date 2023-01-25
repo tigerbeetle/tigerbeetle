@@ -33,6 +33,7 @@ const stdx = @import("../stdx.zig");
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("grid.zig").GridType;
 const BlockType = @import("grid.zig").BlockType;
+const alloc_block = @import("grid.zig").alloc_block;
 const tree = @import("tree.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
@@ -151,10 +152,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             var blocks: [blocks_count_max]BlockPtr = undefined;
             for (blocks) |*block, i| {
                 errdefer for (blocks[0..i]) |b| allocator.free(b);
-
-                const block_slice =
-                    try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
-                block.* = block_slice[0..constants.block_size];
+                block.* = try alloc_block(allocator);
             }
             errdefer for (blocks) |b| allocator.free(b);
 

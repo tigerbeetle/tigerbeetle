@@ -64,7 +64,7 @@ pub const MessagePool = struct {
     pub const Message = struct {
         // TODO: replace this with a header() function to save memory
         header: *Header,
-        buffer: []align(constants.sector_size) u8,
+        buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32 = 0,
         next: ?*Message,
 
@@ -108,7 +108,7 @@ pub const MessagePool = struct {
                 const message = try allocator.create(Message);
                 message.* = .{
                     .header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]),
-                    .buffer = buffer,
+                    .buffer = buffer[0..constants.message_size_max],
                     .next = pool.free_list,
                 };
                 pool.free_list = message;
@@ -123,7 +123,7 @@ pub const MessagePool = struct {
         var free_count: usize = 0;
         while (pool.free_list) |message| {
             pool.free_list = message.next;
-            allocator.free(message.buffer);
+            allocator.free(@as([]const u8, message.buffer));
             allocator.destroy(message);
             free_count += 1;
         }
@@ -148,7 +148,7 @@ pub const MessagePool = struct {
     pub fn unref(pool: *MessagePool, message: *Message) void {
         message.references -= 1;
         if (message.references == 0) {
-            if (builtin.mode == .Debug) mem.set(u8, message.buffer, undefined);
+            mem.set(u8, message.buffer, 0);
             message.next = pool.free_list;
             pool.free_list = message;
         }

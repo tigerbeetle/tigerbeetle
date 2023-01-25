@@ -26,22 +26,19 @@ pub fn build(b: *std.build.Builder) void {
         b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
     );
 
-    options.addOption(
-        config.StateMachine,
-        "config_cluster_state_machine",
-        b.option(
-            config.StateMachine,
-            "config-cluster-state-machine",
-            "State machine.",
-        ) orelse .accounting,
-    );
-
     const tracer_backend = b.option(
         config.TracerBackend,
         "tracer-backend",
         "Which backend to use for tracing.",
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
+
+    const hash_log_mode = b.option(
+        config.HashLogMode,
+        "hash-log-mode",
+        "Log hashes (used for debugging non-deterministic executions).",
+    ) orelse .none;
+    options.addOption(config.HashLogMode, "hash_log_mode", hash_log_mode);
 
     const vsr_package = std.build.Pkg{
         .name = "vsr",
@@ -180,9 +177,23 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const simulator_options = b.addOptions();
+
+        const StateMachine = enum { testing, accounting };
+        simulator_options.addOption(
+            StateMachine,
+            "state_machine",
+            b.option(
+                StateMachine,
+                "simulator-state-machine",
+                "State machine.",
+            ) orelse .accounting,
+        );
+
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
         simulator.addOptions("vsr_options", options);
+        simulator.addOptions("vsr_simulator_options", simulator_options);
         link_tracer_backend(simulator, tracer_backend, target);
 
         const run_cmd = simulator.run();
