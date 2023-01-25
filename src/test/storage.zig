@@ -33,6 +33,7 @@ const BlockType = @import("../lsm/grid.zig").BlockType;
 const stdx = @import("../stdx.zig");
 const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
 const fuzz = @import("./fuzz.zig");
+const hash_log = @import("./hash_log.zig");
 
 const log = std.log.scoped(.storage);
 
@@ -262,9 +263,9 @@ pub const Storage = struct {
             storage.write_sectors_finish(write);
         }
 
-        var queue = storage.next_tick_queue;
-        storage.next_tick_queue = .{};
-        while (queue.pop()) |next_tick| next_tick.callback(next_tick);
+        while (storage.next_tick_queue.pop()) |next_tick| {
+            next_tick.callback(next_tick);
+        }
     }
 
     pub fn on_next_tick(
@@ -286,6 +287,8 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
+        hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
+
         verify_alignment(buffer);
 
         var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
@@ -304,6 +307,8 @@ pub const Storage = struct {
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
+        hash_log.emit_autohash(.{ read.buffer, read.zone, read.offset }, .DeepRecursive);
+
         const offset_in_storage = read.zone.offset(read.offset);
         stdx.copy_disjoint(
             .exact,
@@ -340,6 +345,8 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
+        hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
+
         verify_alignment(buffer);
 
         // Verify that there are no concurrent overlapping writes.
@@ -363,6 +370,8 @@ pub const Storage = struct {
     }
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
+        hash_log.emit_autohash(.{ write.buffer, write.zone, write.offset }, .DeepRecursive);
+
         const offset_in_storage = write.zone.offset(write.offset);
         stdx.copy_disjoint(
             .exact,

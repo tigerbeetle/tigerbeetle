@@ -1629,7 +1629,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // The underlying header memory must be owned by the buffer and not by journal.headers:
             // Otherwise, concurrent writes may modify the memory of the pointer while we write.
-            assert(@ptrToInt(message.header) == @ptrToInt(message.buffer.ptr));
+            assert(@ptrToInt(message.header) == @ptrToInt(message.buffer));
 
             const slot = journal.slot_with_header(message.header).?;
 
@@ -1666,12 +1666,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const buffer = message.buffer[0..vsr.sector_ceil(message.header.size)];
             const offset = Ring.prepares.offset(slot);
 
-            if (builtin.mode == .Debug) {
-                // Assert that any sector padding has already been zeroed:
-                var sum_of_sector_padding_bytes: u8 = 0;
-                for (buffer[message.header.size..]) |byte| sum_of_sector_padding_bytes |= byte;
-                assert(sum_of_sector_padding_bytes == 0);
-            }
+            // Assert that any sector padding has already been zeroed:
+            var sum_of_sector_padding_bytes: u8 = 0;
+            for (buffer[message.header.size..]) |byte| sum_of_sector_padding_bytes |= byte;
+            assert(sum_of_sector_padding_bytes == 0);
 
             journal.prepare_inhabited[slot.index] = false;
             journal.prepare_checksums[slot.index] = 0;

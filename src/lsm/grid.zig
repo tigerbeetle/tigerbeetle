@@ -36,6 +36,15 @@ pub const BlockType = enum(u8) {
     }
 };
 
+// Leave this outside GridType so we can call it from modules that don't know about Storage.
+pub fn alloc_block(
+    allocator: mem.Allocator,
+) !*align(constants.sector_size) [constants.block_size]u8 {
+    const block = try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
+    mem.set(u8, block, 0);
+    return block[0..constants.block_size];
+}
+
 /// The Grid provides access to on-disk blocks (blobs of `block_size` bytes).
 /// Each block is identified by an "address" (`u64`, beginning at 1).
 ///
@@ -180,11 +189,6 @@ pub fn GridType(comptime Storage: type) type {
             };
         }
 
-        pub fn alloc_block(allocator: mem.Allocator) !BlockPtr {
-            const block = try allocator.alignedAlloc(u8, constants.sector_size, block_size);
-            return block[0..block_size];
-        }
-
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
             for (&grid.read_iop_blocks) |block| allocator.free(block);
 
@@ -292,6 +296,12 @@ pub fn GridType(comptime Storage: type) type {
             grid.assert_not_writing(address, block.*);
             grid.assert_not_reading(address, block.*);
 
+            if (constants.verify) {
+                for (grid.cache_blocks) |cache_block| {
+                    assert(cache_block != block.*);
+                }
+            }
+
             assert(grid.superblock.opened);
             assert(!grid.superblock.free_set.is_free(address));
 
@@ -340,9 +350,7 @@ pub fn GridType(comptime Storage: type) type {
             const cache_index = grid.cache.insert_index(&completed_write.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
-            if (constants.verify) {
-                std.mem.set(u8, completed_write.block.*, undefined);
-            }
+            std.mem.set(u8, completed_write.block.*, 0);
 
             // Start a queued write if possible *before* calling the completed
             // write's callback. This ensures that if the callback calls
@@ -462,9 +470,7 @@ pub fn GridType(comptime Storage: type) type {
             const cache_index = grid.cache.insert_index(&read.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, iop_block, cache_block);
-            if (constants.verify) {
-                std.mem.set(u8, iop_block.*, undefined);
-            }
+            std.mem.set(u8, iop_block.*, 0);
 
             // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {
