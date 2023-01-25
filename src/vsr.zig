@@ -39,7 +39,6 @@ pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
 pub const VSRState = superblock.SuperBlockSector.VSRState;
-pub const ViewChangeHeaders = std.BoundedArray(Header, constants.view_change_headers_max);
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
@@ -998,4 +997,88 @@ pub fn quorums(replica_count: u8) struct {
         .replication = quorum_replication,
         .view_change = quorum_view_change,
     };
+}
+
+/// The SuperBlock's persisted VSR headers.
+/// One of the following:
+///
+/// - SV headers (consecutive chain)
+/// - DVC headers (disjoint chain)
+pub const ViewChangeHeaders = struct {
+    slice: []const Header,
+
+    pub const BoundedArray = std.BoundedArray(Header, constants.pipeline_prepare_queue_max);
+
+    pub fn init(slice: []const Header) ViewChangeHeaders {
+        ViewChangeHeaders.verify(slice);
+
+        return .{ .slice = slice };
+    }
+
+    pub fn verify(slice: []const Header) void {
+        assert(slice.len > 0);
+        assert(slice.len <= constants.pipeline_prepare_queue_max);
+
+        var child: ?*const Header = null;
+        for (slice) |*header| {
+            assert(header.command == .prepare);
+
+            if (child) |child_header| {
+                assert(header.op < child_header.op);
+                assert(header.view <= child_header.view);
+                assert((header.op + 1 == child_header.op) ==
+                    (header.checksum == child_header.parent));
+                assert(header.timestamp < child_header.timestamp);
+            }
+            child = header;
+        }
+    }
+
+    const ViewRange = struct {
+        min: u32, // inclusive
+        max: u32, // inclusive
+
+        pub fn contains(range: ViewRange, view: u32) bool {
+            return range.min <= view and view <= range.max;
+        }
+    };
+
+    /// Returns the range of possible views (of prepare, not commit) for a message that is part of
+    /// the same log_view as these headers.
+    pub fn view_for_op(headers: ViewChangeHeaders, op: u64, log_view: u32) ViewRange {
+        const header_newest = &headers.slice[0];
+        const header_oldest = &headers.slice[headers.slice.len - 1];
+
+        if (op < header_oldest.op) return .{ .min = 0, .max = header_oldest.view };
+        if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
+
+        var view_max: u32 = log_view;
+        for (headers.slice) |*header| {
+            assert(header.view <= view_max);
+
+            if (header.op == op) return .{ .min = header.view, .max = header.view };
+            if (header.op < op) return .{ .min = header.view, .max = view_max };
+
+            view_max = header.view;
+        } else {
+            unreachable;
+        }
+    }
+};
+
+test "ViewChangeHeaders.view_for_op" {
+    var headers_array = [_]Header{
+        std.mem.zeroInit(Header, .{ .op = 9, .view = 10 }),
+        std.mem.zeroInit(Header, .{ .op = 6, .view = 7 }),
+    };
+
+    const headers = ViewChangeHeaders{ .slice = &headers_array };
+    try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(10, 12), .{ .min = 12, .max = 12 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(9, 12), .{ .min = 10, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(8, 12), .{ .min = 7, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(7, 12), .{ .min = 7, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(6, 12), .{ .min = 7, .max = 7 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(5, 12), .{ .min = 0, .max = 7 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(0, 12), .{ .min = 0, .max = 7 }));
 }
