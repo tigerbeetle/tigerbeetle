@@ -444,7 +444,7 @@ pub const Simulator = struct {
     }
 
     fn tick_crash(simulator: *Simulator) void {
-        var recoverable_count_min =
+        const recoverable_count_min =
             vsr.quorums(simulator.options.cluster.replica_count).view_change;
         var recoverable_count: usize = 0;
         for (simulator.cluster.replicas) |*replica| {
@@ -458,18 +458,35 @@ pub const Simulator = struct {
 
             switch (simulator.cluster.replica_health[replica.replica]) {
                 .up => {
-                    const replica_writes = simulator.cluster.storages[replica.replica].writes.count();
+                    const storage = &simulator.cluster.storages[replica.replica];
+                    const replica_writes = storage.writes.count();
                     const crash_probability = simulator.options.replica_crash_probability *
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
                     if (!chance_f64(simulator.random, crash_probability)) continue;
 
                     const fault = recoverable_count > recoverable_count_min;
                     replica.superblock.storage.faulty = fault;
-                    recoverable_count -= @boolToInt(replica.status == .recovering_head);
+
+                    if (!fault) {
+                        // The journal writes redundant headers of faulty ops as zeroes to ensure
+                        // that they remain faulty after a crash/recover. Since that fault cannot
+                        // be disabled by `storage.faulty`, we must manually repair it here to
+                        // ensure a cluster cannot become stuck in status=recovering_head.
+                        // See recover_slots() for more detail.
+                        const offset = vsr.Zone.wal_headers.offset(0);
+                        const size = vsr.Zone.wal_headers.size().?;
+                        const headers_bytes = storage.memory[offset..][0..size];
+                        const headers = mem.bytesAsSlice(vsr.Header, headers_bytes);
+                        for (headers) |*h, slot| {
+                            if (h.checksum == 0) h.* = storage.wal_prepares()[slot].header;
+                        }
+                    }
 
                     log_simulator.debug("{}: crash replica (faults={})", .{ replica.replica, fault });
                     simulator.cluster.crash_replica(replica.replica) catch unreachable;
                     replica.superblock.storage.faulty = true;
+
+                    recoverable_count -= @boolToInt(replica.status == .recovering_head);
                     assert(replica.status != .recovering_head or fault);
 
                     simulator.replica_stability[replica.replica] =
