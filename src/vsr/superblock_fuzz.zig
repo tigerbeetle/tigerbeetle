@@ -317,6 +317,7 @@ const Environment = struct {
 
         var vsr_headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
         var vsr_head = std.mem.zeroInit(vsr.Header, .{
+            .command = .prepare,
             .op = env.superblock.staging.vsr_state.commit_min,
         });
         vsr_head.set_checksum_body(&.{});
@@ -361,7 +362,7 @@ const Environment = struct {
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
             .vsr_headers = vsr.ViewChangeHeaders.BoundedArray.fromSlice(
-                env.superblock.staging.vsr_headers(),
+                env.superblock.staging.vsr_headers().slice,
             ) catch unreachable,
             .free_set = checksum_free_set(env.superblock),
         });
