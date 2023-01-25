@@ -10,11 +10,11 @@ const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const IdPermutation = @import("../test/id.zig").IdPermutation;
+const IdPermutation = @import("../testing/id.zig").IdPermutation;
 
 // TODO(zig) This won't be necessary in Zig 0.10.
-const PriorityQueue = @import("../test/priority_queue.zig").PriorityQueue;
-const Storage = @import("../test/storage.zig").Storage;
+const PriorityQueue = @import("../testing/priority_queue.zig").PriorityQueue;
+const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
 });

@@ -562,7 +562,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn verify_cached_read(grid: *Grid, address: u64, cached_block: BlockPtrConst) void {
-            if (Storage != @import("../test/storage.zig").Storage)
+            if (Storage != @import("../testing/storage.zig").Storage)
                 // Too complicated to do async verification
                 return;
 

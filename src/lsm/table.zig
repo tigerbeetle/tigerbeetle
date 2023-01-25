@@ -980,7 +980,7 @@ pub fn TableType(
             key_min: ?Key,
             key_max: ?Key,
         ) void {
-            if (Storage != @import("../test/storage.zig").Storage)
+            if (Storage != @import("../testing/storage.zig").Storage)
                 // Too complicated to do async verification
                 return;
 
