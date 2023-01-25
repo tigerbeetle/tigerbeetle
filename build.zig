@@ -312,10 +312,16 @@ pub fn build(b: *std.build.Builder) void {
             .file = "src/lsm/segmented_array_benchmark.zig",
             .description = "SegmentedArray search",
         },
+        .{
+            .name = "benchmark_grid",
+            .file = "src/lsm/grid_benchmark.zig",
+            .description = "Grid",
+        },
     }) |benchmark| {
         const exe = b.addExecutable(benchmark.name, benchmark.file);
         exe.setTarget(target);
         exe.setBuildMode(.ReleaseSafe);
+        exe.omit_frame_pointer = false;
         exe.setMainPkgPath("src");
         exe.addOptions("vsr_options", options);
         link_tracer_backend(exe, tracer_backend, target);
