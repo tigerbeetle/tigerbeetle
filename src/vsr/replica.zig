@@ -2779,6 +2779,21 @@ pub fn ReplicaType(
                 // Construct DVC message headers.
                 assert(self.view > self.log_view);
 
+                // Ensure that if we started a DVC before a crash, that we will resume sending the
+                // exact same DVC after recovery.
+                // (An alternative implementation would be to load the superblock's DVC headers
+                // (including gaps) into the journal during open(), but that is more complicated
+                // to implement correctly).
+                if (self.log_view_durable() == self.log_view and
+                    self.log_view_durable() < self.view_durable())
+                {
+                    const headers_durable = self.superblock.working.vsr_headers().slice;
+                    assert(headers_durable[0].checksum == headers.get(0).checksum);
+
+                    for (headers_durable[1..]) |*header| headers.appendAssumeCapacity(header.*);
+                    return headers;
+                }
+
                 // The DVC anchor: Within the log suffix following the anchor, we have additional
                 // guarantees about the state of the log headers which allow us to tolerate certain
                 // gaps (by locally guaranteeing that the gap does not hide a break).
