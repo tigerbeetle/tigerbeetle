@@ -360,21 +360,41 @@ pub fn ReplicaType(
             var op_head: u64 = vsr_headers.slice[0].op;
             for (self.journal.headers) |*header| {
                 if (header.command == .prepare and header.op > op_head) {
-                    assert(header.view <= self.log_view);
+                    assert(self.log_view >= header.view);
+                    assert(self.log_view == self.view);
+
                     op_head = header.op;
                 }
             }
 
             self.op = op_head;
-            for (vsr_headers.slice) |*header| self.replace_header(header);
+            for (vsr_headers.slice) |*header| {
+                const slot = .{ .index = header.op % constants.journal_slot_count };
+                if (self.journal.has(header)) {
+                    // Header is already in the WAL.
+                    assert(!self.journal.dirty.bit(slot));
+                    assert(!self.journal.faulty.bit(slot));
+                } else if (self.journal.header_for_op(header.op)) |journal_header| {
+                    assert(!self.journal.dirty.bit(slot));
+                    assert(!self.journal.faulty.bit(slot));
 
-            if (self.op == 0 and self.op_checkpoint == 0 and
-                self.journal.header_with_op(self.op) == null)
-            {
-                // Empty log, but slot 0 is corrupt.
-                // replace_header() didn't repair it because op 0 is "committed".
-                const root_prepare = Header.root_prepare(self.superblock.working.cluster);
-                self.journal.set_header_as_dirty(&root_prepare);
+                    if (header.op < journal_header.op) {
+                        // Don't overwrite a newer op.
+                        // (This must be a SV message because a DVC would not have a newer op).
+                        assert(self.log_view == self.view);
+                    } else {
+                        self.journal.set_header_as_dirty(header);
+                    }
+                } else {
+                    assert(self.journal.dirty.bit(slot) == self.journal.faulty.bit(slot));
+
+                    self.journal.headers[slot.index] = header.*;
+                    self.journal.dirty.set(slot);
+                    // Don't touch faulty — if it is set, we don't want to unset it. The WAL slot
+                    // may contain a corrupt version is this op, and we don't want to incorrectly
+                    // nack it. (This is why we do not call replace_header()/set_header_as_dirty()
+                    // here.)
+                }
             }
 
             const header_head = self.journal.header_with_op(self.op).?;
@@ -392,8 +412,9 @@ pub fn ReplicaType(
                     self.transition_to_normal_from_recovering_status();
                 }
             } else {
-                if (self.op_head_certain()) {
-                    if (self.view == self.log_view) {
+                // Even if op_head_certain() returns false, a DVC always has a certain head op.
+                if (self.log_view < self.view or self.op_head_certain()) {
+                    if (self.log_view == self.view) {
                         if (self.primary_index(self.view) == self.replica) {
                             self.transition_to_view_change_status(self.view + 1);
                         } else {
@@ -3408,8 +3429,6 @@ pub fn ReplicaType(
 
             var iterator = self.journal.faulty.bits.iterator(.{ .kind = .set });
             while (iterator.next()) |slot| {
-                assert(self.journal.headers[slot].command == .reserved);
-
                 if (slot_op_checkpoint.index == slot_op_head.index or
                     !slot_known_range.contains(.{ .index = slot }))
                 {
