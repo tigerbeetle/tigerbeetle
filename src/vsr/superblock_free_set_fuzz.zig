@@ -7,7 +7,7 @@ const log = std.log.scoped(.fuzz_vsr_superblock_free_set);
 
 const FreeSet = @import("./superblock_free_set.zig").FreeSet;
 const Reservation = @import("./superblock_free_set.zig").Reservation;
-const fuzz = @import("../test/fuzz.zig");
+const fuzz = @import("../testing/fuzz.zig");
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 

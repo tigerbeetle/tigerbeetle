@@ -29,9 +29,9 @@ test {
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/segmented_array.zig");
 
-    _ = @import("test/id.zig");
-    _ = @import("test/storage.zig");
-    _ = @import("test/table.zig");
+    _ = @import("testing/id.zig");
+    _ = @import("testing/storage.zig");
+    _ = @import("testing/table.zig");
 
     _ = @import("clients/go/go_bindings_test.zig");
     _ = @import("clients/dotnet/dotnet_bindings_test.zig");

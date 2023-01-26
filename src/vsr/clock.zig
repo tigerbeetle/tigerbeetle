@@ -453,8 +453,8 @@ pub fn Clock(comptime Time: type) type {
 }
 
 const testing = std.testing;
-const OffsetType = @import("../test/time.zig").OffsetType;
-const DeterministicTime = @import("../test/time.zig").Time;
+const OffsetType = @import("../testing/time.zig").OffsetType;
+const DeterministicTime = @import("../testing/time.zig").Time;
 const DeterministicClock = Clock(DeterministicTime);
 
 const ClockUnitTestContainer = struct {
@@ -624,9 +624,9 @@ test "ideal clocks get clamped to cluster time" {
     }
 }
 
-const PacketSimulatorOptions = @import("../test/packet_simulator.zig").PacketSimulatorOptions;
-const PacketSimulatorType = @import("../test/packet_simulator.zig").PacketSimulatorType;
-const Path = @import("../test/packet_simulator.zig").Path;
+const PacketSimulatorOptions = @import("../testing/packet_simulator.zig").PacketSimulatorOptions;
+const PacketSimulatorType = @import("../testing/packet_simulator.zig").PacketSimulatorType;
+const Path = @import("../testing/packet_simulator.zig").Path;
 const Command = @import("../vsr.zig").Command;
 const ClockSimulator = struct {
     const Packet = struct {
@@ -771,7 +771,7 @@ test "clock: fuzz test" {
 
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
-    const SystemTime = @import("../test/time.zig").Time;
+    const SystemTime = @import("../testing/time.zig").Time;
     var system_time = SystemTime{
         .resolution = constants.tick_ms * std.time.ns_per_ms,
         .offset_type = .linear,
