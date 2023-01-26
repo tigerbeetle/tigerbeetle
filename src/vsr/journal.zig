@@ -1193,26 +1193,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             //
             // It is essential that this is performed before we compute the op_max so that the
             // recovery cases apply correctly.
-            for (journal.headers_redundant) |*header_untrusted, index| {
-                const slot = Slot{ .index = index };
-                if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
-                    var view_range = view_change_headers.view_for_op(header.op, log_view);
-                    view_range.max = std.math.min(view_range.max, log_view);
+            for ([_][]align(constants.sector_size) Header{
+                journal.headers_redundant,
+                journal.headers,
+            }) |headers| {
+                for (headers) |*header_untrusted, index| {
+                    const slot = Slot{ .index = index };
+                    if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
+                        var view_range = view_change_headers.view_for_op(header.op, log_view);
+                        view_range.max = std.math.min(view_range.max, log_view);
 
-                    if (header.command == .prepare and !view_range.contains(header.view)) {
-                        header_untrusted.* = Header.reserved(replica.cluster, index);
-                    }
-                }
-            }
-
-            for (journal.headers) |*header_untrusted, index| {
-                const slot = Slot{ .index = index };
-                if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
-                    var view_range = view_change_headers.view_for_op(header.op, log_view);
-                    view_range.max = std.math.min(view_range.max, log_view);
-
-                    if (header.command == .prepare and !view_range.contains(header.view)) {
-                        header_untrusted.* = Header.reserved(replica.cluster, index);
+                        if (header.command == .prepare and !view_range.contains(header.view)) {
+                            header_untrusted.* = Header.reserved(replica.cluster, index);
+                        }
                     }
                 }
             }
