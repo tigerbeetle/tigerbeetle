@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const fuzz = @import("../test/fuzz.zig");
+const fuzz = @import("../testing/fuzz.zig");
 const segmented_array = @import("segmented_array.zig");
 
 pub fn main() !void {
