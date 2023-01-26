@@ -6177,6 +6177,7 @@ fn message_body_as_headers(message: *const Message) []const Header {
 
     var child: ?*const Header = null;
     for (headers) |*header| {
+        assert(!constants.verify or header.valid_checksum());
         assert(header.cluster == message.header.cluster);
         assert(header.command == .prepare);
         assert(header.view <= message.header.view);

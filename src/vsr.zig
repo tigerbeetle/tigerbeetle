@@ -1021,6 +1021,7 @@ pub const ViewChangeHeaders = struct {
 
         var child: ?*const Header = null;
         for (slice) |*header| {
+            assert(header.valid_checksum());
             assert(header.command == .prepare);
 
             if (child) |child_header| {
