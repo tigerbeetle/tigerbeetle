@@ -22,7 +22,7 @@ else
 // Default is `.none`.
 pub const tracer_backend = config.process.tracer_backend;
 
-// Which mode to use for ./test/hash_log.zig.
+// Which mode to use for ./testing/hash_log.zig.
 pub const hash_log_mode = config.process.hash_log_mode;
 
 /// The maximum number of replicas allowed in a cluster.

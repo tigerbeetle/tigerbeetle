@@ -1115,7 +1115,7 @@ test "sum_overflows" {
 }
 
 const TestContext = struct {
-    const Storage = @import("test/storage.zig").Storage;
+    const Storage = @import("testing/storage.zig").Storage;
     const MessagePool = @import("message_pool.zig").MessagePool;
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
@@ -1301,7 +1301,7 @@ fn check(comptime test_table: []const u8) !void {
     // `test_actions.constSlice()`. Most likely a comptime bug that will be resolved by 0.10.
     if (@import("builtin").os.tag == .macos) return;
 
-    const parse_table = @import("test/table.zig").parse;
+    const parse_table = @import("testing/table.zig").parse;
     const allocator = std.testing.allocator;
 
     var context: TestContext = undefined;
