@@ -167,7 +167,7 @@ const Environment = struct {
     latest_sequence: u64 = 0,
     latest_checksum: u128 = 0,
     latest_parent: u128 = 0,
-    latest_vsr_state: VSRState = std.mem.zeroInit(VSRState, .{}),
+    latest_vsr_state: VSRState = std.mem.zeroes(VSRState),
 
     context_format: SuperBlock.Context = undefined,
     context_open: SuperBlock.Context = undefined,
