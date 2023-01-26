@@ -632,7 +632,7 @@ pub const ClusterFaultAtlas = struct {
         // - B₁ (corrupt), manifest (ok)
         // - A₂ (ok),      manifest (corrupt)
         // - A₃ (ok),      manifest (torn)
-        const sector_faults_max = random.uintLessThan(usize, superblock_area_faults_max);
+        const sector_faults_max = random.uintLessThan(usize, superblock_area_faults_max + 1);
         const trailer_faults_max = superblock_area_faults_max - sector_faults_max;
         for (&atlas.faulty_superblock_areas.values) |*copies, area| {
             const faults_max = if (area == @enumToInt(superblock.Area.sector))
