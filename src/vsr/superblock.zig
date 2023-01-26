@@ -643,8 +643,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .free_set_size = 0,
                 .client_table_size = 0,
                 .vsr_headers_count = 0,
-                .vsr_headers_all = [_]vsr.Header{mem.zeroInit(vsr.Header, .{})} **
-                    constants.view_change_headers_max,
+                .vsr_headers_all = mem.zeroes([constants.view_change_headers_max]vsr.Header),
             };
 
             mem.set(SuperBlockSector.Snapshot, &superblock.working.snapshots, .{
@@ -834,7 +833,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 std.mem.set(
                     vsr.Header,
                     superblock.staging.vsr_headers_all[headers.len..],
-                    std.mem.zeroInit(vsr.Header, .{}),
+                    std.mem.zeroes(vsr.Header),
                 );
             } else {
                 assert(context.caller == .checkpoint);
@@ -1614,7 +1613,7 @@ pub const areas = struct {
 test "SuperBlockSector" {
     const expect = std.testing.expect;
 
-    var a = std.mem.zeroInit(SuperBlockSector, .{});
+    var a = std.mem.zeroes(SuperBlockSector);
     a.set_checksum();
 
     assert(a.copy == 0);
