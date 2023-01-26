@@ -107,6 +107,9 @@ pub const SuperBlockSector = extern struct {
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
+    ///
+    /// When `vsr_state.log_view < vsr_state.view`, the headers are for a DVC.
+    /// When `vsr_state.log_view = vsr_state.view`, the headers are for a SV.
     vsr_headers_all: [constants.view_change_headers_max]vsr.Header,
     vsr_headers_reserved: [vsr_headers_reserved_size]u8 =
         [_]u8{0} ** vsr_headers_reserved_size,
