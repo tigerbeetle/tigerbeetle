@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 set -e
 
@@ -9,7 +9,7 @@ set -e
 # because the rest of it doesn't always seem to be valid when passed
 # back in to `-target`.
 target="$(./zig/zig targets | grep triple |cut -d '"' -f 4 | cut -d '.' -f 1,2)"
-if [[ "$target" == "aarch64-macos.13" ]]; then
+if [ "$target" = "aarch64-macos.13" ]; then
     target="native-macos.11"
 fi
 
