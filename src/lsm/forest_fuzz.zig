@@ -4,7 +4,7 @@ const allocator = testing.allocator;
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
-const fuzz = @import("../test/fuzz.zig");
+const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 
 const log = std.log.scoped(.lsm_forest_fuzz);
@@ -13,7 +13,7 @@ const tracer = @import("../tracer.zig");
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
-const Storage = @import("../test/storage.zig").Storage;
+const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
 });

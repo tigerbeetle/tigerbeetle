@@ -26,6 +26,9 @@ pub const lsm = .{
     .forest = @import("lsm/forest.zig"),
     .posted_groove = @import("lsm/posted_groove.zig"),
 };
+pub const testing = .{
+    .cluster = @import("testing/cluster.zig"),
+};
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const format = @import("vsr/replica_format.zig").format;
@@ -827,8 +830,6 @@ pub fn exponential_backoff_with_jitter(
 }
 
 test "exponential_backoff_with_jitter" {
-    const testing = std.testing;
-
     var prng = std.rand.DefaultPrng.init(0);
     const random = prng.random();
 
@@ -839,8 +840,8 @@ test "exponential_backoff_with_jitter" {
     var attempt = max - attempts;
     while (attempt < max) : (attempt += 1) {
         const ebwj = exponential_backoff_with_jitter(random, min, max, attempt);
-        try testing.expect(ebwj >= min);
-        try testing.expect(ebwj <= max);
+        try std.testing.expect(ebwj >= min);
+        try std.testing.expect(ebwj <= max);
     }
 }
 
