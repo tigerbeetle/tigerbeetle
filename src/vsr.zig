@@ -1005,6 +1005,7 @@ pub fn quorums(replica_count: u8) struct {
 /// - SV headers (consecutive chain)
 /// - DVC headers (disjoint chain)
 pub const ViewChangeHeaders = struct {
+    /// Headers are ordered from high-to-low op.
     slice: []const Header,
 
     pub const BoundedArray = std.BoundedArray(Header, constants.pipeline_prepare_queue_max);
@@ -1046,6 +1047,12 @@ pub const ViewChangeHeaders = struct {
 
     /// Returns the range of possible views (of prepare, not commit) for a message that is part of
     /// the same log_view as these headers.
+    ///
+    /// - When these are DVC headers for a log_view=V, we must be in view_change status working to
+    ///   transition to a view beyond V. So we will never prepare anything else as part of view V.
+    /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
+    ///   more ops), but those ops will laways be part of the log_view. If they were prepared during
+    ///   a view prior to the log_view, they would already be part of the headers.
     pub fn view_for_op(headers: ViewChangeHeaders, op: u64, log_view: u32) ViewRange {
         const header_newest = &headers.slice[0];
         const header_oldest = &headers.slice[headers.slice.len - 1];
@@ -1053,17 +1060,17 @@ pub const ViewChangeHeaders = struct {
         if (op < header_oldest.op) return .{ .min = 0, .max = header_oldest.view };
         if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
 
-        var view_max: u32 = log_view;
         for (headers.slice) |*header| {
-            assert(header.view <= view_max);
-
             if (header.op == op) return .{ .min = header.view, .max = header.view };
-            if (header.op < op) return .{ .min = header.view, .max = view_max };
-
-            view_max = header.view;
-        } else {
-            unreachable;
         }
+
+        for (headers.slice[0 .. headers.slice.len - 1]) |*header_next, header_next_index| {
+            const header_prev = headers.slice[header_next_index + 1];
+            if (header_prev.op < op and op < header_next.op) {
+                return .{ .min = header_prev.view, .max = header_next.view };
+            }
+        }
+        unreachable;
     }
 };
 
