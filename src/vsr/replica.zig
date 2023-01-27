@@ -5249,7 +5249,7 @@ pub fn ReplicaType(
 
         fn transition_to_recovering_head(self: *Self) void {
             assert(self.status == .recovering);
-            assert(self.view >= self.log_view);
+            assert(self.view == self.log_view);
             assert(self.op >= self.commit_min);
             assert(!self.committing);
             assert(self.replica_count > 1);
