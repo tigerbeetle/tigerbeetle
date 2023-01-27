@@ -5256,16 +5256,13 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
 
+            self.status = .recovering_head;
+
             log.warn("{}: transition_to_recovering_head: op_checkpoint={} op_head={}", .{
                 self.replica,
                 self.op_checkpoint,
                 self.op,
             });
-
-            var view = self.view;
-            if (self.primary_index(view) == self.replica) view += 1;
-
-            self.status = .recovering_head;
         }
 
         fn transition_to_normal_from_recovering_status(self: *Self) void {
