@@ -5,7 +5,7 @@ set -e
 # macOS 13 Ventura is not supported on Zig 0.9.x.
 # Overriding -target is one workaround Andrew suggests.
 # https://github.com/ziglang/zig/issues/10478#issuecomment-1294313967
-# Cut everything after the second `.` in the target query result
+# Cut everything after the first `.` in the target query result
 # because the rest of it doesn't always seem to be valid when passed
 # back in to `-target`.
 target="$(./zig/zig targets | grep triple |cut -d '"' -f 4 | cut -d '.' -f 1)"
