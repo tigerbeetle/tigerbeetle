@@ -1211,7 +1211,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
 
             const prepare_op_max = std.math.max(
-                replica.op_checkpoint,
+                replica.op_checkpoint(),
                 op_maximum_headers_untrusted(replica.cluster, journal.headers),
             );
 
@@ -1279,7 +1279,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             const op_max = op_maximum_headers_untrusted(replica.cluster, journal.headers_redundant);
             if (op_max != op_maximum_headers_untrusted(replica.cluster, journal.headers)) return null;
-            if (op_max < replica.op_checkpoint) return null;
+            if (op_max < replica.op_checkpoint()) return null;
             // We can't assume that the header at `op_max` is a prepare — an empty journal with a
             // corrupt root prepare (op_max=0) will be repaired later.
 
@@ -1310,7 +1310,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 // unless the prepare header was lost, in which case this slot may also not be torn.
             }
 
-            const checkpoint_index = journal.slot_for_op(replica.op_checkpoint).index;
+            const checkpoint_index = journal.slot_for_op(replica.op_checkpoint()).index;
             const known_range = SlotRange{
                 .head = Slot{ .index = checkpoint_index },
                 .tail = torn_slot,
@@ -1333,8 +1333,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 // Do not use `faulty.bit()` because the decisions have not been processed yet.
                 if (case.decision(replica.replica_count) == .vsr) {
                     if (checkpoint_index == torn_slot.index) {
-                        assert(op_max >= replica.op_checkpoint);
-                        assert(torn_op > replica.op_checkpoint);
+                        assert(op_max >= replica.op_checkpoint());
+                        assert(torn_op > replica.op_checkpoint());
                         if (index != torn_slot.index) return null;
                     } else {
                         if (!known_range.contains(Slot{ .index = index })) return null;
