@@ -145,15 +145,15 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             inline for (std.meta.fields(Checkpoint)) |field| {
                 log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={}", .{
                     replica.replica,
-                    replica.op_checkpoint,
+                    replica.op_checkpoint(),
                     field.name,
                     @field(checkpoint, field.name),
                 });
             }
 
-            const checkpoint_expect = checker.checkpoints.get(replica.op_checkpoint) orelse {
+            const checkpoint_expect = checker.checkpoints.get(replica.op_checkpoint()) orelse {
                 // This replica is the first to reach op_checkpoint.
-                try checker.checkpoints.putNoClobber(replica.op_checkpoint, checkpoint);
+                try checker.checkpoints.putNoClobber(replica.op_checkpoint(), checkpoint);
                 return;
             };
 
