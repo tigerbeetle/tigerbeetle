@@ -1226,7 +1226,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     },
                 );
                 for (superblock.working.vsr_headers().slice) |*header| {
-                    log.debug("{s}: vsr_header: {}", .{ @tagName(context.caller), header.* });
+                    log.debug("{s}: vsr_header: op={} checksum={}", .{
+                        @tagName(context.caller),
+                        header.op,
+                        header.checksum,
+                    });
                 }
 
                 if (context.caller == .open) {
