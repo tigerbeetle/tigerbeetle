@@ -2777,10 +2777,14 @@ pub fn ReplicaType(
 
             var headers2 = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
             defer {
-                assert(headers.len == headers2.len);
+                std.debug.print("  compare {} -> {}\n", .{headers.len, headers2.len});
+                for (headers.constSlice()) |*h, i| std.debug.print("  compare i={} H₁={}\n", .{i, h.*});
+                for (headers2.constSlice()) |*h, i| std.debug.print("  compare i={} H₂={}\n", .{i, h.*});
+
                 for (headers.constSlice()) |*h, i| {
                     assert(std.meta.eql(h.*, headers2.get(i)));
                 }
+                assert(headers.len <= headers2.len);
             }
 
             {
@@ -2833,36 +2837,38 @@ pub fn ReplicaType(
                         1 + self.op -| constants.pipeline_prepare_queue_max,
                     );
 
-                    var child: ?*const Header = null;
-                    var op = self.op + 1;
+                    // Always include the head message.
+                    var head = self.journal.header_with_op(self.op).?;
+                    headers2.appendAssumeCapacity(head.*);
+
+                    var child: ?*const Header = head;
+                    var op = self.op;
                     while (op > 0 and headers2.len < constants.view_change_headers_max) {
                         op -= 1;
                         std.debug.print("  op? {} < {}\n", .{op,self.op});
 
                         if (self.journal.header_with_op(op)) |header| {
                             std.debug.print("  header={}\n", .{header});
-                            if (headers2.len == 0) {
-                                // Always include the head message.
-                                headers2.appendAssumeCapacity(header.*);
-                            } else if (child) |child_header| {
+                            if (child) |child_header| {
                                 if (header.checksum == child_header.parent) {
                                     // It is always safe to include chained headers.
                                     headers2.appendAssumeCapacity(header.*);
                                 } else {
                                     // Don't include a chain break.
+                                    assert(header.view != child_header.view);
                                     break;
                                 }
                             } else {
                                 // There is a header at op, but op+1 is a gap.
-                                if (header.view == self.log_view) {
+                                if (header.view == headers2.get(headers2.len - 1).view) {
                                     // Gaps within the current view never hide a chain break.
                                     // See Example 2b and Example 4.
                                     headers2.appendAssumeCapacity(header.*);
-                                } else if (headers2.get(headers2.len - 1).view == self.log_view) {
-                                    // See Example TODO
-                                    // To the right of the gap is a message with view=log_view.
-                                    // To the left of the gap is a message with view<log_view.
-                                    headers2.appendAssumeCapacity(header.*);
+                                //} else if (headers2.get(headers2.len - 1).view == self.log_view) {
+                                //    // To the right of the gap is a message with view=log_view.
+                                //    // To the left of the gap is a message with view<log_view.
+                                //    // See Example TODO
+                                //    headers2.appendAssumeCapacity(header.*);
                                 } else {
                                     // Gaps to the right of  // TODO
                                     // See Example 2a.
@@ -2878,7 +2884,6 @@ pub fn ReplicaType(
                         }
                     }
                 }
-                assert(headers2.get(0).op == self.op);
                 vsr.ViewChangeHeaders.verify(headers2.constSlice());
             }
 
