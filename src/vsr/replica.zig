@@ -2793,18 +2793,33 @@ pub fn ReplicaType(
                 // Construct DVC message headers.
                 assert(self.view > self.log_view);
 
-                // Ensure that if we started a DVC before a crash, that we will resume sending the
-                // exact same DVC after recovery.
-                // (An alternative implementation would be to load the superblock's DVC headers
-                // (including gaps) into the journal during open(), but that is more complicated
-                // to implement correctly).
-                if (self.log_view_durable() == self.log_view and
-                    self.log_view_durable() < self.view_durable())
-                {
+                if (self.log_view_durable() == self.log_view) {
                     const headers_durable = self.superblock.working.vsr_headers().slice;
-                    assert(headers_durable[0].checksum == headers.get(0).checksum);
+                    assert(headers_durable[0].op <= self.op);
 
-                    for (headers_durable[1..]) |*header| headers.appendAssumeCapacity(header.*);
+                    if (self.log_view_durable() < self.view_durable()) {
+                        // Ensure that if we started a DVC before a crash, that we will resume
+                        // sending the exact same DVC after recovery.
+                        // (An alternative implementation would be to load the superblock's DVC
+                        // headers (including gaps) into the journal during open(), but that is more
+                        // complicated to implement correctly).
+                        assert(headers_durable[0].op == self.op);
+                        assert(headers_durable[0].checksum == headers.get(0).checksum);
+
+                        for (headers_durable[1..]) |*header| headers.appendAssumeCapacity(header.*);
+                    } else {
+                        // Durable SV anchor. See Example 4.
+                        assert(self.log_view_durable() == self.view_durable());
+
+                        var op = self.op;
+                        while (op > headers_durable[headers_durable.len - 1].op) : (op -= 1) {
+                            const header_prev = self.journal.header_with_op(op - 1) orelse continue;
+                            const header_next = self.journal.header_with_op(op);
+                            assert(header_next == null or header_prev.checksum == header_next.?.parent);
+
+                            headers.append(header_prev.*) catch break;
+                        }
+                    }
                     return headers;
                 }
 
@@ -5875,6 +5890,42 @@ pub fn ReplicaType(
 ///
 ///   replica   headers
 ///         1   1   2   3   4a  5   6   7a [8   9]         (retired primary)
+///
+///
+/// Example 4: Gap in retiring primary suffix after recovery
+///
+/// Suppose that replica 1 starts a view as the primary of view 4, with the suffix:
+///
+///  log_view   4
+///      view   4
+///   journal   1   2   3
+///      head   3
+///
+/// During this view, it prepares several ops:
+///
+///  log_view   4
+///      view   4
+///   journal   1   2   3   4   5   6   7
+///      head   7
+///
+/// However, the WAL writes are reordered — ops 4,5,7 writes finish before op=6's write has begun:
+///
+///  log_view   4
+///      view   4
+///   journal   1   2   3   4   5   6   7
+///       wal   1   2   3   4   5   _   7
+///      head   7
+///
+/// Replica 1 crashes and recovers, and immediately begins sending a DVC for view=5.
+/// Under normal circumstances, the retired primary cannot distinguish between a gap and a break
+/// due to the possibility that its did not complete repair (see Example 2a).
+/// In this instance though, the gap is safe to skip over because it is to the right of the durable
+/// SV's head (op=3).
+///
+///  log_view   4
+///      view   5
+///   journal   1   2   3  [4   5   _   7]
+///      head   7
 ///
 const DVCQuorum = struct {
     const DVCArray = std.BoundedArray(*const Message, constants.replicas_max);
