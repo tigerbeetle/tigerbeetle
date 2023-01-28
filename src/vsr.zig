@@ -38,7 +38,7 @@ pub const Clock = @import("vsr/clock.zig").Clock;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
-pub const VSRState = superblock.SuperBlockSector.VSRState;
+pub const VSRState = superblock.SuperBlockHeader.VSRState;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
