@@ -1226,7 +1226,6 @@ pub fn ReplicaType(
             // headers of any other replica with the same log_view so that the next primary can
             // identify an unambiguous set of canonical headers.
             self.log_view = self.view;
-            self.view_durable_update();
 
             assert(self.op >= self.commit_max);
             assert(self.state_machine.prepare_timestamp >=
@@ -4905,11 +4904,15 @@ pub fn ReplicaType(
         /// `view_durable` and `log_view_durable` will update asynchronously, when their respective
         /// updates are durable.
         fn view_durable_update(self: *Self) void {
-            assert(self.status != .recovering);
+            assert(self.status == .normal or self.status == .view_change);
             assert(self.view >= self.log_view);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
             assert(self.log_view > self.log_view_durable() or self.view > self.view_durable());
+            // The primary must only persist the SV headers after repairs are done.
+            // Otherwise headers could be nacked, truncated, then restored after a crash.
+            assert(self.log_view < self.view or self.replica != self.primary_index(self.view) or
+                self.status == .normal);
 
             if (self.view_durable_updating()) return;
 
@@ -4936,7 +4939,7 @@ pub fn ReplicaType(
 
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context_view_change", context);
-            assert(self.status != .recovering);
+            assert(self.status == .normal or self.status == .view_change);
             assert(!self.view_durable_updating());
             assert(self.superblock.working.vsr_state.view <= self.view);
             assert(self.superblock.working.vsr_state.log_view <= self.log_view);
@@ -4954,13 +4957,16 @@ pub fn ReplicaType(
             assert(self.log_view_durable() <= self.view_durable());
             assert(self.log_view_durable() <= self.log_view);
 
-            if (self.view_durable() != self.view or
-                self.log_view_durable() != self.log_view)
-            {
-                // The view/log_view incremented while the previous view-change update was
-                // being saved.
-                self.view_durable_update();
-            }
+            // The view/log_view incremented while the previous view-change update was being saved.
+            const update = self.log_view_durable() < self.log_view or
+                self.view_durable() < self.view;
+
+            const update_dvc = update and self.log_view < self.view;
+            const update_sv = update and self.log_view == self.view and
+                (self.replica != self.primary_index(self.view) or self.status == .normal);
+            assert(!(update_dvc and update_sv));
+
+            if (update_dvc or update_sv) self.view_durable_update();
         }
 
         fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
@@ -5184,6 +5190,7 @@ pub fn ReplicaType(
         fn primary_start_view_as_the_new_primary(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
+            assert(self.view == self.log_view);
             assert(self.do_view_change_quorum);
             assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
@@ -5225,6 +5232,7 @@ pub fn ReplicaType(
             }
 
             self.transition_to_normal_from_view_change_status(self.view);
+            self.view_durable_update();
 
             assert(self.status == .normal);
             assert(self.primary());
@@ -5232,16 +5240,9 @@ pub fn ReplicaType(
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();
 
-            const start_view = self.create_view_change_message(.start_view);
-            defer self.message_bus.unref(start_view);
-
-            assert(start_view.references == 1);
-            assert(start_view.header.command == .start_view);
-            assert(start_view.header.view == self.view);
-            assert(start_view.header.op == self.op);
-            assert(start_view.header.commit == self.commit_max);
-
-            self.send_message_to_other_replicas(start_view);
+            // SVs will be sent out (via timeout) after the view_durable update completes.
+            assert(self.view_durable_updating());
+            assert(self.log_view > self.log_view_durable());
         }
 
         fn transition_to_recovering_head(self: *Self) void {
@@ -5333,8 +5334,7 @@ pub fn ReplicaType(
                 assert(self.pipeline == .queue);
                 assert(self.view == view_new);
                 assert(self.log_view == view_new);
-                assert(self.view_durable_updating() or self.view_durable() == view_new);
-                assert(self.view_durable_updating() or self.log_view_durable() == view_new);
+                assert(self.commit_min == self.commit_max);
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
