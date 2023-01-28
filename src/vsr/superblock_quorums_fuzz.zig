@@ -264,7 +264,7 @@ pub fn fuzz_quorum_repairs(
         break :blk headers;
     };
 
-    const header = blk: {
+    const header_invalid = blk: {
         var header = headers_valid[0];
         header.checksum = 456;
         break :blk header;
@@ -280,7 +280,7 @@ pub fn fuzz_quorum_repairs(
 
     var working_headers: [superblock_copies]SuperBlockHeader = undefined;
     for (&working_headers) |*header, i| {
-        header.* = if (valid.isSet(i)) headers_valid[i] else header;
+        header.* = if (valid.isSet(i)) headers_valid[i] else header_invalid;
     }
     random.shuffle(SuperBlockHeader, &working_headers);
     var repair_headers = working_headers;

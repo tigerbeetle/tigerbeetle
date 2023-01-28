@@ -352,6 +352,16 @@ pub fn ReplicaType(
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
 
+            // DVCs may have gaps, SVs do not.
+            // Any gaps that were part of our DVC must still be gaps after recovering.
+            // If not, generating a new DVC could potentially include an incorrect op (truncated but
+            // not overwritten, restored after recovery) after jumping a gap. See DVC Example 2b.
+            //var vsr_headers_gaps = vsr_headers.iterate_gaps();
+            //while (vsr_headers_gaps.next()) |gap_op| {
+            //    if (self.journal.headers[ // TODO
+            //    journal.remove_entry(.{ .index = gap_op % constants.journal_slot_count });
+            //}
+
             const vsr_headers = self.superblock.working.vsr_headers();
             var op_head: u64 = vsr_headers.slice[0].op;
             for (self.journal.headers) |*header| {
@@ -398,7 +408,7 @@ pub fn ReplicaType(
 
             if (self.replica_count == 1) {
                 if (self.journal.faulty.count > 0) {
-                    @panic("journal is corrupt");
+                    @panic("journal is corrupt"); // TODO return error
                 }
                 assert(self.op_head_certain());
 
@@ -1339,6 +1349,8 @@ pub fn ReplicaType(
 
             const op = message.header.op;
             const slot = self.journal.slot_for_op(op);
+            // TODO Primary cannot trust its WAL with checksum=null for checkpointed ops,
+            // since they may have changed after crash/recover due to a lost prepare write.
             const checksum: ?u128 = switch (message.header.timestamp) {
                 0 => null,
                 1 => message.header.context,
@@ -2762,6 +2774,113 @@ pub fn ReplicaType(
 
             // Always include the head message.
             headers.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
+
+            var headers2 = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
+            defer {
+                assert(headers.len == headers2.len);
+                for (headers.constSlice()) |*h, i| {
+                    assert(std.meta.eql(h.*, headers2.get(i)));
+                }
+            }
+
+            {
+                //headers2.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
+                if (self.log_view < self.view and self.log_view_durable() == self.log_view) {
+                    const headers_durable = self.superblock.working.vsr_headers().slice;
+                    assert(headers_durable[0].op <= self.op);
+
+            headers2.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
+
+                    if (self.log_view_durable() < self.view_durable()) {
+                        // Ensure that if we started a DVC before a crash, that we will resume
+                        // sending the exact same DVC after recovery.
+                        // (An alternative implementation would be to load the superblock's DVC
+                        // headers (including gaps) into the journal during open(), but that is more
+                        // complicated to implement correctly).
+                        assert(headers_durable[0].op == self.op);
+                        assert(headers_durable[0].checksum == headers2.get(0).checksum);
+
+                        for (headers_durable[1..]) |*header| headers2.appendAssumeCapacity(header.*);
+                    } else {
+                        // Durable SV anchor. See Example 4.
+                        assert(self.log_view_durable() == self.view_durable());
+
+                        var op = self.op;
+                        while (op > headers_durable[headers_durable.len - 1].op) : (op -= 1) {
+                            const header_prev = self.journal.header_with_op(op - 1) orelse continue;
+                            const header_next = self.journal.header_with_op(op);
+                            assert(header_next == null or header_prev.checksum == header_next.?.parent);
+
+                            headers2.append(header_prev.*) catch break;
+                        }
+                    }
+                } else {
+                    // The DVC anchor: Within the log suffix following the anchor, we have additional
+                    // guarantees about the state of the log headers which allow us to tolerate certain
+                    // gaps (by locally guaranteeing that the gap does not hide a break).
+                    // See Example 2/3 for more detail.
+                    const op_dvc_anchor = std.math.max(
+                        self.commit_min,
+                        // +1: We can have a full pipeline, but not yet have performed any repair.
+                        // In such a case, we want to send those pipeline_prepare_queue_max headers in
+                        // the DVC, but not the preceding op (which may belong to a different chain).
+                        // This satisfies the DVC invariant because the first op in the pipeline is
+                        // "connected" to the canonical chain (via its "parent" checksum).
+                        //
+                        // For example, as a follower, we might have received pipeline_prepare_queue_max
+                        // headers in the SV message, but not done any repair before the next view
+                        // change.
+                        1 + self.op -| constants.pipeline_prepare_queue_max,
+                    );
+
+                    var child: ?*const Header = null;
+                    var op = self.op + 1;
+                    while (op > 0 and headers2.len < constants.view_change_headers_max) {
+                        op -= 1;
+                        std.debug.print("  op? {} < {}\n", .{op,self.op});
+
+                        if (self.journal.header_with_op(op)) |header| {
+                            std.debug.print("  header={}\n", .{header});
+                            if (headers2.len == 0) {
+                                // Always include the head message.
+                                headers2.appendAssumeCapacity(header.*);
+                            } else if (child) |child_header| {
+                                if (header.checksum == child_header.parent) {
+                                    // It is always safe to include chained headers.
+                                    headers2.appendAssumeCapacity(header.*);
+                                } else {
+                                    // Don't include a chain break.
+                                    break;
+                                }
+                            } else {
+                                // There is a header at op, but op+1 is a gap.
+                                if (header.view == self.log_view) {
+                                    // Gaps within the current view never hide a chain break.
+                                    // See Example 2b and Example 4.
+                                    headers2.appendAssumeCapacity(header.*);
+                                } else if (headers2.get(headers2.len - 1).view == self.log_view) {
+                                    // See Example TODO
+                                    // To the right of the gap is a message with view=log_view.
+                                    // To the left of the gap is a message with view<log_view.
+                                    headers2.appendAssumeCapacity(header.*);
+                                } else {
+                                    // Gaps to the right of  // TODO
+                                    // See Example 2a.
+                                    break;
+                                }
+                            }
+                            child = header;
+                        } else {
+                            // TODO break if hit anchor?
+                            // Stop once we connect to the anchor.
+                            if (op <= op_dvc_anchor + 1) break;
+                            child = null;
+                        }
+                    }
+                }
+                assert(headers2.get(0).op == self.op);
+                vsr.ViewChangeHeaders.verify(headers2.constSlice());
+            }
 
             if (self.view == self.log_view) {
                 // Construct SV message headers. (On the backup, these are only stored in the
@@ -4395,6 +4514,7 @@ pub fn ReplicaType(
 
             if (header.op <= self.commit_min) {
                 if (self.journal.header_with_op(header.op)) |existing_header| {
+                    // TODO Is this guaranteed after a restart if the `header.op < op_checkpoint`?
                     assert(existing_header.checksum == header.checksum);
                     return;
                 } else {
@@ -5810,8 +5930,8 @@ pub fn ReplicaType(
 ///
 /// Consider a view change with DVCs:
 ///
-///   replica   headers                         log_view
-///         0   1  [2   3   4b]                 4          (new primary)
+///   replica   headers                              log_view
+///         0   1  [2   3   4b]                      4     (new primary)
 ///         1   1   2   3   4a  5   6  [7   8   9]   5
 ///         2  (1   2   3   4a  5   6   7   8   9)   5     (partitioned)
 ///
@@ -5834,7 +5954,8 @@ pub fn ReplicaType(
 ///         2  (1   2   3   ?   ?   ?   ?   ?   ?)   5     (partitioned)
 ///
 /// Which headers should replica 1 include in its DVC?
-/// The cases are be distinguished by `log_view % replica_count`.
+/// It depends whether replica 1 was a primary or a follower during its log_view.
+/// These cases are be distinguished by `log_view % replica_count`.
 ///
 /// (These examples are still applicable if the gap is not in the first op of the pipeline suffix).
 ///
@@ -5879,53 +6000,44 @@ pub fn ReplicaType(
 ///
 ///   replica   headers                              log_view
 ///         0   1  [2   3   4b]                      4     (new primary)
-///         1   1   2   3   4b  5a  6a  7a [8b  9b]  5
+///         1   1   2   3   4b  5a  6a  7a [8b  9b]  5     (retired primary)
 ///         2  (1   2   3   4b  5b  7b  7b  8b  9b)  5     (partitioned)
 ///
-/// (Note the chain break at replica 1's 7a/8b.)
-/// This scenario is exactly analogous to Example 2, except that it can only occur on a retired
-/// primary, never a retired follower.
+/// Take note of the chain break at replica 1's 7a/8b. (This situation may occur due to incomplete header
+/// repair.) This scenario is exactly analogous to Example 2, except that it can only occur on a
+/// retired primary, never a retired follower. (Retired followers may have breaks in their journal,
+/// but they would not fall within the pipeline suffix thanks to the SV's headers.)
 ///
 /// The retired primary sends a DVC with only the unbroken log suffix:
 ///
 ///   replica   headers
-///         1   1   2   3   4a  5   6   7a [8   9]         (retired primary)
+///         1   1a  2a  3a  4a  5a  6a  7a [8b  9b]        (retired primary)
 ///
 ///
-/// Example 4: Gap in retiring primary suffix after recovery
+/// Example 4: Gap in recovering retired primary suffix
 ///
-/// Suppose that replica 1 starts a view as the primary of view 4, with the suffix:
+/// Suppose that replica 1 starts a view as the primary of view 2, with the suffix:
 ///
-///  log_view   4
-///      view   4
-///   journal   1   2   3
-///      head   3
+///   journal   1₁  2₁  3₁
 ///
+/// (Subscripts denote the message's prepare-view.)
 /// During this view, it prepares several ops:
 ///
-///  log_view   4
-///      view   4
-///   journal   1   2   3   4   5   6   7
-///      head   7
+///   journal   1₁  2₁  3a  4₂  5₂  6₂  7₂
 ///
 /// However, the WAL writes are reordered — ops 4,5,7 writes finish before op=6's write has begun:
 ///
-///  log_view   4
-///      view   4
-///   journal   1   2   3   4   5   6   7
-///       wal   1   2   3   4   5   _   7
-///      head   7
+///   journal   1₁  2₁  3₁  4₂  5₂  6₂  7₂
+///       wal   1₁  2₁  3₁  4₂  5₂      7₂
 ///
 /// Replica 1 crashes and recovers, and immediately begins sending a DVC for view=5.
 /// Under normal circumstances, the retired primary cannot distinguish between a gap and a break
 /// due to the possibility that its did not complete repair (see Example 2a).
 /// In this instance though, the gap is safe to skip over because it is to the right of the durable
-/// SV's head (op=3).
+/// SV's head (op=3) — equivalently, because 5b and 7b were prepared by the same view.
 ///
-///  log_view   4
-///      view   5
-///   journal   1   2   3  [4   5   _   7]
-///      head   7
+///   replica   headers                              log_view
+///         1   1₁  2₁  3₁ [4₂  5₂      7₂]          2     (retired primary)
 ///
 const DVCQuorum = struct {
     const DVCArray = std.BoundedArray(*const Message, constants.replicas_max);
