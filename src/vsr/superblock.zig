@@ -36,7 +36,7 @@ const vsr_headers_reserved_size = constants.sector_size -
     ((constants.view_change_headers_max * @sizeOf(vsr.Header)) % constants.sector_size);
 
 // Fields are aligned to work as an extern or packed struct.
-pub const SuperBlockSector = extern struct {
+pub const SuperBlockHeader = extern struct {
     checksum: u128 = undefined,
 
     /// Protects against misdirected reads at startup.
@@ -155,7 +155,7 @@ pub const SuperBlockSector = extern struct {
         pub fn monotonic(old: VSRState, new: VSRState) bool {
             assert(old.internally_consistent());
             assert(new.internally_consistent());
-            // The last case is for when checking monotonic() from the sequence=0 sector.
+            // The last case is for when checking monotonic() from the sequence=0 header.
             assert(old.commit_min != new.commit_min or
                 old.commit_min_checksum == new.commit_min_checksum or
                 (old.commit_min_checksum == 0 and old.commit_min == 0));
@@ -215,16 +215,16 @@ pub const SuperBlockSector = extern struct {
     };
 
     comptime {
-        assert(@sizeOf(SuperBlockSector) % constants.sector_size == 0);
-        assert(@divExact(@sizeOf(SuperBlockSector), constants.sector_size) >= 2);
-        assert(@offsetOf(SuperBlockSector, "vsr_headers_all") == constants.sector_size);
+        assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
+        assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
+        assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
         // Assert that there is no implicit padding in the struct.
-        assert(@bitSizeOf(SuperBlockSector) == @sizeOf(SuperBlockSector) * 8);
+        assert(@bitSizeOf(SuperBlockHeader) == @sizeOf(SuperBlockHeader) * 8);
     }
 
-    pub fn calculate_checksum(superblock: *const SuperBlockSector) u128 {
-        comptime assert(meta.fieldIndex(SuperBlockSector, "checksum") == 0);
-        comptime assert(meta.fieldIndex(SuperBlockSector, "copy") == 1);
+    pub fn calculate_checksum(superblock: *const SuperBlockHeader) u128 {
+        comptime assert(meta.fieldIndex(SuperBlockHeader, "checksum") == 0);
+        comptime assert(meta.fieldIndex(SuperBlockHeader, "copy") == 1);
 
         const checksum_size = @sizeOf(@TypeOf(superblock.checksum));
         comptime assert(checksum_size == @sizeOf(u128));
@@ -237,7 +237,7 @@ pub const SuperBlockSector = extern struct {
         return vsr.checksum(std.mem.asBytes(superblock)[ignore_size..]);
     }
 
-    pub fn set_checksum(superblock: *SuperBlockSector) void {
+    pub fn set_checksum(superblock: *SuperBlockHeader) void {
         assert(superblock.copy < constants.superblock_copies);
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.flags == 0);
@@ -249,12 +249,12 @@ pub const SuperBlockSector = extern struct {
         superblock.checksum = superblock.calculate_checksum();
     }
 
-    pub fn valid_checksum(superblock: *const SuperBlockSector) bool {
+    pub fn valid_checksum(superblock: *const SuperBlockHeader) bool {
         return superblock.checksum == superblock.calculate_checksum();
     }
 
     /// Does not consider { checksum, copy } when comparing equality.
-    pub fn equal(a: *const SuperBlockSector, b: *const SuperBlockSector) bool {
+    pub fn equal(a: *const SuperBlockHeader, b: *const SuperBlockHeader) bool {
         for (mem.bytesAsSlice(u64, &a.reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &b.reserved)) |word| assert(word == 0);
 
@@ -285,7 +285,7 @@ pub const SuperBlockSector = extern struct {
         return true;
     }
 
-    pub fn vsr_headers(superblock: *const SuperBlockSector) vsr.ViewChangeHeaders {
+    pub fn vsr_headers(superblock: *const SuperBlockHeader) vsr.ViewChangeHeaders {
         return vsr.ViewChangeHeaders.init(
             superblock.vsr_headers_all[0..superblock.vsr_headers_count],
         );
@@ -303,12 +303,12 @@ comptime {
 pub const superblock_zone_size = superblock_copy_size * constants.superblock_copies;
 
 /// The size of an individual superblock including trailer.
-pub const superblock_copy_size = @sizeOf(SuperBlockSector) + superblock_trailer_size_max;
+pub const superblock_copy_size = @sizeOf(SuperBlockHeader) + superblock_trailer_size_max;
 comptime {
     assert(superblock_copy_size % constants.sector_size == 0);
 }
 
-/// The maximum possible size of the superblock trailer, following the superblock sector.
+/// The maximum possible size of the superblock trailer, following the superblock header.
 pub const superblock_trailer_size_max = blk: {
     // To calculate the size of the superblock trailer we need to know:
     // 1. the maximum number of manifest blocks that should be able to be referenced, and
@@ -363,7 +363,7 @@ pub const data_file_size_min = blk: {
 /// The maximum number of blocks in the grid.
 const block_count_max = blk: {
     var size = constants.storage_size_max;
-    size -= constants.superblock_copies * @sizeOf(SuperBlockSector);
+    size -= constants.superblock_copies * @sizeOf(SuperBlockHeader);
     size -= constants.superblock_copies * superblock_trailer_client_table_size_max;
     size -= constants.superblock_copies * superblock_trailer_manifest_size_max;
     size -= constants.journal_size_max;
@@ -387,11 +387,11 @@ comptime {
     assert(block_count_max * constants.block_size + data_file_size_min <= constants.storage_size_max);
 }
 
-/// This table shows the sequence number progression of the SuperBlock's sectors.
+/// This table shows the sequence number progression of the SuperBlock's headers.
 ///
 /// action        working  staging  disk
 /// format        seq      seq      seq
-///                0                 -        Initially the file has no sectors.
+///                0                 -        Initially the file has no headers.
 ///                0        1        -
 ///                0        1        1        Write a copyset for the first sequence.
 ///                1        1        1        Read quorum; verify 3/4 are valid.
@@ -439,7 +439,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             read_threshold: ?Quorums.Threshold = null,
             copy: ?u8 = null,
             /// Used by format(), checkpoint(), and view_change().
-            vsr_state: ?SuperBlockSector.VSRState = null,
+            vsr_state: ?SuperBlockHeader.VSRState = null,
             /// Used by format() and view_change().
             vsr_headers: ?vsr.ViewChangeHeaders.BoundedArray = null,
             repairs: ?Quorums.RepairIterator = null, // Used by open().
@@ -454,15 +454,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
         storage_size: u64 = superblock_zone_size,
 
         /// The superblock that was recovered at startup after a crash or that was last written.
-        working: *align(constants.sector_size) SuperBlockSector,
+        working: *align(constants.sector_size) SuperBlockHeader,
 
         /// The superblock that will replace the current working superblock once written.
         /// We cannot mutate any working state directly until it is safely on stable storage.
         /// Otherwise, we may accidentally externalize guarantees that are not yet durable.
-        staging: *align(constants.sector_size) SuperBlockSector,
+        staging: *align(constants.sector_size) SuperBlockHeader,
 
         /// The copies that we read into at startup or when verifying the written superblock.
-        reading: []align(constants.sector_size) SuperBlockSector,
+        reading: []align(constants.sector_size) SuperBlockHeader,
 
         /// It might seem that, at startup, we simply install the copy with the highest sequence.
         ///
@@ -521,14 +521,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const block_count_limit = shard_count_limit * FreeSet.shard_bits;
             assert(block_count_limit <= block_count_max);
 
-            const a = try allocator.allocAdvanced(SuperBlockSector, constants.sector_size, 1, .exact);
+            const a = try allocator.allocAdvanced(SuperBlockHeader, constants.sector_size, 1, .exact);
             errdefer allocator.free(a);
 
-            const b = try allocator.allocAdvanced(SuperBlockSector, constants.sector_size, 1, .exact);
+            const b = try allocator.allocAdvanced(SuperBlockHeader, constants.sector_size, 1, .exact);
             errdefer allocator.free(b);
 
             const reading = try allocator.allocAdvanced(
-                [constants.superblock_copies]SuperBlockSector,
+                [constants.superblock_copies]SuperBlockHeader,
                 constants.sector_size,
                 1,
                 .exact,
@@ -649,7 +649,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .vsr_headers_all = mem.zeroes([constants.view_change_headers_max]vsr.Header),
             };
 
-            mem.set(SuperBlockSector.Snapshot, &superblock.working.snapshots, .{
+            mem.set(SuperBlockHeader.Snapshot, &superblock.working.snapshots, .{
                 .created = 0,
                 .queried = 0,
                 .timeout = 0,
@@ -664,7 +664,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .format,
-                .vsr_state = SuperBlockSector.VSRState.root(options.cluster),
+                .vsr_state = SuperBlockHeader.VSRState.root(options.cluster),
                 .vsr_headers = vsr_headers,
             };
 
@@ -710,7 +710,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.vsr_state.commit_min_checksum != update.commit_min_checksum);
             assert(update.commit_min <= update.commit_max);
 
-            const vsr_state = SuperBlockSector.VSRState{
+            const vsr_state = SuperBlockHeader.VSRState{
                 .commit_min_checksum = update.commit_min_checksum,
                 .commit_min = update.commit_min,
                 .commit_max = update.commit_max,
@@ -757,7 +757,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr.ViewChangeHeaders.verify(update.headers.constSlice());
             assert(update.view >= update.log_view);
 
-            const vsr_state = SuperBlockSector.VSRState{
+            const vsr_state = SuperBlockHeader.VSRState{
                 .commit_min_checksum = superblock.staging.vsr_state.commit_min_checksum,
                 .commit_min = superblock.staging.vsr_state.commit_min,
                 .commit_max = update.commit_max,
@@ -851,14 +851,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             context.copy = 0;
             if (context.caller == .view_change) {
-                superblock.write_sector(context);
+                superblock.write_header(context);
             } else {
                 superblock.write_manifest(context);
             }
         }
 
         fn write_staging_encode_manifest(superblock: *SuperBlock) void {
-            const staging: *SuperBlockSector = superblock.staging;
+            const staging: *SuperBlockHeader = superblock.staging;
             const target = superblock.manifest_buffer;
 
             staging.manifest_size = @intCast(u32, superblock.manifest.encode(target));
@@ -866,7 +866,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         fn write_staging_encode_free_set(superblock: *SuperBlock) void {
-            const staging: *SuperBlockSector = superblock.staging;
+            const staging: *SuperBlockHeader = superblock.staging;
             const encode_size_max = FreeSet.encode_size_max(superblock.block_count_limit);
             const target = superblock.free_set_buffer[0..encode_size_max];
 
@@ -896,7 +896,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         fn write_staging_encode_client_table(superblock: *SuperBlock) void {
-            const staging: *SuperBlockSector = superblock.staging;
+            const staging: *SuperBlockHeader = superblock.staging;
             const target = superblock.client_table_buffer;
 
             staging.client_table_size = @intCast(u32, superblock.client_table.encode(target));
@@ -1029,10 +1029,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn write_client_table_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
-            context.superblock.write_sector(context);
+            context.superblock.write_header(context);
         }
 
-        fn write_sector(superblock: *SuperBlock, context: *Context) void {
+        fn write_header(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
             // We update the working superblock for a checkpoint/format/view_change:
@@ -1058,9 +1058,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.valid_checksum());
 
             const buffer = mem.asBytes(superblock.staging);
-            const offset = areas.sector.offset(context.copy.?);
+            const offset = areas.header.offset(context.copy.?);
 
-            log.debug("{}: {s}: write_sector: checksum={x} sequence={} copy={} size={} offset={}", .{
+            log.debug("{}: {s}: write_header: checksum={x} sequence={} copy={} size={} offset={}", .{
                 superblock.staging.replica,
                 @tagName(context.caller),
                 superblock.staging.checksum,
@@ -1073,7 +1073,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.assert_bounds(offset, buffer.len);
 
             superblock.storage.write_sectors(
-                write_sector_callback,
+                write_header_callback,
                 &context.write,
                 buffer,
                 .superblock,
@@ -1081,7 +1081,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
         }
 
-        fn write_sector_callback(write: *Storage.Write) void {
+        fn write_header_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
             const superblock = context.superblock;
             const copy = context.copy.?;
@@ -1106,7 +1106,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 switch (context.caller) {
                     .open => unreachable,
                     .format, .checkpoint => superblock.write_manifest(context),
-                    .view_change => superblock.write_sector(context),
+                    .view_change => superblock.write_header(context),
                 }
             }
         }
@@ -1128,18 +1128,18 @@ pub fn SuperBlockType(comptime Storage: type) type {
             context.copy = 0;
             context.read_threshold = threshold;
             for (superblock.reading) |*copy| copy.* = undefined;
-            superblock.read_sector(context);
+            superblock.read_header(context);
         }
 
-        fn read_sector(superblock: *SuperBlock, context: *Context) void {
+        fn read_header(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
             assert(context.copy.? < constants.superblock_copies);
             assert(context.read_threshold != null);
 
             const buffer = mem.asBytes(&superblock.reading[context.copy.?]);
-            const offset = areas.sector.offset(context.copy.?);
+            const offset = areas.header.offset(context.copy.?);
 
-            log.debug("{s}: read_sector: copy={} size={} offset={}", .{
+            log.debug("{s}: read_header: copy={} size={} offset={}", .{
                 @tagName(context.caller),
                 context.copy.?,
                 buffer.len,
@@ -1149,7 +1149,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.assert_bounds(offset, buffer.len);
 
             superblock.storage.read_sectors(
-                read_sector_callback,
+                read_header_callback,
                 &context.read,
                 buffer,
                 .superblock,
@@ -1157,7 +1157,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
         }
 
-        fn read_sector_callback(read: *Storage.Read) void {
+        fn read_header_callback(read: *Storage.Read) void {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
             const threshold = context.read_threshold.?;
@@ -1167,7 +1167,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.copy.? < constants.superblock_copies);
             if (context.copy.? + 1 != constants.superblock_copies) {
                 context.copy = context.copy.? + 1;
-                superblock.read_sector(context);
+                superblock.read_header(context);
                 return;
             }
 
@@ -1177,9 +1177,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (superblock.quorums.working(superblock.reading, threshold)) |quorum| {
                 assert(quorum.valid);
                 assert(quorum.copies.count() >= threshold.count());
-                assert(quorum.sector.storage_size_max == constants.storage_size_max);
+                assert(quorum.header.storage_size_max == constants.storage_size_max);
 
-                const working = quorum.sector;
+                const working = quorum.header;
                 if (threshold == .verify) {
                     if (working.checksum != superblock.staging.checksum) {
                         @panic("superblock failed verification after writing");
@@ -1580,20 +1580,20 @@ pub fn SuperBlockType(comptime Storage: type) type {
 }
 
 pub const Area = enum {
-    sector,
+    header,
     manifest,
     free_set,
     client_table,
 };
 
 pub const areas = struct {
-    pub const sector = AreaRange{
+    pub const header = AreaRange{
         .base = 0,
-        .size_max = @sizeOf(SuperBlockSector),
+        .size_max = @sizeOf(SuperBlockHeader),
     };
 
     pub const manifest = AreaRange{
-        .base = sector.base + sector.size_max,
+        .base = header.base + header.size_max,
         .size_max = superblock_trailer_manifest_size_max, // TODO inline these constants?
     };
 
@@ -1617,10 +1617,10 @@ pub const areas = struct {
     };
 };
 
-test "SuperBlockSector" {
+test "SuperBlockHeader" {
     const expect = std.testing.expect;
 
-    var a = std.mem.zeroes(SuperBlockSector);
+    var a = std.mem.zeroes(SuperBlockHeader);
     a.set_checksum();
 
     assert(a.copy == 0);

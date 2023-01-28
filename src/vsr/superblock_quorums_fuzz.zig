@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock_quorums);
 
 const superblock = @import("./superblock.zig");
-const SuperBlockSector = superblock.SuperBlockSector;
+const SuperBlockHeader = superblock.SuperBlockHeader;
 const SuperBlockVersion = superblock.SuperBlockVersion;
 
 const fuzz = @import("../testing/fuzz.zig");
@@ -21,7 +21,7 @@ pub fn main() !void {
     try fuzz_quorums_working(prng.random());
 
     try fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 4 });
-    // TODO: Enable these once SuperBlockSector is generic over its Constants.
+    // TODO: Enable these once SuperBlockHeader is generic over its Constants.
     // try fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 6 });
     // try fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 8 });
 }
@@ -108,18 +108,18 @@ fn test_quorums_working(
     const Quorums = QuorumsType(.{ .superblock_copies = 4 });
     const misdirect = random.boolean(); // true:cluster false:replica
     var quorums: Quorums = undefined;
-    var sectors: [4]SuperBlockSector = undefined;
+    var headers: [4]SuperBlockHeader = undefined;
     // TODO(Zig): Ideally this would be a [6]?u128 and the access would be
     // "checksums[i] orelse random.int(u128)", but that currently causes the compiler to segfault
     // during code generation.
     var checksums: [6]u128 = undefined;
     for (checksums) |*c| c.* = random.int(u128);
 
-    // Create sectors in ascending-sequence order to build the checksum/parent hash chain.
+    // Create headers in ascending-sequence order to build the checksum/parent hash chain.
     std.sort.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
 
-    for (sectors) |*sector, i| {
-        sector.* = std.mem.zeroInit(SuperBlockSector, .{
+    for (headers) |*header, i| {
+        header.* = std.mem.zeroInit(SuperBlockHeader, .{
             .copy = @intCast(u8, i),
             .version = SuperBlockVersion,
             .replica = 1,
@@ -131,32 +131,32 @@ fn test_quorums_working(
         var checksum: ?u128 = null;
         switch (copies[i].variant) {
             .valid => {},
-            .valid_high_copy => sector.copy = 4,
+            .valid_high_copy => header.copy = 4,
             .invalid_broken => {
                 if (random.boolean() and i > 0) {
-                    // Error: duplicate sector (if available).
-                    sector.* = sectors[random.uintLessThanBiased(usize, i)];
+                    // Error: duplicate header (if available).
+                    header.* = headers[random.uintLessThanBiased(usize, i)];
                     checksum = random.int(u128);
                 } else {
                     // Error: invalid checksum.
                     checksum = random.int(u128);
                 }
             },
-            .invalid_fork => sector.storage_size_max += 1, // Ensure we have a different checksum.
-            .invalid_parent => sector.parent += 1,
+            .invalid_fork => header.storage_size_max += 1, // Ensure we have a different checksum.
+            .invalid_parent => header.parent += 1,
             .invalid_misdirect => {
                 if (misdirect) {
-                    sector.cluster += 1;
+                    header.cluster += 1;
                 } else {
-                    sector.replica += 1;
+                    header.replica += 1;
                 }
             },
-            .invalid_vsr_state => sector.vsr_state.view += 1,
+            .invalid_vsr_state => header.vsr_state.view += 1,
         }
-        sector.checksum = checksum orelse sector.calculate_checksum();
+        header.checksum = checksum orelse header.calculate_checksum();
 
         if (copies[i].variant == .valid or copies[i].variant == .invalid_vsr_state) {
-            checksums[sector.sequence] = sector.checksum;
+            checksums[header.sequence] = header.checksum;
         }
     }
 
@@ -165,7 +165,7 @@ fn test_quorums_working(
     } else {
         // Shuffling copies can only change the working quorum when we have a corrupt copy index,
         // because we guess that the true index is the slot.
-        random.shuffle(SuperBlockSector, &sectors);
+        random.shuffle(SuperBlockHeader, &headers);
     }
 
     const threshold = switch (threshold_count) {
@@ -175,8 +175,8 @@ fn test_quorums_working(
     };
     assert(threshold.count() == threshold_count);
 
-    if (quorums.working(&sectors, threshold)) |working| {
-        try std.testing.expectEqual(result, working.sector.sequence);
+    if (quorums.working(&headers, threshold)) |working| {
+        try std.testing.expectEqual(result, working.header.sequence);
     } else |err| {
         try std.testing.expectEqual(result, err);
     }
@@ -238,7 +238,7 @@ pub const CopyTemplate = struct {
     }
 };
 
-// Verify that a torn sector write during repair never compromises the existing quorum.
+// Verify that a torn header write during repair never compromises the existing quorum.
 pub fn fuzz_quorum_repairs(
     random: std.rand.Random,
     comptime options: superblock_quorums.Options,
@@ -249,66 +249,66 @@ pub fn fuzz_quorum_repairs(
     var q1: Quorums = undefined;
     var q2: Quorums = undefined;
 
-    const sectors_valid = blk: {
-        var sectors: [superblock_copies]SuperBlockSector = undefined;
-        for (&sectors) |*sector, i| {
-            sector.* = std.mem.zeroInit(SuperBlockSector, .{
+    const headers_valid = blk: {
+        var headers: [superblock_copies]SuperBlockHeader = undefined;
+        for (&headers) |*header, i| {
+            header.* = std.mem.zeroInit(SuperBlockHeader, .{
                 .copy = @intCast(u8, i),
                 .version = SuperBlockVersion,
                 .replica = 1,
                 .storage_size_max = superblock.data_file_size_min,
                 .sequence = 123,
             });
-            sector.set_checksum();
+            header.set_checksum();
         }
-        break :blk sectors;
+        break :blk headers;
     };
 
-    const sector_invalid = blk: {
-        var sector = sectors_valid[0];
-        sector.checksum = 456;
-        break :blk sector;
+    const header = blk: {
+        var header = headers_valid[0];
+        header.checksum = 456;
+        break :blk header;
     };
 
     // Generate a random valid 2/4 quorum.
-    // 1 bits indicate valid sectors.
-    // 0 bits indicate invalid sectors.
+    // 1 bits indicate valid headers.
+    // 0 bits indicate invalid headers.
     var valid = std.bit_set.IntegerBitSet(superblock_copies).initEmpty();
     while (valid.count() < Quorums.Threshold.open.count() or random.boolean()) {
         valid.set(random.uintLessThan(usize, superblock_copies));
     }
 
-    var working_sectors: [superblock_copies]SuperBlockSector = undefined;
-    for (&working_sectors) |*sector, i| {
-        sector.* = if (valid.isSet(i)) sectors_valid[i] else sector_invalid;
+    var working_headers: [superblock_copies]SuperBlockHeader = undefined;
+    for (&working_headers) |*header, i| {
+        header.* = if (valid.isSet(i)) headers_valid[i] else header;
     }
-    random.shuffle(SuperBlockSector, &working_sectors);
-    var repair_sectors = working_sectors;
+    random.shuffle(SuperBlockHeader, &working_headers);
+    var repair_headers = working_headers;
 
-    const working_quorum = q1.working(&working_sectors, .open) catch unreachable;
+    const working_quorum = q1.working(&working_headers, .open) catch unreachable;
     var quorum_repairs = working_quorum.repairs();
     while (quorum_repairs.next()) |repair_copy| {
         {
-            // Simulate a torn sector write, crash, recover sequence.
-            var damaged_sectors = repair_sectors;
-            damaged_sectors[repair_copy] = sector_invalid;
-            const damaged_quorum = q2.working(&damaged_sectors, .open) catch unreachable;
-            assert(damaged_quorum.sector.checksum == working_quorum.sector.checksum);
+            // Simulate a torn header write, crash, recover sequence.
+            var damaged_headers = repair_headers;
+            damaged_headers[repair_copy] = header_invalid;
+            const damaged_quorum = q2.working(&damaged_headers, .open) catch unreachable;
+            assert(damaged_quorum.header.checksum == working_quorum.header.checksum);
         }
 
         // "Finish" the write so that we can test the next repair.
-        repair_sectors[repair_copy] = sectors_valid[repair_copy];
+        repair_headers[repair_copy] = headers_valid[repair_copy];
 
-        const quorum_repaired = q2.working(&repair_sectors, .open) catch unreachable;
-        assert(quorum_repaired.sector.checksum == working_quorum.sector.checksum);
+        const quorum_repaired = q2.working(&repair_headers, .open) catch unreachable;
+        assert(quorum_repaired.header.checksum == working_quorum.header.checksum);
     }
 
     // At the end of all repairs, we expect to have every copy of the superblock.
     // They do not need to be in their home slot.
     var copies = Quorums.QuorumCount.initEmpty();
-    for (repair_sectors) |repair_sector| {
-        assert(repair_sector.checksum == working_quorum.sector.checksum);
-        copies.set(repair_sector.copy);
+    for (repair_headers) |repair_header| {
+        assert(repair_header.checksum == working_quorum.header.checksum);
+        copies.set(repair_header.copy);
     }
-    assert(repair_sectors.len == copies.count());
+    assert(repair_headers.len == copies.count());
 }
