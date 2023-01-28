@@ -181,20 +181,20 @@ test "format" {
 
     try format(Storage, allocator, cluster, replica, &storage, &superblock);
 
-    // Verify the superblock sectors.
+    // Verify the superblock headers.
     var copy: u8 = 0;
     while (copy < constants.superblock_copies) : (copy += 1) {
-        const sector = storage.superblock_sector(copy);
+        const superblock_header = storage.superblock_header(copy);
 
-        try std.testing.expectEqual(sector.copy, copy);
-        try std.testing.expectEqual(sector.replica, replica);
-        try std.testing.expectEqual(sector.cluster, cluster);
-        try std.testing.expectEqual(sector.storage_size, storage.size);
-        try std.testing.expectEqual(sector.sequence, 1);
-        try std.testing.expectEqual(sector.vsr_state.commit_min, 0);
-        try std.testing.expectEqual(sector.vsr_state.commit_max, 0);
-        try std.testing.expectEqual(sector.vsr_state.view, 0);
-        try std.testing.expectEqual(sector.vsr_state.log_view, 0);
+        try std.testing.expectEqual(superblock_header.copy, copy);
+        try std.testing.expectEqual(superblock_header.replica, replica);
+        try std.testing.expectEqual(superblock_header.cluster, cluster);
+        try std.testing.expectEqual(superblock_header.storage_size, storage.size);
+        try std.testing.expectEqual(superblock_header.sequence, 1);
+        try std.testing.expectEqual(superblock_header.vsr_state.commit_min, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.commit_max, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.view, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.log_view, 0);
     }
 
     // Verify the WAL headers and prepares zones.
