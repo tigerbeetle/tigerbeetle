@@ -2809,8 +2809,12 @@ pub fn ReplicaType(
                     op -= 1;
 
                     const header = self.journal.header_with_op(op) orelse {
-                        child = null;
-                        continue;
+                        if (self.log_view == self.view) {
+                            break; // SV headers are consecutive.
+                        } else {
+                            child = null;
+                            continue;
+                        }
                     };
 
                     if (child) |child_header| {
@@ -2851,20 +2855,21 @@ pub fn ReplicaType(
             }
             vsr.ViewChangeHeaders.verify(headers2.constSlice());
 
-            const op_dvc_anchor = std.math.max(
-                self.commit_min,
-                // +1: We can have a full pipeline, but not yet have performed any repair (e.g. a
-                // follower installed a SV). Sending that full pipeline satisfies the DVC invariant
-                // because the first op in the pipeline is "connected" to the canonical chain (via
-                // its "parent" checksum).
-                1 + self.op -| constants.pipeline_prepare_queue_max,
-            );
-            std.debug.print("view={} log_view={} view_durable={} log_view_durable={} first_op={} anchor={}\n", .{
-                self.view,self.log_view, self.view_durable(), self.log_view_durable(), headers2.get(headers2.len - 1).op, op_dvc_anchor,
-            });
-            // +1 because we only need to *connect* to the anchor, not necessarily cover it.
-            // This assertion is not critical for SVs, only DVCs (though it is true for both).
-            assert(headers2.get(headers2.len - 1).op <= op_dvc_anchor + 1);
+            if (self.log_view < self.view) {
+                const op_dvc_anchor = std.math.max(
+                    self.commit_min,
+                    // +1: We can have a full pipeline, but not yet have performed any repair (e.g. a
+                    // follower installed a SV). Sending that full pipeline satisfies the DVC invariant
+                    // because the first op in the pipeline is "connected" to the canonical chain (via
+                    // its "parent" checksum).
+                    1 + self.op -| constants.pipeline_prepare_queue_max,
+                );
+                std.debug.print("view={} log_view={} view_durable={} log_view_durable={} first_op={} anchor={}\n", .{
+                    self.view,self.log_view, self.view_durable(), self.log_view_durable(), headers2.get(headers2.len - 1).op, op_dvc_anchor,
+                });
+                // +1 because we only need to *connect* to the anchor, not necessarily cover it.
+                assert(headers2.get(headers2.len - 1).op <= op_dvc_anchor + 1);
+            }
             }
 
             if (self.view == self.log_view) {
