@@ -2789,54 +2789,39 @@ pub fn ReplicaType(
 
             {
                 //headers2.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
-                if (self.log_view < self.view and self.log_view_durable() == self.log_view) {
+                if (self.log_view < self.view and
+                    self.log_view_durable() == self.log_view and
+                    self.log_view_durable() < self.view_durable())
+                {
                     const headers_durable = self.superblock.working.vsr_headers().slice;
                     assert(headers_durable[0].op <= self.op);
+                    assert(headers_durable[0].op == self.op);
 
-            headers2.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
+                    // Ensure that if we started a DVC before a crash, that we will resume
+                    // sending the exact same DVC after recovery.
+                    // (An alternative implementation would be to load the superblock's DVC
+                    // headers (including gaps) into the journal during open(), but that is more
+                    // complicated to implement correctly).
+                    headers2 = vsr.ViewChangeHeaders.BoundedArray.fromSlice(headers_durable)
+                        catch unreachable;
 
-                    if (self.log_view_durable() < self.view_durable()) {
-                        // Ensure that if we started a DVC before a crash, that we will resume
-                        // sending the exact same DVC after recovery.
-                        // (An alternative implementation would be to load the superblock's DVC
-                        // headers (including gaps) into the journal during open(), but that is more
-                        // complicated to implement correctly).
-                        assert(headers_durable[0].op == self.op);
-                        assert(headers_durable[0].checksum == headers2.get(0).checksum);
+            //headers2.appendAssumeCapacity(self.journal.header_with_op(self.op).?.*);
 
-                        for (headers_durable[1..]) |*header| headers2.appendAssumeCapacity(header.*);
-                    } else {
-                        // Durable SV anchor. See Example 4.
-                        assert(self.log_view_durable() == self.view_durable());
+                        //for (headers_durable[1..]) |*header| headers2.appendAssumeCapacity(header.*);
+                    //} else {
+                    //    // Durable SV anchor. See Example 4.
+                    //    assert(self.log_view_durable() == self.view_durable());
 
-                        var op = self.op;
-                        while (op > headers_durable[headers_durable.len - 1].op) : (op -= 1) {
-                            const header_prev = self.journal.header_with_op(op - 1) orelse continue;
-                            const header_next = self.journal.header_with_op(op);
-                            assert(header_next == null or header_prev.checksum == header_next.?.parent);
+                    //    var op = self.op;
+                    //    while (op > headers_durable[headers_durable.len - 1].op) : (op -= 1) {
+                    //        const header_prev = self.journal.header_with_op(op - 1) orelse continue;
+                    //        const header_next = self.journal.header_with_op(op);
+                    //        assert(header_next == null or header_prev.checksum == header_next.?.parent);
 
-                            headers2.append(header_prev.*) catch break;
-                        }
-                    }
+                    //        headers2.append(header_prev.*) catch break;
+                    //    }
+                    //}
                 } else {
-                    // The DVC anchor: Within the log suffix following the anchor, we have additional
-                    // guarantees about the state of the log headers which allow us to tolerate certain
-                    // gaps (by locally guaranteeing that the gap does not hide a break).
-                    // See Example 2/3 for more detail.
-                    const op_dvc_anchor = std.math.max(
-                        self.commit_min,
-                        // +1: We can have a full pipeline, but not yet have performed any repair.
-                        // In such a case, we want to send those pipeline_prepare_queue_max headers in
-                        // the DVC, but not the preceding op (which may belong to a different chain).
-                        // This satisfies the DVC invariant because the first op in the pipeline is
-                        // "connected" to the canonical chain (via its "parent" checksum).
-                        //
-                        // For example, as a follower, we might have received pipeline_prepare_queue_max
-                        // headers in the SV message, but not done any repair before the next view
-                        // change.
-                        1 + self.op -| constants.pipeline_prepare_queue_max,
-                    );
-
                     // Always include the head message.
                     var head = self.journal.header_with_op(self.op).?;
                     headers2.appendAssumeCapacity(head.*);
@@ -2845,46 +2830,60 @@ pub fn ReplicaType(
                     var op = self.op;
                     while (op > 0 and headers2.len < constants.view_change_headers_max) {
                         op -= 1;
-                        std.debug.print("  op? {} < {}\n", .{op,self.op});
 
                         if (self.journal.header_with_op(op)) |header| {
-                            std.debug.print("  header={}\n", .{header});
                             if (child) |child_header| {
                                 if (header.checksum == child_header.parent) {
                                     // It is always safe to include chained headers.
                                     headers2.appendAssumeCapacity(header.*);
                                 } else {
-                                    // Don't include a chain break.
+                                    // Don't include a chain break (or anything to the left).
                                     assert(header.view != child_header.view);
                                     break;
                                 }
                             } else {
                                 // There is a header at op, but op+1 is a gap.
                                 if (header.view == headers2.get(headers2.len - 1).view) {
-                                    // Gaps within the current view never hide a chain break.
+                                    // Gaps within the same view never hide a chain break.
                                     // See Example 2b and Example 4.
                                     headers2.appendAssumeCapacity(header.*);
-                                //} else if (headers2.get(headers2.len - 1).view == self.log_view) {
-                                //    // To the right of the gap is a message with view=log_view.
-                                //    // To the left of the gap is a message with view<log_view.
-                                //    // See Example TODO
-                                //    headers2.appendAssumeCapacity(header.*);
                                 } else {
-                                    // Gaps to the right of  // TODO
+                                    // Gaps between different views may hide a break.
                                     // See Example 2a.
                                     break;
                                 }
                             }
                             child = header;
                         } else {
-                            // TODO break if hit anchor?
-                            // Stop once we connect to the anchor.
-                            if (op <= op_dvc_anchor + 1) break;
                             child = null;
+                            // This "break" is not necessary for correctness; it is an optimization
+                            // to avoid iterating over every op in the (unlikely) case that the
+                            // journal is very sparse.
+                            if (op < self.op -| constants.pipeline_prepare_queue_max) break;
                         }
                     }
                 }
                 vsr.ViewChangeHeaders.verify(headers2.constSlice());
+
+                // The DVC anchor: Within the log suffix following the anchor, we have additional
+                // guarantees about the state of the log headers which allow us to tolerate certain
+                // gaps (by locally guaranteeing that the gap does not hide a break).
+                // See Example 2/3 for more detail.
+                const op_dvc_anchor = std.math.max(
+                    self.commit_min,
+                    // +1: We can have a full pipeline, but not yet have performed any repair.
+                    // In such a case, we want to send those pipeline_prepare_queue_max headers in
+                    // the DVC, but not the preceding op (which may belong to a different chain).
+                    // This satisfies the DVC invariant because the first op in the pipeline is
+                    // "connected" to the canonical chain (via its "parent" checksum).
+                    //
+                    // For example, as a follower, we might have received pipeline_prepare_queue_max
+                    // headers in the SV message, but not done any repair before the next view
+                    // change.
+                    1 + self.op -| constants.pipeline_prepare_queue_max,
+                );
+                // +1 because we only need to *connect* to the anchor, not necessarily cover it.
+                assert(headers2.get(headers2.len - 1).op <= op_dvc_anchor + 1);
             }
 
             if (self.view == self.log_view) {
@@ -2944,7 +2943,7 @@ pub fn ReplicaType(
                             headers.append(header_prev.*) catch break;
                         }
                     }
-                    return headers;
+                    return headers2;
                 }
 
                 // The DVC anchor: Within the log suffix following the anchor, we have additional
@@ -3012,7 +3011,7 @@ pub fn ReplicaType(
             }
 
             vsr.ViewChangeHeaders.verify(headers.constSlice());
-            return headers;
+            return headers2;
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
