@@ -2778,8 +2778,9 @@ pub fn ReplicaType(
             var headers2 = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
             defer {
                 std.debug.print("  compare {} -> {}\n", .{headers.len, headers2.len});
-                for (headers.constSlice()) |*h, i| std.debug.print("  compare i={} H₁={}\n", .{i, h.*});
-                for (headers2.constSlice()) |*h, i| std.debug.print("  compare i={} H₂={}\n", .{i, h.*});
+                for (headers.constSlice()) |*h, i| std.debug.print("A:  compare i={} H₁={}\n", .{i, h.*});
+                for (headers2.constSlice()) |*h, i| std.debug.print("B:  compare i={} H₂={}\n", .{i, h.*});
+                for (self.superblock.working.vsr_headers().slice) |*h, i| std.debug.print("C:  compare i={} H₃={}\n", .{i, h.*});
 
                 for (headers.constSlice()) |*h, i| {
                     assert(std.meta.eql(h.*, headers2.get(i)));
@@ -2802,12 +2803,8 @@ pub fn ReplicaType(
                 headers2 = vsr.ViewChangeHeaders.BoundedArray.fromSlice(headers_durable)
                     catch unreachable;
             } else {
-                // Always include the head message.
-                var head = self.journal.header_with_op(self.op).?;
-                headers2.appendAssumeCapacity(head.*);
-
-                var child: ?*const Header = head;
-                var op = self.op;
+                var child: ?*const Header = null;
+                var op = self.op + 1;
                 while (op > 0 and headers2.len < constants.view_change_headers_max) {
                     op -= 1;
 
@@ -2827,7 +2824,10 @@ pub fn ReplicaType(
                         }
                     } else {
                         // There is a header at op, but op+1 is a gap.
-                        if (header.view == headers2.get(headers2.len - 1).view) {
+                        if (headers2.len == 0) {
+                            // Always include the head message.
+                            headers2.appendAssumeCapacity(header.*);
+                        } else if (header.view == headers2.get(headers2.len - 1).view) {
                             // Gaps within the same view never hide a chain break.
                             // See Example 2b and Example 4.
                             headers2.appendAssumeCapacity(header.*);
@@ -2837,6 +2837,9 @@ pub fn ReplicaType(
                         {
                             // Gaps to the right of the durable SV never hide a chain break.
                             // See Example 4.
+                            headers2.appendAssumeCapacity(header.*);
+                        } else if (op <= self.commit_min and op > self.op_checkpoint()) {
+                            // A committed op from the current WAL wrap is guaranteed correct.
                             headers2.appendAssumeCapacity(header.*);
                         } else {
                             // Gaps between different views may hide a break. See Example 2a.
@@ -2850,17 +2853,15 @@ pub fn ReplicaType(
 
             const op_dvc_anchor = std.math.max(
                 self.commit_min,
-                // +1: We can have a full pipeline, but not yet have performed any repair.
-                // In such a case, we want to send those pipeline_prepare_queue_max headers in
-                // the DVC, but not the preceding op (which may belong to a different chain).
-                // This satisfies the DVC invariant because the first op in the pipeline is
-                // "connected" to the canonical chain (via its "parent" checksum).
-                //
-                // For example, as a follower, we might have received pipeline_prepare_queue_max
-                // headers in the SV message, but not done any repair before the next view
-                // change.
+                // +1: We can have a full pipeline, but not yet have performed any repair (e.g. a
+                // follower installed a SV). Sending that full pipeline satisfies the DVC invariant
+                // because the first op in the pipeline is "connected" to the canonical chain (via
+                // its "parent" checksum).
                 1 + self.op -| constants.pipeline_prepare_queue_max,
             );
+            std.debug.print("view={} log_view={} view_durable={} log_view_durable={} first_op={} anchor={}\n", .{
+                self.view,self.log_view, self.view_durable(), self.log_view_durable(), headers2.get(headers2.len - 1).op, op_dvc_anchor,
+            });
             // +1 because we only need to *connect* to the anchor, not necessarily cover it.
             // This assertion is not critical for SVs, only DVCs (though it is true for both).
             assert(headers2.get(headers2.len - 1).op <= op_dvc_anchor + 1);
