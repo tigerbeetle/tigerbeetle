@@ -2811,43 +2811,39 @@ pub fn ReplicaType(
                 while (op > 0 and headers2.len < constants.view_change_headers_max) {
                     op -= 1;
 
-                    if (self.journal.header_with_op(op)) |header| {
-                        if (child) |child_header| {
-                            if (header.checksum == child_header.parent) {
-                                // It is always safe to include chained headers.
-                                headers2.appendAssumeCapacity(header.*);
-                            } else {
-                                // Don't include a chain break (or anything to the left).
-                                assert(header.view != child_header.view);
-                                break;
-                            }
-                        } else {
-                            // There is a header at op, but op+1 is a gap.
-                            if (header.view == headers2.get(headers2.len - 1).view) {
-                                // Gaps within the same view never hide a chain break.
-                                // See Example 2b and Example 4.
-                                headers2.appendAssumeCapacity(header.*);
-                            } else if (op >= headers_durable[headers_durable.len - 1].op and
-                                self.log_view_durable() == self.log_view and
-                                self.log_view_durable() == self.view_durable())
-                            {
-                                // Gaps to the right of the durable SV never hide a chain break.
-                                // See Example 4.
-                                headers2.appendAssumeCapacity(header.*);
-                            } else {
-                                // Gaps between different views may hide a break. See Example 2a.
-                                break;
-                            }
-                        }
-                        child = header;
-                    } else {
+                    const header = self.journal.header_with_op(op) orelse {
                         child = null;
-                        // This "break" is not necessary for correctness; it is an optimization to
-                        // avoid iterating over every op in the (unlikely) case that the journal is
-                        // very sparse.
-                        // TODO or limit to op_checkpoint? b/c of gap-to-right-of-durable-SV
-                        if (op < self.op -| constants.pipeline_prepare_queue_max) break;
+                        continue;
+                    };
+
+                    if (child) |child_header| {
+                        if (header.checksum == child_header.parent) {
+                            // It is always safe to include chained headers.
+                            headers2.appendAssumeCapacity(header.*);
+                        } else {
+                            // Don't include a chain break (or anything to the left).
+                            assert(header.view != child_header.view);
+                            break;
+                        }
+                    } else {
+                        // There is a header at op, but op+1 is a gap.
+                        if (header.view == headers2.get(headers2.len - 1).view) {
+                            // Gaps within the same view never hide a chain break.
+                            // See Example 2b and Example 4.
+                            headers2.appendAssumeCapacity(header.*);
+                        } else if (op >= headers_durable[headers_durable.len - 1].op and
+                            self.log_view_durable() == self.log_view and
+                            self.log_view_durable() == self.view_durable())
+                        {
+                            // Gaps to the right of the durable SV never hide a chain break.
+                            // See Example 4.
+                            headers2.appendAssumeCapacity(header.*);
+                        } else {
+                            // Gaps between different views may hide a break. See Example 2a.
+                            break;
+                        }
                     }
+                    child = header;
                 }
             }
             vsr.ViewChangeHeaders.verify(headers2.constSlice());
@@ -5912,6 +5908,9 @@ pub fn ReplicaType(
 /// - Brackets denote the suffix of the replica's log that is actually included in the DVC headers.
 /// - Parenthesis denote a replica that did not participate in the DVC (for example, because it is
 ///   partitioned).
+/// - a/b suffixes (e.g. 4a/4b) denote different versions of an op.
+///   Ops with the same a/b belong to the same chain.
+/// - Subscript suffixes (e.g. 4₁/4₂) denote the view which prepared the op.
 ///
 /// Example 1: No gap in canonical headers
 ///
@@ -6001,7 +6000,7 @@ pub fn ReplicaType(
 ///         1   1a  2a  3a  4a  5a  6a  7a [8b  9b]        (retired primary)
 ///
 ///
-/// Example 4: Gap in recovering retired primary suffix
+/// Example 4: Gap in the pipeline suffix of a recovering retired primary
 ///
 /// Suppose that replica 1 starts a view as the primary of view 2, with the suffix:
 ///
@@ -6010,18 +6009,18 @@ pub fn ReplicaType(
 /// (Subscripts denote the message's prepare-view.)
 /// During this view, it prepares several ops:
 ///
-///   journal   1₁  2₁  3a  4₂  5₂  6₂  7₂
+///   journal   1₁  2₁  3₁  4₂  5₂  6₂  7₂
 ///
 /// However, the WAL writes are reordered — ops 4,5,7 writes finish before op=6's write has begun:
 ///
 ///   journal   1₁  2₁  3₁  4₂  5₂  6₂  7₂
 ///       wal   1₁  2₁  3₁  4₂  5₂      7₂
 ///
-/// Replica 1 crashes and recovers, and immediately begins sending a DVC for view=5.
-/// Under normal circumstances, the retired primary cannot distinguish between a gap and a break
-/// due to the possibility that its did not complete repair (see Example 2a).
-/// In this instance though, the gap is safe to skip over because it is to the right of the durable
-/// SV's head (op=3) — equivalently, because 5b and 7b were prepared by the same view.
+/// Replica 1 crashes and recovers, and immediately begins sending a DVC for view=2+1. Under normal
+/// circumstances, the retired primary cannot distinguish between a gap and a break due to the
+/// possibility that its did not complete repair (see Example 2a). In this instance though, the gap
+/// is safe to skip over because it is to the right of the durable SV's head (op=3) — equivalently,
+/// because 5₂ and 7₂ were prepared during the same view.
 ///
 ///   replica   headers                              log_view
 ///         1   1₁  2₁  3₁ [4₂  5₂      7₂]          2     (retired primary)
