@@ -145,7 +145,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
         compaction_io_pending: usize,
         compaction_callback: ?fn (*Tree) void,
-        compaction_next_tick: Grid.NextTick = undefined,
 
         checkpoint_callback: ?fn (*Tree) void,
         open_callback: ?fn (*Tree) void,
@@ -337,8 +336,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
 
             if (index_block_count == 0) {
-                context.callback = callback;
-                tree.grid.on_next_tick(lookup_invalid_tick_callback, &context.next_tick);
+                callback(context, null);
                 return;
             }
 
@@ -348,7 +346,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             context.* = .{
                 .tree = tree,
                 .completion = undefined,
-                .next_tick = undefined,
 
                 .key = key,
                 .fingerprint = fingerprint,
@@ -363,18 +360,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             context.read_index_block();
         }
 
-        fn lookup_invalid_tick_callback(next_tick: *Grid.NextTick) void {
-            const context = @fieldParentPtr(LookupContext, "next_tick", next_tick);
-            context.callback(context, null);
-        }
-
         pub const LookupContext = struct {
             const Read = Grid.Read;
             const BlockPtrConst = Grid.BlockPtrConst;
 
             tree: *Tree,
             completion: Read,
-            next_tick: Grid.NextTick,
 
             key: Key,
             fingerprint: bloom_filter.Fingerprint,
@@ -569,8 +560,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     tree.compact_mutable_table_into_immutable();
                 }
 
-                tree.compaction_callback = callback;
-                tree.grid.on_next_tick(compact_skip_tick_callback, &tree.compaction_next_tick);
+                callback(tree);
                 return;
             }
 
@@ -596,13 +586,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             tree.compact_start(callback);
             tree.compact_drive();
-        }
-
-        fn compact_skip_tick_callback(next_tick: *Grid.NextTick) void {
-            const tree = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
-            const callback = tree.compaction_callback.?;
-            tree.compaction_callback = null;
-            callback(tree);
         }
 
         fn compact_start(tree: *Tree, callback: fn (*Tree) void) void {
@@ -874,7 +857,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 // We are at the end of a half-bar, but the compactions have not finished.
                 // We keep ticking them until they finish.
                 log.debug(tree_name ++ ": compact_done: driving outstanding compactions", .{});
-                tree.grid.on_next_tick(compact_drive_tick_callback, &tree.compaction_next_tick);
+                tree.compact_drive();
                 return;
             }
 
@@ -950,16 +933,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // At the end of the second/fourth beat:
             // - Compact the manifest before invoking the compact() callback.
             tree.manifest.compact(compact_manifest_callback);
-        }
-
-        /// Asynchronously continue to drive the compactions when they haven't finished at the time
-        /// they were supposed to at the end of a half-bar.
-        fn compact_drive_tick_callback(next_tick: *Grid.NextTick) void {
-            const tree = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
-            assert(tree.compaction_io_pending == 0);
-            assert(tree.compaction_callback != null);
-            assert(tree.compaction_op == tree.lookup_snapshot_max);
-            tree.compact_drive();
         }
 
         /// Called after the last beat of a full compaction bar.
