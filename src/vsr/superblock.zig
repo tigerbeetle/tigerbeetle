@@ -17,7 +17,7 @@ const meta = std.meta;
 const os = std.os;
 
 const constants = @import("../constants.zig");
-const div_ceil = @import("../stdx.zig").div_ceil;
+const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 
@@ -31,6 +31,9 @@ pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
 });
 
 pub const SuperBlockVersion: u16 = 0;
+
+const vsr_headers_reserved_size = constants.sector_size -
+    ((constants.view_change_headers_max * @sizeOf(vsr.Header)) % constants.sector_size);
 
 // Fields are aligned to work as an extern or packed struct.
 pub const SuperBlockSector = extern struct {
@@ -97,7 +100,19 @@ pub const SuperBlockSector = extern struct {
     /// The size of the client table entries stored in the superblock trailer.
     client_table_size: u32,
 
-    reserved: [3148]u8 = [_]u8{0} ** 3148,
+    /// The number of headers in vsr_headers_all.
+    vsr_headers_count: u32,
+
+    reserved: [3144]u8 = [_]u8{0} ** 3144,
+
+    /// SV/DVC header suffix. Headers are ordered from high-to-low op.
+    /// Unoccupied headers (after vsr_headers_count) are zeroed.
+    ///
+    /// When `vsr_state.log_view < vsr_state.view`, the headers are for a DVC.
+    /// When `vsr_state.log_view = vsr_state.view`, the headers are for a SV.
+    vsr_headers_all: [constants.view_change_headers_max]vsr.Header,
+    vsr_headers_reserved: [vsr_headers_reserved_size]u8 =
+        [_]u8{0} ** vsr_headers_reserved_size,
 
     pub const VSRState = extern struct {
         /// The vsr.Header.checksum of commit_min's message.
@@ -159,11 +174,6 @@ pub const SuperBlockSector = extern struct {
             return !meta.eql(old, new);
         }
 
-        pub fn update(state: *VSRState, new: VSRState) void {
-            assert(state.would_be_updated_by(new));
-            state.* = new;
-        }
-
         /// Compaction is one bar ahead of superblock's commit_min.
         /// The commits from the bar following commit_min were in the mutable table, and
         /// thus not preserved in the checkpoint.
@@ -205,7 +215,9 @@ pub const SuperBlockSector = extern struct {
     };
 
     comptime {
-        assert(@sizeOf(SuperBlockSector) == constants.sector_size);
+        assert(@sizeOf(SuperBlockSector) % constants.sector_size == 0);
+        assert(@divExact(@sizeOf(SuperBlockSector), constants.sector_size) >= 2);
+        assert(@offsetOf(SuperBlockSector, "vsr_headers_all") == constants.sector_size);
         // Assert that there is no implicit padding in the struct.
         assert(@bitSizeOf(SuperBlockSector) == @sizeOf(SuperBlockSector) * 8);
     }
@@ -230,9 +242,9 @@ pub const SuperBlockSector = extern struct {
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.flags == 0);
 
-        assert(@bitCast(u32, superblock.reserved[0..4].*) == 0);
-        for (mem.bytesAsSlice(u64, superblock.reserved[4..])) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &superblock.reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &superblock.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &superblock.vsr_headers_reserved)) |word| assert(word == 0);
 
         superblock.checksum = superblock.calculate_checksum();
     }
@@ -243,6 +255,15 @@ pub const SuperBlockSector = extern struct {
 
     /// Does not consider { checksum, copy } when comparing equality.
     pub fn equal(a: *const SuperBlockSector, b: *const SuperBlockSector) bool {
+        for (mem.bytesAsSlice(u64, &a.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &b.reserved)) |word| assert(word == 0);
+
+        for (mem.bytesAsSlice(u64, &a.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &b.vsr_state.reserved)) |word| assert(word == 0);
+
+        for (mem.bytesAsSlice(u64, &a.vsr_headers_reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u64, &b.vsr_headers_reserved)) |word| assert(word == 0);
+
         if (a.version != b.version) return false;
         if (a.replica != b.replica) return false;
         if (a.cluster != b.cluster) return false;
@@ -258,16 +279,16 @@ pub const SuperBlockSector = extern struct {
         if (!meta.eql(a.snapshots, b.snapshots)) return false;
         if (a.manifest_size != b.manifest_size) return false;
         if (a.free_set_size != b.free_set_size) return false;
-
-        assert(@bitCast(u32, a.reserved[0..4].*) == 0);
-        assert(@bitCast(u32, b.reserved[0..4].*) == 0);
-        for (mem.bytesAsSlice(u64, a.reserved[4..])) |word| assert(word == 0);
-        for (mem.bytesAsSlice(u64, b.reserved[4..])) |word| assert(word == 0);
-
-        for (mem.bytesAsSlice(u64, &a.vsr_state.reserved)) |word| assert(word == 0);
-        for (mem.bytesAsSlice(u64, &b.vsr_state.reserved)) |word| assert(word == 0);
+        if (a.vsr_headers_count != b.vsr_headers_count) return false;
+        if (!meta.eql(a.vsr_headers_all, b.vsr_headers_all)) return false;
 
         return true;
+    }
+
+    pub fn vsr_headers(superblock: *const SuperBlockSector) vsr.ViewChangeHeaders {
+        return vsr.ViewChangeHeaders.init(
+            superblock.vsr_headers_all[0..superblock.vsr_headers_count],
+        );
     }
 };
 
@@ -419,6 +440,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             copy: ?u8 = null,
             /// Used by format(), checkpoint(), and view_change().
             vsr_state: ?SuperBlockSector.VSRState = null,
+            /// Used by format() and view_change().
+            vsr_headers: ?vsr.ViewChangeHeaders.BoundedArray = null,
             repairs: ?Quorums.RepairIterator = null, // Used by open().
         };
 
@@ -622,6 +645,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .manifest_size = 0,
                 .free_set_size = 0,
                 .client_table_size = 0,
+                .vsr_headers_count = 0,
+                .vsr_headers_all = mem.zeroes([constants.view_change_headers_max]vsr.Header),
             };
 
             mem.set(SuperBlockSector.Snapshot, &superblock.working.snapshots, .{
@@ -632,11 +657,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.working.set_checksum();
 
+            var vsr_headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
+            vsr_headers.appendAssumeCapacity(vsr.Header.root_prepare(options.cluster));
+
             context.* = .{
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .format,
                 .vsr_state = SuperBlockSector.VSRState.root(options.cluster),
+                .vsr_headers = vsr_headers,
             };
 
             // TODO At a higher layer, we must:
@@ -662,21 +691,33 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
+        const UpdateCheckpoint = struct {
+            commit_min_checksum: u128,
+            commit_min: u64,
+            commit_max: u64,
+        };
+
         /// The vsr_state must update the commit_min and commit_min_checksum.
-        // TODO Will the replica ever update view/log_view by calling checkpoint() during a view
-        // change? If not, forbid it.
+        /// The vsr_state must not update view/log_view.
         pub fn checkpoint(
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
-            vsr_state: SuperBlockSector.VSRState,
+            update: UpdateCheckpoint,
         ) void {
             assert(superblock.opened);
-            // Checkpoint must advance commit_min, but never the view.
+            assert(superblock.staging.vsr_state.commit_min < update.commit_min);
+            assert(superblock.staging.vsr_state.commit_min_checksum != update.commit_min_checksum);
+            assert(update.commit_min <= update.commit_max);
+
+            const vsr_state = SuperBlockSector.VSRState{
+                .commit_min_checksum = update.commit_min_checksum,
+                .commit_min = update.commit_min,
+                .commit_max = update.commit_max,
+                .log_view = superblock.staging.vsr_state.log_view,
+                .view = superblock.staging.vsr_state.view,
+            };
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
-            assert(superblock.staging.vsr_state.commit_min < vsr_state.commit_min);
-            assert(superblock.staging.vsr_state.commit_min_checksum !=
-                vsr_state.commit_min_checksum);
 
             context.* = .{
                 .superblock = superblock,
@@ -688,59 +729,71 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
-        /// The vsr_state must not update the `commit_min` or `commit_min_checksum`.
+        const UpdateViewChange = struct {
+            commit_max: u64,
+            log_view: u32,
+            view: u32,
+            headers: vsr.ViewChangeHeaders.BoundedArray,
+        };
+
+        /// The replica calls view_change() to persist its view/log_view — it cannot
+        /// advertise either value until it is certain they will never backtrack.
+        ///
+        /// The update must advance view/log_view (monotonically increasing).
         pub fn view_change(
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
-            vsr_state: SuperBlockSector.VSRState,
+            update: UpdateViewChange,
         ) void {
             assert(superblock.opened);
-            assert(vsr_state.commit_min == superblock.staging.vsr_state.commit_min);
-            assert(vsr_state.commit_min_checksum ==
-                superblock.staging.vsr_state.commit_min_checksum);
+            assert(superblock.staging.vsr_state.commit_min <= update.headers.get(0).op);
+            assert(superblock.staging.vsr_state.commit_max <= update.commit_max);
+            assert(superblock.staging.vsr_state.view <= update.view);
+            assert(superblock.staging.vsr_state.log_view <= update.log_view);
+            assert(superblock.staging.vsr_state.log_view < update.log_view or
+                superblock.staging.vsr_state.view < update.view);
+
+            vsr.ViewChangeHeaders.verify(update.headers.constSlice());
+            assert(update.view >= update.log_view);
+
+            const vsr_state = SuperBlockSector.VSRState{
+                .commit_min_checksum = superblock.staging.vsr_state.commit_min_checksum,
+                .commit_min = superblock.staging.vsr_state.commit_min,
+                .commit_max = update.commit_max,
+                .log_view = update.log_view,
+                .view = update.view,
+            };
+            assert(vsr_state.internally_consistent());
+            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
             assert(superblock.staging.vsr_state.monotonic(vsr_state));
 
-            log.debug(
-                "view_change: commit_min_checksum={}..{} commit_min={}..{} commit_max={}..{} " ++
-                    "log_view={}..{} view={}..{}",
-                .{
-                    superblock.staging.vsr_state.commit_min_checksum,
-                    vsr_state.commit_min_checksum,
+            log.debug("view_change: commit_max={}..{} log_view={}..{} view={}..{} head={}..{}", .{
+                superblock.staging.vsr_state.commit_max,
+                update.commit_max,
 
-                    superblock.staging.vsr_state.commit_min,
-                    vsr_state.commit_min,
+                superblock.staging.vsr_state.log_view,
+                update.log_view,
 
-                    superblock.staging.vsr_state.commit_max,
-                    vsr_state.commit_max,
+                superblock.staging.vsr_state.view,
+                update.view,
 
-                    superblock.staging.vsr_state.log_view,
-                    vsr_state.log_view,
-
-                    superblock.staging.vsr_state.view,
-                    vsr_state.view,
-                },
-            );
-
-            assert(vsr_state.internally_consistent());
+                superblock.staging.vsr_headers().slice[0].checksum,
+                update.headers.get(0).checksum,
+            });
 
             context.* = .{
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .view_change,
                 .vsr_state = vsr_state,
+                .vsr_headers = update.headers,
             };
-
-            if (!superblock.staging.vsr_state.would_be_updated_by(context.vsr_state.?)) {
-                log.debug("view_change: no change", .{});
-                callback(context);
-                return;
-            }
 
             superblock.acquire(context);
         }
 
-        pub fn view_change_in_progress(superblock: *SuperBlock) bool {
+        pub fn view_change_in_progress(superblock: *const SuperBlock) bool {
             assert(superblock.opened);
 
             if (superblock.queue_head) |head| {
@@ -768,7 +821,26 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.staging.* = superblock.working.*;
             superblock.staging.sequence = superblock.staging.sequence + 1;
             superblock.staging.parent = superblock.staging.checksum;
-            superblock.staging.vsr_state.update(context.vsr_state.?);
+            superblock.staging.vsr_state = context.vsr_state.?;
+
+            if (context.vsr_headers) |headers| {
+                assert(context.caller == .format or context.caller == .view_change);
+
+                superblock.staging.vsr_headers_count = @intCast(u32, headers.len);
+                stdx.copy_disjoint(
+                    .exact,
+                    vsr.Header,
+                    superblock.staging.vsr_headers_all[0..headers.len],
+                    headers.constSlice(),
+                );
+                std.mem.set(
+                    vsr.Header,
+                    superblock.staging.vsr_headers_all[headers.len..],
+                    std.mem.zeroes(vsr.Header),
+                );
+            } else {
+                assert(context.caller == .checkpoint);
+            }
 
             if (context.caller != .view_change) {
                 superblock.write_staging_encode_manifest();
@@ -1127,6 +1199,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
                     assert(working.vsr_state.view == 0);
+                    assert(working.vsr_headers_count == 1);
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
                 }
@@ -1152,6 +1225,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.vsr_state.view,
                     },
                 );
+                for (superblock.working.vsr_headers().slice) |*header| {
+                    log.debug("{s}: vsr_header: {}", .{ @tagName(context.caller), header.* });
+                }
 
                 if (context.caller == .open) {
                     if (context.repairs) |_| {
@@ -1236,12 +1312,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 // We do not repair padding.
                 context.copy = 0;
                 superblock.read_free_set(context);
-            } else if (copy + 1 == constants.superblock_copies) {
-                @panic("superblock manifest lost");
             } else {
                 log.debug("open: read_manifest: corrupt copy={}", .{copy});
-                context.copy = copy + 1;
-                superblock.read_manifest(context);
+                if (copy + 1 == constants.superblock_copies) {
+                    @panic("superblock manifest lost");
+                } else {
+                    context.copy = copy + 1;
+                    superblock.read_manifest(context);
+                }
             }
         }
 
@@ -1538,7 +1616,7 @@ pub const areas = struct {
 test "SuperBlockSector" {
     const expect = std.testing.expect;
 
-    var a = std.mem.zeroInit(SuperBlockSector, .{});
+    var a = std.mem.zeroes(SuperBlockSector);
     a.set_checksum();
 
     assert(a.copy == 0);

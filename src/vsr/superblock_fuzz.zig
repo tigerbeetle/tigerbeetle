@@ -151,6 +151,7 @@ const Environment = struct {
     /// Indexed by sequence.
     const SequenceStates = std.ArrayList(struct {
         vsr_state: VSRState,
+        vsr_headers: vsr.ViewChangeHeaders.BoundedArray,
         /// Track the expected `checksum(free_set)`.
         /// Note that this is a checksum of the decoded free set; it is not the same as
         /// `SuperBlockSector.free_set_checksum`.
@@ -166,7 +167,7 @@ const Environment = struct {
     latest_sequence: u64 = 0,
     latest_checksum: u128 = 0,
     latest_parent: u128 = 0,
-    latest_vsr_state: VSRState = std.mem.zeroInit(VSRState, .{}),
+    latest_vsr_state: VSRState = std.mem.zeroes(VSRState),
 
     context_format: SuperBlock.Context = undefined,
     context_open: SuperBlock.Context = undefined,
@@ -268,10 +269,14 @@ const Environment = struct {
             .replica = 0,
         });
 
+        var vsr_headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
+        vsr_headers.appendAssumeCapacity(vsr.Header.root_prepare(cluster));
+
         assert(env.sequence_states.items.len == 0);
         try env.sequence_states.append(undefined); // skip sequence=0
         try env.sequence_states.append(.{
             .vsr_state = VSRState.root(cluster),
+            .vsr_headers = vsr_headers,
             .free_set = checksum_free_set(env.superblock),
         });
     }
@@ -310,14 +315,29 @@ const Environment = struct {
             .view = env.superblock.staging.vsr_state.view + 5,
         };
 
+        var vsr_headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
+        var vsr_head = std.mem.zeroInit(vsr.Header, .{
+            .command = .prepare,
+            .op = env.superblock.staging.vsr_state.commit_min,
+        });
+        vsr_head.set_checksum_body(&.{});
+        vsr_head.set_checksum();
+        vsr_headers.appendAssumeCapacity(vsr_head);
+
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
+            .vsr_headers = vsr_headers,
             .free_set = env.sequence_states.items[env.sequence_states.items.len - 1].free_set,
         });
 
         env.pending.insert(.view_change);
-        env.superblock.view_change(view_change_callback, &env.context_view_change, vsr_state);
+        env.superblock.view_change(view_change_callback, &env.context_view_change, .{
+            .commit_max = vsr_state.commit_max,
+            .log_view = vsr_state.log_view,
+            .view = vsr_state.view,
+            .headers = vsr_headers,
+        });
     }
 
     fn view_change_callback(context: *SuperBlock.Context) void {
@@ -334,18 +354,25 @@ const Environment = struct {
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
             .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
-            .log_view = env.superblock.staging.vsr_state.log_view + 1,
-            .view = env.superblock.staging.vsr_state.view + 1,
+            .log_view = env.superblock.staging.vsr_state.log_view,
+            .view = env.superblock.staging.vsr_state.view,
         };
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
+            .vsr_headers = vsr.ViewChangeHeaders.BoundedArray.fromSlice(
+                env.superblock.staging.vsr_headers().slice,
+            ) catch unreachable,
             .free_set = checksum_free_set(env.superblock),
         });
 
         env.pending.insert(.checkpoint);
-        env.superblock.checkpoint(checkpoint_callback, &env.context_checkpoint, vsr_state);
+        env.superblock.checkpoint(checkpoint_callback, &env.context_checkpoint, .{
+            .commit_min_checksum = vsr_state.commit_min_checksum,
+            .commit_min = vsr_state.commit_min,
+            .commit_max = vsr_state.commit_max,
+        });
     }
 
     fn checkpoint_callback(context: *SuperBlock.Context) void {

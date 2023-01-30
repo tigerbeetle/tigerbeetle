@@ -106,9 +106,6 @@ pub const Command = enum(u8) {
     do_view_change,
     start_view,
 
-    recovery,
-    recovery_response,
-
     request_start_view,
     request_headers,
     request_prepare,
@@ -323,8 +320,6 @@ pub const Header = extern struct {
             .start_view_change => self.invalid_start_view_change(),
             .do_view_change => self.invalid_do_view_change(),
             .start_view => self.invalid_start_view(),
-            .recovery => self.invalid_recovery(),
-            .recovery_response => self.invalid_recovery_response(),
             .request_start_view => self.invalid_request_start_view(),
             .request_headers => self.invalid_request_headers(),
             .request_prepare => self.invalid_request_prepare(),
@@ -521,29 +516,6 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_recovery(self: *const Header) ?[]const u8 {
-        assert(self.command == .recovery);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_recovery_response(self: *const Header) ?[]const u8 {
-        assert(self.command == .recovery_response);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -1025,4 +997,96 @@ pub fn quorums(replica_count: u8) struct {
         .replication = quorum_replication,
         .view_change = quorum_view_change,
     };
+}
+
+/// The SuperBlock's persisted VSR headers.
+/// One of the following:
+///
+/// - SV headers (consecutive chain)
+/// - DVC headers (disjoint chain)
+pub const ViewChangeHeaders = struct {
+    /// Headers are ordered from high-to-low op.
+    slice: []const Header,
+
+    pub const BoundedArray = std.BoundedArray(Header, constants.pipeline_prepare_queue_max);
+
+    pub fn init(slice: []const Header) ViewChangeHeaders {
+        ViewChangeHeaders.verify(slice);
+
+        return .{ .slice = slice };
+    }
+
+    pub fn verify(slice: []const Header) void {
+        assert(slice.len > 0);
+        assert(slice.len <= constants.pipeline_prepare_queue_max);
+
+        var child: ?*const Header = null;
+        for (slice) |*header| {
+            assert(header.valid_checksum());
+            assert(header.command == .prepare);
+
+            if (child) |child_header| {
+                assert(header.op < child_header.op);
+                assert(header.view <= child_header.view);
+                assert((header.op + 1 == child_header.op) ==
+                    (header.checksum == child_header.parent));
+                assert(header.timestamp < child_header.timestamp);
+            }
+            child = header;
+        }
+    }
+
+    const ViewRange = struct {
+        min: u32, // inclusive
+        max: u32, // inclusive
+
+        pub fn contains(range: ViewRange, view: u32) bool {
+            return range.min <= view and view <= range.max;
+        }
+    };
+
+    /// Returns the range of possible views (of prepare, not commit) for a message that is part of
+    /// the same log_view as these headers.
+    ///
+    /// - When these are DVC headers for a log_view=V, we must be in view_change status working to
+    ///   transition to a view beyond V. So we will never prepare anything else as part of view V.
+    /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
+    ///   more ops), but those ops will laways be part of the log_view. If they were prepared during
+    ///   a view prior to the log_view, they would already be part of the headers.
+    pub fn view_for_op(headers: ViewChangeHeaders, op: u64, log_view: u32) ViewRange {
+        const header_newest = &headers.slice[0];
+        const header_oldest = &headers.slice[headers.slice.len - 1];
+
+        if (op < header_oldest.op) return .{ .min = 0, .max = header_oldest.view };
+        if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
+
+        for (headers.slice) |*header| {
+            if (header.op == op) return .{ .min = header.view, .max = header.view };
+        }
+
+        for (headers.slice[0 .. headers.slice.len - 1]) |*header_next, header_next_index| {
+            const header_prev = headers.slice[header_next_index + 1];
+            if (header_prev.op < op and op < header_next.op) {
+                return .{ .min = header_prev.view, .max = header_next.view };
+            }
+        }
+        unreachable;
+    }
+};
+
+test "ViewChangeHeaders.view_for_op" {
+    var headers_array = [_]Header{
+        std.mem.zeroInit(Header, .{ .op = 9, .view = 10 }),
+        std.mem.zeroInit(Header, .{ .op = 6, .view = 7 }),
+    };
+
+    const headers = ViewChangeHeaders{ .slice = &headers_array };
+    try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(10, 12), .{ .min = 12, .max = 12 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(9, 12), .{ .min = 10, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(8, 12), .{ .min = 7, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(7, 12), .{ .min = 7, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(6, 12), .{ .min = 7, .max = 7 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(5, 12), .{ .min = 0, .max = 7 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(0, 12), .{ .min = 0, .max = 7 }));
 }
