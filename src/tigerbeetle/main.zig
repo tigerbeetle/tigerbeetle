@@ -112,6 +112,11 @@ const Command = struct {
         defer superblock.deinit(allocator);
 
         try vsr.format(Storage, allocator, cluster, replica, &command.storage, &superblock);
+
+        log_main.info("{}: formatted: cluster={}", .{
+            replica,
+            cluster,
+        });
     }
 
     pub fn start(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Start) !void {
