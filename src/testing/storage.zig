@@ -625,20 +625,18 @@ pub const ClusterFaultAtlas = struct {
 
         var atlas = ClusterFaultAtlas{ .options = options };
 
-        {
-            for (&atlas.faulty_superblock_areas.values) |*copies, area| {
-                if (area == @enumToInt(superblock.Area.header)) {
-                    // Only inject read/write faults into trailers, not the header.
-                    // This prevents the quorum from being lost like so:
-                    // - copy₀: B (ok)
-                    // - copy₁: B (torn write)
-                    // - copy₂: A (corrupt)
-                    // - copy₃: A (ok)
-                } else {
-                    var area_faults: usize = 0;
-                    while (area_faults < superblock_trailer_faults_max) : (area_faults += 1) {
-                        copies.set(random.uintLessThan(usize, constants.superblock_copies));
-                    }
+        for (&atlas.faulty_superblock_areas.values) |*copies, area| {
+            if (area == @enumToInt(superblock.Area.header)) {
+                // Only inject read/write faults into trailers, not the header.
+                // This prevents the quorum from being lost like so:
+                // - copy₀: B (ok)
+                // - copy₁: B (torn write)
+                // - copy₂: A (corrupt)
+                // - copy₃: A (ok)
+            } else {
+                var area_faults: usize = 0;
+                while (area_faults < superblock_trailer_faults_max) : (area_faults += 1) {
+                    copies.set(random.uintLessThan(usize, constants.superblock_copies));
                 }
             }
         }
