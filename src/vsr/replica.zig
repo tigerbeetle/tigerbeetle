@@ -5917,6 +5917,12 @@ pub fn ReplicaType(
 ///   Ops with the same a/b belong to the same chain.
 /// - Subscript suffixes (e.g. 4₁/4₂) denote the view which prepared the op.
 ///
+/// │ retired │ durable │ sequence │ gap │ break │
+/// │ primary │     DVC │
+/// │         │      SV │
+/// │  backup │     DVC │
+/// │         │      SV │
+///
 /// Example 1: No gap in canonical headers
 ///
 /// Consider a view change with DVCs:
