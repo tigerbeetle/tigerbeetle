@@ -419,16 +419,17 @@ const Environment = struct {
         env.manifest_log.checkpoint(checkpoint_callback);
         env.wait(&env.manifest_log);
 
-        var vsr_state = env.manifest_log.superblock.working.vsr_state;
-        vsr_state.commit_min += 1;
-        vsr_state.commit_min_checksum += 1;
-        vsr_state.commit_max += 1;
+        const vsr_state = &env.manifest_log.superblock.working.vsr_state;
 
         env.pending += 1;
         env.manifest_log.superblock.checkpoint(
             checkpoint_superblock_callback,
             &env.superblock_context,
-            vsr_state,
+            .{
+                .commit_min_checksum = vsr_state.commit_min_checksum + 1,
+                .commit_min = vsr_state.commit_min + 1,
+                .commit_max = vsr_state.commit_max + 1,
+            },
         );
         env.wait(&env.manifest_log);
 
