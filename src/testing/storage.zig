@@ -620,7 +620,6 @@ pub const ClusterFaultAtlas = struct {
 
     pub fn init(replica_count: u8, random: std.rand.Random, options: Options) ClusterFaultAtlas {
         // If there is only one replica in the cluster, WAL/Grid faults are not recoverable.
-        // TODO Can we allow Header faults only?
         assert(replica_count > 1 or options.faulty_wal_headers == false);
         assert(replica_count > 1 or options.faulty_wal_prepares == false);
 
