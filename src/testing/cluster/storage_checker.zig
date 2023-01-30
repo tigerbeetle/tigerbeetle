@@ -14,7 +14,7 @@
 //! - Acquired Grid blocks
 //!
 //! Areas not verified:
-//! - SuperBlock sectors, which hold replica-specific state.
+//! - SuperBlock headers, which hold replica-specific state.
 //! - WAL headers, which may differ because the WAL writes deliberately corrupt redundant headers
 //!   to faulty slots to ensure recovery is consistent.
 //! - Non-allocated Grid blocks, which may differ due to state transfer.
@@ -25,7 +25,7 @@ const log = std.log.scoped(.storage_checker);
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
 const superblock = @import("../../vsr/superblock.zig");
-const SuperBlockSector = superblock.SuperBlockSector;
+const SuperBlockHeader = superblock.SuperBlockHeader;
 const Storage = @import("../storage.zig").Storage;
 
 /// After each compaction half measure, save the cumulative hash of all acquired grid blocks.
@@ -44,7 +44,7 @@ const Checkpoints = std.AutoHashMap(u64, Checkpoint);
 
 const Checkpoint = struct {
     // The superblock trailers are an XOR of all copies of all respective trailers, not the
-    // `SuperBlockSector.{trailer}_checksum`.
+    // `SuperBlockHeader.{trailer}_checksum`.
     checksum_superblock_manifest: u128,
     checksum_superblock_free_set: u128,
     checksum_superblock_client_table: u128,
@@ -145,15 +145,15 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             inline for (std.meta.fields(Checkpoint)) |field| {
                 log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={}", .{
                     replica.replica,
-                    replica.op_checkpoint,
+                    replica.op_checkpoint(),
                     field.name,
                     @field(checkpoint, field.name),
                 });
             }
 
-            const checkpoint_expect = checker.checkpoints.get(replica.op_checkpoint) orelse {
+            const checkpoint_expect = checker.checkpoints.get(replica.op_checkpoint()) orelse {
                 // This replica is the first to reach op_checkpoint.
-                try checker.checkpoints.putNoClobber(replica.op_checkpoint, checkpoint);
+                try checker.checkpoints.putNoClobber(replica.op_checkpoint(), checkpoint);
                 return;
             };
 

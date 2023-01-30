@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.superblock_quorums);
 
 const superblock = @import("./superblock.zig");
-const SuperBlockSector = superblock.SuperBlockSector;
+const SuperBlockHeader = superblock.SuperBlockHeader;
 const SuperBlockVersion = superblock.SuperBlockVersion;
 const fuzz = @import("./superblock_quorums_fuzz.zig");
 
@@ -16,10 +16,10 @@ pub fn QuorumsType(comptime options: Options) type {
         const Quorums = @This();
 
         const Quorum = struct {
-            sector: *const SuperBlockSector,
+            header: *const SuperBlockHeader,
             valid: bool = false,
             /// Track which copies are a member of the quorum.
-            /// Used to ignore duplicate copies of a sector when determining a quorum.
+            /// Used to ignore duplicate copies of a header when determining a quorum.
             copies: QuorumCount = QuorumCount.initEmpty(),
             /// An integer value indicates the copy index found in the corresponding slot.
             /// A `null` value indicates that the copy is invalid or not a member of the working
@@ -86,7 +86,7 @@ pub fn QuorumsType(comptime options: Options) type {
         ///   trailers may be damaged.
         pub fn working(
             quorums: *Quorums,
-            copies: []SuperBlockSector,
+            copies: []SuperBlockHeader,
             threshold: Threshold,
         ) Error!Quorum {
             assert(copies.len == options.superblock_copies);
@@ -102,17 +102,17 @@ pub fn QuorumsType(comptime options: Options) type {
             for (quorums.slice()) |quorum| {
                 if (quorum.copies.count() == options.superblock_copies) {
                     log.debug("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
-                        quorum.sector.checksum,
-                        quorum.sector.parent,
-                        quorum.sector.sequence,
+                        quorum.header.checksum,
+                        quorum.header.parent,
+                        quorum.header.sequence,
                         quorum.copies.count(),
                         quorum.valid,
                     });
                 } else {
                     log.warn("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
-                        quorum.sector.checksum,
-                        quorum.sector.parent,
-                        quorum.sector.sequence,
+                        quorum.header.checksum,
+                        quorum.header.parent,
+                        quorum.header.sequence,
                         quorum.copies.count(),
                         quorum.valid,
                     });
@@ -128,7 +128,7 @@ pub fn QuorumsType(comptime options: Options) type {
             // Verify that the remaining quorums are correctly sorted:
             for (quorums.slice()[1..]) |a| {
                 assert(sort_priority_descending({}, b, a));
-                assert(a.sector.valid_checksum());
+                assert(a.header.valid_checksum());
             }
 
             // Even the best copy with the most quorum still has inadequate quorum.
@@ -140,61 +140,61 @@ pub fn QuorumsType(comptime options: Options) type {
             // - a lost or misdirected write
             // - a latent sector error that prevented a write
             for (quorums.slice()[1..]) |a| {
-                if (a.sector.cluster != b.sector.cluster) {
+                if (a.header.cluster != b.header.cluster) {
                     log.warn("superblock copy={} has cluster={} instead of {}", .{
-                        a.sector.copy,
-                        a.sector.cluster,
-                        b.sector.cluster,
+                        a.header.copy,
+                        a.header.cluster,
+                        b.header.cluster,
                     });
                     continue;
                 }
 
-                if (a.sector.replica != b.sector.replica) {
+                if (a.header.replica != b.header.replica) {
                     log.warn("superblock copy={} has replica={} instead of {}", .{
-                        a.sector.copy,
-                        a.sector.replica,
-                        b.sector.replica,
+                        a.header.copy,
+                        a.header.replica,
+                        b.header.replica,
                     });
                     continue;
                 }
 
-                if (a.sector.sequence == b.sector.sequence) {
+                if (a.header.sequence == b.header.sequence) {
                     // Two quorums, same cluster+replica+sequence, but different checksums.
                     // This shouldn't ever happen — but if it does, we can't safely repair.
-                    assert(a.sector.checksum != b.sector.checksum);
+                    assert(a.header.checksum != b.header.checksum);
                     return error.Fork;
                 }
 
-                if (a.sector.sequence > b.sector.sequence + 1) {
+                if (a.header.sequence > b.header.sequence + 1) {
                     // We read sequences such as (2,2,2,4) — 2 isn't safe to use, but there isn't a
                     // valid quorum for 4 either.
                     return error.ParentSkipped;
                 }
 
-                if (a.sector.sequence + 1 == b.sector.sequence) {
-                    assert(a.sector.checksum != b.sector.checksum);
-                    assert(a.sector.cluster == b.sector.cluster);
-                    assert(a.sector.replica == b.sector.replica);
+                if (a.header.sequence + 1 == b.header.sequence) {
+                    assert(a.header.checksum != b.header.checksum);
+                    assert(a.header.cluster == b.header.cluster);
+                    assert(a.header.replica == b.header.replica);
 
-                    if (a.sector.checksum != b.sector.parent) {
+                    if (a.header.checksum != b.header.parent) {
                         return error.ParentNotConnected;
-                    } else if (!a.sector.vsr_state.monotonic(b.sector.vsr_state)) {
+                    } else if (!a.header.vsr_state.monotonic(b.header.vsr_state)) {
                         return error.VSRStateNotMonotonic;
                     } else {
-                        assert(b.sector.valid_checksum());
+                        assert(b.header.valid_checksum());
 
                         return b;
                     }
                 }
             }
 
-            assert(b.sector.valid_checksum());
+            assert(b.header.valid_checksum());
             return b;
         }
 
         fn count_copy(
             quorums: *Quorums,
-            copy: *const SuperBlockSector,
+            copy: *const SuperBlockHeader,
             slot: usize,
             threshold: Threshold,
         ) void {
@@ -240,12 +240,12 @@ pub fn QuorumsType(comptime options: Options) type {
             }
 
             var quorum = quorums.find_or_insert_quorum_for_copy(copy);
-            assert(quorum.sector.checksum == copy.checksum);
-            assert(quorum.sector.equal(copy));
+            assert(quorum.header.checksum == copy.checksum);
+            assert(quorum.header.equal(copy));
 
             if (copy.copy >= options.superblock_copies) {
-                // This sector is a valid member of the quorum, but with an unexpected copy number.
-                // The "SuperBlockSector.copy" field is not protected by the checksum, so if that byte
+                // This header is a valid member of the quorum, but with an unexpected copy number.
+                // The "SuperBlockHeader.copy" field is not protected by the checksum, so if that byte
                 // (and only that byte) is corrupted, the superblock is still valid — but we don't know
                 // for certain which copy this was supposed to be.
                 // We make the assumption that this was not a double-fault (corrupt + misdirect) —
@@ -262,13 +262,13 @@ pub fn QuorumsType(comptime options: Options) type {
             quorum.valid = quorum.copies.count() >= threshold.count();
         }
 
-        fn find_or_insert_quorum_for_copy(quorums: *Quorums, copy: *const SuperBlockSector) *Quorum {
+        fn find_or_insert_quorum_for_copy(quorums: *Quorums, copy: *const SuperBlockHeader) *Quorum {
             assert(copy.valid_checksum());
 
             for (quorums.array[0..quorums.count]) |*quorum| {
-                if (copy.checksum == quorum.sector.checksum) return quorum;
+                if (copy.checksum == quorum.header.checksum) return quorum;
             } else {
-                quorums.array[quorums.count] = Quorum{ .sector = copy };
+                quorums.array[quorums.count] = Quorum{ .header = copy };
                 quorums.count += 1;
 
                 return &quorums.array[quorums.count - 1];
@@ -280,26 +280,26 @@ pub fn QuorumsType(comptime options: Options) type {
         }
 
         fn sort_priority_descending(_: void, a: Quorum, b: Quorum) bool {
-            assert(a.sector.checksum != b.sector.checksum);
+            assert(a.header.checksum != b.header.checksum);
 
             if (a.valid and !b.valid) return true;
             if (b.valid and !a.valid) return false;
 
-            if (a.sector.sequence > b.sector.sequence) return true;
-            if (b.sector.sequence > a.sector.sequence) return false;
+            if (a.header.sequence > b.header.sequence) return true;
+            if (b.header.sequence > a.header.sequence) return false;
 
             if (a.copies.count() > b.copies.count()) return true;
             if (b.copies.count() > a.copies.count()) return false;
 
             // The sort order must be stable and deterministic:
-            return a.sector.checksum > b.sector.checksum;
+            return a.header.checksum > b.header.checksum;
         }
 
         /// Repair a quorum's copies in the safest known order.
         /// Repair is complete when every copy is on-disk (not necessarily in its home slot).
         ///
-        /// We must be careful when repairing superblock sectors to avoid endangering our quorum if
-        /// an additional fault occurs. We primarily guard against torn sector writes — preventing a
+        /// We must be careful when repairing superblock headers to avoid endangering our quorum if
+        /// an additional fault occurs. We primarily guard against torn header writes — preventing a
         /// misdirected write from derailing repair is far more expensive and complex — but they are
         /// likewise far less likely to occur.
         ///
@@ -342,9 +342,9 @@ pub fn QuorumsType(comptime options: Options) type {
                 }
 
                 // In descending order, our priorities for repair are:
-                // 1. The slot holds no sector, and the copy was not found anywhere.
-                // 2. The slot holds no sector, but its copy was found elsewhere.
-                // 3. The slot holds a misdirected sector, but that copy is in another slot as well.
+                // 1. The slot holds no header, and the copy was not found anywhere.
+                // 2. The slot holds no header, but its copy was found elsewhere.
+                // 3. The slot holds a misdirected header, but that copy is in another slot as well.
                 var a: ?u8 = null;
                 var b: ?u8 = null;
                 var c: ?u8 = null;
@@ -388,7 +388,7 @@ test "Quorum.repairs" {
     defer std.testing.log_level = level;
 
     try fuzz.fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 4 });
-    // TODO: Enable these once SuperBlockSector is generic over its Constants.
+    // TODO: Enable these once SuperBlockHeader is generic over its Constants.
     // try fuzz.fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 6 });
     // try fuzz.fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 8 });
 }

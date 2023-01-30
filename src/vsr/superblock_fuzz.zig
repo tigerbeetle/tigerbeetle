@@ -22,7 +22,7 @@ const StorageFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("superblock.zig").data_file_size_min;
-const VSRState = @import("superblock.zig").SuperBlockSector.VSRState;
+const VSRState = @import("superblock.zig").SuperBlockHeader.VSRState;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../testing/fuzz.zig");
@@ -154,7 +154,7 @@ const Environment = struct {
         vsr_headers: vsr.ViewChangeHeaders.BoundedArray,
         /// Track the expected `checksum(free_set)`.
         /// Note that this is a checksum of the decoded free set; it is not the same as
-        /// `SuperBlockSector.free_set_checksum`.
+        /// `SuperBlockHeader.free_set_checksum`.
         free_set: u128,
     });
 
@@ -233,7 +233,7 @@ const Environment = struct {
             if (env.latest_checksum != 0) {
                 if (env.latest_sequence + 1 == env.superblock_verify.working.sequence) {
                     // After a checkpoint() or view_change(), the parent points to the previous
-                    // working sector.
+                    // working header.
                     assert(env.superblock_verify.working.parent == env.latest_checksum);
                 }
             }

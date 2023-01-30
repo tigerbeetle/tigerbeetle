@@ -72,7 +72,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             const commit_b = replica.commit_min;
 
             const header_b = replica.journal.header_with_op(replica.commit_min);
-            assert(header_b != null or replica.commit_min == replica.op_checkpoint);
+            assert(header_b != null or replica.commit_min == replica.op_checkpoint());
             assert(header_b == null or header_b.?.op == commit_b);
 
             const checksum_a = state_checker.commits.items[commit_a].header.checksum;
