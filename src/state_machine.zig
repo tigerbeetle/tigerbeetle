@@ -766,8 +766,11 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         }
 
         fn create_account_rollback(self: *StateMachine, a: *const Account) void {
+            // Need to get the timestamp from the inserted account rather than the one passed in.
+            const timestamp = self.forest.grooves.accounts_immutable.get(a.id).?.timestamp;
+
             self.forest.grooves.accounts_immutable.remove(a.id);
-            self.forest.grooves.accounts_mutable.remove(a.timestamp);
+            self.forest.grooves.accounts_mutable.remove(timestamp);
         }
 
         fn create_account_exists(a: *const Account, e: *const AccountImmutable) CreateAccountResult {

@@ -203,7 +203,7 @@ const Environment = struct {
             _id: u128,
             _groove_mut: *GrooveMut,
             _groove_immut: *GrooveImmut,
-            
+
             finished: bool = false,
             prefetch_context_mut: GrooveMut.PrefetchContext = undefined,
             prefetch_context_immut: GrooveImmut.PrefetchContext = undefined,
@@ -223,7 +223,7 @@ const Environment = struct {
                 if (getter._groove_immut.get(getter._id)) |immut| {
                     groove.prefetch_enqueue(immut.timestamp);
                 }
-                
+
                 groove.prefetch(@This().prefetch_callback_mut, &getter.prefetch_context_mut);
             }
 
