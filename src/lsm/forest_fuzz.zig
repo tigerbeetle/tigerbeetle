@@ -53,7 +53,7 @@ const Environment = struct {
     });
 
     // Each account put can generate a put and a tombstone in each index.
-    const puts_since_compact_max = @divTrunc(forest_options.accounts.tree_options_object.commit_entries_max, 2);
+    const puts_since_compact_max = @divTrunc(forest_options.accounts_mutable.tree_options_object.commit_entries_max, 2);
 
     const compacts_per_checkpoint = std.math.divCeil(
         usize,
@@ -194,21 +194,64 @@ const Environment = struct {
     }
 
     fn prefetch_account(env: *Environment, id: u128) void {
-        const groove = &env.forest.grooves.accounts;
-        const Groove = @TypeOf(groove.*);
+        const groove_immut = &env.forest.grooves.accounts_immutable;
+        const groove_mut = &env.forest.grooves.accounts_mutable;
+
+        const GrooveImmut = @TypeOf(groove_immut.*);
+        const GrooveMut = @TypeOf(groove_mut.*);
         const Getter = struct {
+            _id: u128,
+            _groove_mut: *GrooveMut,
+            _groove_immut: *GrooveImmut,
+            
             finished: bool = false,
-            prefetch_context: Groove.PrefetchContext = undefined,
-            fn prefetch_callback(prefetch_context: *Groove.PrefetchContext) void {
-                const getter = @fieldParentPtr(@This(), "prefetch_context", prefetch_context);
+            prefetch_context_mut: GrooveMut.PrefetchContext = undefined,
+            prefetch_context_immut: GrooveImmut.PrefetchContext = undefined,
+
+            fn prefetch_start(getter: *@This()) void {
+                const groove = getter._groove_immut;
+                groove.prefetch_setup(null);
+                groove.prefetch_enqueue(getter._id);
+                groove.prefetch(@This().prefetch_callback_immut, &getter.prefetch_context_immut);
+            }
+
+            fn prefetch_callback_immut(prefetch_context: *GrooveImmut.PrefetchContext) void {
+                const getter = @fieldParentPtr(@This(), "prefetch_context_immut", prefetch_context);
+                const groove = getter._groove_mut;
+                groove.prefetch_setup(null);
+
+                if (getter._groove_immut.get(getter._id)) |immut| {
+                    groove.prefetch_enqueue(immut.timestamp);
+                }
+                
+                groove.prefetch(@This().prefetch_callback_mut, &getter.prefetch_context_mut);
+            }
+
+            fn prefetch_callback_mut(prefetch_context: *GrooveMut.PrefetchContext) void {
+                const getter = @fieldParentPtr(@This(), "prefetch_context_mut", prefetch_context);
+                assert(!getter.finished);
                 getter.finished = true;
             }
         };
-        var getter = Getter{};
-        groove.prefetch_setup(null);
-        groove.prefetch_enqueue(id);
-        groove.prefetch(Getter.prefetch_callback, &getter.prefetch_context);
+
+        var getter = Getter{
+            ._id = id,
+            ._groove_mut = groove_mut,
+            ._groove_immut = groove_immut,
+        };
+        getter.prefetch_start();
         while (!getter.finished) env.storage.tick();
+    }
+
+    fn put_account(env: *Environment, a: *const Account) void {
+        env.forest.grooves.accounts_immutable.put(&StateMachine.AccountImmutable.from_account(a));
+        env.forest.grooves.accounts_mutable.put(&StateMachine.AccountMutable.from_account(a));
+    }
+
+    fn get_account(env: *Environment, id: u128) ?Account {
+        const immut = env.forest.grooves.accounts_immutable.get(id) orelse return null;
+        const mut = env.forest.grooves.accounts_mutable.get(immut.timestamp).?;
+        return StateMachine.into_account(immut, mut);
     }
 
     fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
@@ -238,13 +281,13 @@ const Environment = struct {
                 .put_account => |account| {
                     // The forest requires prefetch before put.
                     env.prefetch_account(account.id);
-                    env.forest.grooves.accounts.put(&account);
+                    env.put_account(&account);
                     try model.put(account.id, account);
                 },
                 .get_account => |id| {
                     // Get account from lsm.
                     env.prefetch_account(id);
-                    const lsm_account = env.forest.grooves.accounts.get(id);
+                    const lsm_account = env.get_account(id);
 
                     // Compare result to model.
                     const model_account = model.get(id);
@@ -254,7 +297,7 @@ const Environment = struct {
                         assert(std.mem.eql(
                             u8,
                             std.mem.asBytes(&model_account.?),
-                            std.mem.asBytes(lsm_account.?),
+                            std.mem.asBytes(&lsm_account.?),
                         ));
                     }
                 },
