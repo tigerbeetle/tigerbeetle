@@ -485,7 +485,7 @@ pub fn GrooveType(
 
             var prefetch_ids = PrefetchIDs{};
             try prefetch_ids.ensureTotalCapacity(allocator, options.prefetch_entries_max);
-            errdefer if (use_id) prefetch_ids.deinit(allocator);
+            errdefer prefetch_ids.deinit(allocator);
 
             var prefetch_objects = PrefetchObjects{};
             try prefetch_objects.ensureTotalCapacity(allocator, options.prefetch_entries_max);
