@@ -31,7 +31,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         const GrooveType = @import("lsm/groove.zig").GrooveType;
         const ForestType = @import("lsm/forest.zig").ForestType;
 
-        const AccountImmutable = extern struct {
+        pub const AccountImmutable = extern struct {
             id: u128,
             user_data: u128,
             timestamp: u64,
@@ -39,15 +39,38 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             code: u16,
             flags: AccountFlags,
             padding: [16]u8,
+
+            pub fn from_account(a: *const Account) AccountImmutable {
+                return .{
+                    .id = a.id,
+                    .user_data = a.user_data,
+                    .timestamp = a.timestamp,
+                    .ledger = a.ledger,
+                    .code = a.code,
+                    .flags = a.flags,
+                    .padding = mem.zeroes([16]u8),
+                };
+            }
         };
 
-        const AccountMutable = extern struct {
+        pub const AccountMutable = extern struct {
             debits_pending: u64,
             debits_posted: u64,
             credits_pending: u64,
             credits_posted: u64,
             timestamp: u64,
             padding: [24]u8,
+
+            pub fn from_account(a: *const Account) AccountMutable {
+                return .{
+                    .debits_pending = a.debits_pending,
+                    .debits_posted = a.debits_posted,
+                    .credits_pending = a.credits_pending,
+                    .credits_posted = a.credits_posted,
+                    .timestamp = a.timestamp,
+                    .padding = mem.zeroes([24]u8),
+                };
+            }
         };
 
         comptime {
@@ -55,12 +78,12 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             assert(math.isPowerOfTwo(@sizeOf(AccountMutable)));
         }
 
-        fn as_account(immut: *const AccountImmutable, mut: *const AccountMutable) Account {
+        pub fn into_account(immut: *const AccountImmutable, mut: *const AccountMutable) Account {
             assert(immut.timestamp == mut.timestamp);
             return Account{
                 .id = immut.id,
                 .user_data = immut.user_data,
-                .reserved = undefined,
+                .reserved = mem.zeroes([48]u8),
                 .ledger = immut.ledger,
                 .code = immut.code,
                 .flags = immut.flags,
@@ -685,7 +708,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             for (batch) |id| {
                 if (self.forest.grooves.accounts_immutable.get(id)) |immut| {
                     const mut = self.forest.grooves.accounts_mutable.get(immut.timestamp).?;
-                    results[results_count] = as_account(immut, mut);
+                    results[results_count] = into_account(immut, mut);
                     results_count += 1;
                 }
             }
@@ -735,24 +758,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 return create_account_exists(a, e);
             }
 
-            self.forest.grooves.accounts_immutable.put_no_clobber(&AccountImmutable{
-                .id = a.id,
-                .user_data = a.user_data,
-                .timestamp = a.timestamp,
-                .ledger = a.ledger,
-                .code = a.code,
-                .flags = a.flags,
-                .padding = undefined,
-            });
-
-            self.forest.grooves.accounts_mutable.put_no_clobber(&AccountMutable{
-                .debits_pending = a.debits_pending,
-                .debits_posted = a.debits_posted,
-                .credits_pending = a.credits_pending,
-                .credits_posted = a.credits_posted,
-                .timestamp = a.timestamp,
-                .padding = undefined,
-            });
+            self.forest.grooves.accounts_immutable.put_no_clobber(&AccountImmutable.from_account(a));
+            self.forest.grooves.accounts_mutable.put_no_clobber(&AccountMutable.from_account(a));
 
             self.commit_timestamp = a.timestamp;
             return .ok;
@@ -839,8 +846,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             }
             if (sum_overflows(t.timestamp, t.timeout)) return .overflows_timeout;
 
-            if (as_account(dr_immut, dr_mut).debits_exceed_credits(t.amount)) return .exceeds_credits;
-            if (as_account(cr_immut, cr_mut).credits_exceed_debits(t.amount)) return .exceeds_debits;
+            if (into_account(dr_immut, dr_mut).debits_exceed_credits(t.amount)) return .exceeds_credits;
+            if (into_account(cr_immut, cr_mut).credits_exceed_debits(t.amount)) return .exceeds_debits;
 
             self.forest.grooves.transfers.put_no_clobber(t);
 
@@ -1487,12 +1494,13 @@ fn check(comptime test_table: []const u8) !void {
             .setup => |b| {
                 assert(operation == null);
 
-                var account = context.state_machine.get_account(b.account).?.*;
-                account.debits_pending = b.debits_pending;
-                account.debits_posted = b.debits_posted;
-                account.credits_pending = b.credits_pending;
-                account.credits_posted = b.credits_posted;
-                context.state_machine.forest.grooves.accounts.put(&account);
+                const immut = context.state_machine.forest.grooves.accounts_immutable.get(b.account).?;
+                var mut = context.state_machine.forest.grooves.accounts_mutable.get(immut.timestamp).?.*;
+                mut.debits_pending = b.debits_pending;
+                mut.debits_posted = b.debits_posted;
+                mut.credits_pending = b.credits_pending;
+                mut.credits_posted = b.credits_posted;
+                context.state_machine.forest.grooves.accounts_mutable.put(&mut);
             },
 
             .account => |a| {
