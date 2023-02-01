@@ -318,13 +318,26 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 self.forest.grooves.accounts_immutable.prefetch_enqueue(a.id);
             }
             self.forest.grooves.accounts_immutable.prefetch(
-                prefetch_create_accounts_callback,
+                prefetch_create_accounts_immutable_callback,
                 &self.prefetch_accounts_immutable_context,
             );
         }
 
-        fn prefetch_create_accounts_callback(completion: *AccountsImmutableGroove.PrefetchContext) void {
+        fn prefetch_create_accounts_immutable_callback(completion: *AccountsImmutableGroove.PrefetchContext) void {
             const self = @fieldParentPtr(StateMachine, "prefetch_accounts_immutable_context", completion);
+
+            // Nothing to prefetch_enqueue() from accounts_mutable as accounts_immutable 
+            // is all that is needed to check for pre-existing accounts before creating one.
+            // We still call prefetch() anyway to keep a valid/expected Groove state for commit().
+
+            self.forest.grooves.accounts_mutable.prefetch(
+                prefetch_create_accounts_mutable_callback,
+                &self.prefetch_accounts_mutable_context,
+            );
+        }
+
+        fn prefetch_create_accounts_mutable_callback(completion: *AccountsMutableGroove.PrefetchContext) void {
+            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_mutable_context", completion);
 
             self.prefetch_finish();
         }
