@@ -84,7 +84,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             Storage,
             AccountMutable,
             .{
-                .ignored = &[_][]const u8{ "padding" },
+                .ignored = &[_][]const u8{"padding"},
                 .derived = .{},
             },
         );
@@ -326,7 +326,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         fn prefetch_create_accounts_immutable_callback(completion: *AccountsImmutableGroove.PrefetchContext) void {
             const self = @fieldParentPtr(StateMachine, "prefetch_accounts_immutable_context", completion);
 
-            // Nothing to prefetch_enqueue() from accounts_mutable as accounts_immutable 
+            // Nothing to prefetch_enqueue() from accounts_mutable as accounts_immutable
             // is all that is needed to check for pre-existing accounts before creating one.
             // We still call prefetch() anyway to keep a valid/expected Groove state for commit().
 
@@ -451,7 +451,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
         fn prefetch_lookup_accounts_mutable_callback(completion: *AccountsMutableGroove.PrefetchContext) void {
             const self = @fieldParentPtr(StateMachine, "prefetch_accounts_mutable_context", completion);
-            
+
             self.prefetch_finish();
         }
 

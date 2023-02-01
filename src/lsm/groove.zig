@@ -566,7 +566,7 @@ pub fn GrooveType(
                         return;
                     }
 
-                    // Fallthrought: The id was in the IdTree's value cache, but not in the 
+                    // Fallthrought: The id was in the IdTree's value cache, but not in the
                     // ObjectTree's value cache so it needs to be prefetched.
                 }
             }
