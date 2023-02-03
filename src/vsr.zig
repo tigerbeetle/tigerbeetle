@@ -352,6 +352,11 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.client != 0) {
+            if (self.replica != 0) return "replica != 0";
+            if (self.op != 0) return "op != 0";
+        }
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -363,6 +368,9 @@ pub const Header = extern struct {
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
+        if (self.timestamp > 0) {
+            if (self.view != 0) return "view != 0";
+        }
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
