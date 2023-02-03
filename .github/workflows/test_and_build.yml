@@ -235,7 +235,7 @@ jobs:
       # On pull requests only build the native image
       - if: github.ref != 'refs/heads/main'
         name: Build and push (ARM and AMD Docker images)
-        id: docker_build_release
+        id: docker_build_pr
         uses: docker/build-push-action@v2
         with:
           push: false
