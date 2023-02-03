@@ -1736,12 +1736,17 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
 
-            // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
-            const latest_committed_entry = self.journal.header_with_op(self.commit_max).?;
+            const latest_committed_entry = checksum: {
+                if (self.commit_max == self.superblock.working.vsr_state.commit_min) {
+                    break :checksum self.superblock.working.vsr_state.commit_min_checksum;
+                } else {
+                    break :checksum self.journal.header_with_op(self.commit_max).?.checksum;
+                }
+            };
 
             self.send_header_to_other_replicas(.{
                 .command = .commit,
-                .context = latest_committed_entry.checksum,
+                .context = latest_committed_entry,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
