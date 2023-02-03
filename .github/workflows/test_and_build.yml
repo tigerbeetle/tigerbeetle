@@ -227,7 +227,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - if: github.ref == 'refs/heads/main'
-        name: Build and push (ARM and AMD Docker images)
+        name: Build and push Docker images (ARM and AMD)
         id: docker_build_release
         uses: docker/build-push-action@v2
         with:
@@ -239,7 +239,7 @@ jobs:
 
       # On pull requests only build the native image
       - if: github.ref != 'refs/heads/main'
-        name: Build and push (ARM and AMD Docker images)
+        name: Build and push Docker image (native only, shortcut for pull requests)
         id: docker_build_pr
         uses: docker/build-push-action@v2
         with:
@@ -280,7 +280,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - if: github.ref == 'refs/heads/main'
-        name: Build and push (ARM and AMD Docker images)
+        name: Build and push debug Docker images (ARM and AMD)
         uses: docker/build-push-action@v2
         id: docker_build_debug
         with:
@@ -294,7 +294,7 @@ jobs:
 
       # On pull requests only build the native image
       - if: github.ref != 'refs/heads/main'
-        name: Build and push pr
+        name: Build and push debug Docker image (native only, shortcut for pull requests)
         uses: docker/build-push-action@v2
         id: docker_build_debug_pr
         with:
