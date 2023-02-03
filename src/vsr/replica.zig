@@ -766,6 +766,12 @@ pub fn ReplicaType(
             tracer.flush();
         }
 
+        // Pings are used:
+        //  - By clients, to learn about the current view.
+        //  - By replicas, to synchronise cluster time and to probe for network connectivity.
+        //
+        // In the second case we avoid setting the view to make sure pings can still be sent
+        // during view changes.
         fn on_ping(self: *Self, message: *const Message) void {
             if (self.status != .normal and self.status != .view_change) return;
 
@@ -777,7 +783,6 @@ pub fn ReplicaType(
                 .command = .pong,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .view = self.view,
             };
 
             if (message.header.client > 0) {
@@ -790,21 +795,28 @@ pub fn ReplicaType(
                 // a newer view number, locking out the client. The principle here is that we must
                 // never send view numbers for views that have not yet started.
                 if (self.status == .normal) {
+                    pong.view = self.view;
                     self.send_header_to_client(message.header.client, pong);
                 }
-            } else if (message.header.replica == self.replica) {
-                log.warn("{}: on_ping: ignoring (self)", .{self.replica});
             } else {
-                // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
-                pong.op = message.header.op;
-                pong.timestamp = @bitCast(u64, self.clock.realtime());
-                self.send_header_to_replica(message.header.replica, pong);
+                assert(message.header.view == 0);
+
+                if (message.header.replica == self.replica) {
+                    log.warn("{}: on_ping: ignoring (self)", .{self.replica});
+                } else {
+                    // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
+                    pong.op = message.header.op;
+                    pong.timestamp = @bitCast(u64, self.clock.realtime());
+                    self.send_header_to_replica(message.header.replica, pong);
+                }
             }
         }
 
         fn on_pong(self: *Self, message: *const Message) void {
             if (message.header.client > 0) return;
             if (message.header.replica == self.replica) return;
+
+            assert(message.header.view == 0);
 
             const m0 = message.header.op;
             const t1 = @bitCast(i64, message.header.timestamp);
@@ -1632,7 +1644,6 @@ pub fn ReplicaType(
                 .command = .ping,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .view = self.view,
                 .op = self.clock.monotonic(),
             };
 
@@ -2894,7 +2905,11 @@ pub fn ReplicaType(
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_message_from_header(self: *Self, header: Header) *Message {
             assert(header.replica == self.replica);
-            assert(header.view == self.view or header.command == .request_start_view);
+            assert(
+                header.view == self.view or
+                    header.command == .request_start_view or
+                    header.command == .pong or header.command == .ping,
+            );
             assert(header.size == @sizeOf(Header));
 
             const message = self.message_bus.pool.get_message();
@@ -4763,7 +4778,7 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                 },
                 .ping, .pong => {
-                    assert(message.header.view == self.view);
+                    assert(message.header.view == 0);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
@@ -4810,6 +4825,11 @@ pub fn ReplicaType(
                 if (message.header.view > self.view_durable() and
                     message.header.command != .request_start_view)
                 {
+                    // Pings are used for syncing time, so they must not be
+                    // blocked on persisting view.
+                    assert(message.header.command != .ping);
+                    assert(message.header.command != .pong);
+
                     log.debug("{}: send_message_to_replica: dropped {s} " ++
                         "(view_durable={} message.view={})", .{
                         self.replica,
