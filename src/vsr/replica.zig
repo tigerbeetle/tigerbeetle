@@ -1521,6 +1521,7 @@ pub fn ReplicaType(
             const op = self.nack_prepare_op.?;
             const checksum = self.journal.header_with_op(op).?.checksum;
             const slot = self.journal.slot_with_op(op).?;
+            assert(op <= self.op);
 
             if (message.header.op != op) {
                 log.debug("{}: on_nack_prepare: ignoring (repairing another op)", .{self.replica});
@@ -1591,6 +1592,7 @@ pub fn ReplicaType(
 
             assert(count == threshold);
             assert(!self.nack_prepare_from_other_replicas.isSet(self.replica));
+            assert(self.op - op < constants.pipeline_prepare_queue_max);
             log.debug("{}: on_nack_prepare: quorum received op={}", .{ self.replica, op });
 
             self.primary_discard_uncommitted_ops_from(op, checksum);
@@ -4590,6 +4592,7 @@ pub fn ReplicaType(
 
         fn send_start_view_change(self: *Self) void {
             assert(self.status == .view_change);
+            assert(self.log_view < self.view);
             assert(!self.do_view_change_quorum);
             // Send only to other replicas (and not to ourself) to avoid a quorum off-by-one error:
             // This could happen if the replica mistakenly counts its own message in the quorum.
