@@ -40,6 +40,11 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             flags: AccountFlags,
             padding: [16]u8,
 
+            comptime {
+                assert(@sizeOf(AccountImmutable) == 64);
+                assert(@bitSizeOf(AccountImmutable) == @sizeOf(AccountImmutable) * 8);
+            }
+
             pub fn from_account(a: *const Account) AccountImmutable {
                 return .{
                     .id = a.id,
@@ -61,6 +66,11 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             timestamp: u64,
             padding: [24]u8,
 
+            comptime {
+                assert(@sizeOf(AccountMutable) == 64);
+                assert(@bitSizeOf(AccountMutable) == @sizeOf(AccountMutable) * 8);
+            }
+
             pub fn from_account(a: *const Account) AccountMutable {
                 return .{
                     .debits_pending = a.debits_pending,
@@ -72,11 +82,6 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 };
             }
         };
-
-        comptime {
-            assert(math.isPowerOfTwo(@sizeOf(AccountImmutable)));
-            assert(math.isPowerOfTwo(@sizeOf(AccountMutable)));
-        }
 
         pub fn into_account(immut: *const AccountImmutable, mut: *const AccountMutable) Account {
             assert(immut.timestamp == mut.timestamp);
@@ -777,7 +782,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             assert(a.id == e.id);
             if (@bitCast(u16, a.flags) != @bitCast(u16, e.flags)) return .exists_with_different_flags;
             if (a.user_data != e.user_data) return .exists_with_different_user_data;
-            assert(zeroed_48_bytes(a.reserved));
+            assert(zeroed_48_bytes(a.reserved) and zeroed_16_bytes(e.padding));
             if (a.ledger != e.ledger) return .exists_with_different_ledger;
             if (a.code != e.code) return .exists_with_different_code;
             return .exists;
@@ -1131,10 +1136,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                     ),
                     .tree_options_object = .{
                         .cache_entries_max = options.cache_entries_accounts,
-                        .commit_entries_max = math.max(
-                            batch_accounts_max,
-                            batch_transfers_max,
-                        ),
+                        .commit_entries_max = math.max(batch_accounts_max, batch_transfers_max),
                     },
                     .tree_options_id = .{
                         .cache_entries_max = options.cache_entries_accounts,
@@ -1158,7 +1160,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                         .cache_entries_max = options.cache_entries_accounts,
                         .commit_entries_max = math.max(
                             batch_accounts_max,
-                            // ×2 because creating a transfer will update 2 AccountsMutable.
+                            // ×2 because creating a transfer will update 2 AccountsMutable's.
                             2 * batch_transfers_max,
                         ),
                     },
@@ -1234,6 +1236,11 @@ fn sum_overflows(a: u64, b: u64) bool {
 }
 
 /// Optimizes for the common case, where the array is zeroed. Completely branchless.
+fn zeroed_16_bytes(a: [16]u8) bool {
+    const x = @bitCast([2]u64, a);
+    return (x[0] | x[1]) == 0;
+}
+
 fn zeroed_32_bytes(a: [32]u8) bool {
     const x = @bitCast([4]u64, a);
     return (x[0] | x[1] | x[2] | x[3]) == 0;
