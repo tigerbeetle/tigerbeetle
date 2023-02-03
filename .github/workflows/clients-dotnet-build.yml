@@ -43,7 +43,7 @@ jobs:
 
       - name: Save nuget package
         uses: actions/upload-artifact@v3
-        ## if: ${{ github.event_name == 'pull_request' }}
+        ## if: ${{ github.ref != 'refs/heads/main' }}
         with:
           name: nuget-artifact
           path: src/clients/dotnet/TigerBeetle/bin/Release/*.nupkg
