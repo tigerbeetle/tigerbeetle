@@ -247,9 +247,6 @@ pub fn ReplicaType(
         /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
         repair_timeout: Timeout,
 
-        /// The nonce of the `recovery` messages.
-        recovery_nonce: Nonce,
-
         /// Used to provide deterministic entropy to `choose_any_other_replica()`.
         /// Incremented whenever `choose_any_other_replica()` is called.
         choose_any_other_replica_ticks: u64 = 0,
@@ -518,15 +515,6 @@ pub fn ReplicaType(
             );
             errdefer self.state_machine.deinit(allocator);
 
-            const recovery_nonce = blk: {
-                var nonce: [@sizeOf(Nonce)]u8 = undefined;
-                var hash = std.crypto.hash.Blake3.init(.{});
-                hash.update(std.mem.asBytes(&self.clock.monotonic()));
-                hash.update(&[_]u8{replica_index});
-                hash.final(&nonce);
-                break :blk @bitCast(Nonce, nonce);
-            };
-
             self.* = Self{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
@@ -585,7 +573,6 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
-                .recovery_nonce = recovery_nonce,
                 .prng = std.rand.DefaultPrng.init(replica_index),
             };
 
