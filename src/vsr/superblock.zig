@@ -285,8 +285,8 @@ pub const SuperBlockHeader = extern struct {
         return true;
     }
 
-    pub fn vsr_headers(superblock: *const SuperBlockHeader) vsr.ViewChangeHeaders {
-        return vsr.ViewChangeHeaders.init(
+    pub fn vsr_headers(superblock: *const SuperBlockHeader) vsr.Headers.ViewChangeSlice {
+        return vsr.Headers.ViewChangeSlice.init(
             superblock.vsr_headers_all[0..superblock.vsr_headers_count],
         );
     }
@@ -441,7 +441,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             /// Used by format(), checkpoint(), and view_change().
             vsr_state: ?SuperBlockHeader.VSRState = null,
             /// Used by format() and view_change().
-            vsr_headers: ?vsr.ViewChangeHeaders.BoundedArray = null,
+            vsr_headers: ?vsr.Headers.ViewChangeArray = null,
             repairs: ?Quorums.RepairIterator = null, // Used by open().
         };
 
@@ -657,15 +657,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.working.set_checksum();
 
-            var vsr_headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
-            vsr_headers.appendAssumeCapacity(vsr.Header.root_prepare(options.cluster));
-
             context.* = .{
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .format,
                 .vsr_state = SuperBlockHeader.VSRState.root(options.cluster),
-                .vsr_headers = vsr_headers,
+                .vsr_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
             };
 
             // TODO At a higher layer, we must:
@@ -733,7 +730,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
             log_view: u32,
             view: u32,
-            headers: vsr.ViewChangeHeaders.BoundedArray,
+            headers: vsr.Headers.ViewChangeArray,
         };
 
         /// The replica calls view_change() to persist its view/log_view — it cannot
@@ -747,14 +744,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
             update: UpdateViewChange,
         ) void {
             assert(superblock.opened);
-            assert(superblock.staging.vsr_state.commit_min <= update.headers.get(0).op);
+            assert(superblock.staging.vsr_state.commit_min <= update.headers.array.get(0).op);
             assert(superblock.staging.vsr_state.commit_max <= update.commit_max);
             assert(superblock.staging.vsr_state.view <= update.view);
             assert(superblock.staging.vsr_state.log_view <= update.log_view);
             assert(superblock.staging.vsr_state.log_view < update.log_view or
                 superblock.staging.vsr_state.view < update.view);
 
-            vsr.ViewChangeHeaders.verify(update.headers.constSlice());
+            vsr.Headers.ViewChangeSlice.verify(update.headers.array.constSlice());
             assert(update.view >= update.log_view);
 
             const vsr_state = SuperBlockHeader.VSRState{
@@ -779,7 +776,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 update.view,
 
                 superblock.staging.vsr_headers().slice[0].checksum,
-                update.headers.get(0).checksum,
+                update.headers.array.get(0).checksum,
             });
 
             context.* = .{
@@ -826,16 +823,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (context.vsr_headers) |headers| {
                 assert(context.caller == .format or context.caller == .view_change);
 
-                superblock.staging.vsr_headers_count = @intCast(u32, headers.len);
+                superblock.staging.vsr_headers_count = @intCast(u32, headers.array.len);
                 stdx.copy_disjoint(
                     .exact,
                     vsr.Header,
-                    superblock.staging.vsr_headers_all[0..headers.len],
-                    headers.constSlice(),
+                    superblock.staging.vsr_headers_all[0..headers.array.len],
+                    headers.array.constSlice(),
                 );
                 std.mem.set(
                     vsr.Header,
-                    superblock.staging.vsr_headers_all[headers.len..],
+                    superblock.staging.vsr_headers_all[headers.array.len..],
                     std.mem.zeroes(vsr.Header),
                 );
             } else {
