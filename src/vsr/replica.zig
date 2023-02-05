@@ -5621,7 +5621,8 @@ pub fn ReplicaType(
                     .view_change => if (header.view == self.view) return,
                     else => unreachable,
                 },
-                .recovering_head => {},
+                // We need a start_view from any other replica — don't request it from ourselves.
+                .recovering_head => if (self.primary_index(header.view) == self.replica) return,
                 else => unreachable,
             }
 
