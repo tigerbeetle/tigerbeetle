@@ -5417,15 +5417,20 @@ pub fn ReplicaType(
         /// based on its own timer, or because it receives a start_view_change or do_view_change
         /// message for a view with a larger number than its own view.
         fn transition_to_view_change_status(self: *Self, view_new: u32) void {
-            log.debug("{}: transition_to_view_change_status: view={}..{}", .{
-                self.replica,
-                self.view,
-                view_new,
-            });
             assert(self.status == .normal or
                 self.status == .view_change or
                 self.status == .recovering or
                 self.status == .recovering_head);
+            assert(view_new >= self.log_view);
+            assert(view_new >= self.view);
+
+            log.debug("{}: transition_to_view_change_status: view={}..{} status={}..{}", .{
+                self.replica,
+                self.view,
+                view_new,
+                self.status,
+                Status.view_change,
+            });
 
             const status_before = self.status;
             self.status = .view_change;
@@ -5433,7 +5438,6 @@ pub fn ReplicaType(
             if (self.view == view_new) {
                 assert(status_before == .recovering or status_before == .recovering_head);
             } else {
-                assert(view_new > self.view);
                 self.view = view_new;
                 self.view_durable_update();
             }
@@ -5465,7 +5469,11 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum == false);
             assert(self.nack_prepare_op == null);
 
-            self.send_start_view_change();
+            if (self.log_view == self.view) {
+                assert(status_before == .recovering_head);
+            } else {
+                self.send_start_view_change();
+            }
         }
 
         fn update_client_table_entry(self: *Self, reply: *Message) void {
