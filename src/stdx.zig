@@ -137,3 +137,26 @@ test "disjoint_slices" {
     try std.testing.expectEqual(false, disjoint_slices(u8, u32, a, std.mem.bytesAsSlice(u32, a)));
     try std.testing.expectEqual(false, disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
 }
+
+/// Utility function for ad-hoc profiling.
+///
+/// A thin wrapper around `std.time.Timer` which handles the boilerplate of
+/// printing to stderr and formatting times in some (unspecified) readable way.
+pub fn timeit() TimeIt {
+    return TimeIt{ .inner = std.time.Timer.start() catch unreachable };
+}
+
+const TimeIt = struct {
+    inner: std.time.Timer,
+
+    /// Prints elapesed time to stderr and resets the internal timer.
+    pub fn lap(self: *TimeIt, comptime label: []const u8) void {
+        const label_alignment = comptime " " ** (1 + (12 -| label.len));
+
+        const nanos = self.inner.lap();
+        std.debug.print(
+            label ++ ":" ++ label_alignment ++ "{}\n",
+            .{std.fmt.fmtDuration(nanos)},
+        );
+    }
+};
