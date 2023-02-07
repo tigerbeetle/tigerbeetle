@@ -24,9 +24,7 @@
     "src/index.ts",
     "src/node.zig",
     "src/test.ts",
-    "src/tigerbeetle/src/*.zig",
-    "src/tigerbeetle/src/{c,io,lsm,testing,vsr,state_machine}",
-    "src/tigerbeetle/scripts",
+    "src/tigerbeetle",
     "src/translate.zig",
     "tsconfig.json"
   ],
@@ -36,13 +34,12 @@
   "scripts": {
     "benchmark": "./scripts/benchmark.sh",
     "test": "node dist/test",
-    "postinstall": "npm run install_zig && npm run download_node_headers && npm run build_lib",
-    "install_zig": "sh ./src/tigerbeetle/scripts/install_zig.sh",
+    "postinstall": "npm run download_node_headers && npm run build_lib",
     "download_node_headers": "sh ./scripts/download_node_headers.sh",
     "build": "npm run build_tsc && npm run build_lib",
     "build_tsc": "./node_modules/typescript/bin/tsc",
     "build_lib": "sh ./scripts/build_lib.sh",
-    "prepack": "npm run build_tsc",
+    "prepack": "npm run build",
     "clean": "rm -rf build dist node_modules src/zig-cache zig"
   },
   "author": "TigerBeetle, Inc",
