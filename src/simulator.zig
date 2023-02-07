@@ -112,7 +112,7 @@ pub fn main() !void {
             .read_latency_min = random.uintLessThan(u16, 3),
             .read_latency_mean = 3 + random.uintLessThan(u16, 10),
             .write_latency_min = random.uintLessThan(u16, 3),
-            .write_latency_mean = 3 + random.uintLessThan(u16, 100),
+            .write_latency_mean = 3 + random.uintLessThan(u16, 150),
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
@@ -143,9 +143,10 @@ pub fn main() !void {
     const simulator_options = Simulator.Options{
         .cluster = cluster_options,
         .workload = workload_options,
+        // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
         .replica_crash_probability = 0.00002,
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
-        .replica_restart_probability = 0.0001,
+        .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = 1 + random.uintLessThan(u8, 99),
@@ -268,9 +269,9 @@ pub const Simulator = struct {
     requests_idle: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Simulator {
-        assert(options.replica_crash_probability < 1.0);
+        assert(options.replica_crash_probability < 100.0);
         assert(options.replica_crash_probability >= 0.0);
-        assert(options.replica_restart_probability < 1.0);
+        assert(options.replica_restart_probability < 100.0);
         assert(options.replica_restart_probability >= 0.0);
         assert(options.requests_max > 0);
         assert(options.request_probability > 0);
