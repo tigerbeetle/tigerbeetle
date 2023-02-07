@@ -1188,6 +1188,11 @@ pub fn ReplicaType(
 
             if (self.primary_index(message.header.view) != self.replica) {
                 for (self.do_view_change_from_all_replicas) |dvc| assert(dvc == null);
+
+                log.debug("{}: on_do_view_change: view={} backup awaiting start_view", .{
+                    self.replica,
+                    self.view,
+                });
                 return;
             }
 
@@ -4911,13 +4916,28 @@ pub fn ReplicaType(
             // The view/log_view incremented while the previous view-change update was being saved.
             const update = self.log_view_durable() < self.log_view or
                 self.view_durable() < self.view;
-
             const update_dvc = update and self.log_view < self.view;
             const update_sv = update and self.log_view == self.view and
                 (self.replica != self.primary_index(self.view) or self.status == .normal);
             assert(!(update_dvc and update_sv));
 
             if (update_dvc or update_sv) self.view_durable_update();
+
+            // Reset SVC timeouts in case the view-durable update took a long time.
+            if (self.normal_status_timeout.ticking) self.normal_status_timeout.reset();
+            if (self.view_change_status_timeout.ticking) self.view_change_status_timeout.reset();
+
+            // Trigger work that was deferred until after the view-change update.
+            if (self.status == .normal) {
+                if (self.primary_index(self.view) == self.replica) {
+                    const start_view = self.create_view_change_message(.start_view);
+                    defer self.message_bus.unref(start_view);
+
+                    self.send_message_to_other_replicas(start_view);
+                } else {
+                    self.send_prepare_oks_after_view_change();
+                }
+            }
         }
 
         fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
@@ -5188,7 +5208,7 @@ pub fn ReplicaType(
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();
 
-            // SVs will be sent out (via timeout) after the view_durable update completes.
+            // SVs will be sent out after the view_durable update completes.
             assert(self.view_durable_updating());
             assert(self.log_view > self.log_view_durable());
         }
