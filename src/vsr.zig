@@ -687,7 +687,7 @@ pub const Timeout = struct {
 
     /// It's important to check that when fired() is acted on that the timeout is stopped/started,
     /// otherwise further ticks around the event loop may trigger a thundering herd of messages.
-    pub fn fired(self: *Timeout) bool {
+    pub fn fired(self: *const Timeout) bool {
         if (self.ticking and self.ticks >= self.after) {
             log.debug("{}: {s} fired", .{ self.id, self.name });
             if (self.ticks > self.after) {
