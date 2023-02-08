@@ -185,11 +185,15 @@ pub const Network = struct {
 
     fn deliver_message(packet: Packet, path: PacketSimulatorPath) void {
         const network = packet.network;
+        const process_path = .{
+            .source = raw_process_to_process(network.processes.items[path.source]),
+            .target = raw_process_to_process(network.processes.items[path.target]),
+        };
 
         if (!network.buses_enabled.items[path.target]) {
             log.debug("deliver_message: {} > {}: {} (dropped; target is down)", .{
-                path.source,
-                path.target,
+                process_path.source,
+                process_path.target,
                 packet.message.header.command,
             });
             return;
@@ -200,11 +204,6 @@ pub const Network = struct {
         defer target_bus.unref(target_message);
 
         stdx.copy_disjoint(.exact, u8, target_message.buffer, packet.message.buffer);
-
-        const process_path = .{
-            .source = raw_process_to_process(network.processes.items[path.source]),
-            .target = raw_process_to_process(network.processes.items[path.target]),
-        };
 
         log.debug("deliver_message: {} > {}: {}", .{
             process_path.source,
