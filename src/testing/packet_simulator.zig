@@ -64,8 +64,11 @@ pub const PartitionMode = enum {
     /// equal-size partitions.
     uniform_partition,
 
-    /// Isolates exactly one replica.
+    /// Isolates exactly one replica (symmetric).
     isolate_single,
+
+    /// Isolates exactly one replica (asymmetric: send-only).
+    isolate_single_sender,
 };
 
 pub fn PacketSimulatorType(comptime Packet: type) type {
@@ -215,6 +218,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             assert(self.options.replica_count > 1);
 
             var partition = self.auto_partition;
+            var partition_sender: ?u8 = null;
             switch (self.options.partition_mode) {
                 .none => std.mem.set(bool, partition, false),
                 .uniform_size => {
@@ -239,13 +243,17 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
                     if (only_same) {
                         const n = self.prng.random().uintLessThan(u8, self.options.replica_count);
-                        self.auto_partition[n] = true;
+                        partition[n] = true;
                     }
                 },
                 .isolate_single => {
                     std.mem.set(bool, partition, false);
                     const n = self.prng.random().uintLessThan(u8, self.options.replica_count);
                     partition[n] = true;
+                },
+                .isolate_single_sender => {
+                    std.mem.set(bool, partition, false);
+                    partition_sender = self.prng.random().uintLessThan(u8, self.options.replica_count);
                 },
             }
 
@@ -257,8 +265,12 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 var to: u8 = 0;
                 while (to < self.node_count()) : (to += 1) {
                     const path = .{ .source = from, .target = to };
-                    self.links[self.path_index(path)].enabled = from >= self.options.replica_count or
-                        to >= self.options.replica_count or partition[from] == partition[to];
+                    self.links[self.path_index(path)].enabled =
+                        from >= self.options.replica_count or
+                        to >= self.options.replica_count or
+                        (partition[from] == partition[to] and
+                        (partition_sender == null or
+                        partition_sender.? == from));
                 }
             }
         }
