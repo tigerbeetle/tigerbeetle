@@ -337,7 +337,6 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     const reverse_path: Path = .{ .source = to, .target = from };
 
                     if (self.should_clog(reverse_path)) {
-                        log.debug("reverse path clogged", .{});
                         const ticks = fuzz.random_int_exponential(
                             self.prng.random(),
                             u64,
