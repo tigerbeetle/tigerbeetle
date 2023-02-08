@@ -149,6 +149,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         pub fn deinit(bus: *Self, allocator: std.mem.Allocator) void {
             if (process_type == .replica) {
                 bus.process.clients.deinit(allocator);
+                os.closeSocket(bus.process.accept_fd);
             }
 
             for (bus.connections) |*connection| {
