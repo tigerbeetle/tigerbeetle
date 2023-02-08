@@ -4675,6 +4675,7 @@ pub fn ReplicaType(
                     assert(message.header.replica == self.replica);
                     assert(message.header.op == self.op);
                     assert(message.header.commit == self.commit_min);
+                    assert(message.header.timestamp == self.log_view);
                 },
                 .start_view => switch (self.status) {
                     .normal => {
@@ -4761,19 +4762,23 @@ pub fn ReplicaType(
                     return;
                 }
 
-                if (message.header.command == .do_view_change) {
-                    const message_log_view = message.header.timestamp;
-                    if (self.log_view_durable() < message_log_view) {
+                // For DVCs and SVCs we must wait for the log_view to be durable:
+                // - A DVC includes the log_view.
+                // - A SV implies the log_view.
+                if (message.header.command == .do_view_change or
+                    message.header.command == .start_view)
+                {
+                    if (self.log_view_durable() < self.log_view) {
                         log.debug("{}: send_message_to_replica: dropped {s} " ++
-                            "(log_view_durable={} message.log_view={})", .{
+                            "(log_view_durable={} log_view={})", .{
                             self.replica,
                             @tagName(message.header.command),
                             self.log_view_durable(),
-                            message_log_view,
+                            self.log_view,
                         });
                         return;
                     }
-                    assert(std.mem.eql(
+                    assert(message.header.command != .do_view_change or std.mem.eql(
                         u8,
                         message.body(),
                         std.mem.sliceAsBytes(self.superblock.working.vsr_headers().slice),
