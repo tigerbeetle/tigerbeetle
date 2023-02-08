@@ -1770,6 +1770,7 @@ pub fn ReplicaType(
         fn on_normal_status_timeout(self: *Self) void {
             assert(self.status == .normal);
             self.normal_status_timeout.reset();
+            if (self.committing) return;
 
             if (self.replica_count > 1) {
                 self.send_start_view_change();
@@ -1779,6 +1780,7 @@ pub fn ReplicaType(
         fn on_start_view_change_message_timeout(self: *Self) void {
             assert(self.status == .normal or self.status == .view_change);
             self.start_view_change_message_timeout.reset();
+            if (self.committing) return;
 
             if (self.start_view_change_from_all_replicas.isSet(self.replica)) {
                 assert(self.replica_count > 1);
