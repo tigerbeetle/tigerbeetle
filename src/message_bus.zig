@@ -544,7 +544,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 bus.replicas_connect_attempts[connection.peer.replica] = 0;
 
                 connection.assert_recv_send_initial_state(bus);
-                // This will terminate the connection if there are no messages available:
                 connection.get_recv_message_and_recv(bus);
                 // A message may have been queued for sending while we were connecting:
                 // TODO Should we relax recv() and send() to return if `connection.state != .connected`?
