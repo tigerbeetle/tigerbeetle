@@ -413,7 +413,7 @@ pub fn ReplicaType(
 
             if (self.replica_count == 1) {
                 if (self.journal.faulty.count > 0) {
-                    @panic("journal is corrupt");
+                    @panic("journal is corrupt"); // TODO return error
                 }
                 assert(self.op_head_certain());
 
@@ -1259,6 +1259,14 @@ pub fn ReplicaType(
             assert(!self.repair_timeout.ticking);
             self.repair_timeout.start();
             self.repair();
+
+            if (self.op > 2 and
+                (self.journal.header_with_op(self.op - 2) == null or
+                self.journal.header_with_op(self.op - 1).?.parent != self.journal.header_with_op(self.op - 2).?.checksum))
+            {
+                //self.transition_to_view_change_status(self.view + 1);
+                @panic("DEBUG");
+            }
         }
 
         /// When other replicas receive the start_view message, they replace their log with the one
@@ -1363,6 +1371,8 @@ pub fn ReplicaType(
 
             const op = message.header.op;
             const slot = self.journal.slot_for_op(op);
+            // TODO Primary cannot trust its WAL with checksum=null for checkpointed ops,
+            // since they may have changed after crash/recover due to a lost prepare write.
             const checksum: ?u128 = switch (message.header.timestamp) {
                 0 => null,
                 1 => message.header.context,
@@ -4366,6 +4376,7 @@ pub fn ReplicaType(
 
             if (header.op <= self.commit_min) {
                 if (self.journal.header_with_op(header.op)) |existing_header| {
+                    // TODO Is this guaranteed after a restart if the `header.op < op_checkpoint`?
                     assert(existing_header.checksum == header.checksum);
                     return;
                 } else {
@@ -4775,12 +4786,14 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                     assert(self.primary_index(self.view) == replica);
                 },
-                else => {
-                    log.info("{}: send_message_to_replica: TODO {s}", .{
-                        self.replica,
-                        @tagName(message.header.command),
-                    });
+                .eviction => {
+                    assert(self.status == .normal);
+                    assert(self.primary());
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
                 },
+                .request_block => unreachable,
+                .block => unreachable,
             }
 
             if (replica != self.replica) {

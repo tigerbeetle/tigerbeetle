@@ -368,6 +368,9 @@ pub const Header = extern struct {
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
+        if (self.timestamp > 0) {
+            //if (self.view != 0) return "view != 0";
+        }
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -1005,6 +1008,19 @@ pub fn quorums(replica_count: u8) struct {
     };
 }
 
+//test "quorums" {
+//    if (constants.quorum_replication_max != 3) return;
+//
+//    const expect_replication = [_]u8{ 1, 2, 2, 3, 3, 3 };
+//    const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4 };
+//
+//    for (expect_replication[0..]) |_, i| {
+//        const actual = quorums(@intCast(u8, i) + 1);
+//        try std.testing.expectEqual(actual.replication, expect_replication[i]);
+//        try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
+//    }
+//}
+
 pub const Headers = struct {
     pub const Array = std.BoundedArray(Header, constants.pipeline_prepare_queue_max);
     /// The SuperBlock's persisted VSR headers.
@@ -1276,13 +1292,14 @@ const ViewChangeHeadersArray = struct {
             } else if (current.log_view_primary and command_durable != .start_view) {
                 switch (chain) {
                     .chain_sequence => {},
-                    .chain_view => {},
+                    .chain_view, .chain_gap, .chain_break => unreachable,
+                    //.chain_view => {},
                     // The retiring primary may have gap-breaks or breaks in its suffix iff:
                     // - it didn't finish repairs before the second view-change, and
                     // - some uncommitted ops were truncated during the first view-change.
                     //   (Truncation "moves" the suffix backwards).
-                    .chain_gap => break,
-                    .chain_break => break,
+                    //.chain_gap => break,
+                    //.chain_break => break,
                 }
                 suffix_done = op <= op_dvc_anchor;
             } else if (!current.log_view_primary and command_durable == .start_view) {

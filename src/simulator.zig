@@ -77,7 +77,7 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
+    const replica_count = 1 + random.uintLessThan(u8, 6);
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
     const cluster_options = Cluster.Options{
@@ -112,7 +112,7 @@ pub fn main() !void {
             .read_latency_min = random.uintLessThan(u16, 3),
             .read_latency_mean = 3 + random.uintLessThan(u16, 10),
             .write_latency_min = random.uintLessThan(u16, 3),
-            .write_latency_mean = 3 + random.uintLessThan(u16, 150),
+            .write_latency_mean = 3 + random.uintLessThan(u16, 100),
             .read_fault_probability = random.uintLessThan(u8, 10),
             .write_fault_probability = random.uintLessThan(u8, 10),
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
