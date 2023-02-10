@@ -238,7 +238,7 @@ pub fn ReplicaType(
         /// The number of ticks before the primary sends a commit heartbeat:
         /// The primary always sends a commit heartbeat irrespective of when it last sent a prepare.
         /// This improves liveness when prepare messages cannot be replicated fully due to partitions.
-        commit_timeout: Timeout,
+        commit_message_timeout: Timeout,
 
         /// The number of ticks without a commit.
         /// Triggers SVC messages. If an SVC quorum is achieved, we will kick off a view-change.
@@ -582,8 +582,8 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
-                .commit_timeout = Timeout{
-                    .name = "commit_timeout",
+                .commit_message_timeout = Timeout{
+                    .name = "commit_message_timeout",
                     .id = replica_index,
                     .after = 100,
                 },
@@ -695,7 +695,7 @@ pub fn ReplicaType(
 
             self.ping_timeout.tick();
             self.prepare_timeout.tick();
-            self.commit_timeout.tick();
+            self.commit_message_timeout.tick();
             self.normal_heartbeat_quorum_timeout.tick();
             self.start_view_change_message_timeout.tick();
             self.view_change_status_timeout.tick();
@@ -704,7 +704,7 @@ pub fn ReplicaType(
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
-            if (self.commit_timeout.fired()) self.on_commit_timeout();
+            if (self.commit_message_timeout.fired()) self.on_commit_message_timeout();
             if (self.normal_heartbeat_quorum_timeout.fired()) self.on_normal_heartbeat_quorum_timeout();
             if (self.start_view_change_message_timeout.fired()) self.on_start_view_change_message_timeout();
             if (self.view_change_status_timeout.fired()) self.on_view_change_status_timeout();
@@ -1770,8 +1770,8 @@ pub fn ReplicaType(
             self.send_message_to_replica(replica, prepare.message);
         }
 
-        fn on_commit_timeout(self: *Self) void {
-            self.commit_timeout.reset();
+        fn on_commit_message_timeout(self: *Self) void {
+            self.commit_message_timeout.reset();
 
             assert(self.status == .normal);
             assert(self.primary());
@@ -5334,7 +5334,7 @@ pub fn ReplicaType(
                 self.ping_timeout.start();
                 self.normal_heartbeat_quorum_timeout.start();
                 self.start_view_change_message_timeout.start();
-                self.commit_timeout.start();
+                self.commit_message_timeout.start();
                 self.repair_timeout.start();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
@@ -5350,7 +5350,7 @@ pub fn ReplicaType(
 
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.normal_heartbeat_quorum_timeout.ticking);
-                assert(!self.commit_timeout.ticking);
+                assert(!self.commit_message_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
                 assert(!self.view_change_message_timeout.ticking);
 
@@ -5391,7 +5391,7 @@ pub fn ReplicaType(
                 self.view_durable_update();
 
                 self.ping_timeout.start();
-                self.commit_timeout.start();
+                self.commit_message_timeout.start();
                 self.normal_heartbeat_quorum_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
@@ -5421,7 +5421,7 @@ pub fn ReplicaType(
                 }
 
                 self.ping_timeout.start();
-                self.commit_timeout.stop();
+                self.commit_message_timeout.stop();
                 self.normal_heartbeat_quorum_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
@@ -5476,7 +5476,7 @@ pub fn ReplicaType(
             }
 
             self.ping_timeout.stop();
-            self.commit_timeout.stop();
+            self.commit_message_timeout.stop();
             self.normal_heartbeat_quorum_timeout.stop();
             self.start_view_change_message_timeout.start();
             self.view_change_status_timeout.start();
