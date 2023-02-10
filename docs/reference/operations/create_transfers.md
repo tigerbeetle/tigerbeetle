@@ -170,26 +170,46 @@ To correctly recover from application crashes
 The transfer was not created.
 `debit_account.debits_pending + transfer.amount` would overflow a 64-bit unsigned integer.
 
+If `flags.debits_at_most` is set,
+`debit_account.debits_pending + 1` would overflow a 64-bit unsigned integer.
+
 ### `overflows_credits_pending`
 The transfer was not created.
 `credit_account.credits_pending + transfer.amount` would overflow a 64-bit unsigned integer.
+
+If `flags.credits_at_most` is set,
+`debit_account.credits_pending + 1` would overflow a 64-bit unsigned integer.
 
 ### `overflows_debits_posted`
 The transfer was not created.
 `debit_account.debits_posted + transfer.amount` would overflow a 64-bit unsigned integer.
 
+If `flags.debits_at_most` is set,
+`debit_account.debits_posted + 1` would overflow a 64-bit unsigned integer.
+
 ### `overflows_credits_posted`
 The transfer was not created.
 `debit_account.credits_posted + transfer.amount` would overflow a 64-bit unsigned integer.
+
+If `flags.credits_at_most` is set,
+`debit_account.credits_posted + 1` would overflow a 64-bit unsigned integer.
 
 ### `overflows_debits`
 The transfer was not created.
 `debit_account.debits_pending + debit_account.debits_posted + transfer.amount`
 would overflow a 64-bit unsigned integer.
 
+If `flags.debits_at_most` is set,
+`debit_account.debits_pending + debit_account.debits_posted + 1`
+would overflow a 64-bit unsigned integer.
+
 ### `overflows_credits`
 The transfer was not created.
 `credit_account.credits_pending + credit_account.credits_posted + transfer.amount`
+would overflow a 64-bit unsigned integer.
+
+If `flags.credits_at_most` is set,
+`debit_account.credits_pending + debit_account.credits_posted + 1`
 would overflow a 64-bit unsigned integer.
 
 ### `overflows_timeout`
@@ -206,12 +226,20 @@ The [debit account](../transfers.md#debit_account_id) has
 but `debit_account.debits_pending + debit_account.debits_posted + transfer.amount`
 would exceed `debit_account.credits_posted`.
 
+If `flags.debits_at_most` is set,
+`debit_account.debits_pending + debit_account.debits_posted + 1`
+would exceed `debit_account.credits_posted`.
+
 ### `exceeds_debits`
 The transfer was not created.
 The [credit account](../transfers.md#credit_account_id) has
 [`flags.credits_must_not_exceed_debits`](../transfers.md#credits_must_not_exceed_debits) set,
-but `credit_account.debits_pending + credit_account.debits_posted + transfer.amount`
+but `credit_account.credits_pending + credit_account.credits_posted + transfer.amount`
 would exceed `credit_account.debits_posted`.
+
+If `flags.credits_at_most` is set,
+`debit_account.credits_pending + debit_account.credits_posted + 1`
+would exceed `debit_account.debits_posted`.
 
 ### `cannot_post_and_void_pending_transfer`
 The transfer was not created.

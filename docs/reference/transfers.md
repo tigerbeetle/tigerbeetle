@@ -34,6 +34,8 @@ Fields used by each mode of transfer:
 | `flags.pending`               | false        | true     | false        | false        |
 | `flags.post_pending_transfer` | false        | false    | true         | false        |
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
+| `flags.debits_at_most`        | optional     | optional | false        | false        |
+| `flags.credits_at_most`       | optional     | optional | false        | false        |
 | `amount`                      | required     | required | optional     | optional     |
 
 TigerBeetle uses the same data structures internally and
@@ -364,10 +366,59 @@ Mark the transfer as a [post-pending transfer](#post-pending-transfer).
 
 Mark the transfer as a [void-pending transfer](#void-pending-transfer).
 
+### `flags.debits_at_most`
+
+Transfer at most [`amount`](#amount) — automatically transferring less than `amount` if necessary
+to obey the debit account's constraints. If the highest amount transferable is `0`, the respective
+"overflow" or "exceeds" result code is returned.
+
+The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
+less than or equal to the amount that was passed to `create_transfers`.
+
+`flags.debits_at_most` is compatible with:
+- `flags.linked`
+- `flags.pending`
+- `flags.credits_at_most`
+
+`flags.debits_at_most` is incompatible with:
+- `flags.post_pending_transfer`
+- `flags.void_pending_transfer`
+
+##### Examples
+
+- [Close Account](../recipes/close-account.md)
+
+### `flags.credits_at_most`
+
+Transfer at most [`amount`](#amount) — automatically transferring less than `amount` if necessary
+to obey the credit account's constraints. If the highest amount transferable is `0`, the respective
+"overflow" or "exceeds" result code is returned.
+
+The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
+less than or equal to the amount that was passed to `create_transfers`.
+
+`flags.credits_at_most` is compatible with:
+- `flags.linked`
+- `flags.pending`
+- `flags.debits_at_most`
+
+`flags.credits_at_most` is incompatible with:
+- `flags.post_pending_transfer`
+- `flags.void_pending_transfer`
+
+##### Examples
+
+- [Close Account](../recipes/close-account.md)
+
 ### `amount`
 
 This is how much should be debited from the `debit_account_id` account
 and credited to the `credit_account_id` account.
+
+- When `flags.debits_at_most` is set, this is the maximum amount that will be debited/credited,
+  where the actual transfer amount is determined by the debit account's constraints.
+- When `flags.credits_at_most` is set, this is the maximum amount that will be debited/credited,
+  where the actual transfer amount is determined by the credit account's constraints.
 
 Constraints:
 

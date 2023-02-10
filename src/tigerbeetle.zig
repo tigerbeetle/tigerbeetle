@@ -84,7 +84,9 @@ pub const TransferFlags = packed struct {
     pending: bool = false,
     post_pending_transfer: bool = false,
     void_pending_transfer: bool = false,
-    padding: u12 = 0,
+    debits_at_most: bool = false,
+    credits_at_most: bool = false,
+    padding: u10 = 0,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
