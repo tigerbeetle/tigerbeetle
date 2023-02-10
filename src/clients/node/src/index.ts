@@ -146,7 +146,9 @@ export enum TransferFlags {
   linked = (1 << 0),
   pending = (1 << 1),
   post_pending_transfer = (1 << 2),
-  void_pending_transfer = (1 << 3)
+  void_pending_transfer = (1 << 3),
+  debits_at_most = (1 << 4),
+  credits_at_most = (1 << 5),
 }
 
 export enum CreateTransferError {
