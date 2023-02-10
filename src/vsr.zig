@@ -96,6 +96,9 @@ pub const Command = enum(u8) {
     ping,
     pong,
 
+    ping_client,
+    pong_client,
+
     request,
     prepare,
     prepare_ok,
@@ -312,6 +315,8 @@ pub const Header = extern struct {
             .reserved => self.invalid_reserved(),
             .ping => self.invalid_ping(),
             .pong => self.invalid_pong(),
+            .ping_client => self.invalid_ping_client(),
+            .pong_client => self.invalid_pong_client(),
             .request => self.invalid_request(),
             .prepare => self.invalid_prepare(),
             .prepare_ok => self.invalid_prepare_ok(),
@@ -348,15 +353,12 @@ pub const Header = extern struct {
     fn invalid_ping(self: *const Header) ?[]const u8 {
         assert(self.command == .ping);
         if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.client != 0) {
-            if (self.replica != 0) return "replica != 0";
-            if (self.view != 0) return "view != 0";
-            if (self.op != 0) return "op != 0";
-        }
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -368,6 +370,38 @@ pub const Header = extern struct {
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
+        if (self.timestamp == 0) return "timestamp == 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_ping_client(self: *const Header) ?[]const u8 {
+        assert(self.command == .ping_client);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client == 0) return "client == 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.replica != 0) return "replica != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_pong_client(self: *const Header) ?[]const u8 {
+        assert(self.command == .pong_client);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -617,15 +651,7 @@ pub const Header = extern struct {
             },
             .prepare => return .unknown,
             // These messages identify the peer as either a replica or a client:
-            // TODO Assert that pong responses from a replica do not echo the pinging client's ID.
-            .ping, .pong => {
-                if (self.client > 0) {
-                    assert(self.replica == 0);
-                    return .client;
-                } else {
-                    return .replica;
-                }
-            },
+            .ping_client => return .client,
             // All other messages identify the peer as a replica:
             else => return .replica,
         }

@@ -754,6 +754,8 @@ pub fn ReplicaType(
             switch (message.header.command) {
                 .ping => self.on_ping(message),
                 .pong => self.on_pong(message),
+                .ping_client => self.on_ping_client(message),
+                .pong_client => self.on_pong_client(message),
                 .request => self.on_request(message),
                 .prepare => self.on_prepare(message),
                 .prepare_ok => self.on_prepare_ok(message),
@@ -794,10 +796,9 @@ pub fn ReplicaType(
             tracer.flush();
         }
 
-        // Pings are used:
-        //  - By clients, to learn about the current view.
-        //  - By replicas, to synchronise cluster time and to probe for network connectivity.
+        /// Pings are used by replicas to synchronise cluster time and to probe for network connectivity.
         fn on_ping(self: *Self, message: *const Message) void {
+            assert(message.header.command == .ping);
             if (self.status != .normal and self.status != .view_change) return;
 
             assert(self.status == .normal or self.status == .view_change);
@@ -808,47 +809,26 @@ pub fn ReplicaType(
                 .command = .pong,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                // Setting the view only when status=normal serves two purposes:
-                //
-                // 1:
-                // We must only ever send our view number to a client via a pong message if we are
-                // in normal status. Otherwise, we may be partitioned from the cluster with a newer
-                // view number, leak this to the client, which would then pass this to the cluster
-                // in subsequent client requests, which would then ignore these client requests with
-                // a newer view number, locking out the client. The principle here is that we must
-                // never send view numbers for views that have not yet started.
-                //
-                // 2:
                 // Pongs (in addition to pings) are heartbeats from status=normal replicas.
-                // TODO maybe split ping/pong commands for client/replica?
                 .view = if (self.status == .normal) self.view else 0,
             };
 
-            if (message.header.client > 0) {
-                assert(message.header.replica == 0);
-
-                if (self.status == .normal) {
-                    pong.view = self.view;
-                    self.send_header_to_client(message.header.client, pong);
-                }
+            if (message.header.replica == self.replica) {
+                log.warn("{}: on_ping: ignoring (self)", .{self.replica});
             } else {
-                if (message.header.replica == self.replica) {
-                    log.warn("{}: on_ping: ignoring (self)", .{self.replica});
-                } else {
-                    if (self.view == message.header.view) {
-                        self.heartbeat_from_all_replicas.set(message.header.replica);
-                    }
-
-                    // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
-                    pong.op = message.header.op;
-                    pong.timestamp = @bitCast(u64, self.clock.realtime());
-                    self.send_header_to_replica(message.header.replica, pong);
+                if (self.view == message.header.view) {
+                    self.heartbeat_from_all_replicas.set(message.header.replica);
                 }
+
+                // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
+                pong.op = message.header.op;
+                pong.timestamp = @bitCast(u64, self.clock.realtime());
+                self.send_header_to_replica(message.header.replica, pong);
             }
         }
 
         fn on_pong(self: *Self, message: *const Message) void {
-            if (message.header.client > 0) return;
+            assert(message.header.command == .pong);
             if (message.header.replica == self.replica) return;
 
             const m0 = message.header.op;
@@ -860,6 +840,36 @@ pub fn ReplicaType(
             if (self.view == message.header.view) {
                 self.heartbeat_from_all_replicas.set(message.header.replica);
             }
+        }
+
+        /// Pings are used by clients to learn about the current view.
+        fn on_ping_client(self: *Self, message: *const Message) void {
+            assert(message.header.command == .ping_client);
+            assert(message.header.client != 0);
+
+            // We must only ever send our view number to a client via a pong message if we are
+            // in normal status. Otherwise, we may be partitioned from the cluster with a newer
+            // view number, leak this to the client, which would then pass this to the cluster
+            // in subsequent client requests, which would then ignore these client requests with
+            // a newer view number, locking out the client. The principle here is that we must
+            // never send view numbers for views that have not yet started.
+            if (self.status != .normal) return;
+
+            self.send_header_to_client(message.header.client, .{
+                .command = .pong_client,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+            });
+        }
+
+        /// pong_client messages are only sent to clients, but a network fault can redirect one.
+        fn on_pong_client(self: *Self, message: *const Message) void {
+            assert(message.header.command == .pong_client);
+            log.warn("{}: on_pong_client: ignoring (misdirected from replica={})", .{
+                self.replica,
+                message.header.replica,
+            });
         }
 
         /// When there is free space in the pipeline's prepare queue:
@@ -2859,7 +2869,8 @@ pub fn ReplicaType(
             assert(
                 header.view == self.view or
                     header.command == .request_start_view or
-                    header.command == .pong or header.command == .ping,
+                    header.command == .ping or header.command == .ping_client or
+                    header.command == .pong or header.command == .pong_client,
             );
             assert(header.size == @sizeOf(Header));
 
@@ -4752,10 +4763,13 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                 },
                 .pong => {
+                    assert(self.status == .normal or self.status == .view_change);
                     assert(message.header.view == 0 or message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
+                .ping_client => unreachable,
+                .pong_client => unreachable,
                 .commit => {
                     assert(self.status == .normal);
                     assert(self.primary());
