@@ -55,6 +55,16 @@ namespace TigerBeetle
         /// </summary>
         VoidPendingTransfer = 1 << 3,
 
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/transfers#flagsdebits_at_most
+        /// </summary>
+        DebitsAtMost = 1 << 4,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/transfers#flagscredits_at_most
+        /// </summary>
+        CreditsAtMost = 1 << 5,
+
     }
 
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
