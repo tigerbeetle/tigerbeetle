@@ -33,7 +33,7 @@ This ensures that a recovering replica never backtracks to an older view (from t
 
 Replicas send `command=ping`/`command=pong` messages to one another to synchronize clocks.
 
-Additionally, these messages serve as heartbeats to let replicas know which _other_ replicas are healthy, i.e. reachable and in `status=normal`.
+Additionally, both of these messages serve as heartbeats to let replicas know which _other_ replicas are healthy, i.e. reachable and in `status=normal`.
 If a [replication quorum](#quorums) of replicas is not healthy, begin [Start-View-Change protocol](#protocol-start-view-change).
 
 ## Protocol: Ping (Replica-Client)
@@ -50,7 +50,7 @@ Normal protocol prepares and commits requests (from clients) and sends replies (
     - Write the prepare to the WAL.
     - Forward the prepare to the next replica in the chain.
 4. Each replica sends a `command=prepare_ok` message to the primary once it has written the prepare to the WAL.
-5. When a primary collects a [commit quorum](#quorums) of `prepare_ok`s _and_ it has committed all preceding prepares, it commits the prepare.
+5. When a primary collects a [replication quorum](#quorums) of `prepare_ok`s _and_ it has committed all preceding prepares, it commits the prepare.
 6. The primary replies to the client.
 7. The backups are informed that the prepare was committed by either:
     - a subsequent prepare, or
@@ -92,8 +92,6 @@ Unlike the Start-View-Change described in [VRR](https://pmg.csail.mit.edu/papers
 2. (Periodically retry sending the SVC).
 3. If the replica receives a heartbeat quorum or changes views (respectively), stop the `command=start_view_change` retries.
 4. If the replica collects a [view-change quorum](#quorums) of SVC messages, transition to `status=view_change` for the next view. (That is, increment the replica's view and start sending a DVC).
-
-To ensure that an idle (but healthy) cluster does not change views, a `status=normal` primary periodically prepares a heartbeat message.
 
 This protocol approach enables liveness under asymmetric network partitions. For example, a replica which can send to the cluster but not receive may send SVCs, but if the remainder of the cluster is healthy, they will never achieve a quorum, so the view is stable. When the partition heals, the formerly-isolated replica may rejoin the original view (if it was isolated in `status=normal`) or a new view (if it was isolated in `status=view_change`).
 
@@ -173,14 +171,14 @@ TODO (Unimplemented)
 
 # Quorums
 
-- The _commit quorum_ is the minimum number of replicas required to complete a commit.
+- The _replication quorum_ is the minimum number of replicas required to complete a commit.
 - The _view-change quorum_ is the minimum number of replicas required to complete a view-change.
 
 With the default configuration:
 
 |      **Replica Count** |   1 |  2 |  3 |  4 |  5 |  6 |
 | ---------------------: | --: | -: | -: | -: | -: | -: |
-|      **Commit Quorum** |   1 |  2 |  2 |  3 |  3 |  3 |
+| **Replication Quorum** |   1 |  2 |  2 |  3 |  3 |  3 |
 | **View-Change Quorum** |   1 |  2 |  2 |  3 |  3 |  4 |
 
 See also:
