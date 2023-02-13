@@ -1289,18 +1289,9 @@ pub fn ReplicaType(
 
             assert(self.op == message.header.op);
 
-            switch (self.status) {
-                .normal => {},
-                .view_change => {
-                    self.transition_to_normal_from_view_change_status(message.header.view);
-                    self.send_prepare_oks_after_view_change();
-                },
-                .recovering_head => {
-                    self.transition_to_normal_from_recovering_status();
-                    self.send_prepare_oks_after_view_change();
-                },
-                .recovering => unreachable,
-            }
+            assert(self.status == .view_change);
+            self.transition_to_normal_from_view_change_status(message.header.view);
+            self.send_prepare_oks_after_view_change();
 
             assert(self.status == .normal);
             assert(message.header.view == self.view);
