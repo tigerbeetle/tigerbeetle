@@ -801,7 +801,10 @@ pub fn ReplicaType(
             assert(message.header.command == .ping);
             if (self.status != .normal and self.status != .view_change) return;
 
-            assert(self.status == .normal or self.status == .view_change);
+            if (message.header.replica == self.replica) {
+                log.warn("{}: on_ping: ignoring (self)", .{self.replica});
+                return;
+            }
 
             // TODO Drop pings that were not addressed to us.
 
@@ -813,17 +816,13 @@ pub fn ReplicaType(
                 .view = if (self.status == .normal) self.view else 0,
             };
 
-            if (message.header.replica == self.replica) {
-                log.warn("{}: on_ping: ignoring (self)", .{self.replica});
-            } else {
-                if (self.view == message.header.view) {
-                    self.heartbeat_from_all_replicas.set(message.header.replica);
-                }
+            // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
+            pong.op = message.header.op;
+            pong.timestamp = @bitCast(u64, self.clock.realtime());
+            self.send_header_to_replica(message.header.replica, pong);
 
-                // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
-                pong.op = message.header.op;
-                pong.timestamp = @bitCast(u64, self.clock.realtime());
-                self.send_header_to_replica(message.header.replica, pong);
+            if (self.view == message.header.view) {
+                self.heartbeat_from_all_replicas.set(message.header.replica);
             }
         }
 
