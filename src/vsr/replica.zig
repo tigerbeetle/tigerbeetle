@@ -25,7 +25,16 @@ const tracer = @import("../tracer.zig");
 pub const Status = enum {
     normal,
     view_change,
+    /// Replicas start with `.recovering` status. Normally, replica immediately
+    /// transitions to a different status. The exception is a single-node cluster,
+    /// where the replica stays in `.recovering` state until it commits all entries
+    /// from its journal.
     recovering,
+    /// Replica transitions from `.recovering` to `.recovering_head` at startup
+    /// if it finds its persistent state corrupted. In this case, replica can
+    /// not participate in consensus, as it might have forgotten some of the
+    /// messages it has sent or received before. Instead, it waits for a SV
+    /// message to get into a consistent state.
     recovering_head,
 };
 
@@ -424,6 +433,13 @@ pub fn ReplicaType(
                     self.transition_to_recovering_head();
                 }
             }
+
+            assert(
+                (self.status == .recovering and self.replica_count == 1) or
+                    self.status == .normal or
+                    self.status == .view_change or
+                    self.status == .recovering_head,
+            );
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
