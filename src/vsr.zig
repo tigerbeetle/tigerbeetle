@@ -253,6 +253,7 @@ pub const Header = extern struct {
     /// * A `pong` sets this to the sender's wall clock value.
     /// * A `request_prepare` sets this to `1` when `context` is set to a checksum, and `0`
     ///   otherwise.
+    /// * A `commit` message sets this to the replica's monotonic timestamp.
     timestamp: u64 = 0,
 
     /// The size of the Header structure (always), plus any associated body.
@@ -356,6 +357,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -369,6 +371,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp == 0) return "timestamp == 0";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -523,7 +526,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.timestamp == 0) return "timestamp == 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
