@@ -208,8 +208,17 @@ pub fn ReplicaType(
         /// we require and assert in our protocol implementation.
         loopback_queue: ?*Message = null,
 
-        /// Track which replicas are in status=normal for our current view, according to recent pings.
-        heartbeat_from_all_replicas: QuorumCounter = quorum_counter_null,
+        /// The last timestamp received on a commit heartbeat.
+        /// Used to discard delayed heartbeat messages.
+        /// (status=normal backup)
+        heartbeat_timestamp: u64 = 0,
+
+        /// While set, don't send commit heartbeats.
+        /// Used when the primary believes that it is partitioned and needs to step down.
+        /// In particular, guards against a deadlock in the case where small messages (e.g.
+        /// heartbeats, pings/pongs) succeed, but large messages (e.g. prepares) fail.
+        /// (status=normal primary, pipeline has prepare with !ok_quorum_received)
+        primary_abdicating: bool = false,
 
         /// Unique start_view_change messages for the same view from ALL replicas (including ourself).
         start_view_change_from_all_replicas: QuorumCounter = quorum_counter_null,
@@ -230,32 +239,50 @@ pub fn ReplicaType(
         /// The number of ticks before a primary or backup broadcasts a ping to other replicas.
         /// TODO Explain why we need this (MessageBus handshaking, leapfrogging faulty replicas,
         /// deciding whether starting a view change would be detrimental under some network partitions).
+        /// (status=normal replicas)
         ping_timeout: Timeout,
 
         /// The number of ticks without enough prepare_ok's before the primary resends a prepare.
+        /// (status=normal primary with nonempty pipeline)
         prepare_timeout: Timeout,
+
+        /// The number of ticks waiting for a prepare_ok.
+        /// When triggered, set primary_abdicating=true, which pauses outgoing commit heartbeats.
+        /// (status=normal primary, pipeline has prepare with !ok_quorum_received)
+        primary_abdicate_timeout: Timeout,
 
         /// The number of ticks before the primary sends a commit heartbeat:
         /// The primary always sends a commit heartbeat irrespective of when it last sent a prepare.
         /// This improves liveness when prepare messages cannot be replicated fully due to partitions.
+        /// (status=normal primary)
         commit_message_timeout: Timeout,
 
-        /// The number of ticks without a commit.
+        /// The number of ticks without a heartbeat.
+        /// Reset any time the backup receives a heartbeat from the primary.
         /// Triggers SVC messages. If an SVC quorum is achieved, we will kick off a view-change.
-        normal_heartbeat_quorum_timeout: Timeout,
+        /// (status=normal backup)
+        normal_heartbeat_timeout: Timeout,
+
+        /// The number of ticks before resetting the SVC quorum.
+        /// (status=normal|view-change)
+        start_view_change_window_timeout: Timeout,
 
         /// The number of ticks before resending a `start_view_change` message.
+        /// (status=normal|view-change)
         start_view_change_message_timeout: Timeout,
 
         /// The number of ticks before a view change is timed out.
         /// When triggered, begin sending SVC messages (to attempt to increment the view and try a
         /// different primary) — but keep trying DVCs as well.
+        /// (status=view-change)
         view_change_status_timeout: Timeout,
 
         /// The number of ticks before resending a `do_view_change` message:
+        /// (status=view-change)
         view_change_message_timeout: Timeout,
 
         /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
+        /// (status=normal or (status=view-change and primary))
         repair_timeout: Timeout,
 
         /// Used to provide deterministic entropy to `choose_any_other_replica()`.
@@ -582,13 +609,23 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
+                .primary_abdicate_timeout = Timeout{
+                    .name = "primary_abdicate_timeout",
+                    .id = replica_index,
+                    .after = 1000,
+                },
                 .commit_message_timeout = Timeout{
                     .name = "commit_message_timeout",
                     .id = replica_index,
-                    .after = 100,
+                    .after = 50,
                 },
-                .normal_heartbeat_quorum_timeout = Timeout{
-                    .name = "normal_heartbeat_quorum_timeout",
+                .normal_heartbeat_timeout = Timeout{
+                    .name = "normal_heartbeat_timeout",
+                    .id = replica_index,
+                    .after = 500,
+                },
+                .start_view_change_window_timeout = Timeout{
+                    .name = "start_view_change_window_timeout",
                     .id = replica_index,
                     .after = 500,
                 },
@@ -695,8 +732,10 @@ pub fn ReplicaType(
 
             self.ping_timeout.tick();
             self.prepare_timeout.tick();
+            self.primary_abdicate_timeout.tick();
             self.commit_message_timeout.tick();
-            self.normal_heartbeat_quorum_timeout.tick();
+            self.normal_heartbeat_timeout.tick();
+            self.start_view_change_window_timeout.tick();
             self.start_view_change_message_timeout.tick();
             self.view_change_status_timeout.tick();
             self.view_change_message_timeout.tick();
@@ -704,8 +743,10 @@ pub fn ReplicaType(
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
+            if (self.primary_abdicate_timeout.fired()) self.on_primary_abdicate_timeout();
             if (self.commit_message_timeout.fired()) self.on_commit_message_timeout();
-            if (self.normal_heartbeat_quorum_timeout.fired()) self.on_normal_heartbeat_quorum_timeout();
+            if (self.normal_heartbeat_timeout.fired()) self.on_normal_heartbeat_timeout();
+            if (self.start_view_change_window_timeout.fired()) self.on_start_view_change_window_timeout();
             if (self.start_view_change_message_timeout.fired()) self.on_start_view_change_message_timeout();
             if (self.view_change_status_timeout.fired()) self.on_view_change_status_timeout();
             if (self.view_change_message_timeout.fired()) self.on_view_change_message_timeout();
@@ -808,22 +849,14 @@ pub fn ReplicaType(
 
             // TODO Drop pings that were not addressed to us.
 
-            var pong = Header{
+            self.send_header_to_replica(message.header.replica, .{
                 .command = .pong,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                // Pongs (in addition to pings) are heartbeats from status=normal replicas.
-                .view = if (self.status == .normal) self.view else 0,
-            };
-
-            // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
-            pong.op = message.header.op;
-            pong.timestamp = @bitCast(u64, self.clock.realtime());
-            self.send_header_to_replica(message.header.replica, pong);
-
-            if (self.view == message.header.view) {
-                self.heartbeat_from_all_replicas.set(message.header.replica);
-            }
+                // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
+                .op = message.header.op,
+                .timestamp = @bitCast(u64, self.clock.realtime()),
+            });
         }
 
         fn on_pong(self: *Self, message: *const Message) void {
@@ -835,10 +868,6 @@ pub fn ReplicaType(
             const m2 = self.clock.monotonic();
 
             self.clock.learn(message.header.replica, m0, t1, m2);
-
-            if (self.view == message.header.view) {
-                self.heartbeat_from_all_replicas.set(message.header.replica);
-            }
         }
 
         /// Pings are used by clients to learn about the current view.
@@ -1047,6 +1076,13 @@ pub fn ReplicaType(
             else
                 self.quorum_replication;
 
+            if (!prepare.ok_from_all_replicas.isSet(message.header.replica)) {
+                self.primary_abdicating = false;
+                if (!prepare.ok_quorum_received) {
+                    self.primary_abdicate_timeout.reset();
+                }
+            }
+
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
                 message,
@@ -1061,6 +1097,12 @@ pub fn ReplicaType(
                 self.replica,
                 prepare.message.header.checksum,
             });
+
+            assert(self.primary_abdicate_timeout.ticking);
+            assert(!self.primary_abdicating);
+            if (!self.primary_pipeline_pending()) {
+                self.primary_abdicate_timeout.stop();
+            }
 
             self.commit_pipeline();
         }
@@ -1096,6 +1138,13 @@ pub fn ReplicaType(
             assert(self.backup());
             assert(message.header.view == self.view);
             assert(message.header.replica == self.primary_index(message.header.view));
+
+            // Old/duplicate heartbeats don't count.
+            if (self.heartbeat_timestamp < message.header.timestamp) {
+                self.heartbeat_timestamp = message.header.timestamp;
+                self.normal_heartbeat_timeout.reset();
+                self.start_view_change_from_all_replicas.unset(self.replica);
+            }
 
             // We may not always have the latest commit entry but if we do our checksum must match:
             if (self.journal.header_with_op(message.header.commit)) |commit_entry| {
@@ -1667,8 +1716,6 @@ pub fn ReplicaType(
             self.ping_timeout.reset();
 
             // TODO We may want to ping for connectivity during a view change.
-            // (If we ping during view_change, include the status so that on_ping
-            // can distinguish status=normal heartbeats).
             assert(self.status == .normal);
             assert(self.primary() or self.backup());
 
@@ -1676,7 +1723,6 @@ pub fn ReplicaType(
                 .command = .ping,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .view = self.view,
                 .op = self.clock.monotonic(),
             };
 
@@ -1769,12 +1815,38 @@ pub fn ReplicaType(
             self.send_message_to_replica(replica, prepare.message);
         }
 
+        fn on_primary_abdicate_timeout(self: *Self) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(self.primary_pipeline_pending());
+            self.primary_abdicate_timeout.reset();
+            if (self.replica_count == 1) return;
+
+            log.debug("{}: on_primary_abdicate_timeout: abdicating (view={})", .{
+                self.replica,
+                self.view,
+            });
+            self.primary_abdicating = true;
+        }
+
         fn on_commit_message_timeout(self: *Self) void {
             self.commit_message_timeout.reset();
 
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
+
+            if (self.primary_abdicating) {
+                assert(self.primary_abdicate_timeout.ticking);
+                assert(self.pipeline.queue.prepare_queue.count > 0);
+                assert(self.primary_pipeline_pending());
+
+                log.debug("{}: on_commit_message_timeout: primary abdicating (view={})", .{
+                    self.replica,
+                    self.view,
+                });
+                return;
+            }
 
             const latest_committed_entry = checksum: {
                 if (self.commit_max == self.superblock.working.vsr_state.commit_min) {
@@ -1791,39 +1863,33 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .view = self.view,
                 .commit = self.commit_max,
+                .timestamp = self.clock.monotonic(),
             });
         }
 
-        fn on_normal_heartbeat_quorum_timeout(self: *Self) void {
+        fn on_normal_heartbeat_timeout(self: *Self) void {
             assert(self.status == .normal);
-            self.normal_heartbeat_quorum_timeout.reset();
-            defer self.reset_quorum_heartbeat();
+            assert(self.backup());
+            self.normal_heartbeat_timeout.reset();
 
             if (self.replica_count == 1) return;
 
-            if (self.heartbeat_from_all_replicas.count() < self.quorum_replication or
-                !self.heartbeat_from_all_replicas.isSet(self.primary_index(self.view)))
-            {
-                // Start a view change when either:
-                // - a quorum of replicas are no longer in status=normal (or are unavailable), or
-                // - the primary is unavailable.
-                // reset_quorum_heartbeat() sets our own replica index directly.
-                log.debug("{}: on_normal_heartbeat_quorum_timeout: heartbeat quorum lost " ++
-                    "(view={}, replicas={b})", .{
-                    self.replica,
-                    self.view,
-                    self.heartbeat_from_all_replicas.mask,
-                });
-                self.send_start_view_change();
-            } else {
-                log.debug("{}: on_normal_heartbeat_quorum_timeout: heartbeat quorum recovered " ++
-                    "(view={}, replicas={b})", .{
-                    self.replica,
-                    self.view,
-                    self.heartbeat_from_all_replicas.mask,
-                });
-                self.start_view_change_from_all_replicas.unset(self.replica);
-            }
+            log.debug("{}: on_normal_heartbeat_timeout: heartbeat lost (view={})", .{
+                self.replica,
+                self.view,
+            });
+            self.send_start_view_change();
+        }
+
+        fn on_start_view_change_window_timeout(self: *Self) void {
+            assert(self.status == .normal or self.status == .view_change);
+            self.start_view_change_window_timeout.reset();
+            if (self.replica_count == 1) return;
+
+            // Don't reset our own SVC; it will be reset if/when we receive a heartbeat.
+            const svc = self.start_view_change_from_all_replicas.isSet(self.replica);
+            self.reset_quorum_start_view_change();
+            if (svc) self.start_view_change_from_all_replicas.set(self.replica);
         }
 
         fn on_start_view_change_message_timeout(self: *Self) void {
@@ -3584,6 +3650,7 @@ pub fn ReplicaType(
 
             log.debug("{}: primary_pipeline_next: prepare {}", .{ self.replica, message.header.checksum });
 
+            if (!self.primary_abdicate_timeout.ticking) self.primary_abdicate_timeout.start();
             if (self.pipeline.queue.prepare_queue.tail_ptr()) |previous| {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
                 assert(self.prepare_timeout.ticking);
@@ -3599,6 +3666,18 @@ pub fn ReplicaType(
             // We expect `on_prepare()` to increment `self.op` to match the primary's latest prepare:
             // This is critical to ensure that pipelined prepares do not receive the same op number.
             assert(self.op == message.header.op);
+        }
+
+        /// Returns whether the primary is expecting any prepare_ok messages.
+        fn primary_pipeline_pending(self: *const Self) bool {
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            var prepares = self.pipeline.queue.prepare_queue.iterator();
+            while (prepares.next()) |prepare| {
+                if (!prepare.ok_quorum_received) return true;
+            }
+            return false;
         }
 
         fn pipeline_prepare_by_op_and_checksum(self: *Self, op: u64, checksum: ?u128) ?*Message {
@@ -4478,11 +4557,6 @@ pub fn ReplicaType(
             }
         }
 
-        fn reset_quorum_heartbeat(self: *Self) void {
-            self.reset_quorum_counter(&self.heartbeat_from_all_replicas);
-            self.heartbeat_from_all_replicas.set(self.replica);
-        }
-
         fn reset_quorum_do_view_change(self: *Self) void {
             self.reset_quorum_messages(&self.do_view_change_from_all_replicas, .do_view_change);
             self.do_view_change_quorum = false;
@@ -4652,6 +4726,8 @@ pub fn ReplicaType(
         }
 
         fn send_header_to_client(self: *Self, client: u128, header: Header) void {
+            assert(header.cluster == self.cluster);
+
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
@@ -4757,13 +4833,11 @@ pub fn ReplicaType(
                 },
                 .ping => {
                     assert(self.status == .normal);
-                    assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
                 .pong => {
                     assert(self.status == .normal or self.status == .view_change);
-                    assert(message.header.view == 0 or message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
@@ -4809,13 +4883,14 @@ pub fn ReplicaType(
             if (replica != self.replica) {
                 // Critical: Do not advertise a view/log_view before it is durable.
                 // See view_durable()/log_view_durable().
-                //
-                // Pings are used for syncing time, so they must not be blocked on persisting view.
                 if (message.header.view > self.view_durable() and
-                    message.header.command != .request_start_view and
-                    message.header.command != .ping and
-                    message.header.command != .pong)
+                    message.header.command != .request_start_view)
                 {
+                    // Pings are used for syncing time, so they must not be
+                    // blocked on persisting view.
+                    assert(message.header.command != .ping);
+                    assert(message.header.command != .pong);
+
                     log.debug("{}: send_message_to_replica: dropped {s} " ++
                         "(view_durable={} message.view={})", .{
                         self.replica,
@@ -5326,12 +5401,13 @@ pub fn ReplicaType(
 
                 assert(self.replica_count == 1);
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.normal_heartbeat_quorum_timeout.ticking);
+                assert(!self.primary_abdicate_timeout.ticking);
+                assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
                 assert(!self.view_change_message_timeout.ticking);
 
                 self.ping_timeout.start();
-                self.normal_heartbeat_quorum_timeout.start();
+                self.start_view_change_window_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
@@ -5348,13 +5424,15 @@ pub fn ReplicaType(
                 );
 
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.normal_heartbeat_quorum_timeout.ticking);
+                assert(!self.primary_abdicate_timeout.ticking);
+                assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.commit_message_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
                 assert(!self.view_change_message_timeout.ticking);
 
                 self.ping_timeout.start();
-                self.normal_heartbeat_quorum_timeout.start();
+                self.normal_heartbeat_timeout.start();
+                self.start_view_change_window_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.repair_timeout.start();
             }
@@ -5376,7 +5454,8 @@ pub fn ReplicaType(
                 );
 
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.normal_heartbeat_quorum_timeout.ticking);
+                assert(!self.normal_heartbeat_timeout.ticking);
+                assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.pipeline_repairing);
                 assert(self.pipeline == .queue);
                 assert(self.view == view_new);
@@ -5391,14 +5470,17 @@ pub fn ReplicaType(
 
                 self.ping_timeout.start();
                 self.commit_message_timeout.start();
-                self.normal_heartbeat_quorum_timeout.start();
+                self.start_view_change_window_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
-                if (self.pipeline.queue.prepare_queue.count > 0) self.prepare_timeout.start();
+                if (self.pipeline.queue.prepare_queue.count > 0) {
+                    self.prepare_timeout.start();
+                    self.primary_abdicate_timeout.start();
+                }
             } else {
                 log.debug("{}: transition_to_normal_from_view_change_status: view={}..{} backup", .{
                     self.replica,
@@ -5407,7 +5489,8 @@ pub fn ReplicaType(
                 });
 
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.normal_heartbeat_quorum_timeout.ticking);
+                assert(!self.normal_heartbeat_timeout.ticking);
+                assert(!self.primary_abdicate_timeout.ticking);
                 assert(self.pipeline == .cache);
 
                 if (self.log_view == view_new and self.view == view_new) {
@@ -5421,14 +5504,16 @@ pub fn ReplicaType(
 
                 self.ping_timeout.start();
                 self.commit_message_timeout.stop();
-                self.normal_heartbeat_quorum_timeout.start();
+                self.normal_heartbeat_timeout.start();
+                self.start_view_change_window_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
                 self.view_change_message_timeout.stop();
                 self.repair_timeout.start();
             }
 
-            self.reset_quorum_heartbeat();
+            self.heartbeat_timestamp = 0;
+            self.primary_abdicating = false;
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
@@ -5476,19 +5561,22 @@ pub fn ReplicaType(
 
             self.ping_timeout.stop();
             self.commit_message_timeout.stop();
-            self.normal_heartbeat_quorum_timeout.stop();
+            self.normal_heartbeat_timeout.stop();
+            self.start_view_change_window_timeout.start();
             self.start_view_change_message_timeout.start();
             self.view_change_status_timeout.start();
             self.view_change_message_timeout.start();
             self.repair_timeout.stop();
             self.prepare_timeout.stop();
+            self.primary_abdicate_timeout.stop();
 
             // Do not reset quorum counters only on entering a view, assuming that the view will be
             // followed only by a single subsequent view change to the next view, because multiple
             // successive view changes can fail, e.g. after a view change timeout.
             // We must therefore reset our counters here to avoid counting messages from an older
             // view, which would violate the quorum intersection property essential for correctness.
-            self.reset_quorum_heartbeat();
+            self.heartbeat_timestamp = 0;
+            self.primary_abdicating = false;
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
