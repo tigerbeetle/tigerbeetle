@@ -5298,7 +5298,7 @@ pub fn ReplicaType(
         }
 
         fn transition_to_normal_from_recovering_status(self: *Self) void {
-            assert(self.status == .recovering or self.status == .recovering_head);
+            assert(self.status == .recovering);
             assert(self.view == self.log_view);
             assert(!self.committing);
             assert(self.replica_count > 1 or self.commit_min == self.op);
