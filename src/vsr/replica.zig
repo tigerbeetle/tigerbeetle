@@ -3318,18 +3318,11 @@ pub fn ReplicaType(
                 message.header.command == .do_view_change or
                 message.header.command == .start_view);
             assert(message.header.view > 0); // The initial view is already zero.
+            assert(self.status != .recovering); // Single node clusters don't have view changes.
 
             const command: []const u8 = @tagName(message.header.command);
 
             if (self.status == .recovering_head and message.header.command != .start_view) {
-                return true;
-            }
-
-            // While a replica's status is recovering it does not participate in either the request
-            // processing protocol or the view change protocol.
-            // This is critical for correctness (to avoid data loss):
-            if (self.status == .recovering) {
-                log.debug("{}: on_{s}: ignoring (recovering)", .{ self.replica, command });
                 return true;
             }
 
@@ -5305,7 +5298,7 @@ pub fn ReplicaType(
         }
 
         fn transition_to_normal_from_recovering_status(self: *Self) void {
-            assert(self.status == .recovering or self.status == .recovering_head);
+            assert(self.status == .recovering);
             assert(self.view == self.log_view);
             assert(!self.committing);
             assert(self.replica_count > 1 or self.commit_min == self.op);
