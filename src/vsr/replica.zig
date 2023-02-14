@@ -473,7 +473,6 @@ pub fn ReplicaType(
             const quorum_view_change = quorums.view_change;
             assert(quorum_replication <= replica_count);
             assert(quorum_view_change <= replica_count);
-            assert(quorum_view_change + quorum_replication >= replica_count);
 
             if (replica_count <= 2) {
                 assert(quorum_replication == replica_count);
