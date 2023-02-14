@@ -33,9 +33,6 @@ This ensures that a recovering replica never backtracks to an older view (from t
 
 Replicas send `command=ping`/`command=pong` messages to one another to synchronize clocks.
 
-Additionally, both of these messages serve as heartbeats to let replicas know which _other_ replicas are healthy, i.e. reachable and in `status=normal`.
-If a [replication quorum](#quorums) of replicas is not healthy, begin [Start-View-Change protocol](#protocol-start-view-change).
-
 ## Protocol: Ping (Replica-Client)
 
 Clients send `command=ping_client` (and receive `command=pong_client`) messages to (from) replicas to learn the cluster's current view.
@@ -54,7 +51,7 @@ Normal protocol prepares and commits requests (from clients) and sends replies (
 6. The primary replies to the client.
 7. The backups are informed that the prepare was committed by either:
     - a subsequent prepare, or
-    - a periodic `command=commit` message.
+    - a periodic `command=commit` heartbeat message.
 
 ```mermaid
 sequenceDiagram
@@ -86,11 +83,11 @@ Start-View-Change (SVC) protocol initiates [view-changes](#protocol-view-change)
 Unlike the Start-View-Change described in [VRR](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) §4.2, this protocol runs in both `status=normal` and `status=view_change` (not just `status=view_change`).
 
 1. Depending on the replica's status:
-    - `status=normal` + primary: If the replica has not received a `prepare_ok` recently (and it expects to), send a `command=start_view_change` to all replicas (including self).
-    - `status=normal` + primary/backup: If the replica has not received a quorum of [heartbeats](#protocol-ping-replica-replica), send a `command=start_view_change` to all replicas (including self).
+    - `status=normal` & primary: When the replica has not recently received a `prepare_ok` (and it has a prepare in flight), pause broadcasting `command=commit`.
+    - `status=normal` & backup: When the replica has not recently received a `command=commit`, broadcast `command=start_view_change` to all replicas (including self).
     - `status=view_change`: If the replica has not completed a view-change recently, send a `command=start_view_change` to all replicas (including self).
 2. (Periodically retry sending the SVC).
-3. If the replica receives a heartbeat quorum or changes views (respectively), stop the `command=start_view_change` retries.
+3. If the backup receives a `command=commit` or changes views (respectively), stop the `command=start_view_change` retries.
 4. If the replica collects a [view-change quorum](#quorums) of SVC messages, transition to `status=view_change` for the next view. (That is, increment the replica's view and start sending a DVC).
 
 This protocol approach enables liveness under asymmetric network partitions. For example, a replica which can send to the cluster but not receive may send SVCs, but if the remainder of the cluster is healthy, they will never achieve a quorum, so the view is stable. When the partition heals, the formerly-isolated replica may rejoin the original view (if it was isolated in `status=normal`) or a new view (if it was isolated in `status=view_change`).
