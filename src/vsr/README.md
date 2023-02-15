@@ -201,7 +201,7 @@ With the default configuration:
 |      **Replica Count** |   1 |  2 |  3 |  4 |  5 |  6 |
 | ---------------------: | --: | -: | -: | -: | -: | -: |
 | **Replication Quorum** |   1 |  2 |  2 |  3 |  3 |  3 |
-| **View-Change Quorum** |   1 |  2 |  2 |  3 |  3 |  4 |
+| **View-Change Quorum** |   1 |  2 |  2 |  2 |  3 |  4 |
 
 See also:
 
