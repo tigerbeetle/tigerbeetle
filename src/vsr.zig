@@ -991,20 +991,33 @@ pub fn quorums(replica_count: u8) struct {
     const quorum_replication = std.math.min(constants.quorum_replication_max, majority);
     assert(quorum_replication >= 2 or quorum_replication == replica_count);
 
-    const quorum_view_change = std.math.max(
-        replica_count - quorum_replication + 1,
-        majority,
-    );
     // The view change quorum may be more expensive to make the replication quorum cheaper.
     // The insight is that the replication phase is by far more common than the view change.
     // This trade-off allows us to optimize for the common case.
     // See the comments in `constants.zig` for further explanation.
-    assert(quorum_view_change >= majority);
+    //
+    // For replica_count=2, set quorum_view_change=2 even though 1 would intersect.
+    // This avoids creating special cases for a single-replica view-change in Replica.
+    const quorum_view_change =
+        if (replica_count == 2) 2 else replica_count - quorum_replication + 1;
 
     return .{
         .replication = quorum_replication,
         .view_change = quorum_view_change,
     };
+}
+
+test "quorums" {
+    if (constants.quorum_replication_max != 3) return;
+
+    const expect_replication = [_]u8{ 1, 2, 2, 3, 3, 3 };
+    const expect_view_change = [_]u8{ 1, 2, 2, 2, 3, 4 };
+
+    for (expect_replication[0..]) |_, i| {
+        const actual = quorums(@intCast(u8, i) + 1);
+        try std.testing.expectEqual(actual.replication, expect_replication[i]);
+        try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
+    }
 }
 
 pub const Headers = struct {
