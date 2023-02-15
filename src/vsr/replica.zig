@@ -1655,9 +1655,9 @@ pub fn ReplicaType(
             assert(prepare.message.header.op == self.commit_min + 1);
 
             if (prepare.ok_quorum_received) {
-                self.prepare_timeout.reset();
-
                 assert(self.committing);
+
+                self.prepare_timeout.reset();
                 return;
             }
 
