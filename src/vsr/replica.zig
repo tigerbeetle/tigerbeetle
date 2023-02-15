@@ -256,9 +256,6 @@ pub fn ReplicaType(
         /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
         repair_timeout: Timeout,
 
-        /// The nonce of the `recovery` messages.
-        recovery_nonce: Nonce,
-
         /// Used to provide deterministic entropy to `choose_any_other_replica()`.
         /// Incremented whenever `choose_any_other_replica()` is called.
         choose_any_other_replica_ticks: u64 = 0,
@@ -533,15 +530,6 @@ pub fn ReplicaType(
             );
             errdefer self.state_machine.deinit(allocator);
 
-            const recovery_nonce = blk: {
-                var nonce: [@sizeOf(Nonce)]u8 = undefined;
-                var hash = std.crypto.hash.Blake3.init(.{});
-                hash.update(std.mem.asBytes(&self.clock.monotonic()));
-                hash.update(&[_]u8{replica_index});
-                hash.final(&nonce);
-                break :blk @bitCast(Nonce, nonce);
-            };
-
             self.* = Self{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
@@ -600,7 +588,6 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
-                .recovery_nonce = recovery_nonce,
                 .prng = std.rand.DefaultPrng.init(replica_index),
             };
 
@@ -1540,6 +1527,7 @@ pub fn ReplicaType(
             const op = self.nack_prepare_op.?;
             const checksum = self.journal.header_with_op(op).?.checksum;
             const slot = self.journal.slot_with_op(op).?;
+            assert(op <= self.op);
 
             if (message.header.op != op) {
                 log.debug("{}: on_nack_prepare: ignoring (repairing another op)", .{self.replica});
@@ -1610,6 +1598,7 @@ pub fn ReplicaType(
 
             assert(count == threshold);
             assert(!self.nack_prepare_from_other_replicas.isSet(self.replica));
+            assert(self.op - op < constants.pipeline_prepare_queue_max);
             log.debug("{}: on_nack_prepare: quorum received op={}", .{ self.replica, op });
 
             self.primary_discard_uncommitted_ops_from(op, checksum);
@@ -1753,12 +1742,17 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
 
-            // TODO Snapshots: Use snapshot checksum if commit is no longer in journal.
-            const latest_committed_entry = self.journal.header_with_op(self.commit_max).?;
+            const latest_committed_entry = checksum: {
+                if (self.commit_max == self.superblock.working.vsr_state.commit_min) {
+                    break :checksum self.superblock.working.vsr_state.commit_min_checksum;
+                } else {
+                    break :checksum self.journal.header_with_op(self.commit_max).?.checksum;
+                }
+            };
 
             self.send_header_to_other_replicas(.{
                 .command = .commit,
-                .context = latest_committed_entry.checksum,
+                .context = latest_committed_entry,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
@@ -4606,6 +4600,7 @@ pub fn ReplicaType(
 
         fn send_start_view_change(self: *Self) void {
             assert(self.status == .view_change);
+            assert(self.log_view < self.view);
             assert(!self.do_view_change_quorum);
             // Send only to other replicas (and not to ourself) to avoid a quorum off-by-one error:
             // This could happen if the replica mistakenly counts its own message in the quorum.
