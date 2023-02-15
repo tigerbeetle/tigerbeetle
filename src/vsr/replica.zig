@@ -159,8 +159,6 @@ pub fn ReplicaType(
         /// * `replica.op ≤ replica.op_checkpoint_trigger`:
         ///   Don't wrap the WAL until we are sure that the overwritten entry will not be required
         ///   for recovery.
-        // TODO: When recovery protocol is removed, load the `op` from the WAL, and verify that it is ≥op_checkpoint.
-        // Also verify that a corresponding header exists in the WAL.
         op: u64,
 
         /// The op number of the latest committed and executed operation (according to the replica):
