@@ -248,6 +248,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
             errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
 
+            for (clients) |*client| {
+                client.on_reply_context = cluster;
+                client.on_reply_callback = client_on_reply;
+            }
+
             return cluster;
         }
 
@@ -364,11 +369,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             request_message: *Message,
             request_body_size: usize,
         ) void {
-            // TODO(Zig) Move these into init when `@returnAddress()` is available. They only needs to
-            // be set once, it just requires a stable pointer to the Cluster.
-            cluster.clients[client_index].on_reply_context = cluster;
-            cluster.clients[client_index].on_reply_callback = client_on_reply;
-
             cluster.clients[client_index].request(
                 undefined,
                 request_callback,
