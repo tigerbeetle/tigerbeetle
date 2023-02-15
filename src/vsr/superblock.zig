@@ -730,7 +730,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
             log_view: u32,
             view: u32,
-            headers: vsr.Headers.ViewChangeArray,
+            headers: *const vsr.Headers.ViewChangeArray,
         };
 
         /// The replica calls view_change() to persist its view/log_view — it cannot
@@ -784,7 +784,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .callback = callback,
                 .caller = .view_change,
                 .vsr_state = vsr_state,
-                .vsr_headers = update.headers,
+                .vsr_headers = update.headers.*,
             };
 
             superblock.acquire(context);
@@ -820,7 +820,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.staging.parent = superblock.staging.checksum;
             superblock.staging.vsr_state = context.vsr_state.?;
 
-            if (context.vsr_headers) |headers| {
+            if (context.vsr_headers) |*headers| {
                 assert(context.caller == .format or context.caller == .view_change);
 
                 superblock.staging.vsr_headers_count = @intCast(u32, headers.array.len);

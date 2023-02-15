@@ -1118,13 +1118,15 @@ const ViewChangeHeadersArray = struct {
         return .{ .array = array };
     }
 
+    /// See DVCQuorum for explanation and DVC invariants.
     pub fn build(
+        results: *ViewChangeHeadersArray,
         options: struct {
             op_checkpoint: u64,
             /// The last view_change_headers_max headers of the journal, starting with the head op
             /// then descending, skipping over all gaps.
             current: struct {
-                headers: Headers.Array,
+                headers: *const Headers.Array,
                 view: u32,
                 log_view: u32,
                 log_view_primary: bool,
@@ -1137,10 +1139,14 @@ const ViewChangeHeadersArray = struct {
                 log_view_primary: bool,
             },
         },
-    ) ViewChangeHeadersArray {
+    ) void {
+        defer Headers.ViewChangeSlice.verify(results.array.constSlice());
+
+        const headers = &results.array;
         const current = options.current;
         const durable = options.durable;
 
+        assert(headers.len == 0);
         assert(durable.headers.slice.len > 0);
         assert(current.headers.len > 0);
         for (current.headers.constSlice()[1..]) |*header, i| {
@@ -1175,9 +1181,8 @@ const ViewChangeHeadersArray = struct {
             // same DVC after recovery. (An alternative implementation would be to load the
             // superblock's DVC headers (including gaps) into the journal during Replica.open(), but
             // that is more complicated to implement correctly).
-            return ViewChangeHeadersArray.init(
-                Headers.Array.fromSlice(durable.headers.slice) catch unreachable,
-            );
+            for (durable.headers.slice) |*header| headers.appendAssumeCapacity(header.*);
+            return;
         }
 
         // What is the relationship between two prepares?
@@ -1207,9 +1212,7 @@ const ViewChangeHeadersArray = struct {
             1 + op_head_current -| constants.pipeline_prepare_queue_max,
         );
 
-        var headers = Headers.Array{ .buffer = undefined };
         var suffix_done = false;
-
         for (current.headers.constSlice()) |*header, i| {
             const op = header.op;
             const chain = chain: {
@@ -1315,6 +1318,5 @@ const ViewChangeHeadersArray = struct {
 
             headers.appendAssumeCapacity(header.*);
         }
-        return ViewChangeHeadersArray.init(headers);
     }
 };
