@@ -103,10 +103,19 @@ A replica sends `command=do_view_change` to all replicas, with the `view` it is 
 - The _primary_ of the `view` collects a [view-change quorum](#quorums) of DVCs.
 - The _backup_ of the `view` uses to `do_view_change` to updates its current `view` (transitioning to `status=view_change`).
 
+DVCs include headers from prepares which are:
+- _present_ (in the replica's WAL) and valid
+- _missing_ (never written to the replica's WAL)
+- _corrupt_ (in the replica's WAL)
+
+These cases are distinguished during [WAL repair](#protocol-repair-wal).
+
 When the primary collects its quorum:
 1. The primary installs the headers to its suffix.
-2. Then the primary repairs (and potentially truncates uncommitted ops).
-3. When the primary finishes repair, it transitions to `status=normal` and broadcasts a `command=start_view`.
+2. Then the primary repairs its headers. ([Protocol: Repair Journal](#protocol-repair-journal)).
+3. Then the primary repairs its prepares. ([Protocol: Repair WAL](#protocol-repair-wal)) (and potentially truncates uncommitted ops).
+4. Then primary commits all prepares which are not known to be uncommitted.
+5. Then the primary transitions to `status=normal` and broadcasts a `command=start_view`.
 
 ## Protocol: Request/Start View
 
@@ -128,21 +137,37 @@ Upon receiving a `start_view` for the new view, the backup installs the suffix, 
 ## Protocol: Repair Journal
 
 `request_headers` and `headers` repair gaps or breaks in a replica's journal headers.
+Repaired headers are a prerequisite for [repairing prepares](#protocol-repair-wal).
+
 Because the headers are repaired backwards (from the head) by hash-chaining, it is safe for both backups and transitioning primaries.
+
+Gaps/breaks in a replica's journal headers may occur:
+
+  - On a backup, receiving nonconsecutive ops, leaving a gap in its headers.
+  - On a backup, which has not finished repair.
+  - On a new primary during a view-change, which has not finished repair.
 
 ## Protocol: Repair WAL
 
+The replica's journal tracks which prepares the WAL requires — i.e. headers for which either:
+- no prepare was ever received, or
+- the prepare was received and written, but was since discovered to be corrupt
+
+During repair, missing/damaged prepares are requested & repaired chronologically, which:
+- improves the chances that older entries will be available, i.e. not yet overwritten
+- enables better pipelining of repair and commit.
+
 In response to a `request_prepare`:
 
-- Reply the `command=prepare` with the requested prepare, if available.
+- Reply the `command=prepare` with the requested prepare, if available and valid.
 - Reply `command=nack_prepare` if the request origin is the primary of the ongoing view-change and we never received the prepare. (This enables the primary to truncate uncommitted messages and remain available).
-- Otherwise do not reply.
+- Otherwise do not reply. (e.g. the corresponding slot in the WAL is corrupt)
 
 Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf), we do not nack corrupt entries, since they _might_ be the prepare being requested.
 
 ## Protocol: Client
 
-1. Client registers with cluster (`command=request operation=register`). (See also: [Protocol: Normal](#protocol-normal)).
+1. Client sends `command=request operation=register` to registers with the cluster by starting a new request-reply hashchain. (See also: [Protocol: Normal](#protocol-normal)).
 2. Client receives `command=reply operation=register` from the cluster. (If the cluster is at the maximum number of clients, it evicts the oldest).
 3. Repeat:
     1. Send `command=request` to cluster.
