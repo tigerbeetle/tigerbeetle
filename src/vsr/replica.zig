@@ -2997,6 +2997,10 @@ pub fn ReplicaType(
         }
 
         fn ignore_prepare_ok(self: *Self, message: *const Message) bool {
+            if (self.primary_index(message.header.view) == self.replica) {
+                assert(message.header.view <= self.view);
+            }
+
             if (self.status != .normal) {
                 log.debug("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
                 return true;
