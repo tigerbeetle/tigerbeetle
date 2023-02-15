@@ -260,6 +260,9 @@ pub fn ReplicaType(
         /// Incremented whenever `choose_any_other_replica()` is called.
         choose_any_other_replica_ticks: u64 = 0,
 
+        /// Scratch space for `create_view_change_headers()`.
+        view_change_headers: vsr.Headers.ViewChangeArray = .{ .array = .{ .buffer = undefined } },
+
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
         prng: std.rand.DefaultPrng,
@@ -285,8 +288,6 @@ pub fn ReplicaType(
 
         tracer_slot_commit: ?tracer.SpanStart = null,
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
-
-        view_change_headers: vsr.Headers.ViewChangeArray = .{ .array = .{ .buffer = undefined } },
 
         const OpenOptions = struct {
             replica_count: u8,
@@ -5670,6 +5671,9 @@ pub fn ReplicaType(
 ///
 /// Terminology:
 ///
+/// - *DVC* refers to a command=do_view_change message.
+/// - *SV* refers to a command=start_view message.
+///
 /// - The *head* message (of a view) is the message (committed or uncommitted) within that view with
 ///   the highest op.
 ///
@@ -5677,14 +5681,14 @@ pub fn ReplicaType(
 /// - *break*/*chain break*: The header for op X is not the parent of the header for op X+1.
 /// - *fork*: A correctness bug in which a committed (or possibly committed) message is discarded.
 ///
+/// The cluster can have many different "versions" of the "same" header.
+/// That is, different headers (different checksum) with the same op.
+/// But at most one version (per op) is "canonical", the remainder are "uncanonical".
 /// - An *uncanonical* message may have been removed/changed during a prior view.
 /// - A *canonical* message was part of the most recent log_view.
 ///   - Canonical messages do not necessarily survive into the new view, but they take
 ///     precedence over uncanonical messages.
 ///   - Canonical messages may be committed or uncommitted.
-///
-/// - *DVC* refers to a command=do_view_change message.
-/// - *SV* refers to a command=start_view message.
 ///
 ///
 /// Invariants:

@@ -1118,7 +1118,23 @@ const ViewChangeHeadersArray = struct {
         return .{ .array = array };
     }
 
-    /// See DVCQuorum for explanation and DVC invariants.
+    /// This function generates either DVC headers or SV headers:
+    /// - When `current.log_view < current.view`, generate headers for a SV message.
+    /// - When `current.log_view = current.view`, generate headers for a DVC message.
+    ///
+    /// Additionally, the current log_view/view/primary state informs the sort of "faults"
+    /// (gaps/breaks/etc) that we expect to find in the journal headers (`current.headers`).
+    /// For example, backups generating a DVC can safely skip over gaps (if the gap is after the DVC
+    /// anchor).
+    ///
+    /// Primaries and backups both generate DVCs and SVs.
+    /// - However, SVs are broadcast only by the primary.
+    /// - Backups generate a SV for persisting to the superblock.
+    ///   (For convenience/symmetry, not correctness).
+    ///
+    /// DVCs and SVs have different invariants they must abide.
+    /// - Read DVCQuorum's comments to understand DVC invariants.
+    /// - SV headers are much simpler: no gaps or breaks, and all uncommitted ops must be included.
     pub fn build(
         results: *ViewChangeHeadersArray,
         options: struct {
@@ -1132,6 +1148,11 @@ const ViewChangeHeadersArray = struct {
                 log_view_primary: bool,
             },
             // The vsr_headers from the working superblock.
+            // The durable headers are useful (complimenting `current.headers`) because:
+            // - They simplify generation of DVCs in the case where we are recovering from a crash,
+            //   when we were generating the same DVC prior to the crash.
+            // - They enable additional verification of header gaps/breaks based on the
+            //   gap's/break's position relative to the durable headers.
             durable: struct {
                 headers: Headers.ViewChangeSlice,
                 view: u32,
@@ -1202,7 +1223,7 @@ const ViewChangeHeadersArray = struct {
             // This gap never hides a break.
             chain_view,
             // The ops are non-sequential, and belong to the different views.
-            // Depending on the context, this gap may hide a break.
+            // Depending on the replica state, this gap may hide a break.
             chain_gap,
         };
 
@@ -1219,7 +1240,10 @@ const ViewChangeHeadersArray = struct {
             1 + op_head_current -| constants.pipeline_prepare_queue_max,
         );
 
+        // Within the "suffix" we can make additional assumptions about gaps/etc.
+        // After the suffix, we just add as many extra (valid) headers as we can fit.
         var suffix_done = false;
+
         for (current.headers.constSlice()) |*header, i| {
             const op = header.op;
             const chain = chain: {
@@ -1258,8 +1282,7 @@ const ViewChangeHeadersArray = struct {
             } else if (suffix_done) {
                 // Add extra headers to the DVC. These are not required for correctness or
                 // availability, but including extra (correct) headers minimizes header repair at
-                // the new primary. (Additionally, they keep a retried DVC consistent even if
-                // commit_min has advanced).
+                // the new primary.
                 switch (chain) {
                     .chain_sequence => {},
                     .chain_view => {},
