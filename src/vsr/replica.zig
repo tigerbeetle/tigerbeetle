@@ -286,6 +286,8 @@ pub fn ReplicaType(
         tracer_slot_commit: ?tracer.SpanStart = null,
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
+        view_change_headers: vsr.Headers.ViewChangeArray = .{ .array = .{ .buffer = undefined } },
+
         const OpenOptions = struct {
             replica_count: u8,
             storage_size_limit: u64,
@@ -2763,11 +2765,13 @@ pub fn ReplicaType(
             return message.ref();
         }
 
-        fn create_view_change_headers(self: *const Self) vsr.Headers.ViewChangeArray {
+        fn create_view_change_headers(self: *Self) *const vsr.Headers.ViewChangeArray {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.view >= self.log_view);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
+
+            self.view_change_headers.array.len = 0;
 
             var journal_headers = vsr.Headers.Array{ .buffer = undefined };
             var op = self.op + 1;
@@ -2778,10 +2782,10 @@ pub fn ReplicaType(
                 }
             }
 
-            return vsr.Headers.ViewChangeArray.build(.{
+            vsr.Headers.ViewChangeArray.build(&self.view_change_headers, .{
                 .op_checkpoint = self.op_checkpoint(),
                 .current = .{
-                    .headers = journal_headers,
+                    .headers = &journal_headers,
                     .view = self.view,
                     .log_view = self.log_view,
                     .log_view_primary = self.primary_index(self.log_view) == self.replica,
@@ -2793,6 +2797,7 @@ pub fn ReplicaType(
                     .log_view_primary = self.primary_index(self.log_view_durable()) == self.replica,
                 },
             });
+            return &self.view_change_headers;
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.

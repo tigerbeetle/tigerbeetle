@@ -336,7 +336,7 @@ const Environment = struct {
             .commit_max = vsr_state.commit_max,
             .log_view = vsr_state.log_view,
             .view = vsr_state.view,
-            .headers = .{ .array = vsr_headers },
+            .headers = &.{ .array = vsr_headers },
         });
     }
 
