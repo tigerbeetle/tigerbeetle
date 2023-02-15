@@ -1657,11 +1657,7 @@ pub fn ReplicaType(
             if (prepare.ok_quorum_received) {
                 self.prepare_timeout.reset();
 
-                // We were unable to commit at the time because we were waiting for a message.
-                log.debug("{}: on_prepare_timeout: quorum already received, retrying commit", .{
-                    self.replica,
-                });
-                self.commit_pipeline();
+                assert(self.committing);
                 return;
             }
 
