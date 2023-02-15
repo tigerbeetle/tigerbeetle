@@ -1161,8 +1161,15 @@ const ViewChangeHeadersArray = struct {
         const op_head_current = current.headers.get(0).op;
         const op_head_durable = durable.headers.slice[0].op;
 
+        // The rules for generating DVCs and SVs differ. We use the current view numbers to
+        // determine which is being generated:
+        // - When `log_view < view`, generate a DVC.
+        // - When `log_view = view`, generate a SV.
         const command_current: enum { start_view, do_view_change } =
             if (current.log_view == current.view) .start_view else .do_view_change;
+        // Likewise, the durable view numbers identify whether the durable headers were from a past
+        // DVC or SV. The durable headers are only useful if they are from the same view as our
+        // current headers, though.
         const command_durable: enum { start_view, do_view_change, outdated } = command: {
             if (durable.log_view == current.log_view) {
                 if (durable.log_view == durable.view) {
@@ -1227,7 +1234,7 @@ const ViewChangeHeadersArray = struct {
                 }
             };
 
-            if (current.log_view == current.view) {
+            if (command_current == .start_view) {
                 // Primary: Collect headers for a start_view message.
                 // Follower: these headers are stored in the superblock's vsr_headers.
                 switch (chain) {
