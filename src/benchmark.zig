@@ -1,14 +1,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const constants = @import("constants.zig");
-
+const panic = std.debug.panic;
 const log = std.log;
 pub const log_level: std.log.Level = .err;
 
-const IO = @import("io.zig").IO;
-
+const constants = @import("constants.zig");
 const stdx = @import("stdx.zig");
+const random_int_exponential = @import("testing/fuzz.zig").random_int_exponential;
+const IO = @import("io.zig").IO;
 const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
@@ -16,23 +16,24 @@ const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
 });
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
-
 const vsr = @import("vsr.zig");
 const Client = vsr.Client(StateMachine, MessageBus);
-
 const tb = @import("tigerbeetle.zig");
 
-const batches_count = 1000;
+const transfer_count = 10_000_000;
+const transfer_count_per_second = 100_000;
+const transfer_arrival_rate_ns = @divTrunc(
+    std.time.ns_per_s,
+    transfer_count_per_second,
+);
 
-const transfers_per_batch: u32 = @divExact(
+const transfer_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tb.Transfer),
 );
 comptime {
-    assert(transfers_per_batch >= 2041);
+    assert(transfer_count_per_batch >= 2041);
 }
-
-const transfers_max: u32 = batches_count * transfers_per_batch;
 
 var accounts = [_]tb.Account{
     .{
@@ -60,7 +61,6 @@ var accounts = [_]tb.Account{
         .credits_posted = 0,
     },
 };
-var create_transfers_latency_max: i64 = 0;
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
@@ -98,217 +98,184 @@ pub fn main() !void {
     );
     defer client.deinit(allocator);
 
-    // Pre-allocate a million transfers:
-    const transfers = try allocator.alloc(tb.Transfer, transfers_max);
-    defer allocator.free(transfers);
+    try send(
+        &io,
+        &client,
+        .create_accounts,
+        std.mem.sliceAsBytes(accounts[0..]),
+    );
 
-    for (transfers) |*transfer, index| {
-        transfer.* = .{
-            .id = index + 1,
-            .debit_account_id = accounts[0].id,
-            .credit_account_id = accounts[1].id,
-            .user_data = 0,
-            .reserved = 0,
-            .pending_id = 0,
-            .timeout = 0,
-            .ledger = 2,
-            .code = 1,
-            .flags = .{},
-            .amount = 1,
-            .timestamp = 0,
-        };
-    }
+    var rng = std.rand.DefaultPrng.init(42);
+    const random = rng.random();
 
-    try wait_for_connect(&client, &io);
+    var timer = try std.time.Timer.start();
 
-    var queue = TimedQueue.init(&client, &io);
-    try queue.push(.{
-        .operation = StateMachine.Operation.create_accounts,
-        .data = std.mem.sliceAsBytes(accounts[0..]),
-    });
+    var batch_latency_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count);
+    var transfer_latency_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count);
 
-    try queue.execute();
-    assert(queue.end != null);
-    assert(queue.batches.empty());
+    // Submit all batches.
+    var batch_transfers = try std.ArrayList(tb.Transfer).initCapacity(allocator, transfer_count_per_batch);
+    var transfer_start_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count_per_batch);
+    var batch_index: usize = 0;
+    var transfer_index: usize = 0;
+    var transfer_next_arrival_ns = timer.read();
+    while (transfer_index < transfer_count) {
+        const batch_start_ns = timer.read();
 
-    var count: u64 = 0;
-    queue.reset();
-    while (count < transfers.len) {
-        try queue.push(.{
-            .operation = .create_transfers,
-            .data = std.mem.sliceAsBytes(transfers[count..][0..transfers_per_batch]),
+        // Fill batch.
+        while (transfer_index < transfer_count and
+            batch_transfers.items.len < transfer_count_per_batch and
+            transfer_next_arrival_ns < batch_start_ns)
+        {
+            batch_transfers.appendAssumeCapacity(.{
+                .id = transfer_index + 1,
+                .debit_account_id = accounts[0].id,
+                .credit_account_id = accounts[1].id,
+                .user_data = 0,
+                .reserved = 0,
+                .pending_id = 0,
+                .timeout = 0,
+                .ledger = 2,
+                .code = 1,
+                .flags = .{},
+                .amount = 1,
+                .timestamp = 0,
+            });
+            transfer_start_ns.appendAssumeCapacity(transfer_next_arrival_ns);
+
+            transfer_index += 1;
+            transfer_next_arrival_ns += random_int_exponential(random, u64, transfer_arrival_rate_ns);
+        }
+
+        if (batch_transfers.items.len == 0) continue;
+
+        // Submit batch.
+        try send(
+            &io,
+            &client,
+            .create_transfers,
+            std.mem.sliceAsBytes(batch_transfers.items),
+        );
+
+        // Record latencies.
+        const batch_end_ns = timer.read();
+        log.debug("batch {}: {}tx in {}ms\n", .{
+            batch_index,
+            batch_transfers.items.len,
+            @divTrunc(batch_end_ns - batch_start_ns, std.time.ns_per_ms),
         });
-        count += transfers_per_batch;
+        batch_latency_ns.appendAssumeCapacity(batch_end_ns - batch_start_ns);
+        for (transfer_start_ns.items) |start_ns| {
+            transfer_latency_ns.appendAssumeCapacity(batch_end_ns - start_ns);
+        }
+
+        // Reset.
+        batch_index += 1;
+        try batch_transfers.resize(0);
+        try transfer_start_ns.resize(0);
     }
-    assert(count == transfers_max);
 
-    try queue.execute();
-    assert(queue.end != null);
-    assert(queue.batches.empty());
+    const total_ns = timer.read();
 
-    var ms = queue.end.? - queue.start.?;
+    const less_than_ns = (struct {
+        fn lessThan(_: void, a: u64, b: u64) bool {
+            return a < b;
+        }
+    }).lessThan;
+    std.sort.sort(u64, batch_latency_ns.items, {}, less_than_ns);
+    std.sort.sort(u64, transfer_latency_ns.items, {}, less_than_ns);
 
-    const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
-    try stdout.print("============================================\n", .{});
-    try stdout.print("{} batches in {} ms\n", .{ batches_count, ms });
-    try stdout.print("{} transfers per second\n", .{result});
-    try stdout.print("max p100 latency per {} transfers = {}ms\n", .{
-        transfers_per_batch,
-        queue.transfers_latency_max,
+    try stdout.print("{} batches in {d:2}s\n", .{
+        batch_index,
+        @intToFloat(f64, total_ns) / std.time.ns_per_s,
+    });
+    try stdout.print("offered load = {}tx/s\n", .{
+        transfer_count_per_second,
+    });
+    try stdout.print("accepted load = {}tx/s\n", .{
+        @divTrunc(
+            transfer_count * std.time.ns_per_s,
+            total_ns,
+        ),
+    });
+    try stdout.print("batch latency p100 = {}ms\n", .{
+        @divTrunc(
+            batch_latency_ns.items[batch_latency_ns.items.len - 1],
+            std.time.ns_per_ms,
+        ),
+    });
+    try stdout.print("transfer latency p100 = {}ms\n", .{
+        @divTrunc(
+            transfer_latency_ns.items[transfer_latency_ns.items.len - 1],
+            std.time.ns_per_ms,
+        ),
     });
 }
 
-const Batch = struct {
-    operation: StateMachine.Operation,
-    data: []u8,
-};
-
-const TimedQueue = struct {
-    batch_start: ?i64,
-    start: ?i64,
-    end: ?i64,
-    transfers_latency_max: i64,
-    client: *Client,
+fn send(
     io: *IO,
-    batches: RingBuffer(Batch, batches_count, .array),
+    client: *Client,
+    operation: StateMachine.Operation,
+    payload: []u8,
+) !void {
+    const message = client.get_message();
+    defer client.unref(message);
 
-    pub fn init(client: *Client, io: *IO) TimedQueue {
-        var self = TimedQueue{
-            .batch_start = null,
-            .start = null,
-            .end = null,
-            .transfers_latency_max = 0,
-            .client = client,
-            .io = io,
-            .batches = .{},
-        };
+    stdx.copy_disjoint(
+        .inexact,
+        u8,
+        message.buffer[@sizeOf(vsr.Header)..],
+        payload,
+    );
 
-        return self;
-    }
+    var result: ?(Client.Error![]const u8) = null;
 
-    pub fn reset(self: *TimedQueue) void {
-        self.batch_start = null;
-        self.start = null;
-        self.end = null;
-        self.transfers_latency_max = 0;
-    }
+    client.request(
+        @intCast(u128, @ptrToInt(&result)),
+        send_complete,
+        operation,
+        message,
+        payload.len,
+    );
 
-    pub fn push(self: *TimedQueue, batch: Batch) !void {
-        try self.batches.push(batch);
-    }
-
-    pub fn execute(self: *TimedQueue) !void {
-        assert(self.start == null);
-        assert(!self.batches.empty());
-        self.reset();
-        log.debug("executing batches...", .{});
-
-        const now = std.time.milliTimestamp();
-        self.start = now;
-        if (self.batches.head_ptr()) |starting_batch| {
-            log.debug("sending first batch...", .{});
-            self.batch_start = now;
-            const message = self.client.get_message();
-            defer self.client.unref(message);
-
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                message.buffer[@sizeOf(vsr.Header)..],
-                std.mem.sliceAsBytes(starting_batch.data),
-            );
-            self.client.request(
-                @intCast(u128, @ptrToInt(self)),
-                TimedQueue.lap,
-                starting_batch.operation,
-                message,
-                starting_batch.data.len,
-            );
-        }
-
-        while (!self.batches.empty()) {
-            self.client.tick();
-            try self.io.run_for_ns(5 * std.time.ns_per_ms);
-        }
-    }
-
-    pub fn lap(
-        user_data: u128,
-        operation: StateMachine.Operation,
-        results: Client.Error![]const u8,
-    ) void {
-        const now = std.time.milliTimestamp();
-        const value = results catch |err| {
-            log.err("Client returned error={o}", .{@errorName(err)});
-            @panic("Client returned error during benchmarking.");
-        };
-
-        const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
-        const completed_batch: ?Batch = self.batches.pop();
-        assert(completed_batch != null);
-        assert(completed_batch.?.operation == operation);
-
-        log.debug("completed batch operation={} start={}", .{
-            completed_batch.?.operation,
-            self.batch_start,
-        });
-        const latency = now - self.batch_start.?;
-        switch (operation) {
-            .create_accounts => {
-                const create_accounts_results = std.mem.bytesAsSlice(tb.CreateAccountsResult, value);
-                if (create_accounts_results.len > 0) {
-                    log.err("CreateAccountsResults={any}", .{create_accounts_results});
-                    @panic("Unexpected result creating accounts.");
-                }
-            },
-            .create_transfers => {
-                const create_transfers_results = std.mem.bytesAsSlice(tb.CreateTransfersResult, value);
-                if (create_transfers_results.len > 0) {
-                    log.err("CreateTransfersResults={any}", .{create_transfers_results});
-                    @panic("Unexpected result creating transfers.");
-                }
-
-                if (latency > self.transfers_latency_max) {
-                    self.transfers_latency_max = latency;
-                }
-            },
-            else => unreachable,
-        }
-
-        if (self.batches.head_ptr()) |next_batch| {
-            const message = self.client.get_message();
-            defer self.client.unref(message);
-
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                message.buffer[@sizeOf(vsr.Header)..],
-                std.mem.sliceAsBytes(next_batch.data),
-            );
-
-            self.batch_start = std.time.milliTimestamp();
-            self.client.request(
-                @intCast(u128, @ptrToInt(self)),
-                TimedQueue.lap,
-                next_batch.operation,
-                message,
-                next_batch.data.len,
-            );
-        } else {
-            log.debug("stopping timer...", .{});
-            self.end = now;
-        }
-    }
-};
-
-fn wait_for_connect(client: *Client, io: *IO) !void {
-    var ticks: u32 = 0;
-    while (ticks < 20) : (ticks += 1) {
+    while (result == null) {
         client.tick();
-        // We tick IO outside of client so that an IO instance can be shared by multiple clients:
-        // Otherwise we will hit io_uring memory restrictions too quickly.
-        try io.tick();
-
-        std.time.sleep(10 * std.time.ns_per_ms);
+        try io.run_for_ns(5 * std.time.ns_per_ms);
     }
+
+    const result_payload = result.? catch |err|
+        panic("Client returned error: {}", .{err});
+
+    switch (operation) {
+        .create_accounts => {
+            const create_accounts_results = std.mem.bytesAsSlice(
+                tb.CreateAccountsResult,
+                result_payload,
+            );
+            if (create_accounts_results.len > 0) {
+                panic("CreateAccountsResults: {any}", .{create_accounts_results});
+            }
+        },
+        .create_transfers => {
+            const create_transfers_results = std.mem.bytesAsSlice(
+                tb.CreateTransfersResult,
+                result_payload,
+            );
+            if (create_transfers_results.len > 0) {
+                panic("CreateTransfersResults: {any}", .{create_transfers_results});
+            }
+        },
+        else => unreachable,
+    }
+}
+
+fn send_complete(
+    user_data: u128,
+    operation: StateMachine.Operation,
+    result: Client.Error![]const u8,
+) void {
+    _ = operation;
+
+    const result_ptr = @intToPtr(*?@TypeOf(result), @intCast(u64, user_data));
+    result_ptr.* = result;
 }
