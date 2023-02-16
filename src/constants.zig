@@ -38,14 +38,14 @@ comptime {
     assert(clients_max >= Config.Cluster.clients_max_min);
 }
 
-/// The minimum number of nodes required to form a quorum for replication:
+/// The maximum number of nodes required to form a quorum for replication.
 /// Majority quorums are only required across view change and replication phases (not within).
 /// As per Flexible Paxos, provided `quorum_replication + quorum_view_change > replicas`:
 /// 1. you may increase `quorum_view_change` above a majority, so that
 /// 2. you can decrease `quorum_replication` below a majority, to optimize the common case.
 /// This improves latency by reducing the number of nodes required for synchronous replication.
 /// This reduces redundancy only in the short term, asynchronous replication will still continue.
-/// The size of the replication quorum is limited to the minimum of this value and actual majority.
+/// The size of the replication quorum is limited to the minimum of this value and ⌈replicas/2⌉.
 /// The size of the view change quorum will then be automatically inferred from quorum_replication.
 pub const quorum_replication_max = config.cluster.quorum_replication_max;
 
