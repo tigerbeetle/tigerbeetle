@@ -5070,7 +5070,6 @@ pub fn ReplicaType(
 
             var headers_canonical = DVCQuorum.headers_canonical(self.do_view_change_from_all_replicas);
             const header_head = headers_canonical.next().?;
-            assert(header_head.op == header_head.op);
             assert(header_head.op >= do_view_change_commit_min_max);
             assert(header_head.op >= self.op_checkpoint());
             assert(header_head.op >= self.commit_min);
@@ -5181,17 +5180,16 @@ pub fn ReplicaType(
             }
 
             self.transition_to_normal_from_view_change_status(self.view);
-            self.view_durable_update();
 
             assert(self.status == .normal);
             assert(self.primary());
 
-            // Send prepare_ok messages to ourself to contribute to the pipeline.
-            self.send_prepare_oks_after_view_change();
-
             // SVs will be sent out after the view_durable update completes.
             assert(self.view_durable_updating());
             assert(self.log_view > self.log_view_durable());
+
+            // Send prepare_ok messages to ourself to contribute to the pipeline.
+            self.send_prepare_oks_after_view_change();
         }
 
         fn transition_to_recovering_head(self: *Self) void {
@@ -5284,6 +5282,12 @@ pub fn ReplicaType(
                 assert(self.view == view_new);
                 assert(self.log_view == view_new);
                 assert(self.commit_min == self.commit_max);
+                assert(self.journal.dirty.count == 0);
+                assert(self.journal.faulty.count == 0);
+
+                // Now that the primary is repaired and in status=normal, it can update its
+                // view-change headers.
+                self.view_durable_update();
 
                 self.ping_timeout.start();
                 self.commit_timeout.start();
