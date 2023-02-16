@@ -243,7 +243,7 @@ pub fn ReplicaType(
         ping_timeout: Timeout,
 
         /// The number of ticks without enough prepare_ok's before the primary resends a prepare.
-        /// (status=normal primary with nonempty pipeline)
+        /// (status=normal primary, pipeline has prepare with !ok_quorum_received)
         prepare_timeout: Timeout,
 
         /// The number of ticks waiting for a prepare_ok.
@@ -1098,9 +1098,11 @@ pub fn ReplicaType(
                 prepare.message.header.checksum,
             });
 
+            assert(self.prepare_timeout.ticking);
             assert(self.primary_abdicate_timeout.ticking);
             assert(!self.primary_abdicating);
             if (!self.primary_pipeline_pending()) {
+                self.prepare_timeout.stop();
                 self.primary_abdicate_timeout.stop();
             }
 
@@ -2401,7 +2403,6 @@ pub fn ReplicaType(
                 assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
                 assert(prepare.message.header.op == self.commit_min);
                 assert(prepare.message.header.op == self.commit_max);
-                assert(self.prepare_timeout.ticking);
 
                 self.message_bus.unref(prepare.message);
 
@@ -2419,10 +2420,6 @@ pub fn ReplicaType(
                         });
                         self.write_prepare(next.message, .append);
                     }
-                } else {
-                    // When the pipeline is empty, stop the prepare timeout.
-                    // The timeout will be restarted when another entry arrives for the pipeline.
-                    self.prepare_timeout.stop();
                 }
             }
 
@@ -3662,15 +3659,17 @@ pub fn ReplicaType(
 
             log.debug("{}: primary_pipeline_next: prepare {}", .{ self.replica, message.header.checksum });
 
-            if (!self.primary_abdicate_timeout.ticking) self.primary_abdicate_timeout.start();
-            if (self.pipeline.queue.prepare_queue.tail_ptr()) |previous| {
+            if (self.primary_pipeline_pending()) {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
-                assert(self.prepare_timeout.ticking);
+                const previous = self.pipeline.queue.prepare_queue.tail_ptr().?;
                 assert(previous.message.header.checksum == message.header.parent);
+                assert(self.prepare_timeout.ticking);
+                assert(self.primary_abdicate_timeout.ticking);
             } else {
-                // We are about to add the first prepare to the pipeline, so start the timeout.
                 assert(!self.prepare_timeout.ticking);
+                assert(!self.primary_abdicate_timeout.ticking);
                 self.prepare_timeout.start();
+                self.primary_abdicate_timeout.start();
             }
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
