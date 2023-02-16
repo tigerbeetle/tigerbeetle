@@ -223,10 +223,10 @@ pub fn main() !void {
         batch_index,
         @intToFloat(f64, total_ns) / std.time.ns_per_s,
     });
-    try stdout.print("offered load = {} tx/s\n", .{
+    try stdout.print("load offered = {} tx/s\n", .{
         transfer_count_per_second,
     });
-    try stdout.print("accepted load = {} tx/s\n", .{
+    try stdout.print("load accepted = {} tx/s\n", .{
         @divTrunc(
             transfer_count * std.time.ns_per_s,
             total_ns,
