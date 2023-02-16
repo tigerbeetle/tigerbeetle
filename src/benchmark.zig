@@ -20,13 +20,6 @@ const vsr = @import("vsr.zig");
 const Client = vsr.Client(StateMachine, MessageBus);
 const tb = @import("tigerbeetle.zig");
 
-const transfer_count = 10_000_000;
-const transfer_count_per_second = 100_000;
-const transfer_arrival_rate_ns = @divTrunc(
-    std.time.ns_per_s,
-    transfer_count_per_second,
-);
-
 const transfer_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tb.Transfer),
@@ -74,6 +67,47 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
+
+    var transfer_count: usize = 10_000_000;
+    var transfer_count_per_second: usize = 1_000_000;
+
+    var args = std.process.args();
+
+    // Discard executable name.
+    _ = try args.next(allocator).?;
+
+    // Parse arguments.
+    while (args.next(allocator)) |arg_or_err| {
+        const arg = try arg_or_err;
+        if (std.mem.eql(u8, arg, "--transfer-count")) {
+            const int_string_or_err = args.next(allocator) orelse
+                panic("Expected an argument to --transfer-count", .{});
+            const int_string = try int_string_or_err;
+
+            transfer_count = std.fmt.parseInt(usize, int_string, 10) catch |err|
+                panic(
+                "Could not parse \"{}\" as an integer: {}",
+                .{ std.zig.fmtEscapes(int_string), err },
+            );
+        } else if (std.mem.eql(u8, arg, "--transfer-count-per-second")) {
+            const int_string_or_err = args.next(allocator) orelse
+                panic("Expected an argument to --transfer-count-per-second", .{});
+            const int_string = try int_string_or_err;
+
+            transfer_count_per_second = std.fmt.parseInt(usize, int_string, 10) catch |err|
+                panic(
+                "Could not parse \"{}\" as an integer: {}",
+                .{ std.zig.fmtEscapes(int_string), err },
+            );
+        } else {
+            std.debug.panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
+        }
+    }
+
+    const transfer_arrival_rate_ns = @divTrunc(
+        std.time.ns_per_s,
+        transfer_count_per_second,
+    );
 
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
@@ -159,7 +193,7 @@ pub fn main() !void {
 
         // Record latencies.
         const batch_end_ns = timer.read();
-        log.debug("batch {}: {}tx in {}ms\n", .{
+        log.debug("batch {}: {} tx in {} ms\n", .{
             batch_index,
             batch_transfers.items.len,
             @divTrunc(batch_end_ns - batch_start_ns, std.time.ns_per_ms),
@@ -185,26 +219,26 @@ pub fn main() !void {
     std.sort.sort(u64, batch_latency_ns.items, {}, less_than_ns);
     std.sort.sort(u64, transfer_latency_ns.items, {}, less_than_ns);
 
-    try stdout.print("{} batches in {d:2}s\n", .{
+    try stdout.print("{} batches in {d:2} s\n", .{
         batch_index,
         @intToFloat(f64, total_ns) / std.time.ns_per_s,
     });
-    try stdout.print("offered load = {}tx/s\n", .{
+    try stdout.print("offered load = {} tx/s\n", .{
         transfer_count_per_second,
     });
-    try stdout.print("accepted load = {}tx/s\n", .{
+    try stdout.print("accepted load = {} tx/s\n", .{
         @divTrunc(
             transfer_count * std.time.ns_per_s,
             total_ns,
         ),
     });
-    try stdout.print("batch latency p100 = {}ms\n", .{
+    try stdout.print("batch latency p100 = {} ms\n", .{
         @divTrunc(
             batch_latency_ns.items[batch_latency_ns.items.len - 1],
             std.time.ns_per_ms,
         ),
     });
-    try stdout.print("transfer latency p100 = {}ms\n", .{
+    try stdout.print("transfer latency p100 = {} ms\n", .{
         @divTrunc(
             transfer_latency_ns.items[transfer_latency_ns.items.len - 1],
             std.time.ns_per_ms,
