@@ -1101,7 +1101,7 @@ pub fn ReplicaType(
             assert(self.prepare_timeout.ticking);
             assert(self.primary_abdicate_timeout.ticking);
             assert(!self.primary_abdicating);
-            if (!self.primary_pipeline_pending()) {
+            if (self.primary_pipeline_pending() == null) {
                 self.prepare_timeout.stop();
                 self.primary_abdicate_timeout.stop();
             }
@@ -1736,6 +1736,8 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
 
+            const prepare = self.primary_pipeline_pending().?;
+
             if (self.replica_count == 1) {
                 // Replica=1 doesn't write prepares concurrently to avoid gaps in its WAL.
                 assert(self.journal.writes.executing() <= 1);
@@ -1744,19 +1746,6 @@ pub fn ReplicaType(
                 self.prepare_timeout.reset();
                 return;
             }
-
-            var prepares = self.pipeline.queue.prepare_queue.iterator();
-            const prepare = while (prepares.next_ptr()) |prepare| {
-                assert(prepare.message.header.command == .prepare);
-                if (!prepare.ok_quorum_received) {
-                    break prepare;
-                }
-            } else {
-                assert(self.committing);
-
-                self.prepare_timeout.reset();
-                return;
-            };
 
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [constants.replicas_max]u8 = undefined;
@@ -1783,7 +1772,9 @@ pub fn ReplicaType(
             }
 
             if (waiting_len == 0) {
-                assert(self.quorum_replication == self.replica_count);
+                // TODO: This assert will be valid when the state-transfer is implemented and the
+                // threshold=replica_count hack is removed from on_prepare_ok.
+                // assert(self.quorum_replication == self.replica_count);
                 assert(!prepare.ok_from_all_replicas.isSet(self.replica));
                 assert(prepare.ok_from_all_replicas.count() == self.replica_count - 1);
                 assert(prepare.message.header.op <= self.op);
@@ -1832,7 +1823,7 @@ pub fn ReplicaType(
         fn on_primary_abdicate_timeout(self: *Self) void {
             assert(self.status == .normal);
             assert(self.primary());
-            assert(self.primary_pipeline_pending());
+            assert(self.primary_pipeline_pending() != null);
             self.primary_abdicate_timeout.reset();
             if (self.replica_count == 1) return;
 
@@ -1853,7 +1844,7 @@ pub fn ReplicaType(
             if (self.primary_abdicating) {
                 assert(self.primary_abdicate_timeout.ticking);
                 assert(self.pipeline.queue.prepare_queue.count > 0);
-                assert(self.primary_pipeline_pending());
+                assert(self.primary_pipeline_pending() != null);
 
                 log.debug("{}: on_commit_message_timeout: primary abdicating (view={})", .{
                     self.replica,
@@ -3659,7 +3650,7 @@ pub fn ReplicaType(
 
             log.debug("{}: primary_pipeline_next: prepare {}", .{ self.replica, message.header.checksum });
 
-            if (self.primary_pipeline_pending()) {
+            if (self.primary_pipeline_pending()) |_| {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
                 const previous = self.pipeline.queue.prepare_queue.tail_ptr().?;
                 assert(previous.message.header.checksum == message.header.parent);
@@ -3679,16 +3670,22 @@ pub fn ReplicaType(
             assert(self.op == message.header.op);
         }
 
-        /// Returns whether the primary is expecting any prepare_ok messages.
-        fn primary_pipeline_pending(self: *const Self) bool {
+        /// Returns the next prepare in the pipeline waiting for a quorum.
+        /// Returns null when the pipeline is empty.
+        /// Returns null when the pipeline is nonempty but all prepares have a quorum.
+        fn primary_pipeline_pending(self: *const Self) ?*const Prepare {
             assert(self.status == .normal);
             assert(self.primary());
 
             var prepares = self.pipeline.queue.prepare_queue.iterator();
-            while (prepares.next()) |prepare| {
-                if (!prepare.ok_quorum_received) return true;
+            while (prepares.next_ptr()) |prepare| {
+                assert(prepare.message.header.command == .prepare);
+                if (!prepare.ok_quorum_received) {
+                    return prepare;
+                }
+            } else {
+                return null;
             }
-            return false;
         }
 
         fn pipeline_prepare_by_op_and_checksum(self: *Self, op: u64, checksum: ?u128) ?*Message {
