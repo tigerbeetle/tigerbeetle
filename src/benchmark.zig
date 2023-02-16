@@ -232,18 +232,8 @@ pub fn main() !void {
             total_ns,
         ),
     });
-    try stdout.print("batch latency p100 = {} ms\n", .{
-        @divTrunc(
-            batch_latency_ns.items[batch_latency_ns.items.len - 1],
-            std.time.ns_per_ms,
-        ),
-    });
-    try stdout.print("transfer latency p100 = {} ms\n", .{
-        @divTrunc(
-            transfer_latency_ns.items[transfer_latency_ns.items.len - 1],
-            std.time.ns_per_ms,
-        ),
-    });
+    try print_deciles(stdout, "batch", batch_latency_ns.items);
+    try print_deciles(stdout, "transfer", transfer_latency_ns.items);
 }
 
 fn send(
@@ -312,4 +302,23 @@ fn send_complete(
 
     const result_ptr = @intToPtr(*?@TypeOf(result), @intCast(u64, user_data));
     result_ptr.* = result;
+}
+
+fn print_deciles(
+    stdout: anytype,
+    label: []const u8,
+    latencies: []const u64,
+) !void {
+    var decile: usize = 0;
+    while (decile <= 10) : (decile += 1) {
+        const index = @divTrunc(latencies.len * decile, 10) -| 1;
+        try stdout.print("{s} latency p{}0 = {} ms\n", .{
+            label,
+            decile,
+            @divTrunc(
+                latencies[index],
+                std.time.ns_per_ms,
+            ),
+        });
+    }
 }
