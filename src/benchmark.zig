@@ -219,7 +219,7 @@ pub fn main() !void {
     std.sort.sort(u64, batch_latency_ns.items, {}, less_than_ns);
     std.sort.sort(u64, transfer_latency_ns.items, {}, less_than_ns);
 
-    try stdout.print("{} batches in {d:2} s\n", .{
+    try stdout.print("{} batches in {d:.2} s\n", .{
         batch_index,
         @intToFloat(f64, total_ns) / std.time.ns_per_s,
     });
