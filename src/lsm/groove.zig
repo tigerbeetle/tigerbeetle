@@ -380,26 +380,26 @@ pub fn GrooveType(
             open,
         };
 
-        const id_field = if (has_id) "id" else "timestamp";
-        const Id = @TypeOf(@field(@as(Object, undefined), id_field));
-        const PrefetchIDs = std.AutoHashMapUnmanaged(Id, void);
+        const primary_field = if (has_id) "id" else "timestamp";
+        const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
+        const PrefetchIDs = std.AutoHashMapUnmanaged(PrimaryKey, void);
 
         const PrefetchObjectsContext = struct {
             pub fn hash(_: PrefetchObjectsContext, object: Object) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&@field(object, id_field)));
+                return std.hash.Wyhash.hash(0, mem.asBytes(&@field(object, primary_field)));
             }
 
             pub fn eql(_: PrefetchObjectsContext, a: Object, b: Object) bool {
-                return @field(a, id_field) == @field(b, id_field);
+                return @field(a, primary_field) == @field(b, primary_field);
             }
         };
         const PrefetchObjectsAdapter = struct {
-            pub fn hash(_: PrefetchObjectsAdapter, id: Id) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&id));
+            pub fn hash(_: PrefetchObjectsAdapter, key: PrimaryKey) u64 {
+                return std.hash.Wyhash.hash(0, mem.asBytes(&key));
             }
 
-            pub fn eql(_: PrefetchObjectsAdapter, a_id: Id, b_object: Object) bool {
-                return a_id == @field(b_object, id_field);
+            pub fn eql(_: PrefetchObjectsAdapter, a_key: PrimaryKey, b_object: Object) bool {
+                return a_key == @field(b_object, primary_field);
             }
         };
         const PrefetchObjects = std.HashMapUnmanaged(Object, void, PrefetchObjectsContext, 70);
@@ -516,8 +516,8 @@ pub fn GrooveType(
             groove.* = undefined;
         }
 
-        pub fn get(groove: *const Groove, id: Id) ?*const Object {
-            return groove.prefetch_objects.getKeyPtrAdapted(id, PrefetchObjectsAdapter{});
+        pub fn get(groove: *const Groove, key: PrimaryKey) ?*const Object {
+            return groove.prefetch_objects.getKeyPtrAdapted(key, PrefetchObjectsAdapter{});
         }
 
         /// Must be called directly before the state machine begins queuing ids for prefetch.
@@ -547,13 +547,13 @@ pub fn GrooveType(
         /// This must be called by the state machine for every key to be prefetched.
         /// We tolerate duplicate IDs enqueued by the state machine.
         /// For example, if all unique operations require the same two dependencies.
-        pub fn prefetch_enqueue(groove: *Groove, id: Id) void {
+        pub fn prefetch_enqueue(groove: *Groove, key: PrimaryKey) void {
             if (!has_id) {
-                groove.prefetch_ids.putAssumeCapacity(id, {});
+                groove.prefetch_ids.putAssumeCapacity(key, {});
                 return;
             }
 
-            if (groove.ids.lookup_from_memory(groove.prefetch_snapshot.?, id)) |id_tree_value| {
+            if (groove.ids.lookup_from_memory(groove.prefetch_snapshot.?, key)) |id_tree_value| {
                 if (id_tree_value.tombstone()) {
                     // Do nothing; an explicit ID tombstone indicates that the object was deleted.
                 } else {
@@ -562,16 +562,16 @@ pub fn GrooveType(
                         id_tree_value.timestamp,
                     )) |object| {
                         assert(!ObjectTreeHelpers(Object).tombstone(object));
-                        assert(object.id == id);
+                        assert(object.id == key);
                         groove.prefetch_objects.putAssumeCapacity(object.*, {});
                     } else {
                         // The id was in the IdTree's value cache, but not in the ObjectTree's
                         // value cache.
-                        groove.prefetch_ids.putAssumeCapacity(id, {});
+                        groove.prefetch_ids.putAssumeCapacity(key, {});
                     }
                 }
             } else {
-                groove.prefetch_ids.putAssumeCapacity(id, {});
+                groove.prefetch_ids.putAssumeCapacity(key, {});
             }
         }
 
@@ -756,14 +756,21 @@ pub fn GrooveType(
         };
 
         pub fn put_no_clobber(groove: *Groove, object: *const Object) void {
-            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(@field(object, id_field), PrefetchObjectsAdapter{});
+            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(
+                @field(object, primary_field),
+                PrefetchObjectsAdapter{},
+            );
             assert(!gop.found_existing);
             groove.insert(object);
             gop.key_ptr.* = object.*;
         }
 
         pub fn put(groove: *Groove, object: *const Object) void {
-            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(@field(object, id_field), PrefetchObjectsAdapter{});
+            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(
+                @field(object, primary_field),
+                PrefetchObjectsAdapter{},
+            );
+
             if (gop.found_existing) {
                 groove.update(gop.key_ptr, object);
             } else {
@@ -775,7 +782,7 @@ pub fn GrooveType(
         /// Insert the value into the objects tree and its fields into the index trees.
         fn insert(groove: *Groove, object: *const Object) void {
             groove.objects.put(object);
-            if (has_id) groove.ids.put(&IdTreeValue{ .id = @field(object, id_field), .timestamp = object.timestamp });
+            if (has_id) groove.ids.put(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
@@ -789,7 +796,7 @@ pub fn GrooveType(
 
         /// Update the object and index trees by diff'ing the old and new values.
         fn update(groove: *Groove, old: *const Object, new: *const Object) void {
-            assert(@field(old, id_field) == @field(new, id_field));
+            assert(@field(old, primary_field) == @field(new, primary_field));
             assert(old.timestamp == new.timestamp);
 
             // Update the object tree entry if any of the fields (even ignored) are different.
@@ -819,12 +826,14 @@ pub fn GrooveType(
             }
         }
 
-        /// Asserts that the object with the given ID exists.
-        pub fn remove(groove: *Groove, id: Id) void {
-            const object = groove.prefetch_objects.getKeyPtrAdapted(id, PrefetchObjectsAdapter{}).?;
+        /// Asserts that the object with the given PrimaryKey exists.
+        pub fn remove(groove: *Groove, key: PrimaryKey) void {
+            const object = groove.prefetch_objects.getKeyPtrAdapted(key, PrefetchObjectsAdapter{}).?;
 
             groove.objects.remove(object);
-            if (has_id) groove.ids.remove(&IdTreeValue{ .id = @field(object, id_field), .timestamp = object.timestamp });
+            if (has_id) {
+                groove.ids.remove(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
+            }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
@@ -837,7 +846,10 @@ pub fn GrooveType(
 
             // TODO(zig) Replace this with a call to removeByPtr() after upgrading to 0.10.
             // removeByPtr() replaces an unnecessary lookup here with some pointer arithmetic.
-            assert(groove.prefetch_objects.removeAdapted(@field(object, id_field), PrefetchObjectsAdapter{}));
+            assert(groove.prefetch_objects.removeAdapted(
+                @field(object, primary_field),
+                PrefetchObjectsAdapter{},
+            ));
         }
 
         /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
