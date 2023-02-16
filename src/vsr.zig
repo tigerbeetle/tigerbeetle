@@ -1008,7 +1008,7 @@ pub fn quorums(replica_count: u8) struct {
 }
 
 pub const Headers = struct {
-    pub const Array = std.BoundedArray(Header, constants.pipeline_prepare_queue_max);
+    pub const Array = std.BoundedArray(Header, constants.view_change_headers_max);
     /// The SuperBlock's persisted VSR headers.
     /// One of the following:
     ///
