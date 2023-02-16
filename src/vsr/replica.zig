@@ -1734,16 +1734,27 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
 
-            const prepare = self.pipeline.queue.prepare_queue.head_ptr().?;
-            assert(prepare.message.header.command == .prepare);
-            assert(prepare.message.header.op == self.commit_min + 1);
-
-            if (prepare.ok_quorum_received) {
-                assert(self.committing);
+            if (self.replica_count == 1) {
+                // Replica=1 doesn't write prepares concurrently to avoid gaps in its WAL.
+                assert(self.journal.writes.executing() <= 1);
+                assert(self.journal.writes.executing() == 1 or self.committing);
 
                 self.prepare_timeout.reset();
                 return;
             }
+
+            var prepares = self.pipeline.queue.prepare_queue.iterator();
+            const prepare = while (prepares.next_ptr()) |prepare| {
+                assert(prepare.message.header.command == .prepare);
+                if (!prepare.ok_quorum_received) {
+                    break prepare;
+                }
+            } else {
+                assert(self.committing);
+
+                self.prepare_timeout.reset();
+                return;
+            };
 
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [constants.replicas_max]u8 = undefined;
@@ -1770,10 +1781,13 @@ pub fn ReplicaType(
             }
 
             if (waiting_len == 0) {
-                self.prepare_timeout.reset();
-
-                log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
+                assert(self.quorum_replication == self.replica_count);
                 assert(!prepare.ok_from_all_replicas.isSet(self.replica));
+                assert(prepare.ok_from_all_replicas.count() == self.replica_count - 1);
+                assert(prepare.message.header.op <= self.op);
+
+                self.prepare_timeout.reset();
+                log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
 
                 // We may be slow and waiting for the write to complete.
                 //
@@ -1785,9 +1799,7 @@ pub fn ReplicaType(
                 //
                 // Retry the write through `on_repair()` which will work out which is which.
                 // We do expect that the op would have been run through `on_prepare()` already.
-                assert(prepare.message.header.op <= self.op);
                 self.on_repair(prepare.message);
-
                 return;
             }
 
