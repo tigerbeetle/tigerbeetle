@@ -351,8 +351,14 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             );
         }
 
-        fn prefetch_create_accounts_immutable_callback(completion: *AccountsImmutableGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_immutable_context", completion);
+        fn prefetch_create_accounts_immutable_callback(
+            completion: *AccountsImmutableGroove.PrefetchContext,
+        ) void {
+            const self = @fieldParentPtr(
+                StateMachine,
+                "prefetch_accounts_immutable_context",
+                completion,
+            );
 
             // Nothing to prefetch_enqueue() from accounts_mutable as accounts_immutable
             // is all that is needed to check for pre-existing accounts before creating one.
@@ -364,8 +370,14 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             );
         }
 
-        fn prefetch_create_accounts_mutable_callback(completion: *AccountsMutableGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_mutable_context", completion);
+        fn prefetch_create_accounts_mutable_callback(
+            completion: *AccountsMutableGroove.PrefetchContext,
+        ) void {
+            const self = @fieldParentPtr(
+                StateMachine,
+                "prefetch_accounts_mutable_context",
+                completion,
+            );
 
             self.prefetch_finish();
         }
