@@ -89,28 +89,45 @@ const Environment = struct {
     forest: Forest,
     checkpoint_op: ?u64,
 
-    pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
-        var env: Environment = undefined;
-        env.state = .init;
+    fn init(env: *Environment, storage: *Storage) !void {
         env.storage = storage;
-
         env.message_pool = try MessagePool.init(allocator, .replica);
-        defer env.message_pool.deinit(allocator);
 
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = env.storage,
             .storage_size_limit = constants.storage_size_max,
             .message_pool = &env.message_pool,
         });
-        defer env.superblock.deinit(allocator);
 
         env.grid = try Grid.init(allocator, &env.superblock);
-        defer env.grid.deinit(allocator);
 
         env.forest = undefined;
         env.checkpoint_op = null;
+    }
 
-        try env.open_then_apply(fuzz_ops);
+    fn deinit(env: *Environment) void {
+        env.message_pool.deinit(allocator);
+        env.superblock.deinit(allocator);
+        env.grid.deinit(allocator);
+    }
+
+    pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
+        var env: Environment = undefined;
+        env.state = .init;
+        try env.init(storage);
+        defer env.deinit();
+
+        env.change_state(.init, .superblock_format);
+        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
+            .cluster = cluster,
+            .replica = replica,
+        });
+        env.tick_until_state_change(.superblock_format, .superblock_open);
+
+        try env.open();
+        defer env.close();
+
+        try env.apply(fuzz_ops);
     }
 
     fn change_state(env: *Environment, current_state: State, next_state: State) void {
@@ -125,25 +142,19 @@ const Environment = struct {
         assert(env.state == next_state);
     }
 
-    pub fn open_then_apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-        env.change_state(.init, .superblock_format);
-        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-            .cluster = cluster,
-            .replica = replica,
-        });
-
-        env.tick_until_state_change(.superblock_format, .superblock_open);
+    fn open(env: *Environment) !void {
         env.superblock.open(superblock_open_callback, &env.superblock_context);
-
         env.tick_until_state_change(.superblock_open, .forest_init);
-        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
-        defer env.forest.deinit(allocator);
 
+        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
         env.change_state(.forest_init, .forest_open);
         env.forest.open(forest_open_callback);
 
         env.tick_until_state_change(.forest_open, .fuzzing);
-        try env.apply(fuzz_ops);
+    }
+
+    fn close(env: *Environment) void {
+        env.forest.deinit(allocator);
     }
 
     fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
@@ -265,8 +276,8 @@ const Environment = struct {
         // The forest should behave like a simple key-value data-structure.
         // We'll compare it to a hash map.
         var model = .{
-            .checkpointed  = std.hash_map.AutoHashMap(u128, Account).init(allocator),
-            .uncheckpointed  = std.hash_map.AutoHashMap(u128, Account).init(allocator),
+            .checkpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator),
+            .uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator),
         };
         defer model.checkpointed.deinit();
         defer model.uncheckpointed.deinit();
@@ -322,7 +333,13 @@ const Environment = struct {
                     }
                 },
                 .storage_reset => {
+                    env.close();
+                    env.deinit();
                     env.storage.reset();
+                    try env.init(env.storage);
+
+                    env.state = .superblock_open;
+                    try env.open();
                     {
                         // TODO: currently this checks that everything added to the LSM after checkpoint
                         // resets to the last checkpoint on crash by looking through what's been added
@@ -335,7 +352,7 @@ const Environment = struct {
                                 assert(std.mem.eql(
                                     u8,
                                     std.mem.asBytes(lsm_account.?),
-                                    std.mem.asBytes(&checkpointed_account)
+                                    std.mem.asBytes(&checkpointed_account),
                                 ));
                             }
                         }
@@ -450,7 +467,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .get_account => FuzzOp{
                 .get_account = random_id(random, u128),
             },
-            .storage_reset => FuzzOp{.storage_reset = {}},
+            .storage_reset => FuzzOp{ .storage_reset = {} },
         };
         switch (fuzz_op.*) {
             .compact => puts_since_compact = 0,
