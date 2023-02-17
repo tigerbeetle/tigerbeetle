@@ -102,9 +102,9 @@ pub const IO = struct {
         try self.flush_completions(0, timeouts, etime);
 
         // The SQE array is empty from flush_submissions(). Fill it up with unqueued completions.
-        // This runs before `self.completed` is flushed below to prevent new IO from reserving SQE 
+        // This runs before `self.completed` is flushed below to prevent new IO from reserving SQE
         // slots and potentially starving those in `self.unqueued`.
-        // Loop over a copy to avoid an infinite loop of `enqueue()` re-adding to `self.unqueued`. 
+        // Loop over a copy to avoid an infinite loop of `enqueue()` re-adding to `self.unqueued`.
         {
             var copy = self.unqueued;
             self.unqueued = .{};
