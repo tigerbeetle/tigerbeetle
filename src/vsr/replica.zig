@@ -5094,9 +5094,7 @@ pub fn ReplicaType(
             }
 
             if (self.status == .view_change and self.log_view < self.view) {
-                if (self.primary_index(self.view) != self.replica and !self.do_view_change_quorum) {
-                    self.send_do_view_change();
-                }
+                if (!self.do_view_change_quorum) self.send_do_view_change();
             }
         }
 
