@@ -984,27 +984,48 @@ pub fn quorums(replica_count: u8) struct {
     replication: u8,
     view_change: u8,
 } {
-    const majority = @divFloor(replica_count, 2) + 1;
-    assert(majority <= replica_count);
+    assert(replica_count > 0);
 
     assert(constants.quorum_replication_max >= 2);
-    const quorum_replication = std.math.min(constants.quorum_replication_max, majority);
+    // For replica_count=2, set quorum_replication=2 even though =1 would intersect.
+    // This improves durability of small clusters.
+    const quorum_replication = if (replica_count == 2) 2 else std.math.min(
+        constants.quorum_replication_max,
+        stdx.div_ceil(replica_count, 2),
+    );
+    assert(quorum_replication <= replica_count);
     assert(quorum_replication >= 2 or quorum_replication == replica_count);
 
-    const quorum_view_change = std.math.max(
-        replica_count - quorum_replication + 1,
-        majority,
-    );
+    // For replica_count=2, set quorum_view_change=2 even though =1 would intersect.
+    // This avoids special cases for a single-replica view-change in Replica.
+    const quorum_view_change =
+        if (replica_count == 2) 2 else replica_count - quorum_replication + 1;
     // The view change quorum may be more expensive to make the replication quorum cheaper.
     // The insight is that the replication phase is by far more common than the view change.
     // This trade-off allows us to optimize for the common case.
     // See the comments in `constants.zig` for further explanation.
-    assert(quorum_view_change >= majority);
+    assert(quorum_view_change <= replica_count);
+    assert(quorum_view_change >= 2 or quorum_view_change == replica_count);
+    assert(quorum_view_change >= @divFloor(replica_count, 2) + 1);
+    assert(quorum_view_change + quorum_replication > replica_count);
 
     return .{
         .replication = quorum_replication,
         .view_change = quorum_view_change,
     };
+}
+
+test "quorums" {
+    if (constants.quorum_replication_max != 3) return error.SkipZigTest;
+
+    const expect_replication = [_]u8{ 1, 2, 2, 2, 3, 3, 3, 3 };
+    const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
+
+    for (expect_replication[0..]) |_, i| {
+        const actual = quorums(@intCast(u8, i) + 1);
+        try std.testing.expectEqual(actual.replication, expect_replication[i]);
+        try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
+    }
 }
 
 pub const Headers = struct {
