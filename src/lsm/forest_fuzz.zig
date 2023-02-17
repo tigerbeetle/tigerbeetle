@@ -194,41 +194,41 @@ const Environment = struct {
     }
 
     fn prefetch_account(env: *Environment, id: u128) void {
-        const groove_immut = &env.forest.grooves.accounts_immutable;
-        const groove_mut = &env.forest.grooves.accounts_mutable;
+        const groove_immutable = &env.forest.grooves.accounts_immutable;
+        const groove_mutable = &env.forest.grooves.accounts_mutable;
 
-        const GrooveImmut = @TypeOf(groove_immut.*);
-        const GrooveMut = @TypeOf(groove_mut.*);
+        const GrooveImmutable = @TypeOf(groove_immutable.*);
+        const GrooveMutable = @TypeOf(groove_mutable.*);
         const Getter = struct {
             _id: u128,
-            _groove_mut: *GrooveMut,
-            _groove_immut: *GrooveImmut,
+            _groove_mutable: *GrooveMutable,
+            _groove_immutable: *GrooveImmutable,
 
             finished: bool = false,
-            prefetch_context_mut: GrooveMut.PrefetchContext = undefined,
-            prefetch_context_immut: GrooveImmut.PrefetchContext = undefined,
+            prefetch_context_mutable: GrooveMutable.PrefetchContext = undefined,
+            prefetch_context_immutable: GrooveImmutable.PrefetchContext = undefined,
 
             fn prefetch_start(getter: *@This()) void {
-                const groove = getter._groove_immut;
+                const groove = getter._groove_immutable;
                 groove.prefetch_setup(null);
                 groove.prefetch_enqueue(getter._id);
-                groove.prefetch(@This().prefetch_callback_immut, &getter.prefetch_context_immut);
+                groove.prefetch(@This().prefetch_callback_immuttable, &getter.prefetch_context_immutable);
             }
 
-            fn prefetch_callback_immut(prefetch_context: *GrooveImmut.PrefetchContext) void {
-                const getter = @fieldParentPtr(@This(), "prefetch_context_immut", prefetch_context);
-                const groove = getter._groove_mut;
+            fn prefetch_callback_immuttable(prefetch_context: *GrooveImmutable.PrefetchContext) void {
+                const getter = @fieldParentPtr(@This(), "prefetch_context_immutable", prefetch_context);
+                const groove = getter._groove_mutable;
                 groove.prefetch_setup(null);
 
-                if (getter._groove_immut.get(getter._id)) |immut| {
+                if (getter._groove_immutable.get(getter._id)) |immut| {
                     groove.prefetch_enqueue(immut.timestamp);
                 }
 
-                groove.prefetch(@This().prefetch_callback_mut, &getter.prefetch_context_mut);
+                groove.prefetch(@This().prefetch_callback_mutable, &getter.prefetch_context_mutable);
             }
 
-            fn prefetch_callback_mut(prefetch_context: *GrooveMut.PrefetchContext) void {
-                const getter = @fieldParentPtr(@This(), "prefetch_context_mut", prefetch_context);
+            fn prefetch_callback_mutable(prefetch_context: *GrooveMutable.PrefetchContext) void {
+                const getter = @fieldParentPtr(@This(), "prefetch_context_mutable", prefetch_context);
                 assert(!getter.finished);
                 getter.finished = true;
             }
@@ -236,8 +236,8 @@ const Environment = struct {
 
         var getter = Getter{
             ._id = id,
-            ._groove_mut = groove_mut,
-            ._groove_immut = groove_immut,
+            ._groove_mutable = groove_mutable,
+            ._groove_immutable = groove_immutable,
         };
         getter.prefetch_start();
         while (!getter.finished) env.storage.tick();
