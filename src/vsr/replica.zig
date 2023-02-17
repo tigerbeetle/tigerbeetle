@@ -2934,8 +2934,7 @@ pub fn ReplicaType(
             assert(
                 header.view == self.view or
                     header.command == .request_start_view or
-                    header.command == .ping or header.command == .ping_client or
-                    header.command == .pong or header.command == .pong_client,
+                    header.command == .ping or header.command == .pong,
             );
             assert(header.size == @sizeOf(Header));
 
