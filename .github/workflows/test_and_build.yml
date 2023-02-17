@@ -80,12 +80,13 @@ jobs:
       - uses: actions/checkout@v2
       - run: ./scripts/benchmark.sh
 
-  benchmark_on_windows:
-    name: Run benchmark on Windows
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v2
-      - run: ./scripts/benchmark.bat
+  # TODO Temporarily disabled. See https://github.com/tigerbeetledb/tigerbeetle/issues/473 
+  #benchmark_on_windows:
+  #  name: Run benchmark on Windows
+  #  runs-on: windows-latest
+  #  steps:
+  #    - uses: actions/checkout@v2
+  #    - run: ./scripts/benchmark.bat
 
   fuzz_ewah:
     name: 'Fuzz EWAH codec'
@@ -329,7 +330,7 @@ jobs:
       - test_on_macos
       - benchmark_on_linux
       - benchmark_on_macos
-      - benchmark_on_windows
+      # - benchmark_on_windows
       - fuzz_ewah
       - fuzz_lsm_manifest_log
       - fuzz_lsm_segmented_array
