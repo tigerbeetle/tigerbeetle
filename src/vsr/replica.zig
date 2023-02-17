@@ -4643,6 +4643,7 @@ pub fn ReplicaType(
                     assert(replica == self.primary_index(self.view));
                     assert(message.header.replica == self.replica);
                 },
+                .reply => unreachable,
                 .start_view_change => {
                     assert(self.status == .view_change);
                     assert(message.header.view == self.view);
@@ -4716,12 +4717,14 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                     assert(self.primary_index(self.view) == replica);
                 },
-                else => {
-                    log.info("{}: send_message_to_replica: TODO {s}", .{
-                        self.replica,
-                        @tagName(message.header.command),
-                    });
+                .eviction => {
+                    assert(self.status == .normal);
+                    assert(self.primary());
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
                 },
+                .request_block => unreachable,
+                .block => unreachable,
             }
 
             if (replica != self.replica) {
