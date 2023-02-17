@@ -130,8 +130,11 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests.linkLibC();
         unit_tests.addIncludeDir("src/clients/c/");
 
-        const test_step = b.step("test", "Run the unit tests");
+        const unit_tests_step = b.step("test:unit", "Run the unit tests");
+        unit_tests_step.dependOn(&unit_tests.step);
 
+        const test_step = b.step("test", "Run the unit tests");
+        test_step.dependOn(&unit_tests.step);
         // Test that our demos compile, but don't run them.
         inline for (.{
             "demo_01_create_accounts",
@@ -146,7 +149,6 @@ pub fn build(b: *std.build.Builder) void {
             demo_exe.addPackage(vsr_package);
             test_step.dependOn(&demo_exe.step);
         }
-        test_step.dependOn(&unit_tests.step);
     }
 
     // Clients build:
