@@ -29,6 +29,8 @@ if [ "$(./zig/zig targets | grep triple |cut -d '"' -f 4 | cut -d '.' -f 1,2)" =
     target="-target native-macos.11"
 fi
 
+./zig/zig targets
+
 # Zig picks musl libc on RHEL instead of glibc, incorrectly
 # https://github.com/ziglang/zig/issues/12156
 if [ -f "/etc/redhat-release" ]; then
@@ -42,6 +44,8 @@ if [ "$target" = "" ]; then
 else
     echo "Building for '$target'"
 fi
+
+mkdir -p ./dist
 
 # Need to do string eval-ing because of shellcheck's strict string
 # interpolation rules.
