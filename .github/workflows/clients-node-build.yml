@@ -40,8 +40,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
+      - run: npm install -g npm@8
       - run: npm install
-      - run: node -e 'require("tigerbeetle-node"); console.log("SUCCESS!")'
+      - run: npm pack
+      - run: dir=$(pwd) && mkdir /tmp/test && cd /tmp/test && npm install $dir && node -e 'require("tigerbeetle-node"); console.log("SUCCESS!")'
 
 # Disable version check for now, as it basically requires us to bump version in package.json for every chage.
 # Now that bors enforces that our CI is green, that becomes very painful.
