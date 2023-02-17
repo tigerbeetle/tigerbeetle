@@ -100,6 +100,17 @@ pub const IO = struct {
         try self.flush_submissions(wait_nr, timeouts, etime);
         // We can now just peek for any CQEs without waiting and without another syscall:
         try self.flush_completions(0, timeouts, etime);
+
+        // The SQE array is empty from flush_submissions(). Fill it up with unqueued completions.
+        // This runs before `self.completed` is flushed below to prevent new IO from reserving SQE 
+        // slots and potentially starving those in `self.unqueued`.
+        // Loop over a copy to avoid an infinite loop of `enqueue()` re-adding to `self.unqueued`. 
+        {
+            var copy = self.unqueued;
+            self.unqueued = .{};
+            while (copy.pop()) |completion| self.enqueue(completion);
+        }
+
         // Run completions only after all completions have been flushed:
         // Loop on a copy of the linked list, having reset the list first, so that any synchronous
         // append on running a completion is executed only the next time round the event loop,
@@ -108,12 +119,6 @@ pub const IO = struct {
             var copy = self.completed;
             self.completed = .{};
             while (copy.pop()) |completion| completion.complete();
-        }
-        // Again, loop on a copy of the list to avoid an infinite loop:
-        {
-            var copy = self.unqueued;
-            self.unqueued = .{};
-            while (copy.pop()) |completion| self.enqueue(completion);
         }
     }
 
