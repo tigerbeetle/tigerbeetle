@@ -30,15 +30,11 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build go_client -Drelease-safe
 
-      - name: Cache output
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-go-binaries
+      - name: Upload binaries
+        uses: actions/upload-artifact@v3
         with:
+          name: go-binaries
           path: src/clients/go/pkg/native
-          key: go-binaries-${{ github.sha }}
-          restore-keys: |
-            go-binaries-${{ github.sha }}
 
   tests:
     needs: binaries
@@ -48,15 +44,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - name: Cache output
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-go-binaries
+      - name: Download binaries
+        uses: actions/download-artifact@v3
         with:
+          name: go-binaries
           path: src/clients/go/pkg/native
-          key: go-binaries-${{ github.sha }}
-          restore-keys: |
-            go-binaries-${{ github.sha }}
       - run: ./scripts/install.sh
       - run: go test ./...
         working-directory: ./src/clients/go
@@ -67,15 +59,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Cache output
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-go-binaries
+      - name: Download binaries
+        uses: actions/download-artifact@v3
         with:
+          name: go-binaries
           path: src/clients/go/pkg/native
-          key: go-binaries-${{ github.sha }}
-          restore-keys: |
-            go-binaries-${{ github.sha }}
       - run: ./scripts/install.bat
       - run: ./zgo.bat test ./...
         working-directory: ./src/clients/go
@@ -88,15 +76,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - name: Cache output
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-go-binaries
+      - name: Download binaries
+        uses: actions/download-artifact@v3
         with:
+          name: go-binaries
           path: src/clients/go/pkg/native
-          key: go-binaries-${{ github.sha }}
-          restore-keys: |
-            go-binaries-${{ github.sha }}
       - run: go build
         working-directory: ./src/clients/go/samples/basic
 
@@ -105,15 +89,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Cache output
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-go-binaries
+      - name: Download binaries
+        uses: actions/download-artifact@v3
         with:
+          name: go-binaries
           path: src/clients/go/pkg/native
-          key: go-binaries-${{ github.sha }}
-          restore-keys: |
-            go-binaries-${{ github.sha }}
       - run: ../../zgo.bat build
         working-directory: ./src/clients/go/samples/basic
 
@@ -123,18 +103,14 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./src/clients/go    
+        working-directory: ./src/clients/go
     steps:
       - uses: actions/checkout@v3
-      - name: Cache output
-        uses: actions/cache@v3
-        env:
-          cache-name: cache-go-binaries
+      - name: Download binaries
+        uses: actions/download-artifact@v3
         with:
+          name: go-binaries
           path: src/clients/go/pkg/native
-          key: go-binaries-${{ github.sha }}
-          restore-keys: |
-            go-binaries-${{ github.sha }}
       - run: mkdir ~/.ssh && echo -e "${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
       - run: git clone --no-checkout git@github.com:tigerbeetledb/tigerbeetle-go.git ~/tigerbeetle-go && cp -R . ~/tigerbeetle-go
       - run: echo -e "# tigerbeetle-go\nThis repo has been automatically generated from [tigerbeetledb/tigerbeetle@${{ github.sha }}](https://github.com/tigerbeetledb/tigerbeetle/commit/${{ github.sha }}) to keep binary blobs out of the monorepo. Please see [https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/go](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/go) for documentation and contributions." > ~/tigerbeetle-go/README.md
