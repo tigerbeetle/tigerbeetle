@@ -151,7 +151,7 @@ const Environment = struct {
     /// Indexed by sequence.
     const SequenceStates = std.ArrayList(struct {
         vsr_state: VSRState,
-        vsr_headers: vsr.ViewChangeHeaders.BoundedArray,
+        vsr_headers: vsr.Headers.Array,
         /// Track the expected `checksum(free_set)`.
         /// Note that this is a checksum of the decoded free set; it is not the same as
         /// `SuperBlockHeader.free_set_checksum`.
@@ -269,7 +269,7 @@ const Environment = struct {
             .replica = 0,
         });
 
-        var vsr_headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
+        var vsr_headers = vsr.Headers.Array{ .buffer = undefined };
         vsr_headers.appendAssumeCapacity(vsr.Header.root_prepare(cluster));
 
         assert(env.sequence_states.items.len == 0);
@@ -315,7 +315,7 @@ const Environment = struct {
             .view = env.superblock.staging.vsr_state.view + 5,
         };
 
-        var vsr_headers = vsr.ViewChangeHeaders.BoundedArray{ .buffer = undefined };
+        var vsr_headers = vsr.Headers.Array{ .buffer = undefined };
         var vsr_head = std.mem.zeroInit(vsr.Header, .{
             .command = .prepare,
             .op = env.superblock.staging.vsr_state.commit_min,
@@ -336,7 +336,7 @@ const Environment = struct {
             .commit_max = vsr_state.commit_max,
             .log_view = vsr_state.log_view,
             .view = vsr_state.view,
-            .headers = vsr_headers,
+            .headers = &.{ .array = vsr_headers },
         });
     }
 
@@ -361,7 +361,7 @@ const Environment = struct {
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
-            .vsr_headers = vsr.ViewChangeHeaders.BoundedArray.fromSlice(
+            .vsr_headers = vsr.Headers.Array.fromSlice(
                 env.superblock.staging.vsr_headers().slice,
             ) catch unreachable,
             .free_set = checksum_free_set(env.superblock),
