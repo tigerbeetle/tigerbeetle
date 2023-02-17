@@ -94,7 +94,7 @@ pub fn CompactionType(
         tree_name: []const u8,
 
         grid: *Grid,
-        grid_reservation: Grid.Reservation,
+        grid_reservation: ?Grid.Reservation,
         range: Manifest.CompactionRange,
 
         /// `op_min` is the first op/beat of this compaction's half-bar.
@@ -207,6 +207,9 @@ pub fn CompactionType(
             const drop_tombstones = manifest.compaction_must_drop_tombstones(level_b, range);
             assert(drop_tombstones or level_b < constants.lsm_levels - 1);
 
+            // Enable move table optimization if we just need to move it to the next level.
+            const move_table = (range.table_count == 1) and (table_a != null);
+
             compaction.* = .{
                 .tree_name = compaction.tree_name,
 
@@ -224,7 +227,7 @@ pub fn CompactionType(
                 // (And likewise release the reservation at the end of each beat, instead of at the
                 // end of each half-bar).
                 // TODO(Move Table) Don't reserve these when we just move the table to the next level.
-                .grid_reservation = grid.reserve(range.table_count * Table.block_count_max).?,
+                .grid_reservation = if (move_table) null else grid.reserve(range.table_count * Table.block_count_max).?,
                 .range = range,
                 .op_min = op_min,
                 .drop_tombstones = drop_tombstones,
@@ -250,22 +253,21 @@ pub fn CompactionType(
             assert(compaction.filter.state == .building);
             assert(compaction.data.state == .building);
 
-            // TODO Implement manifest.move_table() optimization if there's only range.table_count == 1.
-            // This would do update_tables + insert_tables inline without going through the iterators.
+            if (!move_table) {
+                const iterator_b_context = .{
+                    .grid = grid,
+                    .manifest = manifest,
+                    .level = level_b,
+                    .snapshot = op_min,
+                    .key_min = range.key_min,
+                    .key_max = range.key_max,
+                    .direction = .ascending,
+                    .table_info_callback = iterator_b_table_info_callback,
+                };
 
-            const iterator_b_context = .{
-                .grid = grid,
-                .manifest = manifest,
-                .level = level_b,
-                .snapshot = op_min,
-                .key_min = range.key_min,
-                .key_max = range.key_max,
-                .direction = .ascending,
-                .table_info_callback = iterator_b_table_info_callback,
-            };
-
-            compaction.iterator_a.start(iterator_a_context, iterator_a_io_callback);
-            compaction.iterator_b.start(iterator_b_context, iterator_b_io_callback);
+                compaction.iterator_a.start(iterator_a_context, iterator_a_io_callback);
+                compaction.iterator_b.start(iterator_b_context, iterator_b_io_callback);
+            }
         }
 
         fn iterator_a_io_callback(iterator_a: *IteratorA) void {
@@ -314,6 +316,25 @@ pub fn CompactionType(
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done);
+
+            // Move table optimization
+            if (compaction.grid_reservation == null) {
+                const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
+                const level_b = compaction.level_b;
+                const level_a = level_b - 1;
+
+                var table_a = compaction.level_a_input.?;
+                compaction.manifest.update_table(level_a, snapshot_max, &table_a);
+                assert(table_a.snapshot_max == snapshot_max);
+
+                table_a = compaction.level_a_input.?;
+                compaction.manifest.insert_table(level_b, &table_a);
+
+                compaction.merge_done = true;
+                compaction.status = .done;
+                callback(compaction);
+                return;
+            }
 
             compaction.callback = callback;
 
@@ -486,7 +507,7 @@ pub fn CompactionType(
             {
                 compaction.table_builder.data_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(compaction.grid_reservation),
+                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
                 });
 
                 // Mark the finished data block as writable for the next compact_tick() call.
@@ -503,7 +524,7 @@ pub fn CompactionType(
             {
                 compaction.table_builder.filter_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(compaction.grid_reservation),
+                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
                 });
 
                 // Mark the finished filter block as writable for the next compact_tick() call.
@@ -519,7 +540,7 @@ pub fn CompactionType(
             {
                 const table = compaction.table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(compaction.grid_reservation),
+                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.op_min),
                     // TODO(Persistent Snapshots) set snapshot_max to the minimum snapshot_max of
                     // all the (original) input tables.
@@ -592,7 +613,7 @@ pub fn CompactionType(
 
             // TODO(Beat Pacing) This should really be where the compaction callback is invoked,
             // but currently that can occur multiple times per beat.
-            compaction.grid.forfeit(compaction.grid_reservation);
+            if (compaction.grid_reservation) |reservation| compaction.grid.forfeit(reservation);
 
             compaction.status = .idle;
             compaction.merge_done = false;
