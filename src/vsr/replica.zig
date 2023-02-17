@@ -3344,7 +3344,8 @@ pub fn ReplicaType(
 
             switch (self.status) {
                 .normal, .view_change => {},
-                .recovering, .recovering_head => {
+                .recovering => unreachable, // Single node clusters don't have view changes.
+                .recovering_head => {
                     log.debug("{}: on_start_view_change: ignoring (status={})", .{
                         self.replica,
                         self.status,
