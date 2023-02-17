@@ -1260,12 +1260,12 @@ const ViewChangeHeadersArray = struct {
 
             if (command_current == .start_view) {
                 // Primary: Collect headers for a start_view message.
-                // Follower: these headers are stored in the superblock's vsr_headers.
+                // Backup: these headers are stored in the superblock's vsr_headers.
                 switch (chain) {
                     .chain_sequence => {},
                     // Gaps are due to either:
                     // - entries before checkpoint, which are not repaired, or
-                    // - follower missed prepares and has not repaired headers. (Immediately after
+                    // - backup missed prepares and has not repaired headers. (Immediately after
                     //   receiving a start_view this is not a concern, but the view_durable_update()
                     //   may be delayed if another is in progress).
                     .chain_view, .chain_gap => {
@@ -1323,8 +1323,8 @@ const ViewChangeHeadersArray = struct {
             } else if (!current.log_view_primary and command_durable == .start_view) {
                 switch (chain) {
                     .chain_sequence => {},
-                    // Followers load a full suffix of headers from the view's SV message. If there
-                    // is now a gap in it the follower's suffix, this must be due to missed prepares.
+                    // Backups load a full suffix of headers from the view's SV message. If there
+                    // is now a gap in it the bcakup's suffix, this must be due to missed prepares.
                     .chain_view, .chain_gap => assert(op + 1 > op_head_durable),
                     // Breaks are impossible to the right of the durable SV — journal recovery uses
                     // the durable SV to prune bad headers by their view numbers.
@@ -1335,7 +1335,7 @@ const ViewChangeHeadersArray = struct {
                 switch (chain) {
                     .chain_sequence => {},
                     .chain_view => {},
-                    // Followers load a full suffix of headers from the view's SV message.
+                    // Backups load a full suffix of headers from the view's SV message.
                     // That SV isn't durable, but it is part of the journal, so any gaps to its
                     // right must be due to missed prepares.
                     .chain_gap => {},
