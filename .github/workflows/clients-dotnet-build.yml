@@ -25,7 +25,7 @@ jobs:
           dotnet-version: |
             3.1.x
             6.0.x
-   
+
       - name: Install zig
         run: ./scripts/install_zig.sh
 
@@ -52,7 +52,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     name: Prepare validation tests
-    steps:  
+    steps:
       - name: Create a simple test project
         run: |
           cat <<"EOF" > Program.cs
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: test-project-artifact
-          path: Program.cs          
+          path: Program.cs
 
   run_validation_tests:
     needs: prepare_validation_tests
@@ -95,10 +95,10 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: test-project-artifact
-          path: ./test-project          
+          path: ./test-project
       - name: Test nuget package
         working-directory: ./test-project
-        run: dotnet run       
+        run: dotnet run
 
   run_validation_tests_on_containers:
     needs: prepare_validation_tests
@@ -106,7 +106,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tag: 
+        tag:
           - "7.0"
           - "6.0"
           - "3.1"
@@ -114,11 +114,11 @@ jobs:
           - "6.0-alpine"
           - "3.1-alpine"
     runs-on: ubuntu-latest
-    steps:   
+    steps:
       - uses: actions/download-artifact@v3
         with:
           name: nuget-artifact
-          path: ./nuget          
+          path: ./nuget
       - uses: actions/download-artifact@v3
         with:
           name: test-project-artifact
