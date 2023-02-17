@@ -42,9 +42,6 @@ for /l %%i in (0, 1, 0) do (
     start /B "tigerbeetle_%%i" .\tigerbeetle.exe start --addresses=3001 !ZIG_FILE! > benchmark.log 2>&1
 )
 
-rem Wait for replicas to start, listen and connect:
-timeout /t 2
-
 echo.
 echo Benchmarking...
 zig\zig.exe build benchmark -Drelease-safe

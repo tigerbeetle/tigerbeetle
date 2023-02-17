@@ -25,7 +25,7 @@ fi
 # Overriding -target is one workaround Andrew suggests.
 # https://github.com/ziglang/zig/issues/10478#issuecomment-1294313967
 target=""
-if [ "$(./zig/zig targets | grep triple |cut -d '"' -f 4 | cut -d '.' -f 1,2)" = "aarch64-macos.13" ]; then
+if [ "$(./zig/zig targets | grep triple |cut -d '"' -f 4 | cut -d '.' -f 1,2 | cut -d '-' -f 2)" = "macos.13" ]; then
     target="-target native-macos.11"
 fi
 
@@ -42,6 +42,8 @@ if [ "$target" = "" ]; then
 else
     echo "Building for '$target'"
 fi
+
+mkdir -p ./dist
 
 # Need to do string eval-ing because of shellcheck's strict string
 # interpolation rules.
