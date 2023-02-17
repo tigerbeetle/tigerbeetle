@@ -52,9 +52,6 @@ do
     ./tigerbeetle start --addresses=3001 "$FILE" >> benchmark.log 2>&1 &
 done
 
-# Wait for replicas to start, listen and connect:
-sleep 1
-
 echo ""
 echo "Benchmarking..."
 zig/zig build benchmark -Drelease-safe
