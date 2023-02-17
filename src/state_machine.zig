@@ -479,7 +479,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
             const ids = mem.bytesAsSlice(Event(.lookup_accounts), self.prefetch_input.?);
             for (ids) |id| {
-                const immut = self.forest.grooves.accounts_immutable.get(id).?;
+                const immut = self.forest.grooves.accounts_immutable.get(id) orelse continue;
                 self.forest.grooves.accounts_mutable.prefetch_enqueue(immut.timestamp);
             }
 
