@@ -4908,6 +4908,8 @@ pub fn ReplicaType(
 
             // Trigger work that was deferred until after the view-change update.
             if (self.status == .normal) {
+                assert(self.log_view == self.view);
+
                 if (self.primary_index(self.view) == self.replica) {
                     const start_view = self.create_view_change_message(.start_view);
                     defer self.message_bus.unref(start_view);
@@ -4915,6 +4917,14 @@ pub fn ReplicaType(
                     self.send_message_to_other_replicas(start_view);
                 } else {
                     self.send_prepare_oks_after_view_change();
+                }
+            }
+
+            if (self.status == .view_change and self.log_view < self.view) {
+                if (self.primary_index(self.view) != self.replica and
+                    self.start_view_change_quorum and !self.do_view_change_quorum)
+                {
+                    self.send_do_view_change();
                 }
             }
         }
