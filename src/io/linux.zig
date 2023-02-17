@@ -80,7 +80,16 @@ pub const IO = struct {
             const timeout_sqe = self.ring.get_sqe() catch blk: {
                 // The submission queue is full, so flush submissions to make space:
                 try self.flush_submissions(0, &timeouts, &etime);
-                break :blk self.ring.get_sqe() catch unreachable;
+                const timeout_sqe = self.ring.get_sqe() catch unreachable;
+
+                // Fill up the sqes with unqueued submissions to make the most of
+                // the next flush_submissions() syscalls in flush() down below.
+                // Loop over a copy to avoid infinite loop of enqueue() re-adding to self.unqueued.
+                var copy = self.unqueued;
+                self.unqueued = .{};
+                while (copy.pop()) |completion| self.enqueue(completion);
+
+                break :blk timeout_sqe;
             };
             // Submit an absolute timeout that will be canceled if any other SQE completes first:
             linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
