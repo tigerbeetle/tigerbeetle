@@ -410,6 +410,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     defer id_to_account.deinit();
 
     var op: u64 = 1;
+    var checkpointed_op: u64 = op;
     var puts_since_compact: usize = 0;
     for (fuzz_ops) |*fuzz_op, fuzz_op_index| {
         const fuzz_op_tag: FuzzOpTag = if (puts_since_compact >= Environment.puts_since_compact_max)
@@ -428,6 +429,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                     compact_op > constants.lsm_batch_multiple and
                     // Checkpoint at roughly the same rate as log wraparound.
                     random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
+                if (checkpoint) {
+                    checkpointed_op = op;
+                }
                 break :compact FuzzOp{
                     .compact = .{
                         .op = compact_op,
@@ -467,7 +471,10 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .get_account => FuzzOp{
                 .get_account = random_id(random, u128),
             },
-            .storage_reset => FuzzOp{ .storage_reset = {} },
+            .storage_reset => storage_reset: {
+                op = checkpointed_op;
+                break :storage_reset FuzzOp{ .storage_reset = {} };
+            },
         };
         switch (fuzz_op.*) {
             .compact => puts_since_compact = 0,
