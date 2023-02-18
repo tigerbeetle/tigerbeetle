@@ -88,8 +88,8 @@ You will need POSIX userland, curl or wget, tar, and xz.
 
 ```bash
 $ git clone https://github.com/tigerbeetledb/tigerbeetle.git
-$ git checkout 2022-11-16-weekly # Or latest tag
 $ cd tigerbeetle
+$ git checkout 2022-11-16-weekly # Or latest tag
 $ scripts/install.sh
 ```
 
