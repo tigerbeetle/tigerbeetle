@@ -984,22 +984,30 @@ pub fn quorums(replica_count: u8) struct {
     replication: u8,
     view_change: u8,
 } {
-    const majority = @divFloor(replica_count, 2) + 1;
-    assert(majority <= replica_count);
+    assert(replica_count > 0);
 
     assert(constants.quorum_replication_max >= 2);
-    const quorum_replication = std.math.min(constants.quorum_replication_max, majority);
+    // For replica_count=2, set quorum_replication=2 even though =1 would intersect.
+    // This improves durability of small clusters.
+    const quorum_replication = if (replica_count == 2) 2 else std.math.min(
+        constants.quorum_replication_max,
+        stdx.div_ceil(replica_count, 2),
+    );
+    assert(quorum_replication <= replica_count);
     assert(quorum_replication >= 2 or quorum_replication == replica_count);
 
-    const quorum_view_change = std.math.max(
-        replica_count - quorum_replication + 1,
-        majority,
-    );
+    // For replica_count=2, set quorum_view_change=2 even though =1 would intersect.
+    // This avoids special cases for a single-replica view-change in Replica.
+    const quorum_view_change =
+        if (replica_count == 2) 2 else replica_count - quorum_replication + 1;
     // The view change quorum may be more expensive to make the replication quorum cheaper.
     // The insight is that the replication phase is by far more common than the view change.
     // This trade-off allows us to optimize for the common case.
     // See the comments in `constants.zig` for further explanation.
-    assert(quorum_view_change >= majority);
+    assert(quorum_view_change <= replica_count);
+    assert(quorum_view_change >= 2 or quorum_view_change == replica_count);
+    assert(quorum_view_change >= @divFloor(replica_count, 2) + 1);
+    assert(quorum_view_change + quorum_replication > replica_count);
 
     return .{
         .replication = quorum_replication,
@@ -1007,26 +1015,43 @@ pub fn quorums(replica_count: u8) struct {
     };
 }
 
-/// The SuperBlock's persisted VSR headers.
-/// One of the following:
-///
-/// - SV headers (consecutive chain)
-/// - DVC headers (disjoint chain)
-pub const ViewChangeHeaders = struct {
+test "quorums" {
+    if (constants.quorum_replication_max != 3) return error.SkipZigTest;
+
+    const expect_replication = [_]u8{ 1, 2, 2, 2, 3, 3, 3, 3 };
+    const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
+
+    for (expect_replication[0..]) |_, i| {
+        const actual = quorums(@intCast(u8, i) + 1);
+        try std.testing.expectEqual(actual.replication, expect_replication[i]);
+        try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
+    }
+}
+
+pub const Headers = struct {
+    pub const Array = std.BoundedArray(Header, constants.view_change_headers_max);
+    /// The SuperBlock's persisted VSR headers.
+    /// One of the following:
+    ///
+    /// - SV headers (consecutive chain)
+    /// - DVC headers (disjoint chain)
+    pub const ViewChangeSlice = ViewChangeHeadersSlice;
+    pub const ViewChangeArray = ViewChangeHeadersArray;
+};
+
+const ViewChangeHeadersSlice = struct {
     /// Headers are ordered from high-to-low op.
     slice: []const Header,
 
-    pub const BoundedArray = std.BoundedArray(Header, constants.pipeline_prepare_queue_max);
-
-    pub fn init(slice: []const Header) ViewChangeHeaders {
-        ViewChangeHeaders.verify(slice);
+    pub fn init(slice: []const Header) ViewChangeHeadersSlice {
+        ViewChangeHeadersSlice.verify(slice);
 
         return .{ .slice = slice };
     }
 
     pub fn verify(slice: []const Header) void {
         assert(slice.len > 0);
-        assert(slice.len <= constants.pipeline_prepare_queue_max);
+        assert(slice.len <= constants.view_change_headers_max);
 
         var child: ?*const Header = null;
         for (slice) |*header| {
@@ -1061,7 +1086,7 @@ pub const ViewChangeHeaders = struct {
     /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
     ///   more ops), but those ops will laways be part of the log_view. If they were prepared during
     ///   a view prior to the log_view, they would already be part of the headers.
-    pub fn view_for_op(headers: ViewChangeHeaders, op: u64, log_view: u32) ViewRange {
+    pub fn view_for_op(headers: ViewChangeHeadersSlice, op: u64, log_view: u32) ViewRange {
         const header_newest = &headers.slice[0];
         const header_oldest = &headers.slice[headers.slice.len - 1];
 
@@ -1082,13 +1107,13 @@ pub const ViewChangeHeaders = struct {
     }
 };
 
-test "ViewChangeHeaders.view_for_op" {
+test "Headers.ViewChangeSlice.view_for_op" {
     var headers_array = [_]Header{
         std.mem.zeroInit(Header, .{ .op = 9, .view = 10 }),
         std.mem.zeroInit(Header, .{ .op = 6, .view = 7 }),
     };
 
-    const headers = ViewChangeHeaders{ .slice = &headers_array };
+    const headers = Headers.ViewChangeSlice{ .slice = &headers_array };
     try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(10, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(9, 12), .{ .min = 10, .max = 10 }));
@@ -1098,3 +1123,251 @@ test "ViewChangeHeaders.view_for_op" {
     try std.testing.expect(std.meta.eql(headers.view_for_op(5, 12), .{ .min = 0, .max = 7 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(0, 12), .{ .min = 0, .max = 7 }));
 }
+
+/// The headers of a SV or DVC message.
+const ViewChangeHeadersArray = struct {
+    array: Headers.Array,
+
+    pub fn root(cluster: u32) ViewChangeHeadersArray {
+        var array = Headers.Array{ .buffer = undefined };
+        array.appendAssumeCapacity(Header.root_prepare(cluster));
+        return ViewChangeHeadersArray.init(array);
+    }
+
+    fn init(array: Headers.Array) ViewChangeHeadersArray {
+        Headers.ViewChangeSlice.verify(array.constSlice());
+        return .{ .array = array };
+    }
+
+    /// This function generates either DVC headers or SV headers:
+    /// - When `current.log_view < current.view`, generate headers for a SV message.
+    /// - When `current.log_view = current.view`, generate headers for a DVC message.
+    ///
+    /// Additionally, the current log_view/view/primary state informs the sort of "faults"
+    /// (gaps/breaks/etc) that we expect to find in the journal headers (`current.headers`).
+    /// For example, backups generating a DVC can safely skip over gaps (if the gap is after the DVC
+    /// anchor).
+    ///
+    /// Primaries and backups both generate DVCs and SVs.
+    /// - However, SVs are broadcast only by the primary.
+    /// - Backups generate a SV for persisting to the superblock.
+    ///   (For convenience/symmetry, not correctness).
+    ///
+    /// DVCs and SVs have different invariants they must abide.
+    /// - Read DVCQuorum's comments to understand DVC invariants.
+    /// - SV headers are much simpler: no gaps or breaks, and all uncommitted ops must be included.
+    pub fn build(
+        results: *ViewChangeHeadersArray,
+        options: struct {
+            op_checkpoint: u64,
+            /// The last view_change_headers_max headers of the journal, starting with the head op
+            /// then descending, skipping over all gaps.
+            current: struct {
+                headers: *const Headers.Array,
+                view: u32,
+                log_view: u32,
+                log_view_primary: bool,
+            },
+            // The vsr_headers from the working superblock.
+            // The durable headers are useful (complimenting `current.headers`) because:
+            // - They simplify generation of DVCs in the case where we are recovering from a crash,
+            //   when we were generating the same DVC prior to the crash.
+            // - They enable additional verification of header gaps/breaks based on the
+            //   gap's/break's position relative to the durable headers.
+            durable: struct {
+                headers: Headers.ViewChangeSlice,
+                view: u32,
+                log_view: u32,
+                log_view_primary: bool,
+            },
+        },
+    ) void {
+        defer Headers.ViewChangeSlice.verify(results.array.constSlice());
+
+        const headers = &results.array;
+        const current = options.current;
+        const durable = options.durable;
+
+        assert(headers.len == 0);
+        assert(durable.headers.slice.len > 0);
+        assert(current.headers.len > 0);
+        for (current.headers.constSlice()[1..]) |*header, i| {
+            assert(current.headers.get(i).op > header.op);
+        }
+
+        assert(current.view >= durable.view);
+        assert(current.log_view >= durable.log_view);
+        assert(current.view >= current.log_view);
+        assert(durable.view >= durable.log_view);
+
+        const op_head_current = current.headers.get(0).op;
+        const op_head_durable = durable.headers.slice[0].op;
+
+        // The rules for generating DVCs and SVs differ. We use the current view numbers to
+        // determine which is being generated:
+        // - When `log_view < view`, generate a DVC.
+        // - When `log_view = view`, generate a SV.
+        const command_current: enum { start_view, do_view_change } =
+            if (current.log_view == current.view) .start_view else .do_view_change;
+        // Likewise, the durable view numbers identify whether the durable headers were from a past
+        // DVC or SV. The durable headers are only useful if they are from the same view as our
+        // current headers, though.
+        const command_durable: enum { start_view, do_view_change, outdated } = command: {
+            if (durable.log_view == current.log_view) {
+                if (durable.log_view == durable.view) {
+                    break :command .start_view;
+                } else {
+                    break :command .do_view_change;
+                }
+            } else {
+                break :command .outdated;
+            }
+        };
+
+        if (command_durable == .do_view_change and command_current == .do_view_change) {
+            assert(op_head_durable == op_head_current);
+            // Ensure that if we started a DVC before a crash, that we will resume sending the exact
+            // same DVC after recovery. (An alternative implementation would be to load the
+            // superblock's DVC headers (including gaps) into the journal during Replica.open(), but
+            // that is more complicated to implement correctly).
+            for (durable.headers.slice) |*header| headers.appendAssumeCapacity(header.*);
+            return;
+        }
+
+        // What is the relationship between two prepares?
+        const Chain = enum {
+            // The ops are sequential, and the hash-chain is valid.
+            chain_sequence,
+            // The ops are sequential, and the hash-chain is invalid.
+            chain_break,
+            // The ops are non-sequential, and belong to the same view.
+            // This gap never hides a break.
+            chain_view,
+            // The ops are non-sequential, and belong to the different views.
+            // Depending on the replica state, this gap may hide a break.
+            chain_gap,
+        };
+
+        // The DVC anchor: Within the log suffix following the anchor, we have additional
+        // guarantees about the state of the log headers which allow us to tolerate certain
+        // gaps (by locally guaranteeing that the gap does not hide a break).
+        const op_dvc_anchor = std.math.max(
+            options.op_checkpoint,
+            // +1: We may have a full pipeline, but not yet have performed any repair.
+            // In such a case, we want to send those pipeline_prepare_queue_max headers in
+            // the DVC, but not the preceding op (which may belong to a different chain).
+            // This satisfies the DVC invariant because the first op in the pipeline is
+            // "connected" to the canonical chain (via its "parent" checksum).
+            1 + op_head_current -| constants.pipeline_prepare_queue_max,
+        );
+
+        // Within the "suffix" we can make additional assumptions about gaps/etc.
+        // After the suffix, we just add as many extra (valid) headers as we can fit.
+        var suffix_done = false;
+
+        for (current.headers.constSlice()) |*header, i| {
+            const op = header.op;
+            const chain = chain: {
+                // Always include the head message.
+                if (i == 0) break :chain Chain.chain_sequence;
+
+                const child = headers.get(i - 1);
+                if (child.op == header.op + 1) {
+                    break :chain if (child.parent == header.checksum) Chain.chain_sequence else Chain.chain_break;
+                } else {
+                    break :chain if (child.view == header.view) Chain.chain_view else Chain.chain_gap;
+                }
+            };
+
+            if (command_current == .start_view) {
+                // Primary: Collect headers for a start_view message.
+                // Backup: these headers are stored in the superblock's vsr_headers.
+                switch (chain) {
+                    .chain_sequence => {},
+                    // Gaps are due to either:
+                    // - entries before checkpoint, which are not repaired, or
+                    // - backup missed prepares and has not repaired headers. (Immediately after
+                    //   receiving a start_view this is not a concern, but the view_durable_update()
+                    //   may be delayed if another is in progress).
+                    .chain_view, .chain_gap => {
+                        assert(op <= options.op_checkpoint or !current.log_view_primary);
+                        break;
+                    },
+                    // Breaks are due to:
+                    // - entries before checkpoint, which are not repaired
+                    .chain_break => {
+                        assert(op <= options.op_checkpoint);
+                        break;
+                    },
+                }
+            } else if (suffix_done) {
+                // Add extra headers to the DVC. These are not required for correctness or
+                // availability, but including extra (correct) headers minimizes header repair at
+                // the new primary.
+                switch (chain) {
+                    .chain_sequence => {},
+                    .chain_view => {},
+                    // Outside of the log suffix, repair may not have been finished, so gaps and
+                    // breaks are possible. Non-same-view gaps may hide breaks.
+                    .chain_gap => break,
+                    .chain_break => break,
+                }
+            } else if (current.log_view_primary and command_durable == .start_view) {
+                switch (chain) {
+                    .chain_sequence => {},
+                    // Gaps to the right of the (durable) SV originate from:
+                    // 1. The primary (durable SV: 1,2,3) prepares several ops (4,5,6).
+                    // 2. However, the WAL writes are reordered such that some later ops (5,6)
+                    //    finish before an earlier op (4).
+                    // 3. Crash, recover. Start sending a DVC for the next view. Either:
+                    //    - There is a gap in the WAL at op=4, but this is to the right of the
+                    //      durable SV, so it may be safely skipped.
+                    //    - Same as above, except op=4 was a torn write (or bit rot).
+                    .chain_view, .chain_gap => assert(op + 1 > op_head_durable),
+                    // Breaks are impossible to the right of the durable SV — journal recovery uses
+                    // the durable SV to prune bad headers by their view numbers.
+                    .chain_break => unreachable,
+                }
+                suffix_done = op <= op_head_durable;
+            } else if (current.log_view_primary and command_durable != .start_view) {
+                switch (chain) {
+                    .chain_sequence => {},
+                    .chain_view => {},
+                    // The retiring primary may have gap-breaks or breaks in its suffix iff:
+                    // - it didn't finish repairs before the second view-change, and
+                    // - some uncommitted ops were truncated during the first view-change.
+                    //   (Truncation "moves" the suffix backwards).
+                    .chain_gap => break,
+                    .chain_break => break,
+                }
+                suffix_done = op <= op_dvc_anchor;
+            } else if (!current.log_view_primary and command_durable == .start_view) {
+                switch (chain) {
+                    .chain_sequence => {},
+                    // Backups load a full suffix of headers from the view's SV message. If there
+                    // is now a gap in it the bcakup's suffix, this must be due to missed prepares.
+                    .chain_view, .chain_gap => assert(op + 1 > op_head_durable),
+                    // Breaks are impossible to the right of the durable SV — journal recovery uses
+                    // the durable SV to prune bad headers by their view numbers.
+                    .chain_break => unreachable,
+                }
+                suffix_done = op <= op_head_durable;
+            } else if (!current.log_view_primary and command_durable != .start_view) {
+                switch (chain) {
+                    .chain_sequence => {},
+                    .chain_view => {},
+                    // Backups load a full suffix of headers from the view's SV message.
+                    // That SV isn't durable, but it is part of the journal, so any gaps to its
+                    // right must be due to missed prepares.
+                    .chain_gap => {},
+                    // Breaks are impossible to the right of the ephemeral SV, since the log was
+                    // truncated when the SV was installed.
+                    .chain_break => unreachable,
+                }
+                suffix_done = op <= op_dvc_anchor;
+            } else unreachable;
+
+            headers.appendAssumeCapacity(header.*);
+        }
+    }
+};
