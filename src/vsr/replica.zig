@@ -282,7 +282,7 @@ pub fn ReplicaType(
 
         /// The number of ticks before resending a `do_view_change` message:
         /// (status=view-change)
-        view_change_message_timeout: Timeout,
+        do_view_change_message_timeout: Timeout,
 
         /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
         /// (status=normal or (status=view-change and primary))
@@ -642,8 +642,8 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 500,
                 },
-                .view_change_message_timeout = Timeout{
-                    .name = "view_change_message_timeout",
+                .do_view_change_message_timeout = Timeout{
+                    .name = "do_view_change_message_timeout",
                     .id = replica_index,
                     .after = 50,
                 },
@@ -741,7 +741,7 @@ pub fn ReplicaType(
             self.start_view_change_window_timeout.tick();
             self.start_view_change_message_timeout.tick();
             self.view_change_status_timeout.tick();
-            self.view_change_message_timeout.tick();
+            self.do_view_change_message_timeout.tick();
             self.repair_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
@@ -752,7 +752,7 @@ pub fn ReplicaType(
             if (self.start_view_change_window_timeout.fired()) self.on_start_view_change_window_timeout();
             if (self.start_view_change_message_timeout.fired()) self.on_start_view_change_message_timeout();
             if (self.view_change_status_timeout.fired()) self.on_view_change_status_timeout();
-            if (self.view_change_message_timeout.fired()) self.on_view_change_message_timeout();
+            if (self.do_view_change_message_timeout.fired()) self.on_do_view_change_message_timeout();
             if (self.repair_timeout.fired()) self.on_repair_timeout();
 
             // None of the on_timeout() functions above should send a message to this replica.
@@ -1918,10 +1918,10 @@ pub fn ReplicaType(
             self.send_start_view_change();
         }
 
-        fn on_view_change_message_timeout(self: *Self) void {
+        fn on_do_view_change_message_timeout(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.replica_count > 1);
-            self.view_change_message_timeout.reset();
+            self.do_view_change_message_timeout.reset();
 
             if (self.primary_index(self.view) == self.replica and self.do_view_change_quorum) {
                 // A primary in status=view_change with a complete DVC quorum must be repairing —
@@ -5404,7 +5404,7 @@ pub fn ReplicaType(
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
-                assert(!self.view_change_message_timeout.ticking);
+                assert(!self.do_view_change_message_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.start_view_change_window_timeout.start();
@@ -5428,7 +5428,7 @@ pub fn ReplicaType(
                 assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.commit_message_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
-                assert(!self.view_change_message_timeout.ticking);
+                assert(!self.do_view_change_message_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.normal_heartbeat_timeout.start();
@@ -5473,7 +5473,7 @@ pub fn ReplicaType(
                 self.start_view_change_window_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
-                self.view_change_message_timeout.stop();
+                self.do_view_change_message_timeout.stop();
                 self.repair_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
@@ -5508,7 +5508,7 @@ pub fn ReplicaType(
                 self.start_view_change_window_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
-                self.view_change_message_timeout.stop();
+                self.do_view_change_message_timeout.stop();
                 self.repair_timeout.start();
             }
 
@@ -5565,7 +5565,7 @@ pub fn ReplicaType(
             self.start_view_change_window_timeout.start();
             self.start_view_change_message_timeout.start();
             self.view_change_status_timeout.start();
-            self.view_change_message_timeout.start();
+            self.do_view_change_message_timeout.start();
             self.repair_timeout.stop();
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
