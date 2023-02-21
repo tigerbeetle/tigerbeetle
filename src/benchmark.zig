@@ -163,7 +163,8 @@ pub fn main() !void {
             transfer_next_arrival_ns < batch_start_ns)
         {
             batch_transfers.appendAssumeCapacity(.{
-                .id = transfer_index + 1,
+                // Reverse the bits to stress non-append-only index for `id`.
+                .id = @bitReverse(u128, transfer_index + 1),
                 .debit_account_id = accounts[0].id,
                 .credit_account_id = accounts[1].id,
                 .user_data = 0,
