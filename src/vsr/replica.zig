@@ -968,6 +968,7 @@ pub fn ReplicaType(
         /// If the next replica is down or partitioned, then the primary's prepare timeout will fire,
         /// and the primary will resend but to another replica, until it receives enough prepare_ok's.
         fn on_prepare(self: *Self, message: *Message) void {
+            assert(message.header.command == .prepare);
             self.view_jump(message.header);
 
             if (self.is_repair(message)) {
@@ -1049,6 +1050,7 @@ pub fn ReplicaType(
         }
 
         fn on_prepare_ok(self: *Self, message: *Message) void {
+            assert(message.header.command == .prepare_ok);
             if (self.ignore_prepare_ok(message)) return;
 
             assert(self.status == .normal);
@@ -1238,6 +1240,7 @@ pub fn ReplicaType(
         }
 
         fn on_start_view_change(self: *Self, message: *Message) void {
+            assert(message.header.command == .start_view_change);
             if (self.ignore_start_view_change_message(message)) return;
 
             assert(self.replica_count > 1);
@@ -1273,6 +1276,7 @@ pub fn ReplicaType(
             });
 
             self.transition_to_view_change_status(self.view + 1);
+            assert(self.start_view_change_from_all_replicas.count() == 0);
         }
 
         /// When the new primary receives f + 1 do_view_change messages from different replicas
@@ -1285,6 +1289,7 @@ pub fn ReplicaType(
         /// ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
         /// op number, and k is the commit number.
         fn on_do_view_change(self: *Self, message: *Message) void {
+            assert(message.header.command == .do_view_change);
             if (self.ignore_view_change_message(message)) return;
 
             assert(self.status == .normal or self.status == .view_change);
@@ -1352,6 +1357,7 @@ pub fn ReplicaType(
         /// they execute all operations known to be committed that they haven’t executed previously,
         /// advance their commit number, and update the information in their client table.
         fn on_start_view(self: *Self, message: *const Message) void {
+            assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message)) return;
 
             if (message.header.op > self.op_checkpoint_trigger()) {
@@ -1398,6 +1404,7 @@ pub fn ReplicaType(
         }
 
         fn on_request_start_view(self: *Self, message: *const Message) void {
+            assert(message.header.command == .request_start_view);
             if (self.ignore_repair_message(message)) return;
 
             assert(self.status == .normal);
@@ -1428,6 +1435,7 @@ pub fn ReplicaType(
         /// prepare. If a guaranteed prepare is found to by faulty, the replica must repair it
         /// to restore durability.
         fn on_request_prepare(self: *Self, message: *const Message) void {
+            assert(message.header.command == .request_prepare);
             if (self.ignore_repair_message(message)) return;
 
             assert(self.replica_count > 1);
@@ -1561,6 +1569,7 @@ pub fn ReplicaType(
         }
 
         fn on_request_headers(self: *Self, message: *const Message) void {
+            assert(message.header.command == .request_headers);
             if (self.ignore_repair_message(message)) return;
 
             assert(self.status == .normal or self.status == .view_change);
@@ -1603,6 +1612,7 @@ pub fn ReplicaType(
         }
 
         fn on_nack_prepare(self: *Self, message: *Message) void {
+            assert(message.header.command == .nack_prepare);
             if (self.ignore_repair_message(message)) return;
 
             assert(self.status == .view_change);
@@ -1700,6 +1710,7 @@ pub fn ReplicaType(
         }
 
         fn on_headers(self: *Self, message: *const Message) void {
+            assert(message.header.command == .headers);
             if (self.ignore_repair_message(message)) return;
 
             assert(self.status == .normal or self.status == .view_change);
@@ -3025,6 +3036,8 @@ pub fn ReplicaType(
         }
 
         fn ignore_prepare_ok(self: *Self, message: *const Message) bool {
+            assert(message.header.command == .prepare_ok);
+
             if (self.primary_index(message.header.view) == self.replica) {
                 assert(message.header.view <= self.view);
             }
