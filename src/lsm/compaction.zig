@@ -337,11 +337,9 @@ pub fn CompactionType(
                 const level_a = level_b - 1;
 
                 var table_a = compaction.level_a_input.?;
-                compaction.manifest.update_table(level_a, snapshot_max, &table_a);
+                compaction.manifest.move_table(level_a, level_b, snapshot_max, &table_a);
                 assert(table_a.snapshot_max == snapshot_max);
-
-                table_a = compaction.level_a_input.?;
-                compaction.manifest.insert_table(level_b, &table_a);
+                assert(table_a.flags.moved);
 
                 compaction.merge_done = true;
                 compaction.status = .done;
