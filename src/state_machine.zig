@@ -429,16 +429,20 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             for (transfers) |*t| {
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     if (self.forest.grooves.transfers.get(t.pending_id)) |p| {
-                        const dr_immut = self.forest.grooves.accounts_immutable.get(p.debit_account_id).?;
-                        const cr_immut = self.forest.grooves.accounts_immutable.get(p.credit_account_id).?;
-                        self.forest.grooves.accounts_mutable.prefetch_enqueue(dr_immut.timestamp);
-                        self.forest.grooves.accounts_mutable.prefetch_enqueue(cr_immut.timestamp);
+                        if (self.forest.grooves.accounts_immutable.get(p.debit_account_id)) |dr_immut| {
+                            self.forest.grooves.accounts_mutable.prefetch_enqueue(dr_immut.timestamp);
+                        }
+                        if (self.forest.grooves.accounts_immutable.get(p.credit_account_id)) |cr_immut| {
+                            self.forest.grooves.accounts_mutable.prefetch_enqueue(cr_immut.timestamp);
+                        }
                     }
                 } else {
-                    const dr_immut = self.forest.grooves.accounts_immutable.get(t.debit_account_id).?;
-                    const cr_immut = self.forest.grooves.accounts_immutable.get(t.credit_account_id).?;
-                    self.forest.grooves.accounts_mutable.prefetch_enqueue(dr_immut.timestamp);
-                    self.forest.grooves.accounts_mutable.prefetch_enqueue(cr_immut.timestamp);
+                    if (self.forest.grooves.accounts_immutable.get(t.debit_account_id)) |dr_immut| {
+                        self.forest.grooves.accounts_mutable.prefetch_enqueue(dr_immut.timestamp);
+                    }
+                    if (self.forest.grooves.accounts_immutable.get(t.credit_account_id)) |cr_immut| {
+                        self.forest.grooves.accounts_mutable.prefetch_enqueue(cr_immut.timestamp);
+                    }
                 }
             }
 
@@ -479,8 +483,9 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
             const ids = mem.bytesAsSlice(Event(.lookup_accounts), self.prefetch_input.?);
             for (ids) |id| {
-                const immut = self.forest.grooves.accounts_immutable.get(id) orelse continue;
-                self.forest.grooves.accounts_mutable.prefetch_enqueue(immut.timestamp);
+                if (self.forest.grooves.accounts_immutable.get(id)) |immut| {
+                    self.forest.grooves.accounts_mutable.prefetch_enqueue(immut.timestamp);
+                }   
             }
 
             self.forest.grooves.accounts_mutable.prefetch(
