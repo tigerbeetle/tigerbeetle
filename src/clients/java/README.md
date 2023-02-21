@@ -2,12 +2,15 @@
 
 [TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) client for Java.
 
+[![javadoc](https://javadoc.io/badge2/com.tigerbeetle/tigerbeetle-java/javadoc.svg)](https://javadoc.io/doc/com.tigerbeetle/tigerbeetle-java)
+
+[![maven-central](https://img.shields.io/maven-central/v/com.tigerbeetle/tigerbeetle-java)](https://central.sonatype.com/namespace/com.tigerbeetle)
 
 ## Pre-built package
 
-Available at [GitHub Packages Registry](https://github.com/orgs/tigerbeetledb/packages?repo_name=tigerbeetle) as a `jar` package.
+Available at [Maven Central](https://central.sonatype.com/namespace/com.tigerbeetle).
 
-You can install it by just downloading and placing the `jar` package directly in your `classpath` or by using a package management system such as [Maven](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-apache-maven-registry) or [Gradle](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-gradle-registry).
+Can be installed by a package management system such as [Maven](https://central.sonatype.org/consume/consume-apache-maven/) or [Gradle](https://central.sonatype.org/consume/consume-gradle/).
 
 ## Examples
 
