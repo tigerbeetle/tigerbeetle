@@ -138,15 +138,12 @@ pub fn TableType(
 
         const address_size = @sizeOf(u64);
         const checksum_size = @sizeOf(u128);
-        const table_size_max = constants.lsm_table_size_max;
-        const table_block_count_max = @divExact(table_size_max, block_size);
         const block_body_size = block_size - @sizeOf(vsr.Header);
 
         pub const layout = layout: {
             @setEvalBranchQuota(10_000);
 
             assert(block_size % constants.sector_size == 0);
-            assert(math.isPowerOfTwo(table_size_max));
             assert(math.isPowerOfTwo(block_size));
 
             // Searching the values array is more expensive than searching the per-block index
@@ -209,9 +206,6 @@ pub fn TableType(
                 value_size,
             );
 
-            const data_index_entry_size = key_size + address_size + checksum_size;
-            const filter_index_entry_size = address_size + checksum_size;
-
             // TODO Audit/tune this number for split block bloom filters:
             const filter_bytes_per_key = 2;
             const filter_data_block_count_max = @divFloor(
@@ -219,29 +213,9 @@ pub fn TableType(
                 block_value_count_max * filter_bytes_per_key,
             );
 
-            // Compute the number of data and filter blocks by solving the constraints:
-            // * the cumulative table size must not exceed lsm_table_size_max
-            // * the filter and data blocks' metadata must fix in the index block
-            // * the filter blocks must index all data blocks
-            // * minimize the number of filter blocks
-            // * maximize the number of data blocks
-            var data_blocks = table_block_count_max - index_block_count;
-            var filter_blocks = 0;
-            while (true) : (data_blocks -= 1) {
-                filter_blocks = div_ceil(data_blocks, filter_data_block_count_max);
-
-                const data_index_size = data_index_entry_size * data_blocks;
-                const filter_index_size = filter_index_entry_size * filter_blocks;
-
-                const index_size = @sizeOf(vsr.Header) + data_index_size + filter_index_size;
-                const table_block_count = index_block_count + filter_blocks + data_blocks;
-                if (index_size <= block_size and table_block_count <= table_block_count_max) {
-                    break;
-                }
-            }
-
-            const table_block_count = index_block_count + filter_blocks + data_blocks;
-            assert(table_block_count <= table_block_count_max);
+            // We need enough blocks to hold `value_count_max` values.
+            const data_blocks = div_ceil(value_count_max, block_value_count_max);
+            const filter_blocks = div_ceil(data_blocks, filter_data_block_count_max);
 
             break :layout .{
                 // The number of keys in the Eytzinger layout per data block.
@@ -322,9 +296,10 @@ pub fn TableType(
                     \\
                     \\
                     \\lsm parameters:
+                    \\    value: {}
+                    \\    value count max: {}
                     \\    key size: {}
                     \\    value size: {}
-                    \\    table size max: {}
                     \\    block size: {}
                     \\layout:
                     \\    index block count: {}
@@ -360,9 +335,10 @@ pub fn TableType(
                     \\
                 ,
                     .{
+                        Value,
+                        value_count_max,
                         key_size,
                         value_size,
-                        table_size_max,
                         block_size,
 
                         index_block_count,
@@ -404,8 +380,6 @@ pub fn TableType(
             assert(index_block_count > 0);
             assert(filter_block_count_max > 0);
             assert(data_block_count_max > 0);
-            assert(index_block_count + filter_block_count_max +
-                data_block_count_max <= table_block_count_max);
 
             assert(filter.data_block_count_max > 0);
             // There should not be more data blocks per filter block than there are data blocks:
