@@ -162,6 +162,8 @@ pub const Operation = enum(u8) {
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
+    const checksum_body_empty = checksum(&.{});
+
     comptime {
         assert(@sizeOf(Header) == 128);
         // Assert that there is no implicit padding in the struct.
@@ -353,6 +355,7 @@ pub const Header = extern struct {
 
     fn invalid_ping(self: *const Header) ?[]const u8 {
         assert(self.command == .ping);
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
@@ -367,6 +370,7 @@ pub const Header = extern struct {
 
     fn invalid_pong(self: *const Header) ?[]const u8 {
         assert(self.command == .pong);
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
@@ -381,6 +385,7 @@ pub const Header = extern struct {
 
     fn invalid_ping_client(self: *const Header) ?[]const u8 {
         assert(self.command == .ping_client);
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.parent != 0) return "parent != 0";
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
@@ -397,6 +402,7 @@ pub const Header = extern struct {
 
     fn invalid_pong_client(self: *const Header) ?[]const u8 {
         assert(self.command == .pong_client);
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
@@ -422,10 +428,11 @@ pub const Header = extern struct {
             .reserved => return "operation == .reserved",
             .root => return "operation == .root",
             .register => {
+                if (self.checksum_body != checksum_body_empty) return "register: checksum_body != expected";
                 // The first request a client makes must be to register with the cluster:
-                if (self.parent != 0) return "parent != 0";
-                if (self.context != 0) return "context != 0";
-                if (self.request != 0) return "request != 0";
+                if (self.parent != 0) return "register: parent != 0";
+                if (self.context != 0) return "register: context != 0";
+                if (self.request != 0) return "register: request != 0";
                 // The .register operation carries no payload:
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
@@ -444,6 +451,7 @@ pub const Header = extern struct {
         switch (self.operation) {
             .reserved => return "operation == .reserved",
             .root => {
+                if (self.checksum_body != checksum_body_empty) return "root: checksum_body != expected";
                 if (self.parent != 0) return "root: parent != 0";
                 if (self.client != 0) return "root: client != 0";
                 if (self.context != 0) return "root: context != 0";
@@ -475,6 +483,7 @@ pub const Header = extern struct {
 
     fn invalid_prepare_ok(self: *const Header) ?[]const u8 {
         assert(self.command == .prepare_ok);
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
