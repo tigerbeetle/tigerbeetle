@@ -401,6 +401,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -412,6 +413,7 @@ pub const Header = extern struct {
     fn invalid_request(self: *const Header) ?[]const u8 {
         assert(self.command == .request);
         if (self.client == 0) return "client == 0";
+        if (self.view == 0) return "view == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -446,7 +448,7 @@ pub const Header = extern struct {
                 if (self.client != 0) return "root: client != 0";
                 if (self.context != 0) return "root: context != 0";
                 if (self.request != 0) return "root: request != 0";
-                if (self.view != 0) return "root: view != 0";
+                if (self.view != 1) return "root: view != 1";
                 if (self.op != 0) return "root: op != 0";
                 if (self.commit != 0) return "root: commit != 0";
                 if (self.timestamp != 0) return "root: timestamp != 0";
@@ -455,6 +457,7 @@ pub const Header = extern struct {
             },
             else => {
                 if (self.client == 0) return "client == 0";
+                if (self.view == 0) return "view == 0";
                 if (self.op == 0) return "op == 0";
                 if (self.op <= self.commit) return "op <= commit";
                 if (self.timestamp == 0) return "timestamp == 0";
@@ -480,7 +483,7 @@ pub const Header = extern struct {
                 if (self.client != 0) return "root: client != 0";
                 if (self.context != 0) return "root: context != 0";
                 if (self.request != 0) return "root: request != 0";
-                if (self.view != 0) return "root: view != 0";
+                if (self.view != 1) return "root: view != 1";
                 if (self.op != 0) return "root: op != 0";
                 if (self.commit != 0) return "root: commit != 0";
                 if (self.timestamp != 0) return "root: timestamp != 0";
@@ -488,6 +491,7 @@ pub const Header = extern struct {
             },
             else => {
                 if (self.client == 0) return "client == 0";
+                if (self.view == 0) return "view == 0";
                 if (self.op == 0) return "op == 0";
                 if (self.op <= self.commit) return "op <= commit";
                 if (self.timestamp == 0) return "timestamp == 0";
@@ -506,6 +510,7 @@ pub const Header = extern struct {
         // Initialization within `client.zig` asserts that client `id` is greater than zero:
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
+        if (self.view == 0) return "view == 0";
         if (self.op != self.commit) return "op != commit";
         if (self.timestamp == 0) return "timestamp == 0";
         if (self.operation == .register) {
@@ -525,6 +530,7 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.op != 0) return "op != 0";
         if (self.timestamp == 0) return "timestamp == 0";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -537,6 +543,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -550,6 +557,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -560,6 +568,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -571,6 +580,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -584,6 +594,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.commit > self.op) return "op_min > op_max";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -595,6 +606,7 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.commit != 0) return "commit != 0";
         switch (self.timestamp) {
             0 => if (self.context != 0) return "context != 0",
@@ -610,6 +622,7 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -622,6 +635,7 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -633,6 +647,7 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view == 0) return "view == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -680,6 +695,7 @@ pub const Header = extern struct {
             .size = @sizeOf(Header),
             .command = .prepare,
             .operation = .root,
+            .view = 1,
         };
         header.set_checksum_body(&[0]u8{});
         header.set_checksum();

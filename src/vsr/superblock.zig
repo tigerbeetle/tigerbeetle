@@ -143,8 +143,8 @@ pub const SuperBlockHeader = extern struct {
                 .commit_min_checksum = vsr.Header.root_prepare(cluster).checksum,
                 .commit_min = 0,
                 .commit_max = 0,
-                .log_view = 0,
-                .view = 0,
+                .log_view = 1,
+                .view = 1,
             };
         }
 
@@ -1194,8 +1194,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         vsr.Header.root_prepare(working.cluster).checksum);
                     assert(working.vsr_state.commit_min == 0);
                     assert(working.vsr_state.commit_max == 0);
-                    assert(working.vsr_state.log_view == 0);
-                    assert(working.vsr_state.view == 0);
+                    assert(working.vsr_state.log_view == 1);
+                    assert(working.vsr_state.view == 1);
                     assert(working.vsr_headers_count == 1);
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
