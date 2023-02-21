@@ -23,12 +23,22 @@ pub fn TableInfoType(comptime Table: type) type {
     return extern struct {
         const TableInfo = @This();
 
+        pub const Flags = packed struct {
+            moved: bool = false,
+            padding: u63 = 0,
+
+            comptime {
+                assert(@sizeOf(Flags) == @sizeOf(u64));
+                assert(@bitSizeOf(Flags) == @bitSizeOf(u64));
+            }
+        };
+
         /// Checksum of the table's index block.
         checksum: u128,
         /// Address of the table's index block.
         address: u64,
         /// Unused.
-        flags: u64 = 0,
+        flags: Flags = .{},
 
         /// The minimum snapshot that can see this table (with exclusive bounds).
         /// - This value is set to the current snapshot tick on table creation.
@@ -92,7 +102,7 @@ pub fn TableInfoType(comptime Table: type) type {
             // Consider defining the API to allow this.
             return table.checksum == other.checksum and
                 table.address == other.address and
-                table.flags == other.flags and
+                @bitCast(u64, table.flags) == @bitCast(u64, other.flags) and
                 table.snapshot_min == other.snapshot_min and
                 table.snapshot_max == other.snapshot_max and
                 compare_keys(table.key_min, other.key_min) == .eq and
@@ -219,12 +229,39 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest_level = &manifest.levels[level];
 
             assert(table.snapshot_max >= snapshot);
-            manifest_level.set_snapshot_max(snapshot, table);
+            manifest_level.set_snapshot_max(snapshot, .{}, table);
             assert(table.snapshot_max == snapshot);
 
             // Append update changes to the manifest log
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
+        }
+
+        pub fn move_table(
+            manifest: *Manifest,
+            level_a: u8,
+            level_b: u8,
+            snapshot: u64,
+            table: *TableInfo,
+        ) void {
+            const manifest_level_a = &manifest.levels[level_a];
+            const manifest_level_b = &manifest.levels[level_b];
+
+            assert(table.snapshot_max >= snapshot);
+            if (constants.verify) {
+                assert(manifest_level_a.contains(table));
+            }
+
+            // Insert the table into level b.
+            manifest_level_b.insert_table(manifest.node_pool, table);
+            manifest.manifest_log.insert(@intCast(u7, level_b), table);
+
+            // Update the table in level a, marking it explicitely as "moved" to prevent its blocks
+            // from being collected as they're now referenced by the inserted table in level b.
+            manifest_level_a.set_snapshot_max(snapshot, .{ .moved = true }, table);
+            assert(table.snapshot_max == snapshot);
+            assert(table.flags.moved);
+            manifest.manifest_log.insert(@intCast(u7, level_a), table);
         }
 
         pub fn remove_invisible_tables(
@@ -255,9 +292,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(compare_keys(key_min, table.key_max) != .gt);
                 assert(compare_keys(key_max, table.key_min) != .lt);
 
-                // Append remove changes to the manifest log.
-                const log_level = @intCast(u7, level);
-                manifest.manifest_log.remove(log_level, table);
+                // Append remove changes to the manifest log only if the table was NOT moved.
+                // This prevents the blocks at table.address from being collected as they're
+                // still referenced by the new table in the level it was moved to.
+                if (!table.flags.moved) {
+                    const log_level = @intCast(u7, level);
+                    manifest.manifest_log.remove(log_level, table);
+                }
                 manifest_level.remove_table(manifest.node_pool, &snapshots, table);
             }
 

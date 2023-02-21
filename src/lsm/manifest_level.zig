@@ -81,12 +81,17 @@ pub fn ManifestLevelType(
             assert(level.keys.len() == level.tables.len());
         }
 
-        /// Set snapshot_max for the given table in the ManifestLevel.
+        /// Set snapshot_max and flags for the given table in the ManifestLevel.
         ///
         /// * The table is mutable so that this function can update its snapshot.
         /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
         /// * Asserts that the table exists in the manifest.
-        pub fn set_snapshot_max(level: *Self, snapshot: u64, table: *TableInfo) void {
+        pub fn set_snapshot_max(
+            level: *Self,
+            snapshot: u64,
+            flags: TableInfo.Flags,
+            table: *TableInfo,
+        ) void {
             assert(snapshot < lsm.snapshot_latest);
             assert(table.snapshot_max == math.maxInt(u64));
 
@@ -112,6 +117,9 @@ pub fn ManifestLevelType(
 
             level_table.snapshot_max = snapshot;
             table.snapshot_max = snapshot;
+
+            level_table.flags = flags;
+            table.flags = flags;
 
             assert(it.next() == null);
             level.table_count_visible -= 1;
@@ -658,7 +666,7 @@ pub fn TestContext(
             const snapshot = context.take_snapshot();
 
             for (context.reference.items[index..][0..count]) |*table| {
-                context.level.set_snapshot_max(snapshot, table);
+                context.level.set_snapshot_max(snapshot, .{}, table);
             }
 
             for (context.snapshot_tables.slice()) |tables| {
