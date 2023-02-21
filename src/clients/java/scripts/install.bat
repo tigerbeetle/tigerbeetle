@@ -8,4 +8,4 @@ cd ..\..\..
 call .\scripts\install.bat
 
 echo "Building TigerBeetle Java Client..."
-mvn -B package --quiet
+mvn -B package -Dmaven.test.skip -Djacoco.skip --quiet
