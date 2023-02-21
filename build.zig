@@ -561,7 +561,7 @@ fn c_client(
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
-    const build_step = b.step("c_client", "Build C client shared library");
+    const build_step = b.step("c_client", "Build C client library");
 
     for (dependencies) |dependency| {
         build_step.dependOn(dependency);
@@ -577,10 +577,12 @@ fn c_client(
 
     // Zig cross-targets
     const platforms = .{
-        "x86_64-linux",
+        "x86_64-linux-gnu",
+        "x86_64-linux-musl",
         "x86_64-macos",
         "x86_64-windows",
-        "aarch64-linux",
+        "aarch64-linux-gnu",
+        "aarch64-linux-musl",
         "aarch64-macos",
     };
 
@@ -603,7 +605,6 @@ fn c_client(
             }
 
             lib.addOptions("vsr_options", options);
-
             link_tracer_backend(lib, tracer_backend, cross_target);
 
             build_step.dependOn(&lib.step);
