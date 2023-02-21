@@ -179,7 +179,7 @@ pub fn build(b: *std.build.Builder) void {
         c_client(
             b,
             mode,
-            &.{&install_step.step, &tb_client_header_generate.step},
+            &.{ &install_step.step, &tb_client_header_generate.step },
             options,
             tracer_backend,
         );
@@ -590,23 +590,23 @@ fn c_client(
         const shared_lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         const static_lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
 
-        for ([_]*std.build.LibExeObjStep {shared_lib, static_lib}) |lib| {
-          lib.setMainPkgPath("src");
-          lib.setOutputDir("src/clients/c/lib/" ++ platform);
-          lib.setTarget(cross_target);
-          lib.setBuildMode(mode);
-          lib.linkLibC();
+        for ([_]*std.build.LibExeObjStep{ shared_lib, static_lib }) |lib| {
+            lib.setMainPkgPath("src");
+            lib.setOutputDir("src/clients/c/lib/" ++ platform);
+            lib.setTarget(cross_target);
+            lib.setBuildMode(mode);
+            lib.linkLibC();
 
-          if (cross_target.os_tag.? == .windows) {
-              lib.linkSystemLibrary("ws2_32");
-              lib.linkSystemLibrary("advapi32");
-          }
+            if (cross_target.os_tag.? == .windows) {
+                lib.linkSystemLibrary("ws2_32");
+                lib.linkSystemLibrary("advapi32");
+            }
 
-          lib.addOptions("vsr_options", options);
+            lib.addOptions("vsr_options", options);
 
-          link_tracer_backend(lib, tracer_backend, cross_target);
+            link_tracer_backend(lib, tracer_backend, cross_target);
 
-          build_step.dependOn(&lib.step);
+            build_step.dependOn(&lib.step);
         }
     }
 }
