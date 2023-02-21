@@ -179,7 +179,7 @@ pub fn build(b: *std.build.Builder) void {
         c_client(
             b,
             mode,
-            &.{&install_step.step},
+            &.{&install_step.step, &tb_client_header_generate.step},
             options,
             tracer_backend,
         );
@@ -567,6 +567,14 @@ fn c_client(
         build_step.dependOn(dependency);
     }
 
+    // Updates the generated header file:
+    const install_header = b.addInstallFile(
+        .{ .path = "src/clients/c/tb_client.h" },
+        "../src/clients/c/include/tb_client.h",
+    );
+
+    build_step.dependOn(&install_header.step);
+
     // Zig cross-targets
     const platforms = .{
         "x86_64-linux",
@@ -579,22 +587,26 @@ fn c_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
 
-        const lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
-        lib.setMainPkgPath("src");
-        // Where should this be output?
-        lib.setOutputDir("zig-out/lib/" ++ platform);
-        lib.setTarget(cross_target);
-        lib.setBuildMode(mode);
-        lib.linkLibC();
+        const shared_lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
+        const static_lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
 
-        if (cross_target.os_tag.? == .windows) {
-            lib.linkSystemLibrary("ws2_32");
-            lib.linkSystemLibrary("advapi32");
+        for ([_]*std.build.LibExeObjStep {shared_lib, static_lib}) |lib| {
+          lib.setMainPkgPath("src");
+          lib.setOutputDir("src/clients/c/lib/" ++ platform);
+          lib.setTarget(cross_target);
+          lib.setBuildMode(mode);
+          lib.linkLibC();
+
+          if (cross_target.os_tag.? == .windows) {
+              lib.linkSystemLibrary("ws2_32");
+              lib.linkSystemLibrary("advapi32");
+          }
+
+          lib.addOptions("vsr_options", options);
+
+          link_tracer_backend(lib, tracer_backend, cross_target);
+
+          build_step.dependOn(&lib.step);
         }
-
-        lib.addOptions("vsr_options", options);
-        link_tracer_backend(lib, tracer_backend, cross_target);
-
-        build_step.dependOn(&lib.step);
     }
 }
