@@ -485,7 +485,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             for (ids) |id| {
                 if (self.forest.grooves.accounts_immutable.get(id)) |immut| {
                     self.forest.grooves.accounts_mutable.prefetch_enqueue(immut.timestamp);
-                }   
+                }
             }
 
             self.forest.grooves.accounts_mutable.prefetch(
