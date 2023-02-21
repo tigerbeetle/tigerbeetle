@@ -211,7 +211,8 @@ pub fn ReplicaType(
         loopback_queue: ?*Message = null,
 
         /// The last timestamp received on a commit heartbeat.
-        /// Used to discard delayed heartbeat messages.
+        /// The timestamp originates from the primary's monotonic clock. It is used to discard
+        /// delayed or duplicate heartbeat messages.
         /// (status=normal backup)
         heartbeat_timestamp: u64 = 0,
 
