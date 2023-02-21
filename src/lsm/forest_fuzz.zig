@@ -16,6 +16,7 @@ const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
 const GridType = @import("grid.zig").GridType;
@@ -52,8 +53,13 @@ const Environment = struct {
         .cache_entries_posted = cache_entries_max,
     });
 
-    // Each account put can generate a put and a tombstone in each index.
-    const puts_since_compact_max = @divTrunc(forest_options.accounts_mutable.tree_options_object.commit_entries_max, 2);
+    // We must call compact after every 'batch'.
+    // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values per index.
+    // Every `FuzzOp.put_account` issues one remove and one put per index.
+    const puts_since_compact_max = @divTrunc(
+        Forest.groove_config.accounts_mutable.ObjectTree.Table.value_count_max,
+        2 * constants.lsm_batch_multiple,
+    );
 
     const compacts_per_checkpoint = std.math.divCeil(
         usize,

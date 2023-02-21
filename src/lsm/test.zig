@@ -15,6 +15,7 @@ const Storage = @import("../storage.zig").Storage;
 const IO = @import("../io.zig").IO;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
 const GridType = @import("grid.zig").GridType;

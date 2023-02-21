@@ -15,6 +15,7 @@ pub fn TableMutableType(comptime Table: type) type {
     const key_from_value = Table.key_from_value;
     const tombstone_from_key = Table.tombstone_from_key;
     const tombstone = Table.tombstone;
+    const value_count_max = Table.value_count_max;
     const usage = Table.usage;
 
     return struct {
@@ -40,12 +41,11 @@ pub fn TableMutableType(comptime Table: type) type {
             .{},
         );
 
-        value_count_max: u32,
         values: Values = .{},
 
         /// Rather than using values.count(), we count how many values we could have had if every
         /// operation had been on a different key. This means that mistakes in calculating
-        /// commit_entries_max are much easier to catch when fuzzing, rather than requiring very
+        /// value_count_max are much easier to catch when fuzzing, rather than requiring very
         /// specific workloads.
         /// Invariant: value_count_worst_case <= value_count_max
         value_count_worst_case: u32 = 0,
@@ -65,25 +65,15 @@ pub fn TableMutableType(comptime Table: type) type {
         // The value type will be []u8 and this will be shared by trees with the same value size."
         values_cache: ?*ValuesCache,
 
-        /// `commit_entries_max` is the maximum number of Values that can be inserted by a single commit.
         pub fn init(
             allocator: mem.Allocator,
             values_cache: ?*ValuesCache,
-            commit_entries_max: u32,
         ) !TableMutable {
-            comptime assert(constants.lsm_batch_multiple > 0);
-            assert(commit_entries_max > 0);
-
-            const value_count_max = commit_entries_max * constants.lsm_batch_multiple;
-            const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
-            assert(data_block_count <= Table.data_block_count_max);
-
             var values: Values = .{};
             try values.ensureTotalCapacity(allocator, value_count_max);
             errdefer values.deinit(allocator);
 
             return TableMutable{
-                .value_count_max = value_count_max,
                 .values = values,
                 .values_cache = values_cache,
             };
@@ -105,7 +95,7 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn put(table: *TableMutable, value: *const Value) void {
-            assert(table.value_count_worst_case < table.value_count_max);
+            assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
             switch (usage) {
                 .secondary_index => {
@@ -128,11 +118,11 @@ pub fn TableMutableType(comptime Table: type) type {
             }
 
             // The hash map's load factor may allow for more capacity because of rounding:
-            assert(table.values.count() <= table.value_count_max);
+            assert(table.values.count() <= value_count_max);
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
-            assert(table.value_count_worst_case < table.value_count_max);
+            assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
             switch (usage) {
                 .secondary_index => {
@@ -156,14 +146,7 @@ pub fn TableMutableType(comptime Table: type) type {
                 },
             }
 
-            assert(table.values.count() <= table.value_count_max);
-        }
-
-        /// This may return `false` even when committing would succeed — it pessimistically
-        /// assumes that none of the batch's keys are already in `table.values`.
-        pub fn can_commit_batch(table: *TableMutable, batch_count: u32) bool {
-            assert(batch_count <= table.value_count_max);
-            return (table.value_count_worst_case + batch_count) <= table.value_count_max;
+            assert(table.values.count() <= value_count_max);
         }
 
         pub fn clear(table: *TableMutable) void {
@@ -175,7 +158,7 @@ pub fn TableMutableType(comptime Table: type) type {
 
         pub fn count(table: *const TableMutable) u32 {
             const value = @intCast(u32, table.values.count());
-            assert(value <= table.value_count_max);
+            assert(value <= value_count_max);
             return value;
         }
 
@@ -185,9 +168,9 @@ pub fn TableMutableType(comptime Table: type) type {
             values_max: []Value,
         ) []const Value {
             assert(table.count() > 0);
-            assert(table.count() <= table.value_count_max);
+            assert(table.count() <= value_count_max);
             assert(table.count() <= values_max.len);
-            assert(values_max.len == table.value_count_max);
+            assert(values_max.len == value_count_max);
 
             var i: usize = 0;
             var it = table.values.keyIterator();

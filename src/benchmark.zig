@@ -14,6 +14,7 @@ const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const vsr = @import("vsr.zig");

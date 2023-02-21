@@ -119,6 +119,7 @@ fn IndexTreeType(
     comptime Storage: type,
     comptime Field: type,
     comptime tree_name: [:0]const u8,
+    comptime value_count_max: usize,
 ) type {
     const Key = CompositeKey(IndexCompositeKeyType(Field));
     const Table = TableType(
@@ -129,6 +130,7 @@ fn IndexTreeType(
         Key.sentinel_key,
         Key.tombstone,
         Key.tombstone_from_key,
+        value_count_max,
         .secondary_index,
     );
 
@@ -144,6 +146,10 @@ pub fn GrooveType(
     comptime Storage: type,
     comptime Object: type,
     /// An anonymous struct instance which contains the following:
+    ///
+    /// - value_count_max: { .field = usize }:
+    ///     An anonymous struct which contains, for each field of `Object`,
+    ///     the maximum number of values per table for the corresponding index tree.
     ///
     /// - ignored: [][]const u8:
     ///     An array of fields on the Object type that should not be given index trees
@@ -178,7 +184,12 @@ pub fn GrooveType(
 
         if (!ignored) {
             const tree_name = @typeName(Object) ++ "." ++ field.name;
-            const IndexTree = IndexTreeType(Storage, field.field_type, tree_name);
+            const IndexTree = IndexTreeType(
+                Storage,
+                field.field_type,
+                tree_name,
+                @field(groove_options.value_count_max, field.name),
+            );
             index_fields = index_fields ++ [_]std.builtin.TypeInfo.StructField{
                 .{
                     .name = field.name,
@@ -218,7 +229,12 @@ pub fn GrooveType(
         // Create an IndexTree for the DerivedType:
         const tree_name = @typeName(Object) ++ "." ++ field.name;
         const DerivedType = @typeInfo(derive_return_type).Optional.child;
-        const IndexTree = IndexTreeType(Storage, DerivedType, tree_name);
+        const IndexTree = IndexTreeType(
+            Storage,
+            DerivedType,
+            tree_name,
+            @field(groove_options.value_count_max, field.name),
+        );
 
         index_fields = index_fields ++ &.{
             .{
@@ -245,7 +261,7 @@ pub fn GrooveType(
         };
     }
 
-    const ObjectTree = blk: {
+    const _ObjectTree = blk: {
         const Table = TableType(
             u64, // key = timestamp
             Object,
@@ -254,6 +270,7 @@ pub fn GrooveType(
             ObjectTreeHelpers(Object).sentinel_key,
             ObjectTreeHelpers(Object).tombstone,
             ObjectTreeHelpers(Object).tombstone_from_key,
+            groove_options.value_count_max.timestamp,
             .general,
         );
 
@@ -261,7 +278,7 @@ pub fn GrooveType(
         break :blk TreeType(Table, Storage, tree_name);
     };
 
-    const IdTree = if (!has_id) void else blk: {
+    const _IdTree = if (!has_id) void else blk: {
         const Table = TableType(
             u128,
             IdTreeValue,
@@ -270,6 +287,7 @@ pub fn GrooveType(
             IdTreeValue.sentinel_key,
             IdTreeValue.tombstone,
             IdTreeValue.tombstone_from_key,
+            groove_options.value_count_max.id,
             .general,
         );
 
@@ -277,7 +295,7 @@ pub fn GrooveType(
         break :blk TreeType(Table, Storage, tree_name);
     };
 
-    const IndexTrees = @Type(.{
+    const _IndexTrees = @Type(.{
         .Struct = .{
             .layout = .Auto,
             .fields = index_fields,
@@ -295,18 +313,22 @@ pub fn GrooveType(
     });
 
     // Verify no hash collisions between all the trees:
-    comptime var hashes: []const u128 = &.{ObjectTree.hash};
+    comptime var hashes: []const u128 = &.{_ObjectTree.hash};
 
-    inline for (std.meta.fields(IndexTrees)) |field| {
-        const IndexTree = @TypeOf(@field(@as(IndexTrees, undefined), field.name));
+    if (has_id) {
+        const hash: []const u128 = &.{_IdTree.hash};
+        assert(std.mem.indexOf(u128, hashes, hash) == null);
+        hashes = hashes ++ hash;
+    }
+    inline for (std.meta.fields(_IndexTrees)) |field| {
+        const IndexTree = @TypeOf(@field(@as(_IndexTrees, undefined), field.name));
         const hash: []const u128 = &.{IndexTree.hash};
-
         assert(std.mem.indexOf(u128, hashes, hash) == null);
         hashes = hashes ++ hash;
     }
 
     // Verify groove index count:
-    const indexes_count_actual = std.meta.fields(IndexTrees).len;
+    const indexes_count_actual = std.meta.fields(_IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len -
         groove_options.ignored.len -
         // The id/timestamp fields are implicitly ignored since it's the primary key for ObjectTree:
@@ -370,6 +392,10 @@ pub fn GrooveType(
 
     return struct {
         const Groove = @This();
+
+        pub const ObjectTree = _ObjectTree;
+        pub const IdTree = _IdTree;
+        pub const IndexTrees = _IndexTrees;
 
         const Grid = GridType(Storage);
 
@@ -973,6 +999,19 @@ test "Groove" {
         Storage,
         Transfer,
         .{
+            // Doesn't matter for this test.
+            .value_count_max = .{
+                .timestamp = 1,
+                .id = 1,
+                .debit_account_id = 1,
+                .credit_account_id = 1,
+                .user_data = 1,
+                .pending_id = 1,
+                .timeout = 1,
+                .ledger = 1,
+                .code = 1,
+                .amount = 1,
+            },
             .ignored = [_][]const u8{ "reserved", "user_data", "flags" },
             .derived = .{},
         },
