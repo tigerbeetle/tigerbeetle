@@ -87,7 +87,10 @@ const tree_options = .{
     .cache_entries_max = 2048,
 };
 
-const puts_since_compact_max = commit_entries_max;
+// We must call compact after every 'batch'.
+// Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
+// Every `FuzzOp.put` issues one remove and one put.
+const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
 const compacts_per_checkpoint = std.math.divCeil(
     usize,
     constants.journal_slot_count,
