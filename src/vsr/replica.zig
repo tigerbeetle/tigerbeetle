@@ -267,7 +267,7 @@ pub fn ReplicaType(
         normal_heartbeat_timeout: Timeout,
 
         /// The number of ticks before resetting the SVC quorum.
-        /// (status=normal|view-change)
+        /// (status=normal|view-change, SVC quorum contains message from ANY OTHER replica)
         start_view_change_window_timeout: Timeout,
 
         /// The number of ticks before resending a `start_view_change` message.
@@ -1258,6 +1258,10 @@ pub fn ReplicaType(
 
             self.start_view_change_from_all_replicas.set(message.header.replica);
 
+            if (self.replica != message.header.replica) {
+                self.start_view_change_window_timeout.start();
+            }
+
             const count = self.start_view_change_from_all_replicas.count();
             assert(count <= threshold);
 
@@ -1906,8 +1910,9 @@ pub fn ReplicaType(
 
         fn on_start_view_change_window_timeout(self: *Self) void {
             assert(self.status == .normal or self.status == .view_change);
-            self.start_view_change_window_timeout.reset();
-            if (self.replica_count == 1) return;
+            assert(self.start_view_change_from_all_replicas.count() > 0);
+            assert(self.replica_count > 1);
+            self.start_view_change_window_timeout.stop();
 
             // Don't reset our own SVC; it will be reset if/when we receive a heartbeat.
             const svc = self.start_view_change_from_all_replicas.isSet(self.replica);
@@ -5420,11 +5425,11 @@ pub fn ReplicaType(
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.normal_heartbeat_timeout.ticking);
+                assert(!self.start_view_change_window_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
                 assert(!self.do_view_change_message_timeout.ticking);
 
                 self.ping_timeout.start();
-                self.start_view_change_window_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
@@ -5443,13 +5448,13 @@ pub fn ReplicaType(
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.normal_heartbeat_timeout.ticking);
+                assert(!self.start_view_change_window_timeout.ticking);
                 assert(!self.commit_message_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
                 assert(!self.do_view_change_message_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.normal_heartbeat_timeout.start();
-                self.start_view_change_window_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.repair_timeout.start();
             }
@@ -5488,7 +5493,7 @@ pub fn ReplicaType(
 
                 self.ping_timeout.start();
                 self.commit_message_timeout.start();
-                self.start_view_change_window_timeout.start();
+                self.start_view_change_window_timeout.stop();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
                 self.do_view_change_message_timeout.stop();
@@ -5523,7 +5528,7 @@ pub fn ReplicaType(
                 self.ping_timeout.start();
                 self.commit_message_timeout.stop();
                 self.normal_heartbeat_timeout.start();
-                self.start_view_change_window_timeout.start();
+                self.start_view_change_window_timeout.stop();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
                 self.do_view_change_message_timeout.stop();
@@ -5579,7 +5584,7 @@ pub fn ReplicaType(
             self.ping_timeout.stop();
             self.commit_message_timeout.stop();
             self.normal_heartbeat_timeout.stop();
-            self.start_view_change_window_timeout.start();
+            self.start_view_change_window_timeout.stop();
             self.start_view_change_message_timeout.start();
             self.view_change_status_timeout.start();
             self.do_view_change_message_timeout.start();
