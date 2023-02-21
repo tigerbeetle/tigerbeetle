@@ -1119,6 +1119,8 @@ pub fn ReplicaType(
         /// It's possible for the network to be one-way partitioned so that backups don't see the
         /// primary as down, but neither can the primary hear from the backups.
         fn on_commit(self: *Self, message: *const Message) void {
+            assert(message.header.command == .commit);
+
             self.view_jump(message.header);
 
             if (self.status != .normal) {
@@ -5446,6 +5448,7 @@ pub fn ReplicaType(
             assert(self.status == .view_change);
             assert(view_new >= self.view);
             assert(self.journal.header_with_op(self.op) != null);
+            assert(!self.primary_abdicating);
 
             self.status = .normal;
 
@@ -5515,7 +5518,6 @@ pub fn ReplicaType(
             }
 
             self.heartbeat_timestamp = 0;
-            self.primary_abdicating = false;
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
             self.reset_quorum_nack_prepare();
