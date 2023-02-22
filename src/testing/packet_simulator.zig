@@ -22,6 +22,8 @@ pub const PacketSimulatorOptions = struct {
     /// How the partitions should be generated
     partition_mode: PartitionMode = .none,
 
+    partition_symmetry: PartitionSymmetry = .symmetric,
+
     /// Probability per tick that a partition will occur
     partition_probability: u8 = 0,
 
@@ -67,6 +69,8 @@ pub const PartitionMode = enum {
     /// Isolates exactly one replica.
     isolate_single,
 };
+
+pub const PartitionSymmetry = enum { symmetric, asymmetric };
 
 pub fn PacketSimulatorType(comptime Packet: type) type {
     return struct {
@@ -214,37 +218,38 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         fn auto_partition_network(self: *Self) void {
             assert(self.options.replica_count > 1);
 
+            const random = self.prng.random();
             var partition = self.auto_partition;
             switch (self.options.partition_mode) {
                 .none => std.mem.set(bool, partition, false),
                 .uniform_size => {
                     // Exclude cases partition_size == 0 and partition_size == replica_count
                     const partition_size =
-                        1 + self.prng.random().uintAtMost(u8, self.options.replica_count - 2);
-                    self.prng.random().shuffle(u8, self.auto_partition_replicas);
+                        1 + random.uintAtMost(u8, self.options.replica_count - 2);
+                    random.shuffle(u8, self.auto_partition_replicas);
                     for (self.auto_partition_replicas) |r, i| {
                         partition[r] = i < partition_size;
                     }
                 },
                 .uniform_partition => {
                     var only_same = true;
-                    partition[0] = self.prng.random().uintLessThan(u8, 2) == 1;
+                    partition[0] = random.uintLessThan(u8, 2) == 1;
 
                     var i: usize = 1;
                     while (i < self.options.replica_count) : (i += 1) {
-                        partition[i] = self.prng.random().uintLessThan(u8, 2) == 1;
+                        partition[i] = random.uintLessThan(u8, 2) == 1;
                         only_same =
                             only_same and (partition[i - 1] == partition[i]);
                     }
 
                     if (only_same) {
-                        const n = self.prng.random().uintLessThan(u8, self.options.replica_count);
-                        self.auto_partition[n] = true;
+                        const n = random.uintLessThan(u8, self.options.replica_count);
+                        partition[n] = true;
                     }
                 },
                 .isolate_single => {
                     std.mem.set(bool, partition, false);
-                    const n = self.prng.random().uintLessThan(u8, self.options.replica_count);
+                    const n = random.uintLessThan(u8, self.options.replica_count);
                     partition[n] = true;
                 },
             }
@@ -252,13 +257,18 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             self.auto_partition_active = true;
             self.auto_partition_stability = self.options.partition_stability;
 
+            const asymmetric_partition_side = random.boolean();
             var from: u8 = 0;
             while (from < self.node_count()) : (from += 1) {
                 var to: u8 = 0;
                 while (to < self.node_count()) : (to += 1) {
                     const path = .{ .source = from, .target = to };
-                    self.links[self.path_index(path)].enabled = from >= self.options.replica_count or
-                        to >= self.options.replica_count or partition[from] == partition[to];
+                    self.links[self.path_index(path)].enabled =
+                        from >= self.options.replica_count or
+                        to >= self.options.replica_count or
+                        partition[from] == partition[to] or
+                        (self.options.partition_symmetry == .asymmetric and
+                        partition[from] == asymmetric_partition_side);
                 }
             }
         }

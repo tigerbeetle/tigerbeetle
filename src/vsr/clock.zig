@@ -237,6 +237,8 @@ pub fn Clock(comptime Time: type) type {
 
         /// Called by `Replica.on_ping_timeout()` to provide `m0` when we decide to send a ping.
         /// Called by `Replica.on_pong()` to provide `m2` when we receive a pong.
+        /// Called by `Replica.on_commit_message_timeout()` to allow backups to discard
+        //  duplicate/misdirected heartbeats.
         pub fn monotonic(self: *Self) u64 {
             return self.time.monotonic();
         }

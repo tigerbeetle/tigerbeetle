@@ -806,6 +806,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         log.info("connection from replica {}", .{connection.peer.replica});
                     },
                     .client => {
+                        assert(header.client != 0);
                         connection.peer = .{ .client = header.client };
                         const result = bus.process.clients.getOrPutAssumeCapacity(header.client);
                         // If there is a connection to this client, terminate and replace it:
