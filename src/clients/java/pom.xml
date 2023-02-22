@@ -7,6 +7,17 @@
   <artifactId>tigerbeetle-java</artifactId>
   <version>0.0.1-SNAPSHOT</version>
   <name>TigerBeetle Java client</name>
+  <description>The distributed financial accounting database designed for mission critical safety and performance.</description>
+  <developers>
+    <developer>
+      <name>The TigerBeetle contributors</name>
+      <email>hi@tigerbeetle.com</email>
+    </developer>
+  </developers>
+  <organization>
+    <name>TigerBeetle, Inc.</name>
+    <url>https://www.tigerbeetle.com</url>
+  </organization>
   <url>https://www.tigerbeetle.com</url>
   <scm>
     <url>https://github.com/tigerbeetledb/tigerbeetle</url>
@@ -94,6 +105,16 @@
           <artifactId>maven-javadoc-plugin</artifactId>
           <version>3.4.1</version>
         </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-source-plugin</artifactId>
+          <version>3.2.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-gpg-plugin</artifactId>
+          <version>3.0.1</version>
+        </plugin>                 
         <plugin>
           <groupId>org.jacoco</groupId>
           <artifactId>jacoco-maven-plugin</artifactId>
@@ -249,7 +270,42 @@
         </executions>
       </plugin>
 
-      <!-- Javadoc -->
+      <!-- Sign artifacts -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-gpg-plugin</artifactId>
+        <executions>
+            <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals>
+                    <goal>sign</goal>
+                </goals>
+                <configuration>
+                    <gpgArguments>
+                        <arg>--pinentry-mode</arg>
+                        <arg>loopback</arg>
+                    </gpgArguments>
+                </configuration>
+            </execution>
+        </executions>
+      </plugin>      
+
+      <!-- Source code jar -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <executions>
+            <execution>
+                <id>attach-sources</id>
+                <goals>
+                    <goal>jar</goal>
+                </goals>
+            </execution>
+        </executions>
+      </plugin>      
+
+      <!-- Javadoc jar -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
@@ -263,6 +319,7 @@
         </executions>
       </plugin>
 
+      <!-- PMD -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-pmd-plugin</artifactId>
@@ -280,14 +337,30 @@
           </execution>
         </executions>
       </plugin>
+
+      <!-- Maven central -->
+      <plugin>
+        <groupId>org.sonatype.plugins</groupId>
+        <artifactId>nexus-staging-maven-plugin</artifactId>
+        <version>1.6.13</version>
+        <extensions>true</extensions>
+        <configuration>
+            <serverId>ossrh</serverId>
+            <nexusUrl>https://s01.oss.sonatype.org</nexusUrl>
+            <autoReleaseAfterClose>true</autoReleaseAfterClose>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
   
   <distributionManagement>
+    <snapshotRepository>
+      <id>ossrh</id>
+      <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
+    </snapshotRepository>
     <repository>
-      <id>github</id>
-      <name>TigerBeetle Java client</name>
-      <url>https://maven.pkg.github.com/tigerbeetledb/tigerbeetle</url>
+      <id>ossrh</id>
+      <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
     </repository>
-  </distributionManagement>
+  </distributionManagement>  
 </project>
