@@ -66,7 +66,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         /// The highest view number seen by the client in messages exchanged with the cluster.
         /// Used to locate the current primary, and provide more information to a partitioned primary.
-        view: u32 = 1,
+        view: u32 = 0,
 
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
@@ -498,7 +498,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.valid_checksum());
             assert(message.header.client == self.id);
             assert(message.header.cluster == self.cluster);
-            assert(message.header.invalid() == null);
 
             self.message_bus.send_message_to_replica(replica, message);
         }
