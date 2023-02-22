@@ -160,7 +160,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 return;
             }
             switch (message.header.command) {
-                .pong => self.on_pong(message),
+                .pong_client => self.on_pong_client(message),
                 .reply => self.on_reply(message),
                 .eviction => self.on_eviction(message),
                 else => {
@@ -273,8 +273,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             @panic("session evicted: too many concurrent client sessions");
         }
 
-        fn on_pong(self: *Self, pong: *const Message) void {
-            assert(pong.header.command == .pong);
+        fn on_pong_client(self: *Self, pong: *const Message) void {
+            assert(pong.header.command == .pong_client);
             assert(pong.header.cluster == self.cluster);
 
             if (pong.header.client != 0) {
@@ -390,7 +390,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.ping_timeout.reset();
 
             const ping = Header{
-                .command = .ping,
+                .command = .ping_client,
                 .cluster = self.cluster,
                 .client = self.id,
             };
