@@ -4600,7 +4600,7 @@ pub fn ReplicaType(
         fn send_prepare_ok(self: *Self, header: *const Header) void {
             assert(header.command == .prepare);
             assert(header.cluster == self.cluster);
-            assert(header.replica == self.primary_index(header.view) or header.operation == .root);
+            assert(header.replica == self.primary_index(header.view));
             assert(header.view <= self.view);
             assert(header.op <= self.op or header.view < self.view);
 

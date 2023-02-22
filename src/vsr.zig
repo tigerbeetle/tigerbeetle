@@ -701,9 +701,6 @@ pub const Header = extern struct {
         var header = Header{
             .cluster = cluster,
             .size = @sizeOf(Header),
-            // Note the root prepare is the only case where:
-            //   primary_index(prepare.view) ≠ prepare.replica
-            .replica = 0,
             .command = .prepare,
             .operation = .root,
         };
