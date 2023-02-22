@@ -253,7 +253,7 @@ pub fn CompactionType(
             assert(compaction.filter.state == .building);
             assert(compaction.data.state == .building);
 
-            // Start the iteraters if we're not only moving one table.
+            // Start the compaction iterators if we can't move the table directly between levels.
             if (!compaction.move_table()) {
                 const iterator_b_context = .{
                     .grid = grid,
@@ -495,8 +495,6 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
             assert(!compaction.move_table());
 
-            const grid_reservation = compaction.grid_reservation.?;
-
             // Ensure there are values to merge and that is it safe to do so.
             const merge_iterator = &compaction.merge_iterator.?;
             assert(!merge_iterator.empty());
@@ -521,7 +519,7 @@ pub fn CompactionType(
             {
                 compaction.table_builder.data_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(grid_reservation),
+                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
                 });
 
                 // Mark the finished data block as writable for the next compact_tick() call.
@@ -538,7 +536,7 @@ pub fn CompactionType(
             {
                 compaction.table_builder.filter_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(grid_reservation),
+                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
                 });
 
                 // Mark the finished filter block as writable for the next compact_tick() call.
@@ -554,7 +552,7 @@ pub fn CompactionType(
             {
                 const table = compaction.table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(grid_reservation),
+                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.op_min),
                     // TODO(Persistent Snapshots) set snapshot_max to the minimum snapshot_max of
                     // all the (original) input tables.
