@@ -23,22 +23,12 @@ pub fn TableInfoType(comptime Table: type) type {
     return extern struct {
         const TableInfo = @This();
 
-        pub const Flags = packed struct {
-            moved: bool = false,
-            padding: u63 = 0,
-
-            comptime {
-                assert(@sizeOf(Flags) == @sizeOf(u64));
-                assert(@bitSizeOf(Flags) == @bitSizeOf(u64));
-            }
-        };
-
         /// Checksum of the table's index block.
         checksum: u128,
         /// Address of the table's index block.
         address: u64,
         /// Unused.
-        flags: Flags = .{},
+        flags: u64 = 0,
 
         /// The minimum snapshot that can see this table (with exclusive bounds).
         /// - This value is set to the current snapshot tick on table creation.
@@ -102,7 +92,7 @@ pub fn TableInfoType(comptime Table: type) type {
             // Consider defining the API to allow this.
             return table.checksum == other.checksum and
                 table.address == other.address and
-                @bitCast(u64, table.flags) == @bitCast(u64, other.flags) and
+                table.flags == other.flags and
                 table.snapshot_min == other.snapshot_min and
                 table.snapshot_max == other.snapshot_max and
                 compare_keys(table.key_min, other.key_min) == .eq and
@@ -129,6 +119,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
 
+        const MovedTableAddresses = std.AutoHashMapUnmanaged(u64, void);
+
         node_pool: *NodePool,
 
         levels: [constants.lsm_levels]Level,
@@ -139,6 +131,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         snapshot_max: u64 = 1,
 
         manifest_log: ManifestLog,
+
+        moved_table_addresses: MovedTableAddresses,
 
         open_callback: ?Callback = null,
         compact_callback: ?Callback = null,
@@ -160,10 +154,15 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
             errdefer manifest_log.deinit(allocator);
 
+            var moved_table_addresses = MovedTableAddresses{};
+            try moved_table_addresses.ensureTotalCapacity(allocator, constants.lsm_levels);
+            errdefer moved_table_addresses.deinit(allocator);
+
             return Manifest{
                 .node_pool = node_pool,
                 .levels = levels,
                 .manifest_log = manifest_log,
+                .moved_table_addresses = moved_table_addresses,
             };
         }
 
@@ -171,6 +170,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             for (manifest.levels) |*l| l.deinit(allocator, manifest.node_pool);
 
             manifest.manifest_log.deinit(allocator);
+            manifest.moved_table_addresses.deinit(allocator);
         }
 
         pub fn open(manifest: *Manifest, callback: Callback) void {
@@ -209,7 +209,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest_level = &manifest.levels[level];
             manifest_level.insert_table(manifest.node_pool, table);
 
-            // Append insert changes to the manifest log
+            // Append insert changes to the manifest log.
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
 
@@ -229,10 +229,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest_level = &manifest.levels[level];
 
             assert(table.snapshot_max >= snapshot);
-            manifest_level.set_snapshot_max(snapshot, .{}, table);
+            manifest_level.set_snapshot_max(snapshot, table);
             assert(table.snapshot_max == snapshot);
 
-            // Append update changes to the manifest log
+            // Append update changes to the manifest log.
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
         }
@@ -244,24 +244,35 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             snapshot: u64,
             table: *TableInfo,
         ) void {
+            assert(level_b == level_a + 1);
+            assert(level_b < constants.lsm_levels);
+            assert(table.snapshot_max >= snapshot);
+
             const manifest_level_a = &manifest.levels[level_a];
             const manifest_level_b = &manifest.levels[level_b];
 
             assert(table.snapshot_max >= snapshot);
+
+            assert(table.snapshot_max >= snapshot);
             if (constants.verify) {
                 assert(manifest_level_a.contains(table));
+                assert(!manifest_level_b.contains(table));
             }
 
-            // Insert the table into level b.
+            // Insert the table into level b and append insert changes to the manifest log.
             manifest_level_b.insert_table(manifest.node_pool, table);
             manifest.manifest_log.insert(@intCast(u7, level_b), table);
 
-            // Update the table in level a, marking it explicitely as "moved" to prevent its blocks
-            // from being collected as they're now referenced by the inserted table in level b.
-            manifest_level_a.set_snapshot_max(snapshot, .{ .moved = true }, table);
+            // Update the table in level a without appending update changes to the manifest log.
+            // To move a table w.r.t manifest log, the previous level's table should not be removed.
+            // When replaying the log from open(), inserts are processed in LIFO order while
+            // duplicates are ignored. This means the table will only appear in level_b as moved.
+            manifest_level_a.set_snapshot_max(snapshot, table);
             assert(table.snapshot_max == snapshot);
-            assert(table.flags.moved);
-            manifest.manifest_log.insert(@intCast(u7, level_a), table);
+
+            // Finally, the table's address is added to a set that will not be removed from the
+            // manifest log during `remove_invisible_tables`.
+            manifest.moved_table_addresses.putAssumeCapacity(table.address, {});
         }
 
         pub fn remove_invisible_tables(
@@ -292,15 +303,17 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(compare_keys(key_min, table.key_max) != .gt);
                 assert(compare_keys(key_max, table.key_min) != .lt);
 
-                // Append remove changes to the manifest log only if the table was NOT moved.
-                // This prevents the blocks at table.address from being collected as they're
-                // still referenced by the new table in the level it was moved to.
-                if (!table.flags.moved) {
+                // Only remove invisible tables from manifest log that weren't moved to next level.
+                // Moved tables explictly should not be removed: see `ManifestLog.insert` comment.
+                if (!manifest.moved_table_addresses.contains(table.address)) {
                     const log_level = @intCast(u7, level);
                     manifest.manifest_log.remove(log_level, table);
                 }
                 manifest_level.remove_table(manifest.node_pool, &snapshots, table);
             }
+
+            manifest.moved_table_addresses.clearRetainingCapacity();
+            assert(manifest.moved_table_addresses.count() == 0);
 
             if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
         }

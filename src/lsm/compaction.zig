@@ -339,7 +339,6 @@ pub fn CompactionType(
                 var table_a = compaction.level_a_input.?;
                 compaction.manifest.move_table(level_a, level_b, snapshot_max, &table_a);
                 assert(table_a.snapshot_max == snapshot_max);
-                assert(table_a.flags.moved);
 
                 compaction.merge_done = true;
                 compaction.status = .done;
