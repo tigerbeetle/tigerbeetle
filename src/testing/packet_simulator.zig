@@ -66,7 +66,7 @@ pub const PartitionMode = enum {
     /// equal-size partitions.
     uniform_partition,
 
-    /// Isolates exactly one replica (symmetric).
+    /// Isolates exactly one replica.
     isolate_single,
 };
 
@@ -257,6 +257,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             self.auto_partition_active = true;
             self.auto_partition_stability = self.options.partition_stability;
 
+            const asymmetric_partition_side = random.boolean();
             var from: u8 = 0;
             while (from < self.node_count()) : (from += 1) {
                 var to: u8 = 0;
@@ -267,7 +268,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         to >= self.options.replica_count or
                         partition[from] == partition[to] or
                         (self.options.partition_symmetry == .asymmetric and
-                        partition[from] == random.boolean());
+                        partition[from] == asymmetric_partition_side);
                 }
             }
         }
