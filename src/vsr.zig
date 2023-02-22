@@ -355,7 +355,6 @@ pub const Header = extern struct {
 
     fn invalid_ping(self: *const Header) ?[]const u8 {
         assert(self.command == .ping);
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
@@ -363,6 +362,7 @@ pub const Header = extern struct {
         if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -370,7 +370,6 @@ pub const Header = extern struct {
 
     fn invalid_pong(self: *const Header) ?[]const u8 {
         assert(self.command == .pong);
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
@@ -378,6 +377,7 @@ pub const Header = extern struct {
         if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp == 0) return "timestamp == 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -385,7 +385,6 @@ pub const Header = extern struct {
 
     fn invalid_ping_client(self: *const Header) ?[]const u8 {
         assert(self.command == .ping_client);
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.parent != 0) return "parent != 0";
         if (self.client == 0) return "client == 0";
         if (self.context != 0) return "context != 0";
@@ -394,6 +393,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.replica != 0) return "replica != 0";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -402,7 +402,6 @@ pub const Header = extern struct {
 
     fn invalid_pong_client(self: *const Header) ?[]const u8 {
         assert(self.command == .pong_client);
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
@@ -410,6 +409,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -426,12 +426,12 @@ pub const Header = extern struct {
             .reserved => return "operation == .reserved",
             .root => return "operation == .root",
             .register => {
-                if (self.checksum_body != checksum_body_empty) return "register: checksum_body != expected";
                 // The first request a client makes must be to register with the cluster:
                 if (self.parent != 0) return "register: parent != 0";
                 if (self.context != 0) return "register: context != 0";
                 if (self.request != 0) return "register: request != 0";
                 // The .register operation carries no payload:
+                if (self.checksum_body != checksum_body_empty) return "register: checksum_body != expected";
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
@@ -449,7 +449,6 @@ pub const Header = extern struct {
         switch (self.operation) {
             .reserved => return "operation == .reserved",
             .root => {
-                if (self.checksum_body != checksum_body_empty) return "root: checksum_body != expected";
                 if (self.parent != 0) return "root: parent != 0";
                 if (self.client != 0) return "root: client != 0";
                 if (self.context != 0) return "root: context != 0";
@@ -458,6 +457,7 @@ pub const Header = extern struct {
                 if (self.op != 0) return "root: op != 0";
                 if (self.commit != 0) return "root: commit != 0";
                 if (self.timestamp != 0) return "root: timestamp != 0";
+                if (self.checksum_body != checksum_body_empty) return "root: checksum_body != expected";
                 if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
                 if (self.replica != 0) return "root: replica != 0";
             },
@@ -536,6 +536,8 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.timestamp == 0) return "timestamp == 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -549,6 +551,8 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -583,6 +587,8 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -593,8 +599,10 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
         if (self.commit > self.op) return "op_min > op_max";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -605,6 +613,8 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         switch (self.timestamp) {
             0 => if (self.context != 0) return "context != 0",
             1 => {}, // context is a checksum, which may be 0.
@@ -633,6 +643,8 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -645,6 +657,8 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
