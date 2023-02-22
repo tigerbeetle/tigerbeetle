@@ -11,31 +11,22 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 pub fn TableImmutableType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
+    const value_count_max = Table.value_count_max;
     const compare_keys = Table.compare_keys;
     const key_from_value = Table.key_from_value;
 
     return struct {
         const TableImmutable = @This();
 
-        value_count_max: u32,
         values: []Value,
         snapshot_min: u64,
         free: bool,
 
-        /// `commit_entries_max` is the maximum number of Values that can be inserted by a single commit.
-        pub fn init(allocator: mem.Allocator, commit_entries_max: u32) !TableImmutable {
-            assert(commit_entries_max > 0);
-
-            // The in-memory immutable table is the same size as the mutable table:
-            const value_count_max = commit_entries_max * constants.lsm_batch_multiple;
-            const data_block_count = div_ceil(value_count_max, Table.data.value_count_max);
-            assert(data_block_count <= Table.data_block_count_max);
-
+        pub fn init(allocator: mem.Allocator) !TableImmutable {
             const values = try allocator.alloc(Value, value_count_max);
             errdefer allocator.free(values);
 
             return TableImmutable{
-                .value_count_max = value_count_max,
                 .snapshot_min = undefined,
                 .values = values,
                 .free = true,
@@ -43,8 +34,8 @@ pub fn TableImmutableType(comptime Table: type) type {
         }
 
         pub inline fn values_max(table: *const TableImmutable) []Value {
-            assert(table.values.len <= table.value_count_max);
-            return table.values.ptr[0..table.value_count_max];
+            assert(table.values.len <= value_count_max);
+            return table.values.ptr[0..value_count_max];
         }
 
         pub inline fn key_min(table: *const TableImmutable) Key {
@@ -74,7 +65,6 @@ pub fn TableImmutableType(comptime Table: type) type {
             var runtime_zero: usize = 0;
 
             table.* = .{
-                .value_count_max = table.value_count_max,
                 .snapshot_min = undefined,
                 .values = table.values[runtime_zero..runtime_zero],
                 .free = true,
@@ -92,8 +82,8 @@ pub fn TableImmutableType(comptime Table: type) type {
 
             assert(sorted_values.ptr == table.values.ptr);
             assert(sorted_values.len > 0);
-            assert(sorted_values.len <= table.value_count_max);
-            assert(sorted_values.len <= Table.data.value_count_max * Table.data_block_count_max);
+            assert(sorted_values.len <= value_count_max);
+            assert(sorted_values.len <= Table.data.block_value_count_max * Table.data_block_count_max);
 
             if (constants.verify) {
                 var i: usize = 1;
@@ -106,7 +96,6 @@ pub fn TableImmutableType(comptime Table: type) type {
             }
 
             table.* = .{
-                .value_count_max = table.value_count_max,
                 .values = table.values.ptr[0..sorted_values.len],
                 .snapshot_min = snapshot_min,
                 .free = false,

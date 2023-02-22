@@ -14,6 +14,7 @@ const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const vsr = @import("vsr.zig");
@@ -162,7 +163,8 @@ pub fn main() !void {
             transfer_next_arrival_ns < batch_start_ns)
         {
             batch_transfers.appendAssumeCapacity(.{
-                .id = transfer_index + 1,
+                // Reverse the bits to stress non-append-only index for `id`.
+                .id = @bitReverse(u128, transfer_index + 1),
                 .debit_account_id = accounts[0].id,
                 .credit_account_id = accounts[1].id,
                 .user_data = 0,

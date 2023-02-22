@@ -417,6 +417,7 @@ pub fn TestContext(
             std.math.maxInt(Key),
             tombstone,
             tombstone_from_key,
+            1, // Doesn't matter for this test.
             .general,
         );
 

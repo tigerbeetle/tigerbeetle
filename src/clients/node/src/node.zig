@@ -15,6 +15,7 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 const Storage = @import("tigerbeetle/src/storage.zig").Storage;
 const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 const Operation = StateMachine.Operation;
 const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;

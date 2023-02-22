@@ -24,6 +24,7 @@ const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);

@@ -152,26 +152,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         tracer_slot: ?tracer.SpanStart = null,
 
         pub const Options = struct {
-            /// The maximum number of keys that may be committed per batch.
-            ///
-            /// In general, the commit count max for a field depends on the field's object —
-            /// how many objects might be inserted/updated/removed by a batch:
-            ///   (constants.message_size_max - sizeOf(vsr.header))
-            /// For example, there are at most 8191 transfers in a batch.
-            /// So commit_entries_max=8191 for transfer objects and indexes.
-            ///
-            /// However, if a transfer is ever mutated, then this will double commit_entries_max
-            /// since the old index might need to be removed, and the new index inserted.
-            ///
-            /// A way to see this is by looking at the state machine. If a transfer is inserted,
-            /// how many accounts and transfer put/removes will be generated?
-            ///
-            /// This also means looking at the state machine operation that will generate the
-            /// most put/removes in the worst case.
-            /// For example, create_accounts will put at most 8191 accounts.
-            /// However, create_transfers will put 2 accounts (8191 * 2) for every transfer, and
-            /// some of these accounts may exist, requiring a remove/put to update the index.
-            commit_entries_max: u32,
             /// The number of objects to cache in the set-associative value cache.
             cache_entries_max: u32 = 0,
         };
@@ -182,7 +162,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             grid: *Grid,
             options: Options,
         ) !Tree {
-            assert(options.commit_entries_max > 0);
             assert(grid.superblock.opened);
 
             var values_cache: ?*TableMutable.ValuesCache = null;
@@ -201,13 +180,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
             errdefer if (values_cache) |c| c.deinit(allocator);
 
-            var table_mutable = try TableMutable.init(allocator, values_cache, options.commit_entries_max);
+            var table_mutable = try TableMutable.init(allocator, values_cache);
             errdefer table_mutable.deinit(allocator);
 
-            var table_immutable = try TableImmutable.init(allocator, options.commit_entries_max);
+            var table_immutable = try TableImmutable.init(allocator);
             errdefer table_immutable.deinit(allocator);
-
-            assert(table_immutable.value_count_max == table_mutable.value_count_max);
 
             var manifest = try Manifest.init(allocator, node_pool, grid, tree_hash);
             errdefer manifest.deinit(allocator);
@@ -970,7 +947,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         /// Called at the end of each compaction beat.
         fn compact_finish(tree: *Tree) void {
             assert(tree.compaction_io_pending == 0);
-            assert(tree.table_mutable.can_commit_batch(tree.options.commit_entries_max));
 
             tracer.end(
                 &tree.tracer_slot,
