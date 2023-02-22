@@ -1847,6 +1847,18 @@ pub fn ReplicaType(
             self.primary_abdicate_timeout.reset();
             if (self.replica_count == 1) return;
 
+            // When replica_count=2 the primary never abdicates to avoid the following deadlock:
+            // 1. Primary is in status=normal for view V.
+            // 2. Backup is in status=view_change for view V.
+            // 3. Backup missed the primary's start_view.
+            // 4. Primary is trying to prepare a message from V-1.
+            // 5. Backup receives the message but ignores — it is a "repair" (from an old view).
+            // 6. Primary doesn't get any prepare_ok so it pauses commit heartbeats.
+            // 7. Backup doesn't see commit heartbeats so starts its SVC.
+            // 8. Primary doesn't participate in SVC (since if anyone could see its SVC, it would
+            //    still be primary).
+            if (self.replica_count == 2) return;
+
             log.debug("{}: on_primary_abdicate_timeout: abdicating (view={})", .{
                 self.replica,
                 self.view,
