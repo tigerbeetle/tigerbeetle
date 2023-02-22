@@ -5121,16 +5121,7 @@ pub fn ReplicaType(
         }
 
         fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
-            assert(self.status == .view_change or self.status == .recovering);
-
-            switch (self.status) {
-                .normal => unreachable,
-                .view_change => {},
-                // The replica's view hasn't been set yet.
-                // It will be set shortly, when we transition to normal status.
-                .recovering => assert(self.view == 0),
-                .recovering_head => unreachable,
-            }
+            assert(self.status == .view_change);
 
             // Uncommitted ops may not survive a view change so we must assert `op` against
             // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:
