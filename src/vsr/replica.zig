@@ -126,11 +126,10 @@ pub fn ReplicaType(
         /// Initialized from the superblock's VSRState.
         ///
         /// Invariants:
-        /// * `replica.view ≥ 1`
         /// * `replica.view = replica.log_view` when status=normal
         /// * `replica.view ≥ replica.log_view`
         /// * `replica.view ≥ replica.view_durable`
-        /// * `replica.view = 1` when replica_count=1.
+        /// * `replica.view = 0` when replica_count=1.
         view: u32,
 
         /// The latest view where
@@ -141,9 +140,8 @@ pub fn ReplicaType(
         /// Initialized from the superblock's VSRState.
         ///
         /// Invariants (see `view` for others):
-        /// * `replica.log_view ≥ 1`
         /// * `replica.log_view ≥ replica.log_view_durable`
-        /// * `replica.log_view = 1` when replica_count=1.
+        /// * `replica.log_view = 0` when replica_count=1.
         log_view: u32,
 
         /// The current status, either normal, view_change, or recovering:
@@ -5123,7 +5121,16 @@ pub fn ReplicaType(
         }
 
         fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
-            assert(self.status == .view_change);
+            assert(self.status == .view_change or self.status == .recovering);
+
+            switch (self.status) {
+                .normal => unreachable,
+                .view_change => {},
+                // The replica's view hasn't been set yet.
+                // It will be set shortly, when we transition to normal status.
+                .recovering => assert(self.view == 0),
+                .recovering_head => unreachable,
+            }
 
             // Uncommitted ops may not survive a view change so we must assert `op` against
             // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:

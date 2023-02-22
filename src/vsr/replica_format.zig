@@ -193,8 +193,8 @@ test "format" {
         try std.testing.expectEqual(superblock_header.sequence, 1);
         try std.testing.expectEqual(superblock_header.vsr_state.commit_min, 0);
         try std.testing.expectEqual(superblock_header.vsr_state.commit_max, 0);
-        try std.testing.expectEqual(superblock_header.vsr_state.view, 1);
-        try std.testing.expectEqual(superblock_header.vsr_state.log_view, 1);
+        try std.testing.expectEqual(superblock_header.vsr_state.view, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.log_view, 0);
     }
 
     // Verify the WAL headers and prepares zones.
