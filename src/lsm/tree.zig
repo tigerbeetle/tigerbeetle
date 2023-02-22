@@ -860,14 +860,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     .idle => assert(tree.table_immutable.free),
                     .processing => unreachable,
                     .done => {
-                        tree.compaction_table_immutable.reset();
-                        tree.table_immutable.clear();
                         tree.manifest.remove_invisible_tables(
                             tree.compaction_table_immutable.level_b,
                             tree.lookup_snapshot_max,
                             tree.compaction_table_immutable.range.key_min,
                             tree.compaction_table_immutable.range.key_max,
                         );
+                        tree.compaction_table_immutable.reset();
+                        tree.table_immutable.clear();
                     },
                 }
             }
@@ -880,7 +880,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     .idle => {}, // The compaction wasn't started for this half bar.
                     .processing => unreachable,
                     .done => {
-                        context.compaction.reset();
                         tree.manifest.remove_invisible_tables(
                             context.compaction.level_b,
                             tree.lookup_snapshot_max,
@@ -895,6 +894,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                                 context.compaction.range.key_max,
                             );
                         }
+                        context.compaction.reset();
                     },
                 }
             }
