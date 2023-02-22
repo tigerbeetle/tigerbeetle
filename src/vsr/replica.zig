@@ -1099,6 +1099,8 @@ pub fn ReplicaType(
             if (self.primary_pipeline_pending() == null) {
                 self.prepare_timeout.stop();
                 self.primary_abdicate_timeout.stop();
+            } else {
+                self.prepare_timeout.reset();
             }
 
             self.commit_pipeline();
@@ -1246,7 +1248,9 @@ pub fn ReplicaType(
 
             self.start_view_change_from_all_replicas.set(message.header.replica);
 
-            if (self.replica != message.header.replica) {
+            if (self.replica != message.header.replica and
+                !self.start_view_change_window_timeout.ticking)
+            {
                 self.start_view_change_window_timeout.start();
             }
 
