@@ -797,7 +797,6 @@ pub fn ReplicaType(
                 .ping => self.on_ping(message),
                 .pong => self.on_pong(message),
                 .ping_client => self.on_ping_client(message),
-                .pong_client => self.on_pong_client(message),
                 .request => self.on_request(message),
                 .prepare => self.on_prepare(message),
                 .prepare_ok => self.on_prepare_ok(message),
@@ -812,7 +811,7 @@ pub fn ReplicaType(
                 .headers => self.on_headers(message),
                 .nack_prepare => self.on_nack_prepare(message),
                 // A replica should never handle misdirected messages intended for a client:
-                .eviction, .reply => {
+                .pong_client, .eviction, .reply => {
                     log.warn("{}: on_message: ignoring misdirected {s} message", .{
                         self.replica,
                         @tagName(message.header.command),
@@ -891,15 +890,6 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
-            });
-        }
-
-        /// pong_client messages are only sent to clients, but a network fault can redirect one.
-        fn on_pong_client(self: *Self, message: *const Message) void {
-            assert(message.header.command == .pong_client);
-            log.warn("{}: on_pong_client: ignoring (misdirected from replica={})", .{
-                self.replica,
-                message.header.replica,
             });
         }
 
