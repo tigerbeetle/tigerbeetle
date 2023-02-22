@@ -31,6 +31,7 @@ const Storage = @import("../../storage.zig").Storage;
 const MessageBus = @import("../../message_bus.zig").MessageBusClient;
 const StateMachine = @import("../../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
 const ContextType = @import("tb_client/context.zig").ContextType;

@@ -38,7 +38,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             table_iterator: TableIterator,
         };
 
-        const ValuesRingBuffer = RingBuffer(Value, Table.data.value_count_max, .pointer);
+        const ValuesRingBuffer = RingBuffer(Value, Table.data.block_value_count_max, .pointer);
         const TablesRingBuffer = RingBuffer(TableIteratorScope, 2, .array);
 
         grid: *Grid,
@@ -280,7 +280,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         fn buffered_enough_values(it: LevelIterator) bool {
             return it.buffered_all_values() or
-                it.buffered_value_count() >= Table.data.value_count_max;
+                it.buffered_value_count() >= Table.data.block_value_count_max;
         }
 
         /// Returns either:

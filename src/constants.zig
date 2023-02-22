@@ -344,8 +344,6 @@ pub const block_size = config.cluster.block_size;
 
 comptime {
     assert(block_size % sector_size == 0);
-    assert(lsm_table_size_max % sector_size == 0);
-    assert(lsm_table_size_max % block_size == 0);
 }
 
 /// The number of levels in an LSM tree.
@@ -366,10 +364,6 @@ comptime {
 /// factor of 8 for lower write amplification rather than the more typical growth factor of 10.
 pub const lsm_growth_factor = config.cluster.lsm_growth_factor;
 
-/// The maximum cumulative size of a table — computed as the sum of the size of the index block,
-/// filter blocks, and data blocks.
-pub const lsm_table_size_max = config.cluster.lsm_table_size_max;
-
 /// Size of nodes used by the LSM tree manifest implementation.
 /// TODO Double-check this with our "LSM Manifest" spreadsheet.
 pub const lsm_manifest_node_size = config.process.lsm_manifest_node_size;
@@ -377,8 +371,6 @@ pub const lsm_manifest_node_size = config.process.lsm_manifest_node_size;
 /// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
 /// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
 /// means that the transfer tree's mutable table will be sized to 8191 * 4 = 32764 transfers.
-/// TODO Assert this relative to lsm_table_size_max.
-/// We want to ensure that a mutable table can be converted to an immutable table without overflow.
 pub const lsm_batch_multiple = config.cluster.lsm_batch_multiple;
 
 comptime {

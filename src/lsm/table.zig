@@ -81,6 +81,8 @@ pub fn TableType(
     comptime table_tombstone: fn (*const TableValue) callconv(.Inline) bool,
     /// Returns a tombstone value representation for a key.
     comptime table_tombstone_from_key: fn (TableKey) callconv(.Inline) TableValue,
+    /// The maximum number of values per table.
+    comptime table_value_count_max: usize,
     comptime usage: TableUsage,
 ) type {
     return struct {
@@ -94,6 +96,7 @@ pub fn TableType(
         pub const sentinel_key = table_sentinel_key;
         pub const tombstone = table_tombstone;
         pub const tombstone_from_key = table_tombstone_from_key;
+        pub const value_count_max = table_value_count_max;
         pub const usage = usage;
 
         // Export hashmap context for Key and Value
@@ -135,15 +138,12 @@ pub fn TableType(
 
         const address_size = @sizeOf(u64);
         const checksum_size = @sizeOf(u128);
-        const table_size_max = constants.lsm_table_size_max;
-        const table_block_count_max = @divExact(table_size_max, block_size);
         const block_body_size = block_size - @sizeOf(vsr.Header);
 
         pub const layout = layout: {
             @setEvalBranchQuota(10_000);
 
             assert(block_size % constants.sector_size == 0);
-            assert(math.isPowerOfTwo(table_size_max));
             assert(math.isPowerOfTwo(block_size));
 
             // Searching the values array is more expensive than searching the per-block index
@@ -206,9 +206,6 @@ pub fn TableType(
                 value_size,
             );
 
-            const data_index_entry_size = key_size + address_size + checksum_size;
-            const filter_index_entry_size = address_size + checksum_size;
-
             // TODO Audit/tune this number for split block bloom filters:
             const filter_bytes_per_key = 2;
             const filter_data_block_count_max = @divFloor(
@@ -216,29 +213,9 @@ pub fn TableType(
                 block_value_count_max * filter_bytes_per_key,
             );
 
-            // Compute the number of data and filter blocks by solving the constraints:
-            // * the cumulative table size must not exceed lsm_table_size_max
-            // * the filter and data blocks' metadata must fix in the index block
-            // * the filter blocks must index all data blocks
-            // * minimize the number of filter blocks
-            // * maximize the number of data blocks
-            var data_blocks = table_block_count_max - index_block_count;
-            var filter_blocks = 0;
-            while (true) : (data_blocks -= 1) {
-                filter_blocks = div_ceil(data_blocks, filter_data_block_count_max);
-
-                const data_index_size = data_index_entry_size * data_blocks;
-                const filter_index_size = filter_index_entry_size * filter_blocks;
-
-                const index_size = @sizeOf(vsr.Header) + data_index_size + filter_index_size;
-                const table_block_count = index_block_count + filter_blocks + data_blocks;
-                if (index_size <= block_size and table_block_count <= table_block_count_max) {
-                    break;
-                }
-            }
-
-            const table_block_count = index_block_count + filter_blocks + data_blocks;
-            assert(table_block_count <= table_block_count_max);
+            // We need enough blocks to hold `value_count_max` values.
+            const data_blocks = div_ceil(value_count_max, block_value_count_max);
+            const filter_blocks = div_ceil(data_blocks, filter_data_block_count_max);
 
             break :layout .{
                 // The number of keys in the Eytzinger layout per data block.
@@ -300,13 +277,13 @@ pub fn TableType(
 
         pub const data = struct {
             const key_count = layout.block_key_count;
-            pub const value_count_max = layout.block_value_count_max;
+            pub const block_value_count_max = layout.block_value_count_max;
 
             const key_layout_offset = @sizeOf(vsr.Header);
             const key_layout_size = layout.block_key_layout_size;
 
             const values_offset = key_layout_offset + key_layout_size;
-            const values_size = value_count_max * value_size;
+            const values_size = block_value_count_max * value_size;
 
             const padding_offset = values_offset + values_size;
             const padding_size = block_size - padding_offset;
@@ -319,9 +296,10 @@ pub fn TableType(
                     \\
                     \\
                     \\lsm parameters:
+                    \\    value: {}
+                    \\    value count max: {}
                     \\    key size: {}
                     \\    value size: {}
-                    \\    table size max: {}
                     \\    block size: {}
                     \\layout:
                     \\    index block count: {}
@@ -357,9 +335,10 @@ pub fn TableType(
                     \\
                 ,
                     .{
+                        Value,
+                        value_count_max,
                         key_size,
                         value_size,
-                        table_size_max,
                         block_size,
 
                         index_block_count,
@@ -385,7 +364,7 @@ pub fn TableType(
                         filter.padding_size,
 
                         data.key_count,
-                        data.value_count_max,
+                        data.block_value_count_max,
                         data.key_layout_offset,
                         data.key_layout_size,
                         data.values_offset,
@@ -401,8 +380,6 @@ pub fn TableType(
             assert(index_block_count > 0);
             assert(filter_block_count_max > 0);
             assert(data_block_count_max > 0);
-            assert(index_block_count + filter_block_count_max +
-                data_block_count_max <= table_block_count_max);
 
             assert(filter.data_block_count_max > 0);
             // There should not be more data blocks per filter block than there are data blocks:
@@ -410,7 +387,7 @@ pub fn TableType(
 
             const filter_bytes_per_key = 2;
             assert(filter_block_count_max * filter.filter_size >=
-                data_block_count_max * data.value_count_max * filter_bytes_per_key);
+                data_block_count_max * data.block_value_count_max * filter_bytes_per_key);
 
             assert(index.size == @sizeOf(vsr.Header) +
                 data_block_count_max * (key_size + address_size + checksum_size) +
@@ -445,13 +422,13 @@ pub fn TableType(
                 assert(data.values_offset == data.key_layout_offset);
             }
 
-            assert(data.value_count_max > 0);
-            assert(data.value_count_max >= data.key_count);
-            assert(@divExact(data.values_size, value_size) == data.value_count_max);
+            assert(data.block_value_count_max > 0);
+            assert(data.block_value_count_max >= data.key_count);
+            assert(@divExact(data.values_size, value_size) == data.block_value_count_max);
             assert(data.values_offset % constants.cache_line_size == 0);
             // You can have any size value you want, as long as it fits
             // neatly into the CPU cache lines :)
-            assert((data.value_count_max * value_size) % constants.cache_line_size == 0);
+            assert((data.block_value_count_max * value_size) % constants.cache_line_size == 0);
 
             assert(data.padding_size >= 0);
             assert(block_size == @sizeOf(vsr.Header) + data.key_layout_size +
@@ -511,7 +488,7 @@ pub fn TableType(
 
             pub fn data_block_append(builder: *Builder, value: *const Value) void {
                 const values_max = data_block_values(builder.data_block);
-                assert(values_max.len == data.value_count_max);
+                assert(values_max.len == data.block_value_count_max);
 
                 values_max[builder.value] = value.*;
                 builder.value += 1;
@@ -523,10 +500,10 @@ pub fn TableType(
 
             pub fn data_block_append_slice(builder: *Builder, values: []const Value) void {
                 assert(values.len > 0);
-                assert(builder.value + values.len <= data.value_count_max);
+                assert(builder.value + values.len <= data.block_value_count_max);
 
                 const values_max = data_block_values(builder.data_block);
-                assert(values_max.len == data.value_count_max);
+                assert(values_max.len == data.block_value_count_max);
 
                 stdx.copy_disjoint(.inexact, Value, values_max[builder.value..], values);
                 builder.value += @intCast(u32, values.len);
@@ -539,13 +516,13 @@ pub fn TableType(
             }
 
             pub fn data_block_empty(builder: Builder) bool {
-                assert(builder.value <= data.value_count_max);
+                assert(builder.value <= data.block_value_count_max);
                 return builder.value == 0;
             }
 
             pub fn data_block_full(builder: Builder) bool {
-                assert(builder.value <= data.value_count_max);
-                return builder.value == data.value_count_max;
+                assert(builder.value <= data.block_value_count_max);
+                return builder.value == data.block_value_count_max;
             }
 
             const DataFinishOptions = struct {
@@ -562,7 +539,7 @@ pub fn TableType(
 
                 const block = builder.data_block;
                 const values_max = data_block_values(block);
-                assert(values_max.len == data.value_count_max);
+                assert(values_max.len == data.block_value_count_max);
 
                 const values = values_max[0..builder.value];
                 const key_max = key_from_value(&values[values.len - 1]);
@@ -584,7 +561,7 @@ pub fn TableType(
                     );
                     const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
-                    const e = eytzinger(data.key_count, data.value_count_max);
+                    const e = eytzinger(data.key_count, data.block_value_count_max);
                     e.layout_from_keys_or_values(
                         Key,
                         Value,
@@ -902,7 +879,7 @@ pub fn TableType(
             // TODO we should be able to cross-check this with the header size
             // for more safety.
             const used = @intCast(u32, header.request);
-            assert(used <= data.value_count_max);
+            assert(used <= data.block_value_count_max);
             const slice = mem.bytesAsSlice(
                 Value,
                 data_block[data.values_offset..][0..data.values_size],
@@ -936,7 +913,7 @@ pub fn TableType(
                 );
                 const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
-                const e = eytzinger(data.key_count, data.value_count_max);
+                const e = eytzinger(data.key_count, data.block_value_count_max);
                 break :blk e.search_values(
                     Key,
                     Value,
@@ -1023,6 +1000,7 @@ test "Table" {
         Key.sentinel_key,
         Key.tombstone,
         Key.tombstone_from_key,
+        1, // Doesn't matter for this test.
         .general,
     );
 

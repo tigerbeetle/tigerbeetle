@@ -16,6 +16,7 @@ const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
 const GridType = @import("grid.zig").GridType;
@@ -76,17 +77,20 @@ const FuzzOp = union(enum) {
 
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
 const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
+const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
 
 const cluster = 32;
 const replica = 4;
 const node_count = 1024;
 const tree_options = .{
-    .commit_entries_max = commit_entries_max,
     // This is the smallest size that set_associative_cache will allow us.
     .cache_entries_max = 2048,
 };
 
-const puts_since_compact_max = commit_entries_max;
+// We must call compact after every 'batch'.
+// Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
+// Every `FuzzOp.put` issues one remove and one put.
+const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
 const compacts_per_checkpoint = std.math.divCeil(
     usize,
     constants.journal_slot_count,
@@ -106,6 +110,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             Key.sentinel_key,
             Key.tombstone,
             Key.tombstone_from_key,
+            value_count_max,
             table_usage,
         );
 

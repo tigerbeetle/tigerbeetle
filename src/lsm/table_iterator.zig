@@ -17,7 +17,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
 
         const Grid = GridType(Storage);
         const Manifest = ManifestType(Table, Storage);
-        const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.value_count_max, .pointer);
+        const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.block_value_count_max, .pointer);
 
         const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
         const IndexBlockCallback = fn (it: *TableIterator, index_block: BlockPtrConst) void;
@@ -278,7 +278,7 @@ pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
             assert(!it.read_pending);
 
             return it.buffered_all_values() or
-                it.buffered_value_count() >= Table.data.value_count_max;
+                it.buffered_value_count() >= Table.data.block_value_count_max;
         }
 
         /// Returns either:
