@@ -1084,6 +1084,7 @@ pub fn ReplicaType(
                 threshold,
             ) orelse return;
 
+            const prepare_pending = self.primary_pipeline_pending().?;
             assert(count == threshold);
             assert(!prepare.ok_quorum_received);
             prepare.ok_quorum_received = true;
@@ -1096,13 +1097,11 @@ pub fn ReplicaType(
             assert(self.prepare_timeout.ticking);
             assert(self.primary_abdicate_timeout.ticking);
             assert(!self.primary_abdicating);
-            if (self.primary_pipeline_pending() == null) {
+            if (self.primary_pipeline_pending()) |_| {
+                if (prepare_pending == prepare) self.prepare_timeout.reset();
+            } else {
                 self.prepare_timeout.stop();
                 self.primary_abdicate_timeout.stop();
-            } else {
-                if (prepare == self.pipeline.queue.prepare_queue.head_ptr().?) {
-                    self.prepare_timeout.reset();
-                }
             }
 
             self.commit_pipeline();
