@@ -1277,6 +1277,8 @@ pub fn ReplicaType(
             assert(self.start_view_change_from_all_replicas.count() == 0);
         }
 
+        /// DVC serves two purposes:
+        ///
         /// When the new primary receives f + 1 do_view_change messages from different replicas
         /// (including itself), it sets its view number to that in the messages and selects as the
         /// new log the one contained in the message with the largest v′; if several messages have
@@ -1286,6 +1288,9 @@ pub fn ReplicaType(
         /// informs the other replicas of the completion of the view change by sending
         /// ⟨start_view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
         /// op number, and k is the commit number.
+        ///
+        /// When a new backup receives a do_view_change message for a new view, it transitions to
+        /// that new view in view-change status and begins to broadcast its own DVC.
         fn on_do_view_change(self: *Self, message: *Message) void {
             assert(message.header.command == .do_view_change);
             if (self.ignore_view_change_message(message)) return;
