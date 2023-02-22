@@ -1100,7 +1100,9 @@ pub fn ReplicaType(
                 self.prepare_timeout.stop();
                 self.primary_abdicate_timeout.stop();
             } else {
-                self.prepare_timeout.reset();
+                if (prepare == self.pipeline.queue.prepare_queue.head_ptr().?) {
+                    self.prepare_timeout.reset();
+                }
             }
 
             self.commit_pipeline();
