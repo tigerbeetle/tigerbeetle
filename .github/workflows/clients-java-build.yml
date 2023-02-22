@@ -1,13 +1,10 @@
-# This workflow will build a package using Maven and then publish it to GitHub packages when a release is created
-# For more information see: https://github.com/actions/setup-java/blob/main/docs/advanced-usage.md#apache-maven-with-a-settings-path
+# This workflow will build a package using Maven and then publish it to Maven Central when a release is created
 
 name: "clients/java: Build"
 
 on:
   push:
     branches: [ main, staging, trying ]
-    # paths:
-    #   - src/clients/java/**
   pull_request:
     branches: [ main ]
     paths:
@@ -22,12 +19,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0    
     - name: Set up JDK
       uses: actions/setup-java@v3
       with:
         java-version: '11'
         distribution: 'temurin'
-        server-id: github
+        server-id: ossrh 
+        server-username: MAVEN_USERNAME
+        server-password: MAVEN_CENTRAL_TOKEN
+        gpg-private-key: ${{ secrets.MAVEN_GPG_SECRET_KEY }}
+        gpg-passphrase: MAVEN_GPG_PASSPHRASE        
         settings-path: ${{ github.workspace }}
 
     - name: Format linter
@@ -46,25 +49,29 @@ jobs:
       run: mvn compile
 
     - name: Build
-      if: ${{ github.ref != 'refs/heads/main' }}
       working-directory: src/clients/java
       run: mvn -B package --file pom.xml
 
     - name: Save local package
       uses: actions/upload-artifact@v3
-      if: ${{ github.ref != 'refs/heads/main' }}
       with:
         name: jar-artifact
         path: |
           src/clients/java/target/*.jar
           !src/clients/java/target/*javadoc.jar
+          !src/clients/java/target/*sources.jar
 
-    - name: Build and publish
+    - name: Publish to the Maven Central Repository
       if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       working-directory: src/clients/java
-      run: mvn -B deploy --file pom.xml -s $GITHUB_WORKSPACE/settings.xml
+      run: |
+        mvn -B versions:set -DnewVersion=$BASE_VERSION-$(git rev-list --count HEAD) --file pom.xml
+        mvn -B clean deploy -Dmaven.test.skip --file pom.xml -s $GITHUB_WORKSPACE/settings.xml
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        BASE_VERSION: 0.0.1
+        MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+        MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
+        MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}        
 
   prepare_validation_tests:
     needs: build
@@ -79,26 +86,11 @@ jobs:
         server-id: github
         settings-path: ${{ github.workspace }}
 
-    ## If it's not on main, the package wasn't uploaded, so we use a local version:
     - name: Restore local package
-      if: ${{ github.ref != 'refs/heads/main' }}
       uses: actions/download-artifact@v3
       with:
         name: jar-artifact
         path: test/
-
-    ## If it's a push, we can download the package from Maven's registry:
-    - if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-      uses: whelk-io/maven-settings-xml-action@v4
-      with:
-        repositories: '[{ "id": "github", "url": "https://maven.pkg.github.com/tigerbeetledb/tigerbeetle", "snapshots": { "enabled": "true" } }]'
-        servers: '[{ "id": "github", "username": "${{github.actor}}", "password": "${{ github.token }}" }]'
-    - name: Download tigerbeetle-java package
-      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-      run: |
-        mvn dependency:copy -Dartifact=com.tigerbeetle:tigerbeetle-java:0.0.1-SNAPSHOT -DoutputDirectory=. -DrepositoryId=github
-        mkdir -p test
-        mv *.jar test/
    
     - name: Create a simple test program
       run: |
