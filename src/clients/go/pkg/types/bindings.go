@@ -40,8 +40,8 @@ type TransferFlags struct {
 	Pending             bool
 	PostPendingTransfer bool
 	VoidPendingTransfer bool
-	DebitsAtMost        bool
-	CreditsAtMost       bool
+	BalancingDebit      bool
+	BalancingCredit     bool
 }
 
 func (f TransferFlags) ToUint16() uint16 {
@@ -63,11 +63,11 @@ func (f TransferFlags) ToUint16() uint16 {
 		ret |= (1 << 3)
 	}
 
-	if f.DebitsAtMost {
+	if f.BalancingDebit {
 		ret |= (1 << 4)
 	}
 
-	if f.CreditsAtMost {
+	if f.BalancingCredit {
 		ret |= (1 << 5)
 	}
 

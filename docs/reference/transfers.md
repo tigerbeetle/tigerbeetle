@@ -34,8 +34,8 @@ Fields used by each mode of transfer:
 | `flags.pending`               | false        | true     | false        | false        |
 | `flags.post_pending_transfer` | false        | false    | true         | false        |
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
-| `flags.debits_at_most`        | optional     | optional | false        | false        |
-| `flags.credits_at_most`       | optional     | optional | false        | false        |
+| `flags.balancing_debit`       | optional     | optional | false        | false        |
+| `flags.balancing_credit`      | optional     | optional | false        | false        |
 | `amount`                      | required     | required | optional     | optional     |
 
 TigerBeetle uses the same data structures internally and
@@ -366,7 +366,7 @@ Mark the transfer as a [post-pending transfer](#post-pending-transfer).
 
 Mark the transfer as a [void-pending transfer](#void-pending-transfer).
 
-### `flags.debits_at_most`
+### `flags.balancing_debit`
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` if necessary
 to obey the debit account's constraints. If the highest amount transferable is `0`, the respective
@@ -375,12 +375,12 @@ to obey the debit account's constraints. If the highest amount transferable is `
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
 
-`flags.debits_at_most` is compatible with:
+`flags.balancing_debit` is compatible with:
 - `flags.linked`
 - `flags.pending`
-- `flags.credits_at_most`
+- `flags.balancing_credit`
 
-`flags.debits_at_most` is incompatible with:
+`flags.balancing_debit` is incompatible with:
 - `flags.post_pending_transfer`
 - `flags.void_pending_transfer`
 
@@ -388,7 +388,7 @@ less than or equal to the amount that was passed to `create_transfers`.
 
 - [Close Account](../recipes/close-account.md)
 
-### `flags.credits_at_most`
+### `flags.balancing_credit`
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` if necessary
 to obey the credit account's constraints. If the highest amount transferable is `0`, the respective
@@ -397,12 +397,12 @@ to obey the credit account's constraints. If the highest amount transferable is 
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
 
-`flags.credits_at_most` is compatible with:
+`flags.balancing_credit` is compatible with:
 - `flags.linked`
 - `flags.pending`
-- `flags.debits_at_most`
+- `flags.balancing_debit`
 
-`flags.credits_at_most` is incompatible with:
+`flags.balancing_credit` is incompatible with:
 - `flags.post_pending_transfer`
 - `flags.void_pending_transfer`
 
@@ -415,9 +415,9 @@ less than or equal to the amount that was passed to `create_transfers`.
 This is how much should be debited from the `debit_account_id` account
 and credited to the `credit_account_id` account.
 
-- When `flags.debits_at_most` is set, this is the maximum amount that will be debited/credited,
+- When `flags.balancing_debit` is set, this is the maximum amount that will be debited/credited,
   where the actual transfer amount is determined by the debit account's constraints.
-- When `flags.credits_at_most` is set, this is the maximum amount that will be debited/credited,
+- When `flags.balancing_credit` is set, this is the maximum amount that will be debited/credited,
   where the actual transfer amount is determined by the credit account's constraints.
 
 Constraints:

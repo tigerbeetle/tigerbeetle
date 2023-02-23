@@ -84,8 +84,8 @@ pub const TransferFlags = packed struct {
     pending: bool = false,
     post_pending_transfer: bool = false,
     void_pending_transfer: bool = false,
-    debits_at_most: bool = false,
-    credits_at_most: bool = false,
+    balancing_debit: bool = false,
+    balancing_credit: bool = false,
     padding: u10 = 0,
 
     comptime {
