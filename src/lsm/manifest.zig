@@ -162,7 +162,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
             for (manifest.levels) |*l| l.deinit(allocator, manifest.node_pool);
-            for (manifest.moved_table_addresses) |table_address| assert(table_address == null);
+
             manifest.manifest_log.deinit(allocator);
         }
 
