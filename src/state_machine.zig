@@ -909,24 +909,25 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             assert(cr_mut.timestamp == cr_immut.timestamp);
 
             const amount = amount: {
-                var amount: u64 = t.amount;
+                var amount = t.amount;
                 if (t.flags.debits_at_most) {
+                    const dr_balance = dr_mut.debits_posted + dr_mut.debits_pending;
                     const dr_limit = if (dr_immut.flags.debits_must_not_exceed_credits)
                         dr_mut.credits_posted
                     else
                         std.math.maxInt(u64);
-                    const dr_available = dr_limit - dr_mut.debits_posted - dr_mut.debits_pending;
-                    if (dr_available < amount) amount = dr_available;
+                    amount = std.math.min(amount, dr_limit - dr_balance);
                 }
 
                 if (t.flags.credits_at_most) {
+                    const cr_balance = cr_mut.credits_posted + cr_mut.credits_pending;
                     const cr_limit = if (cr_immut.flags.credits_must_not_exceed_debits)
                         cr_mut.debits_posted
                     else
                         std.math.maxInt(u64);
-                    const cr_available = cr_limit - cr_mut.credits_posted - cr_mut.credits_pending;
-                    if (cr_available < amount) amount = cr_available;
+                    amount = std.math.min(amount, cr_limit - cr_balance);
                 }
+
                 // If amount was 0, we will need to return an overflow/exceeds error.
                 break :amount std.math.max(amount, 1);
             };
