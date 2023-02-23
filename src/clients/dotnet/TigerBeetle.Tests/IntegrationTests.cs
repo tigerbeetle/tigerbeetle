@@ -809,7 +809,7 @@ namespace TigerBeetle.Tests
             // Waiting for just one task
             list.First().Wait();
 
-            // Disposes the client, forcing all tasks to finish if already submited a message, or fail
+            // Disposes the client, forcing all tasks to finish if already submitted a message, or fail
             client.Dispose();
 
             try
@@ -820,7 +820,8 @@ namespace TigerBeetle.Tests
             catch { }
 
             // Asserting that either the task failed or succeeded
-            Assert.IsTrue(list.Any(x => x.IsFaulted) && list.Any(x => x.Result == CreateTransferResult.Ok));
+            Assert.IsTrue(list.Any(x => x.Result == CreateTransferResult.Ok));
+            Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
         }
 
         private static void AssertAccounts(Account[] lookupAccounts)
