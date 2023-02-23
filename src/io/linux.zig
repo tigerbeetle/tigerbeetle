@@ -120,6 +120,10 @@ pub const IO = struct {
             self.completed = .{};
             while (copy.pop()) |completion| completion.complete();
         }
+
+        // At this point, unqueued could have completions either by 1) those who didn't get an SQE
+        // during the popping of unqueued or 2) completion.complete() which start new IO. These
+        // unqueued completions will get priority to acquiring SQEs on the next flush().
     }
 
     fn flush_completions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
