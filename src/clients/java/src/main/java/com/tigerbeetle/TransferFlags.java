@@ -29,14 +29,14 @@ public interface TransferFlags {
     int VOID_PENDING_TRANSFER = (int) (1 << 3);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsdebits_at_most">debits_at_most</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsbalancing_debit">balancing_debit</a>
      */
-    int DEBITS_AT_MOST = (int) (1 << 4);
+    int BALANCING_DEBIT = (int) (1 << 4);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagscredits_at_most">credits_at_most</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsbalancing_credit">balancing_credit</a>
      */
-    int CREDITS_AT_MOST = (int) (1 << 5);
+    int BALANCING_CREDIT = (int) (1 << 5);
 
     static boolean hasLinked(final int flags) {
         return (flags & LINKED) == LINKED;
@@ -54,12 +54,12 @@ public interface TransferFlags {
         return (flags & VOID_PENDING_TRANSFER) == VOID_PENDING_TRANSFER;
     }
 
-    static boolean hasDebitsAtMost(final int flags) {
-        return (flags & DEBITS_AT_MOST) == DEBITS_AT_MOST;
+    static boolean hasBalancingDebit(final int flags) {
+        return (flags & BALANCING_DEBIT) == BALANCING_DEBIT;
     }
 
-    static boolean hasCreditsAtMost(final int flags) {
-        return (flags & CREDITS_AT_MOST) == CREDITS_AT_MOST;
+    static boolean hasBalancingCredit(final int flags) {
+        return (flags & BALANCING_CREDIT) == BALANCING_CREDIT;
     }
 
 }

@@ -910,7 +910,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
             const amount = amount: {
                 var amount = t.amount;
-                if (t.flags.debits_at_most) {
+                if (t.flags.balancing_debit) {
                     const dr_balance = dr_mut.debits_posted + dr_mut.debits_pending;
                     const dr_limit = if (dr_immut.flags.debits_must_not_exceed_credits)
                         dr_mut.credits_posted
@@ -919,7 +919,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                     amount = std.math.min(amount, dr_limit - dr_balance);
                 }
 
-                if (t.flags.credits_at_most) {
+                if (t.flags.balancing_credit) {
                     const cr_balance = cr_mut.credits_posted + cr_mut.credits_pending;
                     const cr_limit = if (cr_immut.flags.credits_must_not_exceed_debits)
                         cr_mut.debits_posted
@@ -1025,7 +1025,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             assert(t.timestamp > self.commit_timestamp);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
 
-            if (t.flags.debits_at_most or t.flags.credits_at_most) {
+            if (t.flags.balancing_debit or t.flags.balancing_credit) {
                 @panic("TODO: unimplemented");
             }
 
@@ -1512,8 +1512,8 @@ const TestCreateTransfer = struct {
     flags_pending: ?enum { PEN } = null,
     flags_post_pending_transfer: ?enum { POS } = null,
     flags_void_pending_transfer: ?enum { VOI } = null,
-    flags_debits_at_most: ?enum { DAM } = null,
-    flags_credits_at_most: ?enum { CAM } = null,
+    flags_balancing_debit: ?enum { BDR } = null,
+    flags_balancing_credit: ?enum { BCR } = null,
     flags_padding: u10 = 0,
     amount: u64 = 0,
     timestamp: u64 = 0,
@@ -1535,8 +1535,8 @@ const TestCreateTransfer = struct {
                 .pending = t.flags_pending != null,
                 .post_pending_transfer = t.flags_post_pending_transfer != null,
                 .void_pending_transfer = t.flags_void_pending_transfer != null,
-                .debits_at_most = t.flags_debits_at_most != null,
-                .credits_at_most = t.flags_credits_at_most != null,
+                .balancing_debit = t.flags_balancing_debit != null,
+                .balancing_credit = t.flags_balancing_credit != null,
                 .padding = t.flags_padding,
             },
             .amount = t.amount,
@@ -2077,7 +2077,7 @@ test "create_transfers: failed linked-chains are undone within a commit" {
     );
 }
 
-test "create_transfers: debits_at_most | credits_at_most (*_must_not_exceed_*)" {
+test "create_transfers: balancing_debit | balancing_credit (*_must_not_exceed_*)" {
     try check(
         \\ account A1 _ _ L1 C1 _ D<C   _ _ 0 0 0 0 _ ok
         \\ account A2 _ _ L1 C1 _   _ C<D _ 0 0 0 0 _ ok
@@ -2087,18 +2087,18 @@ test "create_transfers: debits_at_most | credits_at_most (*_must_not_exceed_*)" 
         \\ setup A1 1  0 0 10
         \\ setup A2 0 10 2  0
         \\
-        \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ DAM   _ _  0 _ amount_must_not_be_zero
-        \\ transfer T1 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ CAM _  0 _ amount_must_not_be_zero
-        \\ transfer T1 A1 A3  _ _   _ _ L2 C1 _ _ _ _ DAM   _ _  3 _ transfer_must_have_the_same_ledger_as_accounts
-        \\ transfer T1 A3 A2  _ _   _ _ L2 C1 _ _ _ _   _ CAM _  3 _ transfer_must_have_the_same_ledger_as_accounts
-        \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ DAM   _ _  3 _ ok
-        \\ transfer T2 A1 A3  _ _   _ _ L1 C1 _ _ _ _ DAM   _ _ 13 _ ok
-        \\ transfer T3 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ CAM _  3 _ ok
-        \\ transfer T4 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ CAM _ 13 _ ok
-        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ DAM   _ _  1 _ exceeds_credits
-        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ DAM CAM _  1 _ exceeds_credits
-        \\ transfer T5 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ CAM _  1 _ exceeds_debits
-        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ DAM CAM _  1 _ exceeds_credits
+        \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  0 _ amount_must_not_be_zero
+        \\ transfer T1 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  0 _ amount_must_not_be_zero
+        \\ transfer T1 A1 A3  _ _   _ _ L2 C1 _ _ _ _ BDR   _ _  3 _ transfer_must_have_the_same_ledger_as_accounts
+        \\ transfer T1 A3 A2  _ _   _ _ L2 C1 _ _ _ _   _ BCR _  3 _ transfer_must_have_the_same_ledger_as_accounts
+        \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  3 _ ok
+        \\ transfer T2 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 13 _ ok
+        \\ transfer T3 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  3 _ ok
+        \\ transfer T4 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 13 _ ok
+        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  1 _ exceeds_credits
+        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
+        \\ transfer T5 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  1 _ exceeds_debits
+        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
         // TODO Test exists_with_different_amount, exists.
         \\ commit create_transfers
         \\
@@ -2115,7 +2115,7 @@ test "create_transfers: debits_at_most | credits_at_most (*_must_not_exceed_*)" 
     );
 }
 
-test "create_transfers: debits_at_most | credits_at_most (overflow)" {
+test "create_transfers: balancing_debit | balancing_credit (overflow)" {
     try check(
         \\ account A1 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
         \\ account A2 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
@@ -2124,11 +2124,11 @@ test "create_transfers: debits_at_most | credits_at_most (overflow)" {
         \\ commit create_accounts
         \\
         \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _   _   _ _  1 _ ok
-        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ _ _ _ DAM   _ _ -0 _ ok
+        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ -0 _ ok
         \\ transfer T3 A3 A4  _ _   _ _ L1 C1 _ _ _ _   _   _ _  1 _ ok
-        \\ transfer T4 A3 A4  _ _   _ _ L1 C1 _ _ _ _   _ CAM _ -0 _ ok
-        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ DAM   _ _  1 _ overflows_debits_posted
-        \\ transfer T6 A1 A2  _ _   _ _ L1 C1 _ _ _ _   _ CAM _  1 _ overflows_debits_posted
+        \\ transfer T4 A3 A4  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ -0 _ ok
+        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  1 _ overflows_debits_posted
+        \\ transfer T6 A1 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  1 _ overflows_debits_posted
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 -0 0  0
@@ -2145,7 +2145,7 @@ test "create_transfers: debits_at_most | credits_at_most (overflow)" {
     );
 }
 
-test "create_transfers: debits_at_most & credits_at_most" {
+test "create_transfers: balancing_debit & balancing_credit" {
     try check(
         \\ account A1 _ _ L1 C1 _ D<C   _ _ 0 0 0 0 _ ok
         \\ account A2 _ _ L1 C1 _   _ C<D _ 0 0 0 0 _ ok
@@ -2155,12 +2155,12 @@ test "create_transfers: debits_at_most & credits_at_most" {
         \\ setup A1 0  0 0 20
         \\ setup A2 0 10 0  0
         \\
-        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _ DAM CAM _  0 _ amount_must_not_be_zero
-        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _ DAM CAM _  1 _ ok
-        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ _ _ _ DAM CAM _ 12 _ ok
-        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ _ _ _ DAM CAM _  1 _ exceeds_debits
-        \\ transfer T3 A1 A3  _ _   _ _ L1 C1 _ _ _ _ DAM CAM _ 12 _ ok
-        \\ transfer T4 A1 A3  _ _   _ _ L1 C1 _ _ _ _ DAM CAM _  1 _ exceeds_credits
+        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  0 _ amount_must_not_be_zero
+        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ ok
+        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 12 _ ok
+        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_debits
+        \\ transfer T3 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 12 _ ok
+        \\ transfer T4 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 20 0 20
@@ -2175,7 +2175,7 @@ test "create_transfers: debits_at_most & credits_at_most" {
     );
 }
 
-test "create_transfers: debits_at_most | credits_at_most + pending" {
+test "create_transfers: balancing_debit | balancing_credit + pending" {
     try check(
         \\ account A1 _ _ L1 C1 _ D<C   _ _ 0 0 0 0 _ ok
         \\ account A2 _ _ L1 C1 _   _ C<D _ 0 0 0 0 _ ok
@@ -2184,10 +2184,10 @@ test "create_transfers: debits_at_most | credits_at_most + pending" {
         \\ setup A1 0  0 0 10
         \\ setup A2 0 10 0  0
         \\
-        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ DAM   _ _  0 _ amount_must_not_be_zero
-        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ DAM   _ _  3 _ ok
-        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ DAM   _ _ 13 _ ok
-        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ DAM   _ _  1 _ exceeds_credits
+        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  0 _ amount_must_not_be_zero
+        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  3 _ ok
+        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _ 13 _ ok
+        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  1 _ exceeds_credits
         \\ commit create_transfers
         \\
         \\ lookup_account A1 10  0  0 10
