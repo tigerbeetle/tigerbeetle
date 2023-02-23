@@ -23,7 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
+      # Runs basic checks against Markdown
       - run: ./scripts/validate_docs.sh
+
+      # Runs checks against generated client docs
+      - run: ./scripts/install_zig.sh
+      - run: ( cd src/clients && ../../zig/zig run docs_generate.zig )
+      - run: ./scripts/fail_on_diff.sh
     env:
       SOURCE_REPO: ${{ github.event.pull_request.head.repo.clone_url }}
 
