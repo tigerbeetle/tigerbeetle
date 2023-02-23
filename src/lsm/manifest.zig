@@ -259,7 +259,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest_level_a.set_snapshot_max(snapshot, table);
             assert(table.snapshot_max == snapshot);
 
-            // Finally, the table address is recorded so that it will not be removed from the 
+            // Finally, the table address is recorded so that it will not be removed from the
             // manifest log during `remove_invisible_tables`.
             assert(manifest.moved_table_addresses[level_a] == null);
             manifest.moved_table_addresses[level_a] = table.address;
@@ -301,7 +301,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 } else {
                     manifest.manifest_log.remove(@intCast(u7, level), table);
                 }
-                
+
                 manifest_level.remove_table(manifest.node_pool, &snapshots, table);
             }
 
