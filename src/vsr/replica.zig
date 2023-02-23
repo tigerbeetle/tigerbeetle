@@ -282,6 +282,10 @@ pub fn ReplicaType(
         /// (status=view-change)
         do_view_change_message_timeout: Timeout,
 
+        /// The number of ticks before resending a `request_start_view` message.
+        /// (status=view-change backup)
+        request_start_view_message_timeout: Timeout,
+
         /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
         /// (status=normal or (status=view-change and primary))
         repair_timeout: Timeout,
@@ -645,6 +649,11 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
+                .request_start_view_message_timeout = Timeout{
+                    .name = "request_start_view_message_timeout",
+                    .id = replica_index,
+                    .after = 100,
+                },
                 .repair_timeout = Timeout{
                     .name = "repair_timeout",
                     .id = replica_index,
@@ -740,6 +749,7 @@ pub fn ReplicaType(
             self.start_view_change_message_timeout.tick();
             self.view_change_status_timeout.tick();
             self.do_view_change_message_timeout.tick();
+            self.request_start_view_message_timeout.tick();
             self.repair_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
@@ -751,6 +761,7 @@ pub fn ReplicaType(
             if (self.start_view_change_message_timeout.fired()) self.on_start_view_change_message_timeout();
             if (self.view_change_status_timeout.fired()) self.on_view_change_status_timeout();
             if (self.do_view_change_message_timeout.fired()) self.on_do_view_change_message_timeout();
+            if (self.request_start_view_message_timeout.fired()) self.on_request_start_view_message_timeout();
             if (self.repair_timeout.fired()) self.on_repair_timeout();
 
             // None of the on_timeout() functions above should send a message to this replica.
@@ -1847,18 +1858,6 @@ pub fn ReplicaType(
             self.primary_abdicate_timeout.reset();
             if (self.replica_count == 1) return;
 
-            // When replica_count=2 the primary never abdicates to avoid the following deadlock:
-            // 1. Primary is in status=normal for view V.
-            // 2. Backup is in status=view_change for view V.
-            // 3. Backup missed the primary's start_view.
-            // 4. Primary is trying to prepare a message from V-1.
-            // 5. Backup receives the message but ignores — it is a "repair" (from an old view).
-            // 6. Primary doesn't get any prepare_ok so it pauses commit heartbeats.
-            // 7. Backup doesn't see commit heartbeats so starts its SVC.
-            // 8. Primary doesn't participate in SVC (since if anyone could see its SVC, it would
-            //    still be primary).
-            if (self.replica_count == 2) return;
-
             log.debug("{}: on_primary_abdicate_timeout: abdicating (view={})", .{
                 self.replica,
                 self.view,
@@ -1961,6 +1960,23 @@ pub fn ReplicaType(
                 assert(self.view > self.log_view);
                 self.send_do_view_change();
             }
+        }
+
+        fn on_request_start_view_message_timeout(self: *Self) void {
+            assert(self.status == .view_change);
+            assert(self.primary_index(self.view) != self.replica);
+            self.request_start_view_message_timeout.reset();
+
+            log.debug("{}: on_request_start_view_message_timeout: view={}", .{
+                self.replica,
+                self.view,
+            });
+            self.send_header_to_replica(self.primary_index(self.view), .{
+                .command = .request_start_view,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+            });
         }
 
         fn on_repair_timeout(self: *Self) void {
@@ -5441,6 +5457,7 @@ pub fn ReplicaType(
                 assert(!self.start_view_change_window_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
                 assert(!self.do_view_change_message_timeout.ticking);
+                assert(!self.request_start_view_message_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.start_view_change_message_timeout.start();
@@ -5465,6 +5482,7 @@ pub fn ReplicaType(
                 assert(!self.commit_message_timeout.ticking);
                 assert(!self.view_change_status_timeout.ticking);
                 assert(!self.do_view_change_message_timeout.ticking);
+                assert(!self.request_start_view_message_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.normal_heartbeat_timeout.start();
@@ -5510,6 +5528,7 @@ pub fn ReplicaType(
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
                 self.do_view_change_message_timeout.stop();
+                self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
@@ -5545,6 +5564,7 @@ pub fn ReplicaType(
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
                 self.do_view_change_message_timeout.stop();
+                self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
             }
 
@@ -5604,6 +5624,12 @@ pub fn ReplicaType(
             self.repair_timeout.stop();
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
+
+            if (self.primary_index(self.view) == self.replica) {
+                self.request_start_view_message_timeout.stop();
+            } else {
+                self.request_start_view_message_timeout.start();
+            }
 
             // Do not reset quorum counters only on entering a view, assuming that the view will be
             // followed only by a single subsequent view change to the next view, because multiple
@@ -5799,6 +5825,7 @@ pub fn ReplicaType(
                     }
 
                     // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
+                    // (Using request_start_view_message_timeout).
                     log.debug("{}: view_jump: requesting start_view message", .{self.replica});
                     self.send_header_to_replica(self.primary_index(header.view), .{
                         .command = .request_start_view,
