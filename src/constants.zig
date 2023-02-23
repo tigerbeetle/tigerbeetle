@@ -136,7 +136,10 @@ comptime {
     assert(journal_slot_count >= Config.Cluster.journal_slot_count_min);
     assert(journal_slot_count >= lsm_batch_multiple * 2);
     assert(journal_slot_count % lsm_batch_multiple == 0);
-    assert(journal_slot_count > pipeline_prepare_queue_max);
+    // The journal must have at least two pipelines of messages to ensure that a new, fully-repaired
+    // primary has enough headers for a complete SV message, even if the view-change just truncated
+    // another pipeline of messages. (See op_repair_min()).
+    assert(journal_slot_count >= pipeline_prepare_queue_max * 2);
 
     assert(journal_size_max == journal_size_headers + journal_size_prepares);
 }
