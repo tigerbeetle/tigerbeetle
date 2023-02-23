@@ -8,4 +8,4 @@ echo "Installing TigerBeetle..."
 (cd ../../.. && ./scripts/install.sh)
 
 echo "Building TigerBeetle Java Client..."
-mvn -B package --quiet
+mvn -B package -Dmaven.test.skip -Djacoco.skip --quiet

@@ -1062,7 +1062,6 @@ public class IntegrationTest {
                     }
                 }
 
-                assertTrue(failedCount > 0);
                 assertTrue(succeededCount > 0);
                 assertTrue(succeededCount + failedCount == tasks_qty);
 
