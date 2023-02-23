@@ -1,6 +1,8 @@
 # Close Account
 
-In accounting, a _closing entry_ zeroes a (temporary) account's balance.
+In accounting, a _closing entry_ calculates the net debit or credit balance for an account and then
+credits or debits this balance respectively, to zero the account's balance and move the balance to
+another account.
 
 ### Example
 
@@ -9,7 +11,7 @@ Given a set of accounts:
 | Account | Debits Pending | Debits Posted | Credits Pending | Credits Posted | Flags                            |
 | ------: | -------------: | ------------: | --------------: | -------------: | -------------------------------- |
 |     `A` |              0 |            10 |               0 |             20 | `debits_must_not_exceed_credits` |
-|     `B` |              0 |            20 |               0 |             10 | `credits_must_not_exceed_debits` |
+|     `B` |              0 |            30 |               0 |              5 | `credits_must_not_exceed_debits` |
 |     `C` |              0 |             0 |               0 |              0 |                                  |
 
 The "closing entries" for accounts `A` and `B` are:
@@ -17,7 +19,7 @@ The "closing entries" for accounts `A` and `B` are:
 | Debit Account   | Credit Account | Amount     | Amount (recorded) | Flags             | Notes               |
 | --------------: | -------------: | ---------: | ----------------: | ----------------- | ------------------- |
 |             `A` |            `C` | `2^64 - 1` |                10 | `debits_at_most`  | (close account `A`) |
-|             `C` |            `B` | `2^64 - 1` |                10 | `credits_at_most` | (close account `B`) |
+|             `C` |            `B` | `2^64 - 1` |                25 | `credits_at_most` | (close account `B`) |
 
 (Pass `maxInt(u64)` as the `Transfer.amount` so that the application does not need to know (or query) the balance prior to closing the account).
 
@@ -26,5 +28,5 @@ After committing these transfers, `A` and `B`'s balances are zero:
 | Account | Debits Pending | Debits Posted | Credits Pending | Credits Posted | Flags                            |
 | ------: | -------------: | ------------: | --------------: | -------------: | -------------------------------- |
 |     `A` |              0 |            20 |               0 |             20 | `debits_must_not_exceed_credits` |
-|     `B` |              0 |            20 |               0 |             20 | `credits_must_not_exceed_debits` |
-|     `C` |              0 |            10 |               0 |             10 |                                  |
+|     `B` |              0 |            30 |               0 |             30 | `credits_must_not_exceed_debits` |
+|     `C` |              0 |            25 |               0 |             10 |                                  |
