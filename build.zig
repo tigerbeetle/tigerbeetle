@@ -570,7 +570,7 @@ fn c_client(
     // Updates the generated header file:
     const install_header = b.addInstallFile(
         .{ .path = "src/clients/c/tb_client.h" },
-        "../src/clients/c/include/tb_client.h",
+        "../src/clients/c/lib/include/tb_client.h",
     );
 
     build_step.dependOn(&install_header.step);
