@@ -176,6 +176,13 @@ pub fn build(b: *std.build.Builder) void {
             options,
             tracer_backend,
         );
+        c_client(
+            b,
+            mode,
+            &.{ &install_step.step, &tb_client_header_generate.step },
+            options,
+            tracer_backend,
+        );
     }
 
     {
@@ -544,5 +551,63 @@ fn dotnet_client(
 
         lib.step.dependOn(&bindings_step.step);
         build_step.dependOn(&lib.step);
+    }
+}
+
+fn c_client(
+    b: *std.build.Builder,
+    mode: Mode,
+    dependencies: []const *std.build.Step,
+    options: *std.build.OptionsStep,
+    tracer_backend: config.TracerBackend,
+) void {
+    const build_step = b.step("c_client", "Build C client library");
+
+    for (dependencies) |dependency| {
+        build_step.dependOn(dependency);
+    }
+
+    // Updates the generated header file:
+    const install_header = b.addInstallFile(
+        .{ .path = "src/clients/c/tb_client.h" },
+        "../src/clients/c/lib/include/tb_client.h",
+    );
+
+    build_step.dependOn(&install_header.step);
+
+    // Zig cross-targets
+    const platforms = .{
+        "x86_64-linux-gnu",
+        "x86_64-linux-musl",
+        "x86_64-macos",
+        "x86_64-windows",
+        "aarch64-linux-gnu",
+        "aarch64-linux-musl",
+        "aarch64-macos",
+    };
+
+    inline for (platforms) |platform| {
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
+
+        const shared_lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
+        const static_lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+
+        for ([_]*std.build.LibExeObjStep{ shared_lib, static_lib }) |lib| {
+            lib.setMainPkgPath("src");
+            lib.setOutputDir("src/clients/c/lib/" ++ platform);
+            lib.setTarget(cross_target);
+            lib.setBuildMode(mode);
+            lib.linkLibC();
+
+            if (cross_target.os_tag.? == .windows) {
+                lib.linkSystemLibrary("ws2_32");
+                lib.linkSystemLibrary("advapi32");
+            }
+
+            lib.addOptions("vsr_options", options);
+            link_tracer_backend(lib, tracer_backend, cross_target);
+
+            build_step.dependOn(&lib.step);
+        }
     }
 }

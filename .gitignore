@@ -1,6 +1,7 @@
 demos/bitcast/bench-decode
 demos/bitcast/decode
 demos/bitcast/transfers
+src/clients/c/lib
 dist/
 journal
 /main
