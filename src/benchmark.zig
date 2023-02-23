@@ -21,40 +21,14 @@ const vsr = @import("vsr.zig");
 const Client = vsr.Client(StateMachine, MessageBus);
 const tb = @import("tigerbeetle.zig");
 
+const account_count_per_batch = @divExact(
+    constants.message_size_max - @sizeOf(vsr.Header),
+    @sizeOf(tb.Account),
+);
 const transfer_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tb.Transfer),
 );
-comptime {
-    assert(transfer_count_per_batch >= 2041);
-}
-
-var accounts = [_]tb.Account{
-    .{
-        .id = 1,
-        .user_data = 0,
-        .reserved = [_]u8{0} ** 48,
-        .ledger = 2,
-        .code = 1,
-        .flags = .{},
-        .debits_pending = 0,
-        .debits_posted = 0,
-        .credits_pending = 0,
-        .credits_posted = 0,
-    },
-    .{
-        .id = 2,
-        .user_data = 0,
-        .reserved = [_]u8{0} ** 48,
-        .ledger = 2,
-        .code = 1,
-        .flags = .{},
-        .debits_pending = 0,
-        .debits_posted = 0,
-        .credits_pending = 0,
-        .credits_posted = 0,
-    },
-};
 
 pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
@@ -69,6 +43,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
+    var account_count: usize = 10_000;
     var transfer_count: usize = 10_000_000;
     var transfer_count_per_second: usize = 1_000_000;
 
@@ -80,29 +55,10 @@ pub fn main() !void {
     // Parse arguments.
     while (args.next(allocator)) |arg_or_err| {
         const arg = try arg_or_err;
-        if (std.mem.eql(u8, arg, "--transfer-count")) {
-            const int_string_or_err = args.next(allocator) orelse
-                panic("Expected an argument to --transfer-count", .{});
-            const int_string = try int_string_or_err;
-
-            transfer_count = std.fmt.parseInt(usize, int_string, 10) catch |err|
-                panic(
-                "Could not parse \"{}\" as an integer: {}",
-                .{ std.zig.fmtEscapes(int_string), err },
-            );
-        } else if (std.mem.eql(u8, arg, "--transfer-count-per-second")) {
-            const int_string_or_err = args.next(allocator) orelse
-                panic("Expected an argument to --transfer-count-per-second", .{});
-            const int_string = try int_string_or_err;
-
-            transfer_count_per_second = std.fmt.parseInt(usize, int_string, 10) catch |err|
-                panic(
-                "Could not parse \"{}\" as an integer: {}",
-                .{ std.zig.fmtEscapes(int_string), err },
-            );
-        } else {
+        _ = (try parse_arg(allocator, &args, arg, "--account-count", &account_count)) or
+            (try parse_arg(allocator, &args, arg, "--transfer-count", &transfer_count)) or
+            (try parse_arg(allocator, &args, arg, "--transfer-count-per-second", &transfer_count_per_second)) or
             std.debug.panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
-        }
     }
 
     const transfer_arrival_rate_ns = @divTrunc(
@@ -133,12 +89,40 @@ pub fn main() !void {
     );
     defer client.deinit(allocator);
 
-    try send(
-        &io,
-        &client,
-        .create_accounts,
-        std.mem.sliceAsBytes(accounts[0..]),
-    );
+    // Init accounts.
+    var batch_accounts = try std.ArrayList(tb.Account).initCapacity(allocator, account_count_per_batch);
+    var account_index: usize = 0;
+    while (account_index < account_count) {
+        // Fill batch.
+        while (account_index < account_count and
+            batch_accounts.items.len < account_count_per_batch)
+        {
+            batch_accounts.appendAssumeCapacity(.{
+                .id = @bitReverse(u128, account_index + 1),
+                .user_data = 0,
+                .reserved = [_]u8{0} ** 48,
+                .ledger = 2,
+                .code = 1,
+                .flags = .{},
+                .debits_pending = 0,
+                .debits_posted = 0,
+                .credits_pending = 0,
+                .credits_posted = 0,
+            });
+            account_index += 1;
+        }
+
+        // Submit batch.
+        try send(
+            &io,
+            &client,
+            .create_accounts,
+            std.mem.sliceAsBytes(batch_accounts.items),
+        );
+
+        // Reset.
+        try batch_accounts.resize(0);
+    }
 
     var rng = std.rand.DefaultPrng.init(42);
     const random = rng.random();
@@ -162,19 +146,25 @@ pub fn main() !void {
             batch_transfers.items.len < transfer_count_per_batch and
             transfer_next_arrival_ns < batch_start_ns)
         {
+            const debit_account_index = random.uintLessThan(u64, account_count);
+            var credit_account_index = random.uintLessThan(u64, account_count);
+            if (debit_account_index == credit_account_index) {
+                credit_account_index = (credit_account_index + 1) % account_count;
+            }
             batch_transfers.appendAssumeCapacity(.{
                 // Reverse the bits to stress non-append-only index for `id`.
                 .id = @bitReverse(u128, transfer_index + 1),
-                .debit_account_id = accounts[0].id,
-                .credit_account_id = accounts[1].id,
-                .user_data = 0,
+                .debit_account_id = @bitReverse(u128, debit_account_index + 1),
+                .credit_account_id = @bitReverse(u128, credit_account_index + 1),
+                .user_data = random.int(u128),
                 .reserved = 0,
+                // TODO Benchmark posting/voiding pending transfers.
                 .pending_id = 0,
                 .timeout = 0,
                 .ledger = 2,
-                .code = 1,
+                .code = random.int(u16) +| 1,
                 .flags = .{},
-                .amount = 1,
+                .amount = random_int_exponential(random, u64, 10_000) +| 1,
                 .timestamp = 0,
             });
             transfer_start_ns.appendAssumeCapacity(transfer_next_arrival_ns);
@@ -238,6 +228,26 @@ pub fn main() !void {
     try print_deciles(stdout, "transfer", transfer_latency_ns.items);
 }
 
+fn parse_arg(
+    allocator: std.mem.Allocator,
+    args: *std.process.ArgIterator,
+    arg: []const u8,
+    arg_name: []const u8,
+    arg_value: *usize,
+) !bool {
+    if (!std.mem.eql(u8, arg, arg_name)) return false;
+
+    const int_string_or_err = args.next(allocator) orelse
+        panic("Expected an argument to {s}", .{arg_name});
+    const int_string = try int_string_or_err;
+    arg_value.* = std.fmt.parseInt(usize, int_string, 10) catch |err|
+        panic(
+        "Could not parse \"{}\" as an integer: {}",
+        .{ std.zig.fmtEscapes(int_string), err },
+    );
+    return true;
+}
+
 fn send(
     io: *IO,
     client: *Client,
@@ -254,22 +264,30 @@ fn send(
         payload,
     );
 
-    var result: ?(Client.Error![]const u8) = null;
+    var done = false;
 
     client.request(
-        @intCast(u128, @ptrToInt(&result)),
+        @intCast(u128, @ptrToInt(&done)),
         send_complete,
         operation,
         message,
         payload.len,
     );
 
-    while (result == null) {
+    while (!done) {
         client.tick();
         try io.run_for_ns(5 * std.time.ns_per_ms);
     }
+}
 
-    const result_payload = result.? catch |err|
+fn send_complete(
+    user_data: u128,
+    operation: StateMachine.Operation,
+    result: Client.Error![]const u8,
+) void {
+    _ = operation;
+
+    const result_payload = result catch |err|
         panic("Client returned error: {}", .{err});
 
     switch (operation) {
@@ -293,17 +311,9 @@ fn send(
         },
         else => unreachable,
     }
-}
 
-fn send_complete(
-    user_data: u128,
-    operation: StateMachine.Operation,
-    result: Client.Error![]const u8,
-) void {
-    _ = operation;
-
-    const result_ptr = @intToPtr(*?@TypeOf(result), @intCast(u64, user_data));
-    result_ptr.* = result;
+    const done = @intToPtr(*bool, @intCast(u64, user_data));
+    done.* = true;
 }
 
 fn print_deciles(
