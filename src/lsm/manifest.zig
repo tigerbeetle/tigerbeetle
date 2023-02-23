@@ -119,8 +119,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
 
-        const MovedTableAddresses = std.AutoHashMapUnmanaged(u64, void);
-
         node_pool: *NodePool,
 
         levels: [constants.lsm_levels]Level,
@@ -132,7 +130,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         manifest_log: ManifestLog,
 
-        moved_table_addresses: MovedTableAddresses,
+        moved_table_addresses: [constants.lsm_levels]?u64,
 
         open_callback: ?Callback = null,
         compact_callback: ?Callback = null,
@@ -154,23 +152,18 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
             errdefer manifest_log.deinit(allocator);
 
-            var moved_table_addresses = MovedTableAddresses{};
-            try moved_table_addresses.ensureTotalCapacity(allocator, constants.lsm_levels);
-            errdefer moved_table_addresses.deinit(allocator);
-
             return Manifest{
                 .node_pool = node_pool,
                 .levels = levels,
                 .manifest_log = manifest_log,
-                .moved_table_addresses = moved_table_addresses,
+                .moved_table_addresses = [_]?u64{null} ** constants.lsm_levels,
             };
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
             for (manifest.levels) |*l| l.deinit(allocator, manifest.node_pool);
-
+            for (manifest.moved_table_addresses) |table_address| assert(table_address == null);
             manifest.manifest_log.deinit(allocator);
-            manifest.moved_table_addresses.deinit(allocator);
         }
 
         pub fn open(manifest: *Manifest, callback: Callback) void {
@@ -250,10 +243,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             const manifest_level_a = &manifest.levels[level_a];
             const manifest_level_b = &manifest.levels[level_b];
-
-            assert(table.snapshot_max >= snapshot);
-
-            assert(table.snapshot_max >= snapshot);
             if (constants.verify) {
                 assert(manifest_level_a.contains(table));
                 assert(!manifest_level_b.contains(table));
@@ -270,9 +259,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest_level_a.set_snapshot_max(snapshot, table);
             assert(table.snapshot_max == snapshot);
 
-            // Finally, the table's address is added to a set that will not be removed from the
+            // Finally, the table address is recorded so that it will not be removed from the 
             // manifest log during `remove_invisible_tables`.
-            manifest.moved_table_addresses.putAssumeCapacity(table.address, {});
+            assert(manifest.moved_table_addresses[level_a] == null);
+            manifest.moved_table_addresses[level_a] = table.address;
         }
 
         pub fn remove_invisible_tables(
@@ -290,6 +280,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const direction = .descending;
             const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
+            const moved_table_address = &manifest.moved_table_addresses[level];
 
             var it = manifest_level.iterator(
                 .invisible,
@@ -305,16 +296,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
                 // Only remove invisible tables from manifest log that weren't moved to next level.
                 // Moved tables explictly should not be removed: see `ManifestLog.insert` comment.
-                if (!manifest.moved_table_addresses.contains(table.address)) {
-                    const log_level = @intCast(u7, level);
-                    manifest.manifest_log.remove(log_level, table);
+                if (moved_table_address.* != null and moved_table_address.*.? == table.address) {
+                    moved_table_address.* = null;
+                } else {
+                    manifest.manifest_log.remove(@intCast(u7, level), table);
                 }
+                
                 manifest_level.remove_table(manifest.node_pool, &snapshots, table);
             }
 
-            manifest.moved_table_addresses.clearRetainingCapacity();
-            assert(manifest.moved_table_addresses.count() == 0);
-
+            assert(moved_table_address.* == null);
             if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
         }
 
