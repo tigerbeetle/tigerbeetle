@@ -296,7 +296,6 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 &self.tracer_slot,
                 .main,
                 .state_machine_prefetch,
-
                 @src(),
             );
 
