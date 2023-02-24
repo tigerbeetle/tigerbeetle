@@ -1,19 +1,7 @@
-name: "clients/dotnet: Build"
+name: "clients/dotnet"
 
 on:
-  # Run CI against any commits pushed to 'main', as well as 'staging' and 'trying' for bors.
-  push:
-    branches:
-      - 'main'
-      - 'staging'
-      - 'trying'
-  # Run CI for any PRs that target 'main' when they are opened or updated.
-  pull_request:
-    branches:
-      - 'main'
-    types:
-      - opened
-      - synchronize
+  workflow_call:
 
 jobs:
   build:

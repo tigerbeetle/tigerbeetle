@@ -2,7 +2,9 @@
 
 set -e
 
-./scripts/build.sh
+if [ -z ${SKIP_NODE_BUILD+x} ]; then
+	./scripts/build.sh
+fi
 
 # Prebuild the container with this directory because we have no need for its artifacts
 id=$(docker build -q -f - ../../.. < <(echo "
