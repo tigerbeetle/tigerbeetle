@@ -82,6 +82,11 @@ pub fn CompactionType(
             IteratorB,
         );
 
+        const CompactionStrategy = enum {
+            table_move,
+            table_merge,
+        };
+
         pub const Callback = fn (it: *Compaction) void;
 
         const Status = enum {
@@ -93,6 +98,7 @@ pub fn CompactionType(
         /// Used only for debugging/tracing.
         tree_name: []const u8,
 
+        strategy: CompactionStrategy,
         grid: *Grid,
         grid_reservation: ?Grid.Reservation,
         range: Manifest.CompactionRange,
@@ -144,6 +150,7 @@ pub fn CompactionType(
                 .tree_name = tree_name,
 
                 // Assigned by start()
+                .strategy = undefined,
                 .grid = undefined,
                 .grid_reservation = undefined,
                 .range = undefined,
@@ -207,9 +214,13 @@ pub fn CompactionType(
             const drop_tombstones = manifest.compaction_must_drop_tombstones(level_b, range);
             assert(drop_tombstones or level_b < constants.lsm_levels - 1);
 
+            const strategy: CompactionStrategy =
+                if (range.table_count == 1 and table_a != null) .table_move else .table_merge;
+
             compaction.* = .{
                 .tree_name = compaction.tree_name,
 
+                .strategy = strategy,
                 .grid = grid,
                 // Reserve enough blocks to write our output tables in the worst case, where:
                 // - no tombstones are dropped,
@@ -223,10 +234,10 @@ pub fn CompactionType(
                 // TODO(Compaction Pacing): Reserve smaller increments, at the start of each beat.
                 // (And likewise release the reservation at the end of each beat, instead of at the
                 // end of each half-bar).
-                .grid_reservation = blk: {
+                .grid_reservation = switch (strategy) {
                     // Don't reserve these when we just move the table to the next level.
-                    if (range.table_count == 1 and table_a != null) break :blk null;
-                    break :blk grid.reserve(range.table_count * Table.block_count_max).?;
+                    .table_move => null,
+                    .table_merge => grid.reserve(range.table_count * Table.block_count_max).?,
                 },
                 .range = range,
                 .op_min = op_min,
@@ -253,8 +264,8 @@ pub fn CompactionType(
             assert(compaction.filter.state == .building);
             assert(compaction.data.state == .building);
 
-            // Start the compaction iterators if we can't move the table directly between levels.
-            if (!compaction.move_table()) {
+            // Start the compaction iterators if we need to merge tables between levels.
+            if (compaction.strategy == .table_merge) {
                 const iterator_b_context = .{
                     .grid = grid,
                     .manifest = manifest,
@@ -268,17 +279,6 @@ pub fn CompactionType(
 
                 compaction.iterator_a.start(iterator_a_context, iterator_a_io_callback);
                 compaction.iterator_b.start(iterator_b_context, iterator_b_io_callback);
-            }
-        }
-
-        /// Returns true if the compaction must use the move table optimization. 
-        fn move_table(compaction: *const Compaction) bool {
-            if (compaction.range.table_count == 1 and compaction.level_a_input != null) {
-                assert(compaction.grid_reservation == null);
-                return true;
-            } else {
-                assert(compaction.grid_reservation != null);
-                return false;
             }
         }
 
@@ -301,7 +301,7 @@ pub fn CompactionType(
             assert(compaction.status == .processing);
             assert(compaction.callback != null);
             assert(!compaction.merge_done);
-            assert(!compaction.move_table());
+            assert(compaction.strategy == .table_merge);
             assert(table.visible(compaction.op_min));
 
             // Tables discovered by iterator_b that are visible at the start of compaction.
@@ -331,13 +331,16 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
 
             // Move table optimization
-            if (compaction.move_table()) {
+            if (compaction.strategy == .table_move) {
                 const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
                 const level_b = compaction.level_b;
                 const level_a = level_b - 1;
 
                 var table_a = compaction.level_a_input.?;
                 assert(table_a.snapshot_max >= snapshot_max);
+                assert(compaction.range.table_count == 1);
+                assert(compaction.grid_reservation == null);
+
                 compaction.manifest.move_table(level_a, level_b, snapshot_max, &table_a);
                 assert(table_a.snapshot_max == snapshot_max);
 
@@ -433,7 +436,7 @@ pub fn CompactionType(
             assert(compaction.callback != null);
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done);
-            assert(!compaction.move_table());
+            assert(compaction.strategy == .table_merge);
 
             var tracer_slot: ?tracer.SpanStart = null;
             tracer.start(
@@ -494,7 +497,7 @@ pub fn CompactionType(
             assert(compaction.callback != null);
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done);
-            assert(!compaction.move_table());
+            assert(compaction.strategy == .table_merge);
 
             // Ensure there are values to merge and that is it safe to do so.
             const merge_iterator = &compaction.merge_iterator.?;
@@ -576,7 +579,7 @@ pub fn CompactionType(
             assert(compaction.callback != null);
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done);
-            assert(!compaction.move_table());
+            assert(compaction.strategy == .table_merge);
 
             // Ensure merging is truly finished.
             assert(compaction.merge_iterator.?.empty());
@@ -627,7 +630,10 @@ pub fn CompactionType(
 
             // TODO(Beat Pacing) This should really be where the compaction callback is invoked,
             // but currently that can occur multiple times per beat.
-            if (compaction.grid_reservation) |reservation| compaction.grid.forfeit(reservation);
+            if (compaction.strategy == .table_merge) {
+                compaction.grid.forfeit(compaction.grid_reservation.?);
+                compaction.grid_reservation = null;
+            }
 
             compaction.status = .idle;
             compaction.merge_done = false;
