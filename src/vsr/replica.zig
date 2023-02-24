@@ -5546,6 +5546,7 @@ pub fn ReplicaType(
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
+                assert(self.request_start_view_message_timeout.ticking);
                 assert(self.pipeline == .cache);
 
                 if (self.log_view == view_new and self.view == view_new) {
