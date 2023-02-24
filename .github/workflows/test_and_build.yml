@@ -78,22 +78,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - run: ./scripts/benchmark.sh
+      - run: ./scripts/benchmark.sh --account-count 10 --transfer-count 100_000
 
   benchmark_on_macos:
     name: Run benchmark on macOS
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
-      - run: ./scripts/benchmark.sh
+      - run: ./scripts/benchmark.sh --account-count 10 --transfer-count 100_000
 
-  # TODO Temporarily disabled. See https://github.com/tigerbeetledb/tigerbeetle/issues/473 
-  #benchmark_on_windows:
-  #  name: Run benchmark on Windows
-  #  runs-on: windows-latest
-  #  steps:
-  #    - uses: actions/checkout@v2
-  #    - run: ./scripts/benchmark.bat
+  benchmark_on_windows:
+    name: Run benchmark on Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: ./scripts/benchmark.bat --account-count 10 --transfer-count 100_000
 
   fuzz_ewah:
     name: 'Fuzz EWAH codec'
