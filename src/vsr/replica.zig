@@ -1509,6 +1509,20 @@ pub fn ReplicaType(
                 return;
             }
 
+            if (checksum == null and !self.valid_hash_chain_between(op, self.op)) {
+                // When the checksum is not included in the request, the primary must be extra
+                // careful about the identity of the message it returns, since the backup is
+                // trying to acquire a new op-head.
+                assert(self.replica == self.primary_index(self.view));
+                assert(self.status == .view_change or op < self.op_repair_min());
+
+                log.debug("{}: on_request_prepare: op={} checksum=null repairing", .{
+                    self.replica,
+                    op,
+                });
+                return;
+            }
+
             if (self.journal.prepare_inhabited[slot.index]) {
                 const prepare_checksum = self.journal.prepare_checksums[slot.index];
                 // Consult `journal.prepare_checksums` (rather than `journal.headers`):
