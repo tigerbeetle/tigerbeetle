@@ -630,9 +630,12 @@ pub fn CompactionType(
 
             // TODO(Beat Pacing) This should really be where the compaction callback is invoked,
             // but currently that can occur multiple times per beat.
-            if (compaction.strategy == .table_merge) {
-                compaction.grid.forfeit(compaction.grid_reservation.?);
-                compaction.grid_reservation = null;
+            switch (compaction.strategy) {
+                .table_move => assert(compaction.grid_reservation == null),
+                .table_merge => {
+                    compaction.grid.forfeit(compaction.grid_reservation.?);
+                    compaction.grid_reservation = null;
+                },
             }
 
             compaction.status = .idle;
