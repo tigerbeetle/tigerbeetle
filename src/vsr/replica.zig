@@ -4015,7 +4015,7 @@ pub fn ReplicaType(
             if (self.op < self.commit_max) {
                 @panic("unimplemented (state transfer)");
             }
-            assert(self.valid_hash_chain_between(self.commit_min, self.op));
+            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
             // Request and repair any dirty or faulty prepares:
             if (self.journal.dirty.count > 0) return self.repair_prepares();
@@ -4250,7 +4250,7 @@ pub fn ReplicaType(
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
             assert(self.journal.dirty.count == 0);
-            assert(self.valid_hash_chain_between(self.commit_min, self.op));
+            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
             assert(self.pipeline == .cache);
             assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
@@ -4395,7 +4395,7 @@ pub fn ReplicaType(
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
             assert(self.op - self.op_checkpoint() <= constants.journal_slot_count);
-            assert(self.valid_hash_chain_between(self.commit_min, self.op));
+            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
             if (self.op < constants.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
@@ -5567,7 +5567,7 @@ pub fn ReplicaType(
             assert(self.journal.dirty.count == 0);
             assert(self.journal.faulty.count == 0);
             assert(self.nack_prepare_op == null);
-            assert(self.valid_hash_chain_between(self.commit_min, self.op));
+            assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
             {
                 const pipeline_queue = self.primary_repair_pipeline_done();
@@ -5894,6 +5894,9 @@ pub fn ReplicaType(
         /// Returns true if the hash chain is valid and up to date for the current view.
         /// This is a stronger guarantee than `valid_hash_chain_between()` below.
         fn valid_hash_chain(self: *Self, method: []const u8) bool {
+            assert(self.op_checkpoint() <= self.commit_min);
+            assert(self.op_checkpoint() <= self.op);
+
             // If we know we could validate the hash chain even further, then wait until we can:
             // This is partial defense-in-depth in case `self.op` is ever advanced by a reordered op.
             if (self.op < self.commit_max) {
@@ -5906,8 +5909,12 @@ pub fn ReplicaType(
                 return false;
             }
 
+            // When commit_min=op_checkpoint, the checkpoint may be missing.
+            // valid_hash_chain_between() will still verify that we are connected.
+            const op_verify_min = std.math.max(self.commit_min, self.op_checkpoint() + 1);
+
             // We must validate the hash chain as far as possible, since `self.op` may disclose a fork:
-            if (!self.valid_hash_chain_between(self.commit_min, self.op)) {
+            if (!self.valid_hash_chain_between(op_verify_min, self.op)) {
                 log.debug("{}: {s}: waiting for repair (hash chain)", .{ self.replica, method });
                 return false;
             }
@@ -5919,8 +5926,9 @@ pub fn ReplicaType(
         /// chain, between `op_min` and `op_max` (both inclusive).
         fn valid_hash_chain_between(self: *const Self, op_min: u64, op_max: u64) bool {
             assert(op_min <= op_max);
-            // Headers with ops preceding the checkpoint may be unavailable due to a WAL wrap.
-            assert(op_min >= self.op_checkpoint());
+            assert(op_min <= self.commit_min + 1);
+            assert(op_min <= self.commit_min or self.commit_min == self.op_checkpoint());
+            assert(op_max >= self.op_checkpoint());
 
             // If we use anything less than self.op then we may commit ops for a forked hash chain
             // that have since been reordered by a new primary.
@@ -5930,27 +5938,6 @@ pub fn ReplicaType(
             var op = op_max;
             while (op > op_min) {
                 op -= 1;
-
-                if (self.op_checkpoint() == op) {
-                    // op_checkpoint's slot may have been overwritten in the WAL — but we can
-                    // always use the VSRState to anchor the hash chain.
-                    assert(op == op_min);
-                    assert(op == self.superblock.working.vsr_state.commit_min);
-                    if (self.superblock.working.vsr_state.commit_min_checksum == b.parent) {
-                        return true;
-                    } else {
-                        log.debug("{}: valid_hash_chain_between: break A: {} (checkpoint={})", .{
-                            self.replica,
-                            self.superblock.working.vsr_state.commit_min_checksum,
-                            self.op_checkpoint(),
-                        });
-                        log.debug("{}: valid_hash_chain_between: break B: {}", .{
-                            self.replica,
-                            b,
-                        });
-                        return false;
-                    }
-                }
 
                 if (self.journal.header_with_op(op)) |a| {
                     assert(a.op + 1 == b.op);
@@ -5968,6 +5955,14 @@ pub fn ReplicaType(
                 }
             }
             assert(b.op == op_min);
+
+            // The op immediately after the checkpoint always connects to the checkpoint.
+            if (op_min <= self.op_checkpoint() + 1 and op_max > self.op_checkpoint()) {
+                assert(self.superblock.working.vsr_state.commit_min == self.op_checkpoint());
+                assert(self.superblock.working.vsr_state.commit_min_checksum ==
+                    self.journal.header_with_op(self.op_checkpoint() + 1).?.parent);
+            }
+
             return true;
         }
 
