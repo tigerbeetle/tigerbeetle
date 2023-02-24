@@ -449,6 +449,7 @@ pub fn ReplicaType(
             const header_head = self.journal.header_with_op(self.op).?;
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
+            // TODO Transition to recovering_head if op<op_checkpoint.
             if (self.replica_count == 1) {
                 if (self.journal.faulty.count > 0) {
                     @panic("journal is corrupt");
@@ -1447,6 +1448,9 @@ pub fn ReplicaType(
 
             const op = message.header.op;
             const slot = self.journal.slot_for_op(op);
+            // TODO Primary cannot trust its WAL with checksum=null for ops < op_repair_min,
+            // since they may have changed after crash/recover due to a lost prepare write.
+            // We should check the hash chain, and if it is broken, assert(op<op_repair_min)
             const checksum: ?u128 = switch (message.header.timestamp) {
                 0 => null,
                 1 => message.header.context,
@@ -3854,6 +3858,9 @@ pub fn ReplicaType(
                 });
                 // We need to advance our op number and therefore have to `request_prepare`,
                 // since only `on_prepare()` can do this, not `repair_header()` in `on_headers()`.
+                // TODO The response to this might be discarded if it is from an old view (a repair) but would nonetheless advance our head.
+                // Maybe request/repair headers instead? If so, remove the timestamp=0 (checksumless) case.
+                // TODO Receiving a SV or prepare (or headers, or DVC) for the next wrap should bump commit_max to that checkpoint. (Or trigger state transfer if it is too far ahead).
                 self.send_header_to_replica(self.primary_index(self.view), .{
                     .command = .request_prepare,
                     // We cannot yet know the checksum of the prepare so we set the context and

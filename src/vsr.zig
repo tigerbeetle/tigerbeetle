@@ -1386,13 +1386,14 @@ const ViewChangeHeadersArray = struct {
             } else if (current.log_view_primary and command_durable != .start_view) {
                 switch (chain) {
                     .chain_sequence => {},
-                    .chain_view => {},
+                    .chain_view, .chain_gap, .chain_break => unreachable,
+                    //.chain_view => {},
                     // The retiring primary may have gap-breaks or breaks in its suffix iff:
                     // - it didn't finish repairs before the second view-change, and
                     // - some uncommitted ops were truncated during the first view-change.
                     //   (Truncation "moves" the suffix backwards).
-                    .chain_gap => break,
-                    .chain_break => break,
+                    //.chain_gap => break,
+                    //.chain_break => break,
                 }
                 suffix_done = op <= op_dvc_anchor;
             } else if (!current.log_view_primary and command_durable == .start_view) {
