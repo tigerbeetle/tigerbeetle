@@ -3032,12 +3032,6 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op(self.op) != null);
         }
 
-        /// Returns whether the replica is a backup for the current view.
-        /// This may be used only when the replica status is normal.
-        fn backup(self: *Self) bool {
-            return !self.primary();
-        }
-
         fn flush_loopback_queue(self: *Self) void {
             // There are five cases where a replica will send a message to itself:
             // However, of these five cases, all but one call send_message_to_replica().
@@ -3464,6 +3458,11 @@ pub fn ReplicaType(
             return false;
         }
 
+        /// Returns the index into the configuration of the primary for a given view.
+        fn primary_index(self: *const Self, view: u32) u8 {
+            return @intCast(u8, @mod(view, self.replica_count));
+        }
+
         /// Returns whether the replica is the primary for the current view.
         /// This may be used only when the replica status is normal.
         fn primary(self: *const Self) bool {
@@ -3471,9 +3470,10 @@ pub fn ReplicaType(
             return self.primary_index(self.view) == self.replica;
         }
 
-        /// Returns the index into the configuration of the primary for a given view.
-        fn primary_index(self: *const Self, view: u32) u8 {
-            return @intCast(u8, @mod(view, self.replica_count));
+        /// Returns whether the replica is a backup for the current view.
+        /// This may be used only when the replica status is normal.
+        fn backup(self: *const Self) bool {
+            return !self.primary();
         }
 
         /// Advances `op` to where we need to be before `header` can be processed as a prepare.
