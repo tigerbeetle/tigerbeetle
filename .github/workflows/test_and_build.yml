@@ -78,14 +78,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - run: ./scripts/benchmark.sh
+      - run: ./scripts/benchmark.sh --account-count 10 --transfer-count 100_000
 
   benchmark_on_macos:
     name: Run benchmark on macOS
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v2
-      - run: ./scripts/benchmark.sh
+      - run: ./scripts/benchmark.sh --account-count 10 --transfer-count 100_000
 
   benchmark_on_windows:
     name: Run benchmark on Windows
