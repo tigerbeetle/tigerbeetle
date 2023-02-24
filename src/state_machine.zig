@@ -1025,10 +1025,6 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             assert(t.timestamp > self.commit_timestamp);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
 
-            if (t.flags.balancing_debit or t.flags.balancing_credit) {
-                @panic("TODO: unimplemented");
-            }
-
             if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
                 return .cannot_post_and_void_pending_transfer;
             }
@@ -1061,7 +1057,16 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             if (t.ledger > 0 and t.ledger != p.ledger) return .pending_transfer_has_different_ledger;
             if (t.code > 0 and t.code != p.code) return .pending_transfer_has_different_code;
 
-            const amount = if (t.amount > 0) t.amount else p.amount;
+            const amount = amount: {
+                if (t.amount == 0) break :amount p.amount;
+
+                if (t.flags.balancing_debit or t.flags.balancing_credit) {
+                    break :amount std.math.min(t.amount, p.amount);
+                } else {
+                    break :amount t.amount;
+                }
+            };
+
             if (amount > p.amount) return .exceeds_pending_transfer_amount;
 
             if (t.flags.void_pending_transfer and amount < p.amount) {
@@ -2175,7 +2180,7 @@ test "create_transfers: balancing_debit & balancing_credit" {
     );
 }
 
-test "create_transfers: balancing_debit | balancing_credit + pending" {
+test "create_transfers: balancing_debit/balancing_credit + pending" {
     try check(
         \\ account A1 _ _ L1 C1 _ D<C   _ _ 0 0 0 0 _ ok
         \\ account A2 _ _ L1 C1 _   _ C<D _ 0 0 0 0 _ ok
@@ -2202,6 +2207,34 @@ test "create_transfers: balancing_debit | balancing_credit + pending" {
         \\ lookup_transfer T2 amount  7
         \\ lookup_transfer T3 amount  3
         \\ lookup_transfer T4 amount  5
+        \\ commit lookup_transfers
+    );
+}
+
+test "create_transfers: balancing_debit/balancing_credit + post_pending_transfer/void_pending_transfer" {
+    try check(
+        \\ account A1 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
+        \\ account A2 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _   _   _ _ 10 _ ok
+        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _   _   _ _ 10 _ ok
+        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _   _   _ _ 10 _ ok
+        \\ transfer T4 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _   _   _ _ 10 _ ok
+        \\ transfer T5 A1 A2  _ _  T1 _ L1 C1 _   _ POS   _ BDR   _ _  9 _ ok
+        \\ transfer T6 A1 A2  _ _  T2 _ L1 C1 _   _ POS   _ BDR   _ _ 11 _ ok
+        \\ transfer T7 A1 A2  _ _  T3 _ L1 C1 _   _   _ VOI   _ BCR _  9 _ pending_transfer_has_different_amount
+        \\ transfer T8 A1 A2  _ _  T4 _ L1 C1 _   _   _ VOI   _ BCR _ 11 _ ok
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 10 19  0  0
+        \\ lookup_account A2  0  0 10 19
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T5 amount  9
+        \\ lookup_transfer T6 amount 10
+        \\ lookup_transfer T7 exists false
+        \\ lookup_transfer T8 amount 10
         \\ commit lookup_transfers
     );
 }

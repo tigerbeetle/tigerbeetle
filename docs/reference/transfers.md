@@ -34,8 +34,8 @@ Fields used by each mode of transfer:
 | `flags.pending`               | false        | true     | false        | false        |
 | `flags.post_pending_transfer` | false        | false    | true         | false        |
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
-| `flags.balancing_debit`       | optional     | optional | false        | false        |
-| `flags.balancing_credit`      | optional     | optional | false        | false        |
+| `flags.balancing_debit`       | optional     | optional | optional     | optional     |
+| `flags.balancing_credit`      | optional     | optional | optional     | optional     |
 | `amount`                      | required     | required | optional     | optional     |
 
 TigerBeetle uses the same data structures internally and
@@ -375,14 +375,8 @@ to obey the debit account's constraints. If the highest amount transferable is `
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
 
-`flags.balancing_debit` is compatible with:
-- `flags.linked`
-- `flags.pending`
-- `flags.balancing_credit`
-
-`flags.balancing_debit` is incompatible with:
-- `flags.post_pending_transfer`
-- `flags.void_pending_transfer`
+When `flags.post_pending_transfer` or `flags.void_pending_transfer` is set, the transfer amount will
+be `min(transfer.amount, pending-amount)`.
 
 ##### Examples
 
@@ -397,14 +391,10 @@ to obey the credit account's constraints. If the highest amount transferable is 
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
 
-`flags.balancing_credit` is compatible with:
-- `flags.linked`
-- `flags.pending`
-- `flags.balancing_debit`
-
-`flags.balancing_credit` is incompatible with:
-- `flags.post_pending_transfer`
-- `flags.void_pending_transfer`
+When `flags.post_pending_transfer` or `flags.void_pending_transfer` is set, the voided amount will
+be `min(transfer.amount, pending-amount)`. (If `transfer.amount` is less than `pending-amount`,
+the void-transfer will fail with
+[`pending_transfer_has_different_amount`](./operations/create_transfers.md#pending_transfer_has_different_amount)).
 
 ##### Examples
 
