@@ -87,13 +87,19 @@ jobs:
       - uses: actions/checkout@v2
       - run: ./scripts/benchmark.sh
 
-  # TODO Temporarily disabled. See https://github.com/tigerbeetledb/tigerbeetle/issues/473 
-  #benchmark_on_windows:
-  #  name: Run benchmark on Windows
-  #  runs-on: windows-latest
-  #  steps:
-  #    - uses: actions/checkout@v2
-  #    - run: ./scripts/benchmark.bat
+  benchmark_on_windows:
+    name: Run benchmark on Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Copy repository to C:\ path
+        ## Limited disk space on D:\ partition causes the benchmark to fail on Windows.
+        ## Unfortunately, actions/checkout@v2 does not allow cloning outside GITHUB_WORKSPACE,
+        ## so, copying to C:\ is simpler than customizing git clone command.
+        run: |
+          xcopy /E /I /Y . C:\tigerbeetle\
+      - run: ./scripts/benchmark.bat
+        working-directory: c:\tigerbeetle
 
   fuzz_ewah:
     name: 'Fuzz EWAH codec'
