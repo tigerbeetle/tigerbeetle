@@ -29,7 +29,7 @@ pub const GoDocs = Docs{
     \\import "fmt"
     \\
     \\func main() {
-    \\  fmt.Println("Import ok!")
+    \\	fmt.Println("Import ok!")
     \\}
     ,
 
