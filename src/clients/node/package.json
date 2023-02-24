@@ -1,6 +1,6 @@
 {
   "name": "tigerbeetle-node",
-  "version": "0.11.12",
+  "version": "0.12.0",
   "description": "TigerBeetle Node.js client",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
@@ -13,19 +13,10 @@
     "LICENSE",
     "README.md",
     "dist",
-    "dist/.client.node.sha256",
-    "!dist/client.node",
+    "src",
+    "!src/zig-cache",
     "package.json",
     "package-lock.json",
-    "scripts/download_node_headers.sh",
-    "scripts/build_lib.sh",
-    "src/c.zig",
-    "src/benchmark.ts",
-    "src/index.ts",
-    "src/node.zig",
-    "src/test.ts",
-    "src/tigerbeetle",
-    "src/translate.zig",
     "tsconfig.json"
   ],
   "engines": {
@@ -34,12 +25,10 @@
   "scripts": {
     "benchmark": "./scripts/benchmark.sh",
     "test": "node dist/test",
-    "postinstall": "npm run download_node_headers && npm run build_lib",
-    "download_node_headers": "sh ./scripts/download_node_headers.sh",
     "build": "npm run build_tsc && npm run build_lib",
     "build_tsc": "./node_modules/typescript/bin/tsc",
-    "build_lib": "sh ./scripts/build_lib.sh",
-    "prepack": "npm run build",
+    "build_lib": "node scripts/windows_generate_node_lib.js && cd ../../.. && zig/zig build node_client -Drelease-safe",
+    "prepack": "npm run build && find dist/bin -name '*.o' -delete && for path in dist/bin/*; do mv ${path}/libtb_nodeclient.* ${path}/client.node; done",
     "clean": "rm -rf build dist node_modules src/zig-cache zig"
   },
   "author": "TigerBeetle, Inc",
@@ -52,6 +41,7 @@
   ],
   "devDependencies": {
     "@types/node": "^14.14.41",
+    "node-api-headers": "^0.0.2",
     "typescript": "^4.0.2"
   }
 }
