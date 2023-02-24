@@ -123,14 +123,15 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         levels: [constants.lsm_levels]Level,
 
+        // Addresses of TableInfo's that were moved on a given level to the next.
+        moved_table_addresses: [constants.lsm_levels]?u64 = [_]?u64{null} ** constants.lsm_levels,
+
         // TODO Set this at startup when reading in the manifest.
         // This should be the greatest TableInfo.snapshot_min/snapshot_max (if deleted) or
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
 
         manifest_log: ManifestLog,
-
-        moved_table_addresses: [constants.lsm_levels]?u64,
 
         open_callback: ?Callback = null,
         compact_callback: ?Callback = null,
@@ -156,7 +157,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .node_pool = node_pool,
                 .levels = levels,
                 .manifest_log = manifest_log,
-                .moved_table_addresses = [_]?u64{null} ** constants.lsm_levels,
             };
         }
 
@@ -442,6 +442,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // The last level is not compacted into another.
             assert(level_a < constants.lsm_levels - 1);
 
+            // Double check that there aren't any pending moved tables from a compaction.
+            for (manifest.moved_table_addresses) |address| assert(address == null);
+
             const table_count_visible_max = table_count_max_for_level(growth_factor, level_a);
             assert(table_count_visible_max > 0);
 
@@ -516,6 +519,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         ) CompactionRange {
             assert(level_b < constants.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
+
+            // Double check that there aren't any pending moved tables from a compaction.
+            for (manifest.moved_table_addresses) |address| assert(address == null);
 
             var range = CompactionRange{
                 .table_count = 1,
@@ -617,6 +623,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(manifest.compact_callback == null);
             assert(manifest.checkpoint_callback == null);
             manifest.checkpoint_callback = callback;
+
+            // Double check that there aren't any pending moved tables from a compaction.
+            for (manifest.moved_table_addresses) |address| assert(address == null);
 
             manifest.manifest_log.checkpoint(manifest_log_checkpoint_callback);
         }
