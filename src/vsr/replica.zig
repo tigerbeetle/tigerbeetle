@@ -515,8 +515,6 @@ pub fn ReplicaType(
             time: Time,
             storage: *Storage,
             message_pool: *MessagePool,
-            // TODO With https://github.com/coilhq/tigerbeetle/issues/71,
-            // the separate message_bus_options won't be necessary.
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
         };
