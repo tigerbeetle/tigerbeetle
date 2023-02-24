@@ -4559,7 +4559,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            const next = @mod(self.replica + 1, @intCast(u8, self.replica_count));
+            const next = @mod(self.replica + 1, self.replica_count);
             if (next == self.primary_index(message.header.view)) {
                 log.debug("{}: replicate: not replicating (completed)", .{self.replica});
                 return;
