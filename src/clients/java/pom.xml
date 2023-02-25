@@ -134,6 +134,7 @@
               <!-- Excluding enums -->
               <exclude>com/tigerbeetle/PacketStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
+              <exclude>com/tigerbeetle/TransferFlags.class</exclude>
 
               <!-- Excluding the benchmark -->
               <exclude>benchmark/Benchmark.class</exclude>
