@@ -43,6 +43,7 @@ function getBinding (): Binding {
       const realPath = fs.readlinkSync(path.join("/proc/self/map_files/", file))
       if (realPath.includes('musl')) {
         extra = '-musl'
+        break
       }
     }
   }
