@@ -1189,6 +1189,11 @@ const ViewChangeHeadersArray = struct {
         return ViewChangeHeadersArray.init(array);
     }
 
+    pub fn from_slice(slice: []const Header) ViewChangeHeadersArray {
+        Headers.ViewChangeSlice.verify(slice);
+        return .{ .array = Headers.Array.fromSlice(slice) catch unreachable };
+    }
+
     fn init(array: Headers.Array) ViewChangeHeadersArray {
         Headers.ViewChangeSlice.verify(array.constSlice());
         return .{ .array = array };
