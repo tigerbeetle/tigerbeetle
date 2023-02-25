@@ -215,6 +215,15 @@ pub fn ReplicaType(
             cache: PipelineCache,
         },
 
+        /// When "log_view < view": The DVC headers.
+        /// When "log_view = view": The SV headers.
+        ///
+        /// Invariants:
+        /// - view_change_headers.len     > 0
+        /// - view_change_headers[0].view ≤ self.log_view
+        /// - view_change_headers[0].op   ≤ self.op
+        view_headers: vsr.Headers.ViewChangeArray,
+
         /// In some cases, a replica may send a message to itself. We do not submit these messages
         /// to the message bus but rather queue them here for guaranteed immediate delivery, which
         /// we require and assert in our protocol implementation.
@@ -305,9 +314,6 @@ pub fn ReplicaType(
         /// Used to provide deterministic entropy to `choose_any_other_replica()`.
         /// Incremented whenever `choose_any_other_replica()` is called.
         choose_any_other_replica_ticks: u64 = 0,
-
-        /// Scratch space for `create_view_change_headers()`.
-        view_change_headers: vsr.Headers.ViewChangeArray = .{ .array = .{ .buffer = undefined } },
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
@@ -630,6 +636,8 @@ pub fn ReplicaType(
                 .commit_min = self.superblock.working.vsr_state.commit_min,
                 .commit_max = self.superblock.working.vsr_state.commit_max,
                 .pipeline = .{ .cache = .{} },
+                .view_headers = vsr.Headers.ViewChangeArray.from_slice(
+                    self.superblock.working.vsr_headers().slice),
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
                     .id = replica_index,
@@ -1426,13 +1434,19 @@ pub fn ReplicaType(
             assert(message.header.op == op_highest(message_body_as_headers(message)));
 
             self.set_op_and_commit_max(message.header.op, message.header.commit, "on_start_view");
-            for (message_body_as_headers_chain_consecutive(message)) |*header| {
+            assert(self.op == message.header.op);
+
+            self.view_headers = vsr.Headers.ViewChangeArray.from_slice(
+                message_body_as_headers_chain_consecutive(message));
+            assert(self.view_headers.array.get(0).op == self.op);
+            assert(self.view_headers.array.get(0).view <= self.view);
+            assert(self.view_headers.array.len ==
+                std.math.min(self.op + 1, constants.view_change_headers_max));
+
+            for (self.view_headers.array.constSlice()) |*header| {
                 self.replace_header(header);
             }
 
-            assert(self.op == message.header.op);
-
-            assert(self.status == .view_change);
             self.transition_to_normal_from_view_change_status(message.header.view);
             self.send_prepare_oks_after_view_change();
 
@@ -2957,9 +2971,21 @@ pub fn ReplicaType(
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
-            const headers = self.create_view_change_headers();
+            var headers: vsr.Headers.ViewChangeArray = .{ .array = .{ .buffer = undefined } };
+            switch (command) {
+                .do_view_change => headers = self.view_headers,
+                .start_view => {
+                    var op = self.op + 1;
+                    while (op > 0) {
+                        op -= 1;
+                        headers.array.append(self.journal.header_with_op(op).?.*) catch break;
+                    }
+                },
+                else => unreachable,
+            }
             assert(headers.array.len > 0);
             assert(headers.array.get(0).op == self.op);
+            vsr.Headers.ViewChangeSlice.verify(headers.array.constSlice());
 
             message.header.* = .{
                 .size = @intCast(u32, @sizeOf(Header) * (1 + headers.array.len)),
@@ -2987,41 +3013,6 @@ pub fn ReplicaType(
             message.header.set_checksum();
 
             return message.ref();
-        }
-
-        fn create_view_change_headers(self: *Self) *const vsr.Headers.ViewChangeArray {
-            assert(self.status == .normal or self.status == .view_change);
-            assert(self.view >= self.log_view);
-            assert(self.view >= self.view_durable());
-            assert(self.log_view >= self.log_view_durable());
-
-            self.view_change_headers.array.len = 0;
-
-            var journal_headers = vsr.Headers.Array{ .buffer = undefined };
-            var op = self.op + 1;
-            while (op > 0 and journal_headers.len < constants.view_change_headers_max) {
-                op -= 1;
-                if (self.journal.header_with_op(op)) |h| {
-                    journal_headers.appendAssumeCapacity(h.*);
-                }
-            }
-
-            vsr.Headers.ViewChangeArray.build(&self.view_change_headers, .{
-                .op_checkpoint = self.op_checkpoint(),
-                .current = .{
-                    .headers = &journal_headers,
-                    .view = self.view,
-                    .log_view = self.log_view,
-                    .log_view_primary = self.primary_index(self.log_view) == self.replica,
-                },
-                .durable = .{
-                    .headers = .{ .slice = self.superblock.working.vsr_headers().slice },
-                    .view = self.view_durable(),
-                    .log_view = self.log_view_durable(),
-                    .log_view_primary = self.primary_index(self.log_view_durable()) == self.replica,
-                },
-            });
-            return &self.view_change_headers;
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -5288,6 +5279,10 @@ pub fn ReplicaType(
             // Otherwise headers could be nacked, truncated, then restored after a crash.
             assert(self.log_view < self.view or self.replica != self.primary_index(self.view) or
                 self.status == .normal);
+            assert(self.view_headers.array.len > 0);
+            assert(self.view_headers.array.get(0).view <= self.log_view);
+            assert(self.view_headers.array.get(0).op <= self.op);
+            assert(self.view_headers.array.get(0).op == self.op or self.log_view == self.view);
 
             if (self.view_durable_updating()) return;
 
@@ -5306,7 +5301,7 @@ pub fn ReplicaType(
                     .commit_max = self.commit_max,
                     .view = self.view,
                     .log_view = self.log_view,
-                    .headers = self.create_view_change_headers(),
+                    .headers = &self.view_headers,
                 },
             );
             assert(self.view_durable_updating());
@@ -5613,6 +5608,16 @@ pub fn ReplicaType(
                 self.pipeline.queue.verify();
             }
 
+            self.view_headers.array.len = 0;
+            var op = self.op + 1;
+            while (op > 0) {
+                op -= 1;
+                assert(op >= self.op_repair_min());
+
+                self.view_headers.array.append(self.journal.header_with_op(op).?.*) catch break;
+            }
+            vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
+
             self.transition_to_normal_from_view_change_status(self.view);
 
             assert(self.status == .normal);
@@ -5803,6 +5808,9 @@ pub fn ReplicaType(
                 self.status == .recovering_head);
             assert(view_new >= self.log_view);
             assert(view_new >= self.view);
+            assert(view_new > self.view or
+                self.status == .recovering or self.status == .recovering_head);
+            assert(view_new > self.log_view or self.status == .recovering_head);
 
             log.debug("{}: transition_to_view_change_status: view={}..{} status={}..{}", .{
                 self.replica,
@@ -5815,11 +5823,56 @@ pub fn ReplicaType(
             const status_before = self.status;
             self.status = .view_change;
 
-            if (self.view == view_new) {
-                assert(status_before == .recovering or status_before == .recovering_head);
-            } else {
+            if (status_before == .normal) {
+                self.view_headers.array.len = 0;
+                var op = self.op + 1;
+                while (op > 0) {
+                    op -= 1;
+                    if (self.journal.header_with_op(op)) |header| {
+                        self.view_headers.array.append(header.*) catch break;
+                    } else {
+                        const count = self.view_headers.array.len;
+                        assert(count > 0);
+                        // The DVC headers must connect to the cluster's committed ops.
+                        // We cannot safely go beyond that in all cases, since during a prior
+                        // view-change we might have only accepted a single header from the DVC:
+                        // "header.op = op_checkpoint_trigger", and then not completed any repair.
+                        if (self.view_headers.array.get(count - 1).op <= self.commit_max + 1) break;
+                    }
+                }
+            }
+
+            if (status_before == .recovering or
+                (status_before == .view_change and self.log_view == self.view))
+            {
+                // Either:
+                // - Recovering from normal status.
+                // - Retired primary that didn't finish repair.
+                self.view_headers.array.len = 0;
+                var op = self.op + 1;
+                while (op > 0) {
+                    op -= 1;
+                    if (self.journal.header_with_op(op)) |header| {
+                        self.view_headers.array.append(header.*) catch break;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
+
+            if (status_before == .recovering_head) {
+                // Don't update view-durable — our op-head is not trusted.
+                // This function is called by a view_jump via on_start_view().
+                // We are about to transition to normal status.
                 self.view = view_new;
-                self.view_durable_update();
+            } else {
+                if (self.view == view_new) {
+                    assert(status_before == .recovering);
+                } else {
+                    self.view = view_new;
+                    self.view_durable_update();
+                }
             }
 
             if (self.pipeline == .queue) {
@@ -5859,8 +5912,9 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum == false);
             assert(self.nack_prepare_op == null);
 
-            if (self.log_view == self.view) {
-                assert(status_before == .recovering_head);
+            if (status_before == .recovering_head) {
+                // We don't trust our op-head yet, so we cannot participate in the view-change.
+                // And we just received a SV, so we don't need to.
             } else {
                 self.send_do_view_change();
             }
