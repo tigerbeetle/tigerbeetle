@@ -8,6 +8,4 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-      # Windows benchmarking is currently broken!
-      # See See https://github.com/tigerbeetledb/tigerbeetle/issues/473
-      # - run: ./scripts/benchmark.bat
+      - run: ./scripts/benchmark.bat --transfer-count 4000
