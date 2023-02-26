@@ -1,14 +1,9 @@
 # This workflow will build a package using Maven and then publish it to Maven Central when a release is created
 
-name: "clients/java: Build"
+name: "clients/java"
 
 on:
-  push:
-    branches: [ main, staging, trying ]
-  pull_request:
-    branches: [ main ]
-    paths:
-      - src/clients/java/**
+  workflow_call:
 
 jobs:
   build:
@@ -20,17 +15,18 @@ jobs:
     steps:
     - uses: actions/checkout@v3
       with:
-        fetch-depth: 0    
+        submodules: recursive
+        fetch-depth: 0
     - name: Set up JDK
       uses: actions/setup-java@v3
       with:
         java-version: '11'
         distribution: 'temurin'
-        server-id: ossrh 
+        server-id: ossrh
         server-username: MAVEN_USERNAME
         server-password: MAVEN_CENTRAL_TOKEN
         gpg-private-key: ${{ secrets.MAVEN_GPG_SECRET_KEY }}
-        gpg-passphrase: MAVEN_GPG_PASSPHRASE        
+        gpg-passphrase: MAVEN_GPG_PASSPHRASE
         settings-path: ${{ github.workspace }}
 
     - name: Format linter
@@ -39,10 +35,7 @@ jobs:
 
     - name: Install Zig
       working-directory: src/clients/java
-      run: |
-        git submodule init
-        git submodule update
-        ./scripts/install.sh
+      run: ./scripts/install.sh
 
     - name: Example programs
       working-directory: src/clients/java/examples
@@ -71,7 +64,7 @@ jobs:
         BASE_VERSION: 0.0.1
         MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
         MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
-        MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}        
+        MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
 
   prepare_validation_tests:
     needs: build
@@ -161,8 +154,8 @@ jobs:
           - azul/zulu-openjdk-centos:19
           - azul/zulu-openjdk-debian:19
           - amazoncorretto:17
-          - amazoncorretto:17-alpine 
-    steps:    
+          - amazoncorretto:17-alpine
+    steps:
     - uses: actions/download-artifact@v3
       with:
         name: test-artifact

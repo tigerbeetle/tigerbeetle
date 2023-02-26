@@ -1,4 +1,11 @@
 #!/usr/bin/env sh
-echo "#!/usr/bin/env sh\n $ZIG_EXE cc \$@" > zigcc.sh
-CC=$(pwd)/zigcc.sh
+cat > zigcc.sh << EOF
+#!/usr/bin/env sh
+$ZIG_EXE cc \$@
+EOF
+
+CC="$(pwd)/zigcc.sh"
+export CC
+
+# shellcheck disable=SC2068
 go $@

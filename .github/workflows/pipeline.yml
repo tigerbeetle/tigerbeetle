@@ -1,0 +1,35 @@
+name: CI Pipeline
+
+on:
+  # Run CI against any commits pushed to 'main', as well as 'staging' and 'trying' for bors.
+  push:
+    branches:
+      - 'main'
+      - 'staging'
+      - 'trying'
+
+  # Run CI for any PRs that target 'main' when they are opened or updated.
+  pull_request:
+    branches:
+      - 'main'
+    types:
+      - opened
+      - synchronize
+
+jobs:
+  smoke:
+    uses: ./.github/workflows/smoke.yml
+  linux:
+    uses: ./.github/workflows/linux.yml
+  windows:
+    uses: ./.github/workflows/windows.yml
+  macos:
+    uses: ./.github/workflows/macos.yml
+  client-dotnet:
+    uses: ./.github/workflows/clients-dotnet.yml
+  client-go:
+    uses: ./.github/workflows/clients-go.yml
+  client-java:
+    uses: ./.github/workflows/clients-java.yml
+  client-node:
+    uses: ./.github/workflows/clients-node.yml

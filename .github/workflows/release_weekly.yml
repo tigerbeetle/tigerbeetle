@@ -1,0 +1,25 @@
+name: "Release (weekly)"
+
+on:
+  schedule:
+    # Every Monday at 14:00
+    - cron: "0 14 * * 1"
+
+jobs:
+  scheduled_release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Explicitly pass in the sha, even though it's very likely to be HEAD.
+      - run: hub release create --prerelease --message "Weekly automated build. Do not use in production." -t ${{ github.sha }} "$(date +%Y-%m-%d)-weekly"
+
+        # Propagate token into environment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Even though the release job has an on: release trigger, actions taken by GITHUB_TOKEN
+  # don't trigger this, so we call it here
+  # https://docs.github.com/en/actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow
+  release:
+    uses: ./.github/workflows/release_artifacts.yml

@@ -10,3 +10,5 @@ zig-cache/
 benchmark.log
 tigerbeetle_test.log
 /benchmark
+tigerbeetle-node-*.tgz
+node.lib
