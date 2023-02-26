@@ -138,6 +138,15 @@ test "disjoint_slices" {
     try std.testing.expectEqual(false, disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
 }
 
+/// `maybe` is the dual of `assert`: it signals that condition is sometimes true
+///  and sometimes false.
+///
+/// Currently we use it for documentation, but maybe one day we plug it into
+/// coverage.
+pub fn maybe(ok: bool) void {
+    assert(ok or !ok);
+}
+
 /// Utility function for ad-hoc profiling.
 ///
 /// A thin wrapper around `std.time.Timer` which handles the boilerplate of
