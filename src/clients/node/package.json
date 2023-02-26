@@ -1,12 +1,13 @@
 {
   "name": "tigerbeetle-node",
-  "version": "0.11.12",
+  "version": "0.11.13",
   "description": "TigerBeetle Node.js client",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tigerbeetledb/tigerbeetle-node.git"
+    "url": "git+https://github.com/tigerbeetledb/tigerbeetle.git",
+    "directory": "src/clients/node"
   },
   "preferUnplugged": true,
   "files": [
