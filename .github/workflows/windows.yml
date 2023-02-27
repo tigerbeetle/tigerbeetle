@@ -1,0 +1,11 @@
+name: Windows
+
+on:
+  workflow_call:
+
+jobs:
+  benchmark:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/benchmark.bat --transfer-count 4000

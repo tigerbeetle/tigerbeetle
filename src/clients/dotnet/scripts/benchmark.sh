@@ -56,10 +56,10 @@ echo "Benchmarking..."
 (cd TigerBeetle.Benchmarks && dotnet run -c Release)
 echo ""
 
-for I in 0
+for I in $REPLICAS
 do
     FILE="./0_${I}.tigerbeetle.benchmark"
-    if [ -f $FILE ]; then
-        rm $FILE
+    if [ -f "$FILE" ]; then
+        rm "$FILE"
     fi
 done

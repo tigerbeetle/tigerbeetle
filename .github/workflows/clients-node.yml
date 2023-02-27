@@ -1,0 +1,79 @@
+name: "clients/node"
+
+defaults:
+  run:
+    working-directory: ./src/clients/node
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/build.sh
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: node-binaries
+          path: src/clients/node/tigerbeetle-node-*.tgz
+
+  test_install:
+    needs: build
+    strategy:
+      matrix:
+        distro: [alpine, debian, ubuntu, fedora, rhelubi, amazonlinux, mac]
+
+    runs-on: ${{ matrix.distro == 'mac' && 'macos-latest' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: node-binaries
+          path: src/clients/node
+
+      - run: ./scripts/test_install_on_${{ matrix.distro == 'mac' && 'host' || matrix.distro }}.sh
+        env:
+          SKIP_NODE_BUILD: true
+
+# Disable version check for now, as it basically requires us to bump version in package.json for every chage.
+# Now that bors enforces that our CI is green, that becomes very painful.
+#
+#  version_check:
+#    needs: [test_install]
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v3
+#      - run: npm install && ./scripts/version_check.sh
+
+  publish:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [test_install]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: node-binaries
+          path: src/clients/node
+
+      - run: scripts/publish.sh
+        env:
+          TIGERBEETLE_NODE_PUBLISH_KEY: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
+
+  bors_clients_node:
+    name: bors/clients/node
+    needs:
+      - test_install
+#      - version_check
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        working-directory: ./
+        run: exit 0
