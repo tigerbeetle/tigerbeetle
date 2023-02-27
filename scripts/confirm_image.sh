@@ -12,33 +12,34 @@ if [[ "$2" != "--want-production" ]] && [[ "$2" != "--want-debug" ]]; then
     exit 2
 fi
 
-check="
-set -eu
+# Extract the TigerBeetle binary from the passed in Docker image
+scratch=$(mktemp)
+function finish {
+  rm -f "${scratch}"
+}
+trap finish EXIT
 
-apt-get update -y
-apt-get install -y binutils
+id=$(docker create "${1}")
+docker cp "${id}:/tigerbeetle" "${scratch}"
+docker rm "${id}"
 
-is_production=false
+is_production="false"
 # This getSymbolFromDwarf symbol only appears to be in the debug
 # build, not the release build. So that's the test!
-if ! [[ \$(nm -an /opt/beta-beetle/tigerbeetle | grep getSymbolFromDwarf) ]]; then
-  is_production=true
+if ! (nm -an "${scratch}" | grep -q getSymbolFromDwarf); then
+  is_production="true"
 fi
-"
+
+echo "Is production: ${is_production}"
 
 if [[ "$2" == '--want-production' ]]; then
-    cmd+="
-if [[ \$is_production == false ]]; then
-  echo 'Does not seem to be a production build'
-  exit 1
-fi"
+    if [[ "${is_production}" == "false" ]]; then
+      echo 'Does not seem to be a production build'
+      exit 1
+    fi
 else
-    cmd+="
-if [[ \$is_production == true ]]; then
-  echo 'Does not seem to be a debug build'
-  exit 1
-fi"
+    if [[ "${is_production}" == "true" ]]; then
+      echo 'Does not seem to be a debug build'
+      exit 1
+    fi
 fi
-
-# We accept a passed-in arg 
-docker run --entrypoint bash "$1" -c "$check"

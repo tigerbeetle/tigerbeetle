@@ -89,20 +89,48 @@ pub fn build(b: *std.build.Builder) void {
         run_step.dependOn(&run_cmd.step);
     }
 
+    // Linting targets
+    // We currently have: lint_zig_fmt, lint_tigerstyle, lint_shellcheck, lint_validate_docs.
+    // The meta-target lint runs them all
     {
-        const lint = b.addExecutable("lint", "scripts/lint.zig");
-        lint.setTarget(target);
-        lint.setBuildMode(mode);
+        // lint_zig_fmt
+        // TODO: Better way of running zig fmt?
+        const lint_zig_fmt = b.addSystemCommand(&.{ "zig", "fmt", "--check", "src/" });
+        const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt on src/");
+        lint_zig_fmt_step.dependOn(&lint_zig_fmt.step);
 
-        const run_cmd = lint.run();
+        // lint_tigerstyle
+        const lint_tigerstyle = b.addExecutable("lint_tigerstyle", "scripts/lint_tigerstyle.zig");
+        lint_tigerstyle.setTarget(target);
+        lint_tigerstyle.setBuildMode(mode);
+
+        const run_cmd = lint_tigerstyle.run();
         if (b.args) |args| {
             run_cmd.addArgs(args);
         } else {
             run_cmd.addArg("src");
         }
 
-        const lint_step = b.step("lint", "Run the linter on src/");
-        lint_step.dependOn(&run_cmd.step);
+        const lint_tigerstyle_step = b.step("lint_tigerstyle", "Run the linter on src/");
+        lint_tigerstyle_step.dependOn(&run_cmd.step);
+
+        // lint_shellcheck
+        const lint_shellcheck = b.addSystemCommand(&.{ "sh", "-c", "command -v shellcheck >/dev/null || (echo -e '\\033[0;31mPlease install shellcheck - https://www.shellcheck.net/\\033[0m' && exit 1) && shellcheck $(find . -type f -name '*.sh')" });
+        const lint_shellcheck_step = b.step("lint_shellcheck", "Run shellcheck on **.sh");
+        lint_shellcheck_step.dependOn(&lint_shellcheck.step);
+
+        // lint_validate_docs
+        const lint_validate_docs = b.addSystemCommand(&.{"scripts/validate_docs.sh"});
+        const lint_validate_docs_step = b.step("lint_validate_docs", "Validate docs");
+        lint_validate_docs_step.dependOn(&lint_validate_docs.step);
+
+        // TODO: Iterate above? Make it impossible to neglect to add somehow?
+        // lint
+        const lint_step = b.step("lint", "Run all defined linters");
+        lint_step.dependOn(lint_tigerstyle_step);
+        lint_step.dependOn(lint_zig_fmt_step);
+        lint_step.dependOn(lint_shellcheck_step);
+        lint_step.dependOn(lint_validate_docs_step);
     }
 
     // Executable which generates src/clients/c/tb_client.h
@@ -170,6 +198,13 @@ pub fn build(b: *std.build.Builder) void {
             tracer_backend,
         );
         dotnet_client(
+            b,
+            mode,
+            &.{&install_step.step},
+            options,
+            tracer_backend,
+        );
+        node_client(
             b,
             mode,
             &.{&install_step.step},
@@ -550,6 +585,57 @@ fn dotnet_client(
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);
+        build_step.dependOn(&lib.step);
+    }
+}
+
+fn node_client(
+    b: *std.build.Builder,
+    mode: Mode,
+    dependencies: []const *std.build.Step,
+    options: *std.build.OptionsStep,
+    tracer_backend: config.TracerBackend,
+) void {
+    const build_step = b.step("node_client", "Build Node client shared library");
+
+    for (dependencies) |dependency| {
+        build_step.dependOn(dependency);
+    }
+
+    // Zig cross-targets
+    const platforms = .{
+        "x86_64-linux-gnu",
+        "x86_64-linux-musl",
+        "x86_64-macos",
+        "aarch64-linux-gnu",
+        "aarch64-linux-musl",
+        "aarch64-macos",
+        // "x86_64-windows", // No Windows support just yet. We need to be on a version with https://github.com/ziglang/zig/commit/b97a68c529b5db15705f4d542d8ead616d27c880
+    };
+
+    inline for (platforms) |platform| {
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
+
+        const lib = b.addSharedLibrary("tb_nodeclient", "src/clients/node/src/node.zig", .unversioned);
+        lib.setMainPkgPath("src");
+        lib.setOutputDir("src/clients/node/dist/bin/" ++ platform);
+
+        // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
+        // if you're running zig build node_client manually.
+        lib.addSystemIncludeDir("src/clients/node/node_modules/node-api-headers/include");
+        lib.setTarget(cross_target);
+        lib.setBuildMode(mode);
+        lib.linkLibC();
+        lib.linker_allow_shlib_undefined = true;
+
+        if (cross_target.os_tag.? == .windows) {
+            lib.linkSystemLibrary("ws2_32");
+            lib.linkSystemLibrary("advapi32");
+        }
+
+        lib.addOptions("vsr_options", options);
+        link_tracer_backend(lib, tracer_backend, cross_target);
+
         build_step.dependOn(&lib.step);
     }
 }

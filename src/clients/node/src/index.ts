@@ -1,4 +1,59 @@
-const binding: Binding = require('./client.node')
+function getBinding (): Binding {
+  const { arch, platform } = process
+
+  const archMap = {
+    "arm64": "aarch64",
+    "x64": "x86_64"
+  }
+
+  const platformMap = {
+    "linux": "linux",
+    "darwin": "macos"
+  }
+
+  if (! (arch in archMap)) {
+    throw new Error(`Unsupported arch: ${arch}`)
+  }
+
+  if (! (platform in platformMap)) {
+    throw new Error(`Unsupported platform: ${platform}`)
+  }
+
+  let extra = ''
+
+  /**
+   * We need to detect during runtime which libc we're running on to load the correct NAPI.
+   * binary.
+   *
+   * Rationale: The /proc/self/map_files/ subdirectory contains entries corresponding to
+   * memory-mapped files loaded by Node.
+   * https://man7.org/linux/man-pages/man5/proc.5.html: We detect a musl-based distro by
+   * checking if any library contains the name "musl".
+   *
+   * Prior art: https://github.com/xerial/sqlite-jdbc/issues/623
+   */
+
+  const fs = require('fs')
+  const path = require('path')
+
+  if (platform === 'linux') {
+    extra = '-gnu'
+
+    for (const file of fs.readdirSync("/proc/self/map_files/")) {
+      const realPath = fs.readlinkSync(path.join("/proc/self/map_files/", file))
+      if (realPath.includes('musl')) {
+        extra = '-musl'
+        break
+      }
+    }
+  }
+
+  const filename = `./bin/${archMap[arch]}-${platformMap[platform]}${extra}/client.node`
+  return require(filename)
+}
+
+const binding = getBinding()
+
 interface Binding {
   init: (args: BindingInitArgs) => Context
   request: (context: Context, operation: Operation, batch: Event[], result: ResultCallback) => void

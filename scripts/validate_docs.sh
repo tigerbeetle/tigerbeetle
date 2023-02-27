@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-
+# TODO: Make this print a nice messages if commands are missing
+# TODO: Make this cache between runs for local dev
 set -e
 
 # This script builds the docs website for the currently checked out
