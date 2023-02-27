@@ -4,6 +4,15 @@ name: "clients/java"
 
 on:
   workflow_call:
+    secrets:
+      MAVEN_GPG_SECRET_KEY:
+        required: true
+      MAVEN_CENTRAL_USERNAME:
+        required: true
+      MAVEN_CENTRAL_TOKEN:
+        required: true
+      MAVEN_GPG_SECRET_KEY_PASSWORD:
+        required: true
 
 jobs:
   build:
@@ -164,16 +173,3 @@ jobs:
     - name: Run validation
       run: |
         docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java
-
-  bors_clients_java:
-    name: bors/clients/java
-    needs:
-      - build
-      - prepare_validation_tests
-      - run_validation_tests
-      - run_validation_tests_on_containers
-    runs-on: ubuntu-latest
-    steps:
-      - name: CI succeeded
-        working-directory: ./
-        run: exit 0
