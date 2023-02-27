@@ -76,9 +76,10 @@ jobs:
       - uses: actions/checkout@v3
 
       # Runs checks against generated client docs
-      - run: ./scripts/install_zig.sh
-      - run: ( cd src/clients && ../../zig/zig run docs_generate.zig )
-      - run: ./scripts/fail_on_diff.sh
+      # Disabled for now, we need to make this able to run samples from PRs
+      # - run: ./scripts/install_zig.sh
+      # - run: ( cd src/clients && ../../zig/zig run docs_generate.zig )
+      # - run: ./scripts/fail_on_diff.sh
 
   # This is just a canary to make sure that the simulator compiles
   # It would be a good idea to also _run_ a single iteration,

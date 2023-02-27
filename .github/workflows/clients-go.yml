@@ -81,7 +81,7 @@ jobs:
         with:
           name: go-binaries
           path: src/clients/go/pkg/native
+      - run: ./scripts/publish.sh
         env:
           TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
           GITHUB_SHA: ${{ github.sha }}
-      - run: ./scripts/publish.sh
