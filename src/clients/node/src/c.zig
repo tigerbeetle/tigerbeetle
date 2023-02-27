@@ -1,3 +1,3 @@
 pub usingnamespace @cImport({
-    @cInclude("node/node_api.h");
+    @cInclude("node_api.h");
 });
