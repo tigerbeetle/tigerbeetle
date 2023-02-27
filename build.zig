@@ -619,8 +619,10 @@ fn node_client(
         const lib = b.addSharedLibrary("tb_nodeclient", "src/clients/node/src/node.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.setOutputDir("src/clients/node/dist/bin/" ++ platform);
-        lib.addSystemIncludeDir("/usr/include");
-        lib.addSystemIncludeDir("/usr/local/include");
+
+        // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
+        // if you're running zig build node_client manually.
+        lib.addSystemIncludeDir("src/clients/node/node_modules/node-api-headers/include");
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
         lib.linkLibC();
