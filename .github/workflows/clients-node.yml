@@ -6,6 +6,9 @@ defaults:
 
 on:
   workflow_call:
+    secrets:
+      TIGERBEETLE_NODE_PUBLISH_KEY:
+        required: true
 
 jobs:
   build:
@@ -66,14 +69,3 @@ jobs:
       - run: scripts/publish.sh
         env:
           TIGERBEETLE_NODE_PUBLISH_KEY: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
-
-  bors_clients_node:
-    name: bors/clients/node
-    needs:
-      - test_install
-#      - version_check
-    runs-on: ubuntu-latest
-    steps:
-      - name: CI succeeded
-        working-directory: ./
-        run: exit 0
