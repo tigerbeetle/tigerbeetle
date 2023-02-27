@@ -44,7 +44,7 @@ jobs:
           SKIP_NODE_BUILD: true
 
 # Disable version check for now, as it basically requires us to bump version in package.json for every chage.
-# Now that bors enforces that our CI is green, that becomes very painful.
+# Now that Github enforces that our CI is green, that becomes very painful.
 #
 #  version_check:
 #    needs: [test_install]
