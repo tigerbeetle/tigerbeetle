@@ -58,8 +58,10 @@ pub fn main() !void {
         _ = (try parse_arg(allocator, &args, arg, "--account-count", &account_count)) or
             (try parse_arg(allocator, &args, arg, "--transfer-count", &transfer_count)) or
             (try parse_arg(allocator, &args, arg, "--transfer-count-per-second", &transfer_count_per_second)) or
-            std.debug.panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
+            panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
     }
+
+    if (account_count < 2) panic("Need at least two acconts, got {}", .{account_count});
 
     const transfer_arrival_rate_ns = @divTrunc(
         std.time.ns_per_s,
@@ -151,6 +153,7 @@ pub fn main() !void {
             if (debit_account_index == credit_account_index) {
                 credit_account_index = (credit_account_index + 1) % account_count;
             }
+            assert(debit_account_index != credit_account_index);
             batch_transfers.appendAssumeCapacity(.{
                 // Reverse the bits to stress non-append-only index for `id`.
                 .id = @bitReverse(u128, transfer_index + 1),
