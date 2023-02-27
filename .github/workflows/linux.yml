@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: PATH="zig/:$PATH" zig build lint
+      - run: zig/zig build lint
     env:
       SOURCE_REPO: ${{ github.event.pull_request.head.repo.clone_url }}
 
