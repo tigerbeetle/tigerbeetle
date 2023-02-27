@@ -11,6 +11,10 @@ if [ "$1" = "--debug" ]; then
 fi
 
 target="${TARGET:-}"
+if [ -n "${target}" ]; then
+    target="-Dtarget=${target}"
+fi
+
 if [ "${TARGETPLATFORM:-}" = "linux/arm64" ]; then
     target="-Dtarget=aarch64-linux-gnu"
 fi
