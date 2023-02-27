@@ -2,7 +2,9 @@
 
 set -e
 
-./scripts/build.sh
+if [ -z ${SKIP_NODE_BUILD+x} ]; then
+	./scripts/build.sh
+fi
 
 id=$(docker build -q -f - ../../.. < <(echo "
 FROM fedora

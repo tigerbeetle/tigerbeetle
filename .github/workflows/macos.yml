@@ -1,0 +1,19 @@
+name: macOS
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build test
+      - run: ./scripts/install.sh
+
+  benchmark:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/benchmark.sh --transfer-count 4000

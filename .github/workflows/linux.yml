@@ -1,0 +1,188 @@
+name: Linux
+
+on:
+  workflow_call:
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
+      - run: PATH="zig/:$PATH" zig build lint
+    env:
+      SOURCE_REPO: ${{ github.event.pull_request.head.repo.clone_url }}
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        distro: [ubuntu, alpine]
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/tests_on_${{ matrix.distro }}.sh
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/benchmark.sh --transfer-count 4000
+
+  # I don't like this - having everything manually listed out here, but need to think of a better
+  # way to parallelize it.
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - "fuzz_ewah -- --seed 123"
+          - "fuzz_lsm_manifest_log -- --seed 123 --events-max 400"
+          - "fuzz_lsm_segmented_array -- --seed 123"
+          - "fuzz_lsm_tree -- --seed 123 --events-max 400"
+          - "fuzz_vsr_journal_format -- --seed 123"
+          - "fuzz_vsr_superblock -- --seed 123 --events-max 3"
+          - "fuzz_vsr_superblock_free_set -- --seed 123"
+          - "fuzz_vsr_superblock_quorums -- --seed 123"
+
+          # This both checks that the hash_log builds and acts as a regression test for
+          # https://github.com/tigerbeetledb/tigerbeetle/issues/404
+          - "fuzz_lsm_forest -Dhash-log-mode=create -Drelease-safe -- --seed 16319736705930193193 --events-max 10000 && zig/zig build fuzz_lsm_forest -Dhash-log-mode=check -- --seed 16319736705930193193 --events-max 10000"
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build ${{ matrix.target }}
+
+  # Check some build steps that would otherwise not get checked.
+  # Things like "go_client", "java_client", "dotnet_client" are excluded here
+  # because they get run in their own CI
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: ["build_benchmark_ewah", "build_benchmark_eytzinger", "build_benchmark_segmented_array", "-Dtracer-backend=perfetto", "-Dtracer-backend=tracy"]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build ${{ matrix.target }}
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Runs checks against generated client docs
+      - run: ./scripts/install_zig.sh
+      - run: ( cd src/clients && ../../zig/zig run docs_generate.zig )
+      - run: ./scripts/fail_on_diff.sh
+
+  # This is just a canary to make sure that the simulator compiles
+  # It would be a good idea to also _run_ a single iteration,
+  # but that currently has some false failures :-)
+  # TODO: Make so we have a single zig build simulator that does both
+  simulate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        state_machine: ["accounting", "testing"]
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build simulator -Dsimulator-state-machine=${{ matrix.state_machine }}
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        debug: ["debug", "production"]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/setup-buildx-action@v2
+
+      - id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=${{ github.ref == 'refs/heads/main' }}
+
+      - name: 'Build Docker Container'
+        uses: docker/build-push-action@v4
+        with:
+          build-args: |
+            DEBUG=${{ matrix.debug == 'debug' && 'true' || 'false' }}
+
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          target: release
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      # This is required because we can't load multiple platforms. Instead,
+      # just load amd64 for verification below.
+      - name: 'Load Docker Container'
+        id: docker_load
+        uses: docker/build-push-action@v4
+        with:
+          build-args: |
+            DEBUG=${{ matrix.debug == 'debug' && 'true' || 'false' }}
+
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          target: release
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      # Validate the image
+      - if: matrix.debug == 'production'
+        run: ./scripts/confirm_image.sh ${{ steps.docker_load.outputs.imageid }} --want-production
+      - if: matrix.debug == 'debug'
+        run: ./scripts/confirm_image.sh ${{ steps.docker_load.outputs.imageid }} --want-debug
+
+      # Login and publish, if we're on main.
+      - if: github.ref == 'refs/heads/main'
+        name: 'Login to Registry'
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - if: github.ref == 'refs/heads/main'
+        name: 'Push Docker Container'
+        uses: docker/build-push-action@v4
+        with:
+          build-args: |
+            DEBUG=${{ matrix.debug == 'debug' && 'true' || 'false' }}
+
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          target: release
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  bors_tigerbeetle:
+    name: bors/tigerbeetle
+    needs:
+      - lint
+      - test
+      - benchmark
+      - fuzz
+      - verify
+      - simulate
+      - build
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        working-directory: ./
+        run: exit 0

@@ -1,0 +1,96 @@
+name: "clients/go"
+
+on:
+  workflow_call:
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build go_client -Drelease-safe
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: go-binaries
+          path: src/clients/go/pkg/native
+
+  tests:
+    needs: binaries
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: go-binaries
+          path: src/clients/go/pkg/native
+
+      - if: matrix.os != 'windows-latest'
+        run: ./scripts/install.sh
+      - if: matrix.os != 'windows-latest'
+        run: go test ./...
+        working-directory: ./src/clients/go
+
+      # TODO: Windows exit codes broken
+      - if: matrix.os == 'windows-latest'
+        run: ./scripts/install.bat
+      - if: matrix.os == 'windows-latest'
+        run: ./zgo.bat test ./...
+        working-directory: ./src/clients/go
+
+  build_sample:
+    needs: binaries
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: go-binaries
+          path: src/clients/go/pkg/native
+      - if: matrix.os != 'windows-latest'
+        run: go build
+        working-directory: ./src/clients/go/samples/basic
+      - if: matrix.os == 'windows-latest'
+        run: ../../zgo.bat build
+        working-directory: ./src/clients/go/samples/basic
+
+  publish:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [binaries, tests, build_sample]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./src/clients/go
+    steps:
+      - uses: actions/checkout@v3
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: go-binaries
+          path: src/clients/go/pkg/native
+        env:
+          TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
+          GITHUB_SHA: ${{ github.sha }}
+      - run: ./scripts/publish.sh
+
+  bors_clients_go:
+    name: bors/clients/go
+    needs:
+      - binaries
+      - tests
+      - build_sample
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI succeeded
+        working-directory: ./
+        run: exit 0

@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const c = @import("c.zig");
 const translate = @import("translate.zig");
-const tb = @import("tigerbeetle/src/tigerbeetle.zig");
+const tb = @import("../../../tigerbeetle.zig");
 
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
@@ -12,25 +12,25 @@ const TransferFlags = tb.TransferFlags;
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
-const Storage = @import("tigerbeetle/src/storage.zig").Storage;
-const StateMachine = @import("tigerbeetle/src/state_machine.zig").StateMachineType(Storage, .{
+const Storage = @import("../../../storage.zig").Storage;
+const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
     .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 const Operation = StateMachine.Operation;
-const MessageBus = @import("tigerbeetle/src/message_bus.zig").MessageBusClient;
-const MessagePool = @import("tigerbeetle/src/message_pool.zig").MessagePool;
-const IO = @import("tigerbeetle/src/io.zig").IO;
-const constants = @import("tigerbeetle/src/constants.zig");
+const MessageBus = @import("../../../message_bus.zig").MessageBusClient;
+const MessagePool = @import("../../../message_pool.zig").MessagePool;
+const IO = @import("../../../io.zig").IO;
+const constants = @import("../../../constants.zig");
 
-const vsr = @import("tigerbeetle/src/vsr.zig");
+const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 const Client = vsr.Client(StateMachine, MessageBus);
 
 // TODO(jamii)
 // This is a hack used to work around the absence of tigerbeetle_build_options.
 // This should be removed once the node client is built using `zig build`.
-pub const tracer_backend: @import("tigerbeetle/src/config.zig").TracerBackend = .none;
+pub const tracer_backend: @import("../../../config.zig").TracerBackend = .none;
 
 // Since this is running in application space, log only critical messages to reduce noise.
 pub const log_level: std.log.Level = .err;
