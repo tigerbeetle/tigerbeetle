@@ -95,7 +95,7 @@ pub fn build(b: *std.build.Builder) void {
     {
         // lint_zig_fmt
         // TODO: Better way of running zig fmt?
-        const lint_zig_fmt = b.addSystemCommand(&.{ "zig", "fmt", "--check", "src/" });
+        const lint_zig_fmt = b.addSystemCommand(&.{ b.zig_exe, "fmt", "--check", "src/" });
         const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt on src/");
         lint_zig_fmt_step.dependOn(&lint_zig_fmt.step);
 
