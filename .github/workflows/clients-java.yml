@@ -164,16 +164,3 @@ jobs:
     - name: Run validation
       run: |
         docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java
-
-  bors_clients_java:
-    name: bors/clients/java
-    needs:
-      - build
-      - prepare_validation_tests
-      - run_validation_tests
-      - run_validation_tests_on_containers
-    runs-on: ubuntu-latest
-    steps:
-      - name: CI succeeded
-        working-directory: ./
-        run: exit 0

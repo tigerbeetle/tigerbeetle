@@ -121,16 +121,3 @@ jobs:
           cp -f /Program.cs .
           dotnet run
           "
-
-  bors_clients_dotnet:
-    name: bors/clients/dotnet
-    needs:
-      - build
-      - prepare_validation_tests
-      - run_validation_tests
-      - run_validation_tests_on_containers
-    runs-on: ubuntu-latest
-    steps:
-      - name: CI succeeded
-        working-directory: ./
-        run: exit 0

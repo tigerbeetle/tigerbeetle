@@ -82,15 +82,3 @@ jobs:
           TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
           GITHUB_SHA: ${{ github.sha }}
       - run: ./scripts/publish.sh
-
-  bors_clients_go:
-    name: bors/clients/go
-    needs:
-      - binaries
-      - tests
-      - build_sample
-    runs-on: ubuntu-latest
-    steps:
-      - name: CI succeeded
-        working-directory: ./
-        run: exit 0
