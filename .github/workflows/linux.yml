@@ -169,20 +169,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
-
-  bors_tigerbeetle:
-    name: bors/tigerbeetle
-    needs:
-      - lint
-      - test
-      - benchmark
-      - fuzz
-      - verify
-      - simulate
-      - build
-
-    runs-on: ubuntu-latest
-    steps:
-      - name: CI succeeded
-        working-directory: ./
-        run: exit 0
