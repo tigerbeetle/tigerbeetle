@@ -4,6 +4,15 @@ name: "clients/java"
 
 on:
   workflow_call:
+    secrets:
+      MAVEN_GPG_SECRET_KEY:
+        required: true
+      MAVEN_CENTRAL_USERNAME:
+        required: true
+      MAVEN_CENTRAL_TOKEN:
+        required: true
+      MAVEN_GPG_SECRET_KEY_PASSWORD:
+        required: true
 
 jobs:
   build:

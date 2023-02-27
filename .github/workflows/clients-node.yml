@@ -6,6 +6,9 @@ defaults:
 
 on:
   workflow_call:
+    secrets:
+      TIGERBEETLE_NODE_PUBLISH_KEY:
+        required: true
 
 jobs:
   build:
