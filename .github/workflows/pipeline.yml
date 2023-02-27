@@ -42,3 +42,19 @@ jobs:
     uses: ./.github/workflows/clients-node.yml
     secrets:
       TIGERBEETLE_NODE_PUBLISH_KEY: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
+  full-pipeline:
+    needs:
+      - smoke
+      - linux
+      - windows
+      - macos
+      - client-dotnet
+      - client-go
+      - client-java
+      - client-node
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: All CI Jobs Passed
+        working-directory: ./
+        run: exit 0
