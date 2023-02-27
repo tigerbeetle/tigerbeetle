@@ -395,7 +395,7 @@ pub fn Clock(comptime Time: type) type {
             if (system == cluster) {} else if (system < lower) {
                 const delta = lower - system;
                 if (delta < std.time.ns_per_ms) {
-                    log.info("{}: system time is {} behind", .{
+                    log.debug("{}: system time is {} behind", .{
                         self.replica,
                         fmt.fmtDurationSigned(delta),
                     });
@@ -408,7 +408,7 @@ pub fn Clock(comptime Time: type) type {
             } else {
                 const delta = system - upper;
                 if (delta < std.time.ns_per_ms) {
-                    log.info("{}: system time is {} ahead", .{
+                    log.debug("{}: system time is {} ahead", .{
                         self.replica,
                         fmt.fmtDurationSigned(delta),
                     });
