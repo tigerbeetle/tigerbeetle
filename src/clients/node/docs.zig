@@ -281,22 +281,22 @@ pub const NodeDocs = Docs{
     \\ */
     ,
 
+    // Extra steps to determine commit and repo so this works in
+    // CI against forks and pull requests.
     .developer_setup_bash_commands = 
-    \\git clone https://github.com/tigerbeetledb/tigerbeetle
+    \\rm -rf tigerbeetle
+    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
     \\cd tigerbeetle
+    \\git checkout $GIT_SHA # Optional
     \\./scripts/install_zig.sh
     \\cd src/clients/node
     \\npm install --include dev
     \\npm pack
     ,
-    .developer_setup_windows_commands = 
-    \\git clone https://github.com/tigerbeetledb/tigerbeetle
-    \\cd tigerbeetle
-    \\./scripts/install_zig.bat
-    \\npm install --include dev # NOTE! This does not work at the moment (on Windows).
-    \\cd src/clients/node
-    \\npm pack
-    ,
+
+    // Extra steps to determine commit and repo so this works in
+    // CI against forks and pull requests.
+    .developer_setup_windows_commands = "",
     .test_main_prefix = 
     \\const { createClient } = require("tigerbeetle-node");
     \\

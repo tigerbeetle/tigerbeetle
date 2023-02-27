@@ -94,21 +94,14 @@ const Generator = struct {
     allocator: std.mem.Allocator,
     language: Docs,
 
-    fn run_in_docker(self: Generator, cmds: []const u8, mount: []const u8) !void {
-        self.print(try std.fmt.allocPrint(self.allocator, "Running command in Docker: {s}", .{cmds}));
+    const DockerCommand = struct {
+        cmds: []const u8,
+        mount: ?[][]const u8,
+        env: ?[][]const u8,
+    };
 
-        var full_cmd = &[_][]const u8{
-            "docker",
-            "run",
-            "-v",
-            mount,
-            self.language.test_linux_docker_image,
-            "bash",
-            "-c",
-            cmds,
-        };
-        std.debug.print("{?}\n", .{full_cmd});
-        var cp = try std.ChildProcess.init(full_cmd, self.allocator);
+    fn run(self: Generator, cmd: [][]const u8) !void {
+        var cp = try std.ChildProcess.init(cmd, self.allocator);
         var res = try cp.spawnAndWait();
         switch (res) {
             .Exited => |code| {
@@ -121,7 +114,40 @@ const Generator = struct {
         }
     }
 
-    fn run_with_file_in_docker(self: Generator, file: []const u8, fileName: ?[]const u8, to_run: []const u8) !void {
+    fn run_in_docker(self: Generator, cmd: DockerCommand) !void {
+        self.print(try std.fmt.allocPrint(self.allocator, "Running command in Docker: {s}", .{cmd.cmds}));
+
+        var full_cmd = std.ArrayList([]const u8).init(self.allocator);
+        try full_cmd.appendSlice(&[_][]const u8{
+            "docker",
+            "run",
+        });
+        if (cmd.mount) |mounts| {
+            for (mounts) |entry| {
+                try full_cmd.append("-v");
+                try full_cmd.append(entry);
+            }
+        }
+
+        if (cmd.env) |envs| {
+            for (envs) |entry| {
+                try full_cmd.append("-e");
+                try full_cmd.append(entry);
+            }
+        }
+
+        try full_cmd.appendSlice(&[_][]const u8{
+            self.language.test_linux_docker_image,
+            "bash",
+            "-c",
+            cmd.cmds,
+        });
+
+        self.print(try std.fmt.allocPrint(self.allocator, "[Debug] Command: {s}\n", .{full_cmd.items}));
+        try self.run(full_cmd.items);
+    }
+
+    fn run_with_file_in_docker(self: Generator, file: []const u8, fileName: ?[]const u8, cmd: DockerCommand) !void {
         // Delete the directory if it already exists.
         std.fs.cwd().deleteTree("/tmp/wrk") catch {};
         std.fs.cwd().makeDir("/tmp/wrk") catch {};
@@ -144,21 +170,30 @@ const Generator = struct {
         });
         _ = try tmp_file.write(file);
 
-        var cmd = std.ArrayList(u8).init(self.allocator);
-        defer cmd.deinit();
+        var full_cmd = std.ArrayList(u8).init(self.allocator);
+        defer full_cmd.deinit();
 
-        try cmd.writer().print("cd /tmp/wrk", .{});
+        try full_cmd.writer().print("cd /tmp/wrk", .{});
 
         var install_lines = std.mem.split(u8, self.language.install_commands, "\n");
         while (install_lines.next()) |line| {
-            try cmd.writer().print(" && {s}", .{line});
+            try full_cmd.writer().print(" && {s}", .{line});
         }
 
-        try cmd.writer().print(" && {s}", .{to_run});
+        try full_cmd.writer().print(" && {s}", .{cmd.cmds});
+
+        var mount = std.ArrayList([]const u8).init(self.allocator);
+        if (cmd.mount) |m| {
+            try mount.appendSlice(m);
+        }
+        try mount.append("/tmp/wrk:/tmp/wrk");
 
         try self.run_in_docker(
-            cmd.items,
-            "/tmp/wrk:/tmp/wrk",
+            .{
+                .cmds = full_cmd.items,
+                .mount = mount.items,
+                .env = cmd.env,
+            },
         );
 
         tmp_file.close();
@@ -172,7 +207,11 @@ const Generator = struct {
         try self.run_with_file_in_docker(
             file,
             null,
-            self.language.install_sample_file_build_commands,
+            .{
+                .cmds = self.language.install_sample_file_build_commands,
+                .mount = null,
+                .env = null,
+            },
         );
     }
 
@@ -190,10 +229,33 @@ const Generator = struct {
         self.print("Building aggregate sample file");
         try self.build_file_in_docker(sample);
 
+        var env = std.ArrayList([]const u8).init(self.allocator);
+        for (&[_][]const u8{
+            "GIT_SHA",
+            "GITHUB_REPOSITORY",
+        }) |env_var_name| {
+            if (std.os.getenv(env_var_name)) |value| {
+                try env.append(try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s}={s}",
+                    .{
+                        env_var_name,
+                        value,
+                    },
+                ));
+            }
+        }
+
         try self.run_with_file_in_docker(
             self.language.developer_setup_bash_commands,
             "setup.sh",
-            "apt-get update -y && apt-get install -y xz-utils && bash setup.sh",
+            .{
+                // Important to `bash -e` here since setup.sh won't
+                // necessarily have `set -e` inside.
+                .cmds = "apt-get update -y && apt-get install -y xz-utils && bash -e setup.sh",
+                .env = env.items,
+                .mount = null,
+            },
         );
     }
 
@@ -228,7 +290,11 @@ const Generator = struct {
         try self.run_with_file_in_docker(
             sample,
             null,
-            self.language.code_format_commands,
+            .{
+                .cmds = self.language.code_format_commands,
+                .env = null,
+                .mount = null,
+            },
         );
 
         // This is the place where run_with_file_in_docker places the file.
@@ -357,7 +423,7 @@ const Generator = struct {
             \\request. You can refer to the ID field in the response to
             \\distinguish accounts.
             \\
-            \\In this example, transfer `137` exists while transfer `138` does not.
+            \\In this example, account `137` exists while account `138` does not.
         );
         mw.code(language.markdown_name, language.lookup_accounts_example);
 
@@ -485,7 +551,11 @@ const Generator = struct {
 
         // Windows setup
         mw.header(3, "On Windows");
-        mw.commands(language.developer_setup_windows_commands);
+        if (language.developer_setup_windows_commands.len > 0) {
+            mw.commands(language.developer_setup_windows_commands);
+        } else {
+            mw.paragraph("Unsupported.");
+        }
 
         try mw.save(language.readme);
     }
@@ -495,6 +565,7 @@ pub fn main() !void {
     var args = std.process.args();
     var skipLanguage = [_]bool{false} ** languages.len;
     var validate = true;
+    var generate = true;
     while (args.nextPosix()) |arg| {
         if (std.mem.eql(u8, arg, "--only")) {
             var filter = args.nextPosix().?;
@@ -508,6 +579,10 @@ pub fn main() !void {
 
         if (std.mem.eql(u8, arg, "--no-validate")) {
             validate = false;
+        }
+
+        if (std.mem.eql(u8, arg, "--no-generate")) {
+            generate = false;
         }
     }
 
@@ -524,12 +599,14 @@ pub fn main() !void {
         var mw = MarkdownWriter.init(&buf);
 
         var generator = Generator{ .allocator = allocator, .language = language };
-        generator.print("Validating");
         if (validate) {
+            generator.print("Validating");
             try generator.validate();
         }
 
-        generator.print("Generating");
-        try generator.generate(&mw);
+        if (generate) {
+            generator.print("Generating");
+            try generator.generate(&mw);
+        }
     }
 }
