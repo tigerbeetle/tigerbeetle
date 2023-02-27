@@ -285,7 +285,7 @@ pub fn CompactionType(
         ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(compaction.status == .processing);
-            assert(compaction.callback != null);
+            assert(compaction.io_pending > 0);
             assert(!compaction.merge_done);
             assert(table.visible(compaction.op_min));
 
@@ -312,7 +312,6 @@ pub fn CompactionType(
         pub fn compact_tick(compaction: *Compaction, callback: Callback) void {
             assert(compaction.status == .processing);
             assert(compaction.callback == null);
-            assert(compaction.io_pending == 0);
             assert(!compaction.merge_done);
 
             compaction.callback = callback;
@@ -331,11 +330,17 @@ pub fn CompactionType(
             compaction.io_start();
             defer compaction.io_finish();
 
+            // Only tick IO at the start of the first compact_tick() for the MergeIterator.
+            // After that, compact_tick()s will tick IO for their successors to improve pipelining.
+            if (compaction.merge_iterator == null) compaction.io_tick();
+        }
+
+        fn io_tick(compaction: *Compaction) void {
             // Start reading blocks from the iterators to merge them.
             if (compaction.iterator_a.tick()) compaction.io_start();
             if (compaction.iterator_b.tick()) compaction.io_start();
 
-            // Start writing blocks prepared by the merge iterator from a previous compact_tick().
+            // Start writing blocks prepared by the merge iterator.
             compaction.io_write_start(.data);
             compaction.io_write_start(.filter);
             compaction.io_write_start(.index);
@@ -344,17 +349,17 @@ pub fn CompactionType(
         const BlockWriteField = enum { data, filter, index };
 
         fn io_write_start(compaction: *Compaction, comptime field: BlockWriteField) void {
+            assert(compaction.status == .processing);
+            assert(!compaction.merge_done);
+
             const write_callback = struct {
                 fn callback(write: *Grid.Write) void {
                     const block_write = @fieldParentPtr(BlockWrite, "write", write);
-
                     assert(block_write.state == .writing);
                     block_write.state = .building;
 
-                    if (constants.verify) {
-                        // We've finished writing so the block should now be zeroed.
-                        assert(mem.allEqual(u8, block_write.block.*, 0));
-                    }
+                    // We've finished writing so the block should now be zeroed.
+                    if (constants.verify) assert(mem.allEqual(u8, block_write.block.*, 0));
                     block_write.block = undefined;
 
                     const _compaction = @fieldParentPtr(Compaction, @tagName(field), block_write);
@@ -378,7 +383,6 @@ pub fn CompactionType(
 
         fn io_start(compaction: *Compaction) void {
             assert(compaction.status == .processing);
-            assert(compaction.callback != null);
             assert(!compaction.merge_done);
 
             compaction.io_pending += 1;
@@ -386,12 +390,16 @@ pub fn CompactionType(
 
         fn io_finish(compaction: *Compaction) void {
             assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(compaction.io_pending > 0);
             assert(!compaction.merge_done);
+            assert(compaction.io_pending > 0);
 
             compaction.io_pending -= 1;
-            if (compaction.io_pending == 0) compaction.cpu_merge_start();
+
+            // Only start a CPU merge when IO finishes during a compact_tick().
+            // IO that runs outside of compact_tick() will only help synchronize io_pending.
+            if (compaction.io_pending == 0 and compaction.callback != null) {
+                compaction.cpu_merge_start();
+            }
         }
 
         fn cpu_merge_start(compaction: *Compaction) void {
@@ -444,7 +452,11 @@ pub fn CompactionType(
 
             const callback = compaction.callback.?;
             compaction.callback = null;
-            callback(compaction);
+            defer callback(compaction); // Invoke the callback *after* running io_tick() down below
+
+            // Start IO for the compact_tick() after invoking the callback. It will wait for this 
+            // pending IO to complete before running its cpu_merge_start().
+            if (!compaction.merge_done) compaction.io_tick();
         }
 
         fn cpu_merge(compaction: *Compaction) void {
