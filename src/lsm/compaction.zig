@@ -454,7 +454,7 @@ pub fn CompactionType(
             compaction.callback = null;
             defer callback(compaction); // Invoke the callback *after* running io_tick() down below
 
-            // Start IO for the compact_tick() after invoking the callback. It will wait for this 
+            // Start IO for the compact_tick() after invoking the callback. It will wait for this
             // pending IO to complete before running its cpu_merge_start().
             if (!compaction.merge_done) compaction.io_tick();
         }
