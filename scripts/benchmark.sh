@@ -12,7 +12,7 @@ fi
 COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
-zig/zig build install -Drelease-safe
+zig/zig build install -Drelease-safe -Dconfig=production
 
 function onerror {
     if [ "$?" == "0" ]; then
