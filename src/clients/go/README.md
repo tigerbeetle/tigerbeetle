@@ -198,7 +198,7 @@ not necessarily the same as the order of IDs in the
 request. You can refer to the ID field in the response to
 distinguish accounts.
 
-In this example, transfer `137` exists while transfer `138` does not.
+In this example, account `137` exists while account `138` does not.
 
 ```go
 accounts, err := client.LookupAccounts([]tb_types.Uint128{uint128("137"), uint128("138")})
@@ -435,8 +435,10 @@ log.Println(transfersRes, err)
 ### On Linux and macOS
 
 ```console
-$ git clone https://github.com/tigerbeetledb/tigerbeetle
+$ rm -rf tigerbeetle
+$ git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
 $ cd tigerbeetle
+$ git checkout $GIT_SHA # Optional
 $ ./scripts/install_zig.sh
 $ ./zig/zig build go_client -Drelease-safe
 $ cd src/clients/go
@@ -446,8 +448,10 @@ $ ./zgo.sh test
 ### On Windows
 
 ```console
-$ git clone https://github.com/tigerbeetledb/tigerbeetle
+$ rd -r tigerbeetle
+$ git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
 $ cd tigerbeetle
+$ git checkout $GIT_SHA # Optional
 $ ./scripts/install_zig.bat
 $ ./zig/zig build go_client -Drelease-safe
 $ cd tigerbeetle/src/clients/go

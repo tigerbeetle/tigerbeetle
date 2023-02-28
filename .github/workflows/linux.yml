@@ -76,10 +76,13 @@ jobs:
       - uses: actions/checkout@v3
 
       # Runs checks against generated client docs
-      # Disabled for now, we need to make this able to run samples from PRs
-      # - run: ./scripts/install_zig.sh
-      # - run: ( cd src/clients && ../../zig/zig run docs_generate.zig )
-      # - run: ./scripts/fail_on_diff.sh
+      - run: ./scripts/install_zig.sh
+      - run: ( cd src/clients && ../../zig/zig run docs_generate.zig )
+      - run: ./scripts/fail_on_diff.sh
+    env:
+      # Somehow this is not the same as GITHUB_SHA.
+      # https://github.com/orgs/community/discussions/26325
+      GIT_SHA: ${{ github.event.pull_request.head.sha }}
 
   # This is just a canary to make sure that the simulator compiles
   # It would be a good idea to also _run_ a single iteration,
