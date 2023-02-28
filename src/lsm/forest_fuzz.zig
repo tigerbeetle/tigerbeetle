@@ -299,18 +299,17 @@ const Environment = struct {
         }
     }
 
-    fn apply_op(env: *Environment, fuzz_op: FuzzOp, model_ptr: anytype) !void {
-        var model = model_ptr.*;
+    fn apply_op(env: *Environment, fuzz_op: FuzzOp, model: anytype) !void {
         switch (fuzz_op) {
             .compact => |compact| {
                 env.compact(compact.op);
                 if (compact.checkpoint) {
-                    var it = model.uncheckpointed.iterator();
+                    var it = model.*.uncheckpointed.iterator();
                     while (it.next()) |kv| {
-                        try model.checkpointed.put(kv.key_ptr.*, kv.value_ptr.*);
+                        try model.*.checkpointed.put(kv.key_ptr.*, kv.value_ptr.*);
                     }
-                    model.uncheckpointed.deinit();
-                    model.uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+                    model.*.uncheckpointed.deinit();
+                    model.*.uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator);
 
                     env.checkpoint(compact.op);
                 }
@@ -319,7 +318,7 @@ const Environment = struct {
                 // The forest requires prefetch before put.
                 env.prefetch_account(account.id);
                 env.put_account(&account);
-                try model.uncheckpointed.put(account.id, account);
+                try model.*.uncheckpointed.put(account.id, account);
             },
             .get_account => |id| {
                 // Get account from lsm.
@@ -327,14 +326,14 @@ const Environment = struct {
                 const lsm_account = env.get_account(id);
 
                 // Compare result to model.
-                const model_account = model.uncheckpointed.get(id) orelse model.checkpointed.get(id);
+                const model_account = model.*.uncheckpointed.get(id) orelse model.*.checkpointed.get(id);
                 if (model_account == null) {
                     assert(lsm_account == null);
                 } else {
                     assert(std.mem.eql(
                         u8,
                         std.mem.asBytes(&model_account.?),
-                        std.mem.asBytes(lsm_account.?),
+                        std.mem.asBytes(&lsm_account.?),
                     ));
                 }
             },
@@ -350,15 +349,15 @@ const Environment = struct {
                     // TODO: currently this checks that everything added to the LSM after checkpoint
                     // resets to the last checkpoint on crash by looking through what's been added
                     // afterwards. This won't work if we add account removal to the fuzzer though.
-                    var it = model.uncheckpointed.iterator();
+                    var it = model.*.uncheckpointed.iterator();
                     while (it.next()) |kv| {
                         const id = kv.key_ptr.*;
-                        if (model.checkpointed.get(id)) |checkpointed_account| {
+                        if (model.*.checkpointed.get(id)) |checkpointed_account| {
                             env.prefetch_account(id);
-                            if (env.forest.grooves.accounts.get(id)) |lsm_account| {
+                            if (env.get_account(id)) |lsm_account| {
                                 assert(std.mem.eql(
                                     u8,
-                                    std.mem.asBytes(lsm_account),
+                                    std.mem.asBytes(&lsm_account),
                                     std.mem.asBytes(&checkpointed_account),
                                 ));
                             } else {
@@ -367,8 +366,8 @@ const Environment = struct {
                         }
                     }
 
-                    model.uncheckpointed.deinit();
-                    model.uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+                    model.*.uncheckpointed.deinit();
+                    model.*.uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator);
                 }
             },
         }
