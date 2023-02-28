@@ -407,8 +407,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         .put_account = constants.lsm_batch_multiple * 2,
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
-        // Let's crash this party
-        .storage_reset = 1,
+        // Let's crash this party, but not too much that nothing happens
+        .storage_reset = 0.2,
     };
     log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
