@@ -171,7 +171,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 errdefer for (client_pools[0..i]) |*p| p.deinit(allocator);
                 pool.* = try MessagePool.init(allocator, .client);
             }
-            errdefer for (replica_pools) |*pool| pool.deinit(allocator);
+            errdefer for (client_pools) |*pool| pool.deinit(allocator);
 
             const client_id_permutation = IdPermutation.generate(random);
             var clients = try allocator.alloc(Client, options.client_count);
