@@ -125,6 +125,7 @@ A backup sends a `command=request_start_view` to the primary of a view when any 
 
   - the backup learns about a newer view via a `command=commit` message, or
   - the backup learns about a newer view via a `command=prepare` message, or
+  - the backup discovers `commit_max` exceeds `min(op_head, op_checkpoint_trigger)` (during repair), or
   - a replica recovers to `status=recovering_head`
 
 ### `start_view`
