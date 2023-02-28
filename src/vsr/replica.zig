@@ -455,6 +455,7 @@ pub fn ReplicaType(
             const header_head = self.journal.header_with_op(self.op).?;
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
+            // TODO Transition to recovering_head if op<op_checkpoint.
             if (self.replica_count == 1) {
                 if (self.journal.faulty.count > 0) {
                     @panic("journal is corrupt");
@@ -1370,15 +1371,15 @@ pub fn ReplicaType(
             assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message)) return;
 
-            if (message.header.op > self.op_checkpoint_trigger()) {
-                // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
-                // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
-                // precluding recovery.
-                //
-                // TODO State transfer. Currently this is unreachable because the
-                // primary won't checkpoint until all replicas are caught up.
-                unreachable;
-            }
+            //if (message.header.op > self.op_checkpoint_trigger()) {
+            //    // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
+            //    // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
+            //    // precluding recovery.
+            //    //
+            //    // TODO State transfer. Currently this is unreachable because the
+            //    // primary won't checkpoint until all replicas are caught up.
+            //    unreachable;
+            //}
 
             assert(self.status == .view_change or
                 self.status == .normal or
@@ -1389,15 +1390,16 @@ pub fn ReplicaType(
 
             self.view_jump(message.header);
 
-            assert(self.status == .view_change);
+            // TODO protocol documentation for start_view normal
+            assert(self.status == .view_change or self.status == .normal);
+            assert(self.status == .view_change or self.backup());
             assert(message.header.view == self.view);
             assert(message.header.op == op_highest(message_body_as_headers(message)));
 
+<<<<<<< Updated upstream
             self.set_op_and_commit_max(message.header.op, message.header.commit, "on_start_view");
             assert(self.op == message.header.op);
 
-            self.view_headers = vsr.Headers.ViewChangeArray.from_slice(
-                message_body_as_headers_chain_consecutive(message));
             assert(self.view_headers.array.get(0).op == self.op);
             assert(self.view_headers.array.get(0).view <= self.view);
             assert(self.view_headers.array.len ==
@@ -1409,12 +1411,69 @@ pub fn ReplicaType(
 
             self.transition_to_normal_from_view_change_status(message.header.view);
             self.send_prepare_oks_after_view_change();
+=======
+            //if (self.status == .normal) {
+            //} else {
+            //}
+
+            //if (message.header.op > self.op_checkpoint_next() + constants.journal_slot_count) {
+            //} else if (message.header.op > self.op_checkpoint_trigger()) {
+            //    
+            //}
+            //// TODO discard older op
+
+            // TODO!!
+            const headers = message_body_as_headers_chain_disjoint(message);
+            self.view_headers = vsr.Headers.ViewChangeArray.from_slice(
+                message_body_as_headers_chain_consecutive(message));
+
+            if (self.status == .normal)
+                if (message.header.op <= self.op) {
+                    log.debug("{}: on_start_view view={} (ignoring, old op)", .{
+                        self.replica,
+                        self.view
+                    });
+                    return;
+                }
+                // TODO !!!!!
+            } else {
+                self.set_op_and_commit_max(message.header.op, message.header.commit, "on_start_view");
+            }
+
+            for (headers) |*header| {
+                if (header.op >= self.op and header.op <= self.op_checkpoint_trigger()) {
+                    self.set_op_and_commit_max(message.header.op, message.header.commit, "on_start_view");
+                    break;
+                }
+            } {
+                // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
+                // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
+                // precluding recovery.
+                // TODO State transfer.
+                @panic("TODO: state transfer");
+            }
+
+            for (headers) |*header| {
+                if (header.op <= self.op_checkpoint_trigger()) {
+                    self.replace_header(header);
+                }
+            }
+
+
+
+
+            //assert(self.op == message.header.op);
+
+            if (self.status == .view_change) {
+                self.transition_to_normal_from_view_change_status(message.header.view);
+                self.send_prepare_oks_after_view_change();
+                self.commit_journal(self.commit_max);
+            }
+>>>>>>> Stashed changes
 
             assert(self.status == .normal);
             assert(message.header.view == self.view);
             assert(self.backup());
-
-            self.commit_journal(self.commit_max);
 
             self.repair();
         }
@@ -1461,6 +1520,9 @@ pub fn ReplicaType(
 
             const op = message.header.op;
             const slot = self.journal.slot_for_op(op);
+            // TODO Primary cannot trust its WAL with checksum=null for ops < op_repair_min,
+            // since they may have changed after crash/recover due to a lost prepare write.
+            // We should check the hash chain, and if it is broken, assert(op<op_repair_min)
             const checksum: ?u128 = switch (message.header.timestamp) {
                 0 => null,
                 1 => message.header.context,
@@ -1741,6 +1803,8 @@ pub fn ReplicaType(
 
         fn on_headers(self: *Self, message: *const Message) void {
             assert(message.header.command == .headers);
+            self.view_jump(message.header);
+
             if (self.ignore_repair_message(message)) return;
 
             assert(self.status == .normal or self.status == .view_change);
@@ -3404,35 +3468,37 @@ pub fn ReplicaType(
         fn ignore_view_change_message(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .do_view_change or
                 message.header.command == .start_view);
-            assert(message.header.view > 0); // The initial view is already zero.
             assert(self.status != .recovering); // Single node clusters don't have view changes.
 
             const command: []const u8 = @tagName(message.header.command);
-
-            if (self.status == .recovering_head and message.header.command != .start_view) {
-                log.debug("{}: on_{s}: ignoring (recovering_head)", .{ self.replica, command });
-                return true;
-            }
 
             if (message.header.view < self.view) {
                 log.debug("{}: on_{s}: ignoring (older view)", .{ self.replica, command });
                 return true;
             }
 
-            if (message.header.view == self.view and self.status == .normal) {
-                log.debug("{}: on_{s}: ignoring (view started)", .{ self.replica, command });
-                return true;
-            }
-
-            // These may be caused by faults in the network topology.
             switch (message.header.command) {
                 .start_view => {
+                    // This may be caused by faults in the network topology.
                     if (message.header.replica == self.replica) {
                         log.warn("{}: on_{s}: ignoring (self)", .{ self.replica, command });
                         return true;
                     }
                 },
-                .do_view_change => {},
+                .do_view_change => {
+                    if (self.status == .recovering_head) {
+                        log.debug("{}: on_{s}: ignoring (recovering_head)", .{ self.replica, command });
+                        return true;
+                    }
+
+                    if (message.header.view == self.view and self.status == .normal) {
+                        log.debug("{}: on_{s}: ignoring (view started)", .{
+                            self.replica,
+                            command,
+                        });
+                        return true;
+                    }
+                },
                 else => unreachable,
             }
 
@@ -3831,31 +3897,60 @@ pub fn ReplicaType(
             // Request outstanding committed prepares to advance our op number:
             // This handles the case of an idle cluster, where a backup will not otherwise advance.
             // This is not required for correctness, but for durability.
+            //if (self.op < commit_max_limit) {
+            //    // If the primary repairs during a view change, it will have already advanced
+            //    // `self.op` to the latest op according to the quorum of `do_view_change` messages
+            //    // received, so we must therefore be a backup in normal status:
+            //    assert(self.status == .normal);
+            //    assert(self.backup());
+            //    log.debug("{}: repair: op={} < commit_max_limit={}, commit_max={}", .{
+            //        self.replica,
+            //        self.op,
+            //        commit_max_limit,
+            //        self.commit_max,
+            //    });
+            //    // We need to advance our op number and therefore have to `request_prepare`,
+            //    // since only `on_prepare()` can do this, not `repair_header()` in `on_headers()`.
+            //    // TODO The response to this might be discarded if it is from an old view (a repair) but would nonetheless advance our head.
+            //    // Maybe request/repair headers instead? If so, remove the timestamp=0 (checksumless) case.
+            //    // TODO Receiving a SV or prepare (or headers, or DVC) for the next wrap should bump commit_max to that checkpoint. (Or trigger state transfer if it is too far ahead).
+            //    self.send_header_to_replica(self.primary_index(self.view), .{
+            //        .command = .request_prepare,
+            //        // We cannot yet know the checksum of the prepare so we set the context and
+            //        // timestamp to 0: Context is optional when requesting from the primary but
+            //        // required otherwise.
+            //        .context = 0,
+            //        .timestamp = 0,
+            //        .cluster = self.cluster,
+            //        .replica = self.replica,
+            //        .view = self.view,
+            //        .op = commit_max_limit,
+            //    });
+            //    return;
+            //}
+
+            // TODO combine with below
+            // TODO op_repair_max: min(op, commit_max, trigger) (use it in replace_header()?)
             if (self.op < commit_max_limit) {
-                // If the primary repairs during a view change, it will have already advanced
-                // `self.op` to the latest op according to the quorum of `do_view_change` messages
-                // received, so we must therefore be a backup in normal status:
-                assert(self.status == .normal);
-                assert(self.backup());
-                log.debug("{}: repair: op={} < commit_max_limit={}, commit_max={}", .{
-                    self.replica,
-                    self.op,
-                    commit_max_limit,
-                    self.commit_max,
-                });
-                // We need to advance our op number and therefore have to `request_prepare`,
-                // since only `on_prepare()` can do this, not `repair_header()` in `on_headers()`.
+                log.debug(
+                    "{}: repair: break: view={} break={}..{} (commit={}..{} op={})",
+                    .{
+                        self.replica,
+                        self.view,
+                        self.op + 1,
+                        commit_max_limit,
+                        self.commit_min,
+                        self.commit_max,
+                        self.op,
+                    },
+                );
+
+                // TODO replica_count=1?
                 self.send_header_to_replica(self.primary_index(self.view), .{
-                    .command = .request_prepare,
-                    // We cannot yet know the checksum of the prepare so we set the context and
-                    // timestamp to 0: Context is optional when requesting from the primary but
-                    // required otherwise.
-                    .context = 0,
-                    .timestamp = 0,
+                    .command = .request_start_view,
                     .cluster = self.cluster,
                     .replica = self.replica,
                     .view = self.view,
-                    .op = commit_max_limit,
                 });
                 return;
             }
@@ -4540,6 +4635,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() <= self.commit_min);
 
             assert(header.command == .prepare);
+            assert(header.view <= self.view);
             assert(header.op <= self.op); // Never advance the op.
             assert(header.op <= self.op_checkpoint_trigger());
 
@@ -5195,6 +5291,7 @@ pub fn ReplicaType(
             assert(commit_max >= self.commit_max -| constants.pipeline_prepare_queue_max);
             assert(self.commit_min <= self.commit_max);
             assert(self.op >= self.commit_max or self.op < self.commit_max);
+            assert(self.op <= op + constants.pipeline_prepare_queue_max);
 
             const previous_op = self.op;
             const previous_commit_max = self.commit_max;
@@ -5823,7 +5920,7 @@ pub fn ReplicaType(
         fn view_jump(self: *Self, header: *const Header) void {
             const to: Status = switch (header.command) {
                 .prepare, .commit => .normal,
-                .start_view_change, .do_view_change, .start_view => .view_change,
+                .start_view_change, .do_view_change, .start_view, .headers => .view_change,
                 else => unreachable,
             };
 
