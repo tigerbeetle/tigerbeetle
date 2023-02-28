@@ -439,7 +439,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                     // Checkpoint at roughly the same rate as log wraparound.
                     random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
                 if (checkpoint) {
-                    checkpointed_op = op;
+                    checkpointed_op = op - constants.lsm_batch_multiple;
                 }
                 break :compact FuzzOp{
                     .compact = .{
@@ -518,6 +518,8 @@ pub fn main() !void {
         .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
         .write_latency_min = 0,
         .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
+        // We can't actually recover from a crash in this fuzzer since we would need
+        // to transfer state from a different replica to continue
         .crash_fault_probability = 0,
     }, fuzz_ops);
 
