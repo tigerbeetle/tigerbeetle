@@ -36,6 +36,7 @@ const FuzzOp = union(enum) {
     },
     put_account: Account,
     get_account: u128,
+    storage_reset: void,
 };
 const FuzzOpTag = std.meta.Tag(FuzzOp);
 
@@ -263,8 +264,12 @@ const Environment = struct {
     fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
         // The forest should behave like a simple key-value data-structure.
         // We'll compare it to a hash map.
-        var model = std.hash_map.AutoHashMap(u128, Account).init(allocator);
-        defer model.deinit();
+        var model = .{
+            .checkpointed  = std.hash_map.AutoHashMap(u128, Account).init(allocator),
+            .uncheckpointed  = std.hash_map.AutoHashMap(u128, Account).init(allocator),
+        };
+        defer model.checkpointed.deinit();
+        defer model.uncheckpointed.deinit();
 
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
             assert(env.state == .fuzzing);
@@ -273,7 +278,7 @@ const Environment = struct {
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = model.count() * @sizeOf(Account);
+            const model_size = (model.uncheckpointed.count() + model.checkpointed.count()) * @sizeOf(Account);
             log.debug("space_amplification = {d:.2}", .{
                 @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
             });
@@ -282,13 +287,22 @@ const Environment = struct {
             switch (fuzz_op) {
                 .compact => |compact| {
                     env.compact(compact.op);
-                    if (compact.checkpoint) env.checkpoint(compact.op);
+                    if (compact.checkpoint) {
+                        var it = model.uncheckpointed.iterator();
+                        while (it.next()) |kv| {
+                            try model.checkpointed.put(kv.key_ptr.*, kv.value_ptr.*);
+                        }
+                        model.uncheckpointed.deinit();
+                        model.uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+
+                        env.checkpoint(compact.op);
+                    }
                 },
                 .put_account => |account| {
                     // The forest requires prefetch before put.
                     env.prefetch_account(account.id);
                     env.put_account(&account);
-                    try model.put(account.id, account);
+                    try model.uncheckpointed.put(account.id, account);
                 },
                 .get_account => |id| {
                     // Get account from lsm.
@@ -296,7 +310,7 @@ const Environment = struct {
                     const lsm_account = env.get_account(id);
 
                     // Compare result to model.
-                    const model_account = model.get(id);
+                    const model_account = model.uncheckpointed.get(id) orelse model.checkpointed.get(id);
                     if (model_account == null) {
                         assert(lsm_account == null);
                     } else {
@@ -305,6 +319,29 @@ const Environment = struct {
                             std.mem.asBytes(&model_account.?),
                             std.mem.asBytes(&lsm_account.?),
                         ));
+                    }
+                },
+                .storage_reset => {
+                    env.storage.reset();
+                    {
+                        // TODO: currently this checks that everything added to the LSM after checkpoint
+                        // resets to the last checkpoint on crash by looking through what's been added
+                        // afterwards. This won't work if we add account removal to the fuzzer though.
+                        var it = model.uncheckpointed.iterator();
+                        while (it.next()) |kv| {
+                            const id = kv.key_ptr.*;
+                            if (model.checkpointed.get(id)) |checkpointed_account| {
+                                const lsm_account = env.forest.grooves.accounts.get(id);
+                                assert(std.mem.eql(
+                                    u8,
+                                    std.mem.asBytes(lsm_account.?),
+                                    std.mem.asBytes(&checkpointed_account)
+                                ));
+                            }
+                        }
+
+                        model.uncheckpointed.deinit();
+                        model.uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator);
                     }
                 },
             }
@@ -344,6 +381,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         .put_account = constants.lsm_batch_multiple * 2,
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        // Let's crash this party
+        .storage_reset = 1,
     };
     log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
@@ -411,11 +450,13 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .get_account => FuzzOp{
                 .get_account = random_id(random, u128),
             },
+            .storage_reset => FuzzOp{.storage_reset = {}},
         };
         switch (fuzz_op.*) {
             .compact => puts_since_compact = 0,
             .put_account => puts_since_compact += 1,
             .get_account => {},
+            .storage_reset => {},
         }
     }
 
@@ -444,6 +485,7 @@ pub fn main() !void {
         .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
         .write_latency_min = 0,
         .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
+        .crash_fault_probability = 0,
     }, fuzz_ops);
 
     log.info("Passed!", .{});
