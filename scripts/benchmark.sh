@@ -54,7 +54,7 @@ done
 
 echo ""
 echo "Benchmarking..."
-zig/zig build benchmark -Drelease-safe -- "$@"
+zig/zig build benchmark -Drelease-safe -Dconfig=production -- "$@"
 echo ""
 
 for I in $REPLICAS

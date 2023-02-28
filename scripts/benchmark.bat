@@ -51,5 +51,5 @@ for %%a in (%*) do (
         SET ARGS=!ARGS! %%a
     )
 )
-zig\zig.exe build benchmark -Drelease-safe -- %ARGS%
+zig\zig.exe build benchmark -Drelease-safe -Dconfig=production -- %ARGS%
 exit /b %errorlevel%
