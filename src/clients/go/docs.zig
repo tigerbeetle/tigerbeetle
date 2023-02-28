@@ -282,18 +282,26 @@ pub const GoDocs = Docs{
     \\log.Println(transfersRes, err)
     ,
 
+    // Extra steps to determine commit and repo so this works in
+    // CI against forks and pull requests.
     .developer_setup_bash_commands = 
-    \\git clone https://github.com/tigerbeetledb/tigerbeetle
+    \\rm -rf tigerbeetle
+    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
     \\cd tigerbeetle
+    \\git checkout $GIT_SHA # Optional
     \\./scripts/install_zig.sh
     \\./zig/zig build go_client -Drelease-safe
     \\cd src/clients/go
     \\./zgo.sh test
     ,
 
+    // Extra steps to determine commit and repo so this works in
+    // CI against forks and pull requests.
     .developer_setup_windows_commands = 
-    \\git clone https://github.com/tigerbeetledb/tigerbeetle
+    \\rd -r tigerbeetle
+    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
     \\cd tigerbeetle
+    \\git checkout $GIT_SHA # Optional
     \\./scripts/install_zig.bat
     \\./zig/zig build go_client -Drelease-safe
     \\cd tigerbeetle/src/clients/go
