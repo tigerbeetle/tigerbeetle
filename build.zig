@@ -332,6 +332,9 @@ pub fn build(b: *std.build.Builder) void {
         exe.omit_frame_pointer = false;
         exe.addOptions("vsr_options", options);
         link_tracer_backend(exe, tracer_backend, target);
+        const install_step = b.addInstallArtifact(exe);
+        const build_step = b.step("build_" ++ fuzzer.name, fuzzer.description);
+        build_step.dependOn(&install_step.step);
 
         const run_cmd = exe.run();
         if (b.args) |args| run_cmd.addArgs(args);
