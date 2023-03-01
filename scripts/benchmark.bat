@@ -27,7 +27,7 @@ echo.
 exit /b
 
 :main
-zig\zig.exe build install -Drelease-safe
+zig\zig.exe build install -Drelease-safe -Dconfig=production
 
 for /l %%i in (0, 1, 0) do (
     echo Initializing replica %%i
@@ -51,5 +51,5 @@ for %%a in (%*) do (
         SET ARGS=!ARGS! %%a
     )
 )
-zig\zig.exe build benchmark -Drelease-safe -- %ARGS%
+zig\zig.exe build benchmark -Drelease-safe -Dconfig=production -- %ARGS%
 exit /b %errorlevel%
