@@ -422,15 +422,15 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             return null;
         }
 
-        /// As per `header_with_op()`, but only if there is an optional checksum match.
+        /// As per `header_with_op()`, but only if there is a checksum match.
         pub fn header_with_op_and_checksum(
             journal: *const Journal,
             op: u64,
-            checksum: ?u128,
+            checksum: u128,
         ) ?*const Header {
             if (journal.header_with_op(op)) |existing| {
                 assert(existing.op == op);
-                if (checksum == null or existing.checksum == checksum.?) return existing;
+                if (existing.checksum == checksum) return existing;
             }
             return null;
         }
