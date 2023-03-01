@@ -343,6 +343,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 cluster.allocator,
                 .{
                     .replica_count = @intCast(u8, cluster.replicas.len),
+                    .standby_count = 0,
                     .storage = &cluster.storages[replica_index],
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,
