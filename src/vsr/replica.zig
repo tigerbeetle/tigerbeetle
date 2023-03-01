@@ -1531,14 +1531,7 @@ pub fn ReplicaType(
 
             const op = message.header.op;
             const slot = self.journal.slot_for_op(op);
-            const checksum: ?u128 = switch (message.header.timestamp) {
-                0 => null,
-                1 => message.header.context,
-                else => unreachable,
-            };
-
-            // Only the primary may respond to `request_prepare` messages without a checksum.
-            assert(checksum != null or self.primary_index(self.view) == self.replica);
+            const checksum = message.header.context;
 
             // Try to serve the message directly from the pipeline.
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
@@ -1553,26 +1546,12 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (checksum == null and !self.valid_hash_chain_between(op, self.op)) {
-                // When the checksum is not included in the request, the primary must be extra
-                // careful about the identity of the message it returns, since the backup is
-                // trying to acquire a new op-head.
-                assert(self.replica == self.primary_index(self.view));
-                assert(self.status == .view_change or op < self.op_repair_min());
-
-                log.debug("{}: on_request_prepare: op={} checksum=null repairing", .{
-                    self.replica,
-                    op,
-                });
-                return;
-            }
-
             if (self.journal.prepare_inhabited[slot.index]) {
                 const prepare_checksum = self.journal.prepare_checksums[slot.index];
                 // Consult `journal.prepare_checksums` (rather than `journal.headers`):
                 // the former may have the prepare we want — even if journal recovery marked the
                 // slot as faulty and left the in-memory header as reserved.
-                if (checksum == null or checksum.? == prepare_checksum) {
+                if (checksum == prepare_checksum) {
                     log.debug("{}: on_request_prepare: op={} checksum={} reading", .{
                         self.replica,
                         op,
@@ -1624,14 +1603,13 @@ pub fn ReplicaType(
             // the view.
             if (self.status == .view_change) {
                 assert(message.header.replica == self.primary_index(self.view));
-                assert(checksum != null);
 
                 if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
                     assert(self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot));
                 }
 
                 if (self.journal.prepare_inhabited[slot.index]) {
-                    assert(self.journal.prepare_checksums[slot.index] != checksum.?);
+                    assert(self.journal.prepare_checksums[slot.index] != checksum);
                 }
 
                 log.debug("{}: on_request_prepare: op={} checksum={} nacking", .{
@@ -1642,7 +1620,7 @@ pub fn ReplicaType(
 
                 self.send_header_to_replica(message.header.replica, .{
                     .command = .nack_prepare,
-                    .context = checksum.?,
+                    .context = checksum,
                     .cluster = self.cluster,
                     .replica = self.replica,
                     .view = self.view,
@@ -3246,12 +3224,7 @@ pub fn ReplicaType(
                         log.warn("{}: on_{s}: misdirected message (backup)", .{ self.replica, command });
                         return true;
                     },
-                    // Only the primary may answer a request for a prepare without a context:
-                    .request_prepare => if (message.header.timestamp == 0) {
-                        log.warn("{}: on_{s}: misdirected message (no context)", .{ self.replica, command });
-                        return true;
-                    },
-                    .headers, .request_headers => {},
+                    .request_prepare, .headers, .request_headers => {},
                     else => unreachable,
                 }
             }
@@ -3933,23 +3906,11 @@ pub fn ReplicaType(
             }
         }
 
-        fn pipeline_prepare_by_op_and_checksum(self: *Self, op: u64, checksum: ?u128) ?*Message {
+        fn pipeline_prepare_by_op_and_checksum(self: *Self, op: u64, checksum: u128) ?*Message {
             assert(self.status == .normal or self.status == .view_change);
-            assert(self.replica == self.primary_index(self.view) or checksum != null);
-
-            if (checksum == null) {
-                // The PipelineCache may hold messages that have been discarded, so we must be
-                // careful not to access it unless we can verify the entry's checksum.
-                //
-                // Only on_request_prepare() queries the pipeline with checksum=null.
-                // And primaries ignore request_prepare messages during their view change
-                // (during which time the pipeline is not yet repaired, and so is untrusted).
-                assert(self.primary());
-                assert(self.pipeline == .queue);
-            }
 
             return switch (self.pipeline) {
-                .cache => |*cache| cache.prepare_by_op_and_checksum(op, checksum.?),
+                .cache => |*cache| cache.prepare_by_op_and_checksum(op, checksum),
                 .queue => |*queue| if (queue.prepare_by_op_and_checksum(op, checksum)) |prepare|
                     prepare.message
                 else
@@ -4599,10 +4560,7 @@ pub fn ReplicaType(
 
             const request_prepare = Header{
                 .command = .request_prepare,
-                // If we request a prepare from a backup, as below, it is critical to pass a
-                // checksum: Otherwise we could receive different prepares for the same op number.
                 .context = checksum,
-                .timestamp = 1, // The checksum is included in context.
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
@@ -6713,7 +6671,7 @@ const PipelineQueue = struct {
 
     /// Searches the pipeline for a prepare for a given op and checksum.
     /// When `checksum` is `null`, match any checksum.
-    fn prepare_by_op_and_checksum(pipeline: *PipelineQueue, op: u64, checksum: ?u128) ?*Prepare {
+    fn prepare_by_op_and_checksum(pipeline: *PipelineQueue, op: u64, checksum: u128) ?*Prepare {
         if (pipeline.prepare_queue.empty()) return null;
 
         // To optimize the search, we can leverage the fact that the pipeline's entries are
@@ -6726,8 +6684,7 @@ const PipelineQueue = struct {
         const prepare = pipeline.prepare_queue.get_ptr(op - head_op).?;
         assert(prepare.message.header.op == op);
 
-        if (checksum == null) return prepare;
-        if (checksum.? == prepare.message.header.checksum) return prepare;
+        if (checksum == prepare.message.header.checksum) return prepare;
         return null;
     }
 

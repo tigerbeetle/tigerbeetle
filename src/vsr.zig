@@ -256,8 +256,6 @@ pub const Header = extern struct {
     ///   This allows the test workload to verify transfer timeouts.
     /// * A `do_view_change` sets this to the latest normal view number.
     /// * A `pong` sets this to the sender's wall clock value.
-    /// * A `request_prepare` sets this to `1` when `context` is set to a checksum, and `0`
-    ///   otherwise.
     /// * A `commit` message sets this to the replica's monotonic timestamp.
     timestamp: u64 = 0,
 
@@ -616,13 +614,9 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
         if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        switch (self.timestamp) {
-            0 => if (self.context != 0) return "context != 0",
-            1 => {}, // context is a checksum, which may be 0.
-            else => return "timestamp > 1",
-        }
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
