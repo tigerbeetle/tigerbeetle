@@ -254,7 +254,7 @@ pub const Header = extern struct {
     ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
     /// * A `reply` sets this to the corresponding `prepare`'s timestamp.
     ///   This allows the test workload to verify transfer timeouts.
-    /// * A `do_view_change` sets this to the latest normal view number.
+    /// * A `do_view_change` sets this to its latest log_view number.
     /// * A `pong` sets this to the sender's wall clock value.
     /// * A `commit` message sets this to the replica's monotonic timestamp.
     timestamp: u64 = 0,
