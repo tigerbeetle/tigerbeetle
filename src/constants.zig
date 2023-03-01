@@ -27,6 +27,10 @@ pub const hash_log_mode = config.process.hash_log_mode;
 
 /// The maximum number of replicas allowed in a cluster.
 pub const replicas_max = 6;
+/// The maximum number of standbys allowed in a cluster.
+pub const standbys_max = 6;
+/// The maximum number of nodes (either standbys or active replicas) allowed in a cluster.
+pub const nodes_max = replicas_max + standbys_max;
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.
@@ -138,7 +142,7 @@ comptime {
 }
 
 /// The maximum number of connections that can be held open by the server at any time:
-pub const connections_max = replicas_max + clients_max;
+pub const connections_max = nodes_max + clients_max;
 
 /// The maximum size of a message in bytes:
 /// This is also the limit of all inflight data across multiple pipelined requests per connection.
