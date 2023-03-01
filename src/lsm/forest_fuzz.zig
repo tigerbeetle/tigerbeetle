@@ -34,9 +34,14 @@ const FuzzOp = union(enum) {
         op: u64,
         checkpoint: bool,
     },
-    put_account: Account,
+    put_account: struct {
+        op: u64,
+        account: Account,
+    },
     get_account: u128,
-    storage_reset: void,
+    storage_reset: struct {
+        op: u64,
+    },
 };
 const FuzzOpTag = std.meta.Tag(FuzzOp);
 
@@ -275,12 +280,57 @@ const Environment = struct {
     fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
         // The forest should behave like a simple key-value data-structure.
         // We'll compare it to a hash map.
-        var model = .{
-            .checkpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator),
-            .uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator),
+        const Model = struct {
+            checkpointed: KVType,
+            checkpointable: KVType,
+            uncheckpointable: KVType,
+            latest_op: u64,
+
+            const KVType = std.hash_map.AutoHashMap(u128, Account);
+            const Model = @This();
+            pub fn init(model: *Model) void {
+                model.checkpointed = KVType.init(allocator);
+                model.checkpointable = KVType.init(allocator);
+                model.uncheckpointable = KVType.init(allocator);
+                model.latest_op = 1;
+            }
+
+            pub fn deinit(model: *Model) void {
+                model.checkpointed.deinit();
+                model.checkpointable.deinit();
+                model.uncheckpointable.deinit();
+            }
+
+            pub fn tick_op_to(model: *Model, op: u64) !void {
+                assert(op >= model.latest_op);
+
+                // go backwards to find the last valid checkpointable position
+                var i = op - 1; // we don't want to think the current bar is checkpointable if we're at the last beat
+                while (i >= model.latest_op) : (i -= 1) {
+                    if (i >= constants.lsm_batch_multiple and i % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1) {
+                        var it = model.uncheckpointable.iterator();
+                        while (it.next()) |kv| {
+                            try model.checkpointable.put(kv.key_ptr.*, kv.value_ptr.*);
+                        }
+                        model.uncheckpointable.deinit();
+                        model.uncheckpointable = KVType.init(allocator);
+                        break;
+                    }
+                }
+                model.latest_op = op;
+            }
+
+            pub fn reset_op(model: *Model, op: u64) void {
+                model.latest_op = op;
+                model.uncheckpointable.deinit();
+                model.uncheckpointable = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+                model.checkpointable.deinit();
+                model.checkpointable = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+            }
         };
-        defer model.checkpointed.deinit();
-        defer model.uncheckpointed.deinit();
+        var model: Model = undefined;
+        model.init();
+        defer model.deinit();
 
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
             assert(env.state == .fuzzing);
@@ -289,7 +339,7 @@ const Environment = struct {
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = (model.uncheckpointed.count() + model.checkpointed.count()) * @sizeOf(Account);
+            const model_size = (model.uncheckpointable.count() + model.checkpointable.count() + model.checkpointed.count()) * @sizeOf(Account);
             log.debug("space_amplification = {d:.2}", .{
                 @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
             });
@@ -302,23 +352,25 @@ const Environment = struct {
     fn apply_op(env: *Environment, fuzz_op: FuzzOp, model: anytype) !void {
         switch (fuzz_op) {
             .compact => |compact| {
+                try model.tick_op_to(compact.op);
                 env.compact(compact.op);
                 if (compact.checkpoint) {
-                    var it = model.*.uncheckpointed.iterator();
+                    var it = model.checkpointable.iterator();
                     while (it.next()) |kv| {
-                        try model.*.checkpointed.put(kv.key_ptr.*, kv.value_ptr.*);
+                        try model.checkpointed.put(kv.key_ptr.*, kv.value_ptr.*);
                     }
-                    model.*.uncheckpointed.deinit();
-                    model.*.uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+                    model.checkpointable.deinit();
+                    model.checkpointable = std.hash_map.AutoHashMap(u128, Account).init(allocator);
 
                     env.checkpoint(compact.op);
                 }
             },
-            .put_account => |account| {
+            .put_account => |put| {
+                try model.tick_op_to(put.op);
                 // The forest requires prefetch before put.
-                env.prefetch_account(account.id);
-                env.put_account(&account);
-                try model.*.uncheckpointed.put(account.id, account);
+                env.prefetch_account(put.account.id);
+                env.put_account(&put.account);
+                try model.uncheckpointable.put(put.account.id, put.account);
             },
             .get_account => |id| {
                 // Get account from lsm.
@@ -326,7 +378,7 @@ const Environment = struct {
                 const lsm_account = env.get_account(id);
 
                 // Compare result to model.
-                const model_account = model.*.uncheckpointed.get(id) orelse model.*.checkpointed.get(id);
+                const model_account = model.uncheckpointable.get(id) orelse model.checkpointable.get(id) orelse model.*.checkpointed.get(id);
                 if (model_account == null) {
                     assert(lsm_account == null);
                 } else {
@@ -337,7 +389,7 @@ const Environment = struct {
                     ));
                 }
             },
-            .storage_reset => {
+            .storage_reset => |reset| {
                 env.close();
                 env.deinit();
                 env.storage.reset();
@@ -345,14 +397,16 @@ const Environment = struct {
 
                 env.state = .superblock_open;
                 try env.open();
+
+
+                // TODO: currently this checks that everything added to the LSM after checkpoint
+                // resets to the last checkpoint on crash by looking through what's been added
+                // afterwards. This won't work if we add account removal to the fuzzer though.
                 {
-                    // TODO: currently this checks that everything added to the LSM after checkpoint
-                    // resets to the last checkpoint on crash by looking through what's been added
-                    // afterwards. This won't work if we add account removal to the fuzzer though.
-                    var it = model.*.uncheckpointed.iterator();
+                    var it = model.uncheckpointable.iterator();
                     while (it.next()) |kv| {
                         const id = kv.key_ptr.*;
-                        if (model.*.checkpointed.get(id)) |checkpointed_account| {
+                        if (model.checkpointed.get(id)) |checkpointed_account| {
                             env.prefetch_account(id);
                             if (env.get_account(id)) |lsm_account| {
                                 assert(std.mem.eql(
@@ -365,10 +419,28 @@ const Environment = struct {
                             }
                         }
                     }
-
-                    model.*.uncheckpointed.deinit();
-                    model.*.uncheckpointed = std.hash_map.AutoHashMap(u128, Account).init(allocator);
                 }
+                {
+                    var it = model.checkpointable.iterator();
+                    while (it.next()) |kv| {
+                        const id = kv.key_ptr.*;
+                        if (model.uncheckpointable.get(id) == null) {
+                            if (model.checkpointed.get(id)) |checkpointed_account| {
+                                env.prefetch_account(id);
+                                if (env.get_account(id)) |lsm_account| {
+                                    assert(std.mem.eql(
+                                        u8,
+                                        std.mem.asBytes(&lsm_account),
+                                        std.mem.asBytes(&checkpointed_account),
+                                    ));
+                                } else {
+                                    std.debug.panic("Account checkpointed but not in lsm after crash.\n {}\n", .{checkpointed_account});
+                                }
+                            }
+                        }
+                    }
+                }
+                model.reset_op(reset.op);
             },
         }
     }
@@ -406,8 +478,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         .put_account = constants.lsm_batch_multiple * 2,
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
-        // Let's crash this party, but not too much that nothing happens
-        .storage_reset = 0.2,
+        // Let's crash this party, but not too much that nothing happens (less often than checkpoint)
+        .storage_reset = 0.05,
     };
     log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
@@ -474,14 +546,17 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 account.credits_posted = random.int(u64);
 
                 try id_to_account.put(account.id, account);
-                break :put_account FuzzOp{ .put_account = account };
+                break :put_account FuzzOp{ .put_account = .{
+                    .op = op,
+                    .account = account,
+                } };
             },
             .get_account => FuzzOp{
                 .get_account = random_id(random, u128),
             },
             .storage_reset => storage_reset: {
                 op = checkpointed_op;
-                break :storage_reset FuzzOp{ .storage_reset = {} };
+                break :storage_reset FuzzOp{ .storage_reset = .{ .op = checkpointed_op } };
             },
         };
         switch (fuzz_op.*) {
