@@ -2965,48 +2965,47 @@ pub fn ReplicaType(
         ///
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_view_change_message(self: *Self, command: Command) *Message {
-            // We may send a start_view message in normal status to resolve a backup's view jump:
             assert(self.status == .normal or self.status == .view_change);
             assert((self.status == .normal) == (command == .start_view));
             assert((self.status == .view_change) == (command == .do_view_change));
-            assert(self.view >= self.log_view);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
-
-            assert(command != .do_view_change or self.log_view < self.view);
-            assert(command != .start_view or self.log_view == self.view);
+            assert((self.log_view < self.view) == (command == .do_view_change));
+            assert((self.log_view == self.view) == (command == .start_view));
 
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
-            var headers: vsr.Headers.ViewChangeArray = .{ .array = .{ .buffer = undefined } };
             switch (command) {
-                .do_view_change => headers = self.view_headers,
+                // The DVC headers are already up to date, either via:
+                // - transition_to_view_change_status(), or
+                // - superblock's vsr_headers (after recovery).
+                .do_view_change => {},
                 .start_view => {
+                    self.view_headers.array.len = 0;
                     var op = self.op + 1;
                     while (op > 0 and
-                        headers.array.len < constants.view_change_headers_suffix_max)
+                        self.view_headers.array.len < constants.view_change_headers_suffix_max)
                     {
                         op -= 1;
-                        headers.array.append(self.journal.header_with_op(op).?.*) catch unreachable;
+                        self.view_headers.array.appendAssumeCapacity(self.journal.header_with_op(op).?.*);
                     }
-                    assert(headers.array.len < constants.view_change_headers_max);
+                    assert(self.view_headers.array.len < constants.view_change_headers_max);
 
-                    // Include the view-change "hook" to help backups on the previous log.
+                    // Include the view-change "hook" to help backups on the previous log wrap.
                     op = std.math.min(op, self.op_checkpoint_trigger_previous() + 1);
                     while (op > 0) {
                         op -= 1;
-                        headers.array.append(self.journal.header_with_op(op).?.*) catch break;
+                        self.view_headers.array.append(self.journal.header_with_op(op).?.*) catch break;
                     }
                 },
                 else => unreachable,
             }
-            assert(headers.array.len > 0);
-            assert(headers.array.get(0).op == self.op);
-            vsr.Headers.ViewChangeSlice.verify(headers.array.constSlice());
+            vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
+            assert(self.view_headers.array.get(0).op == self.op);
 
             message.header.* = .{
-                .size = @intCast(u32, @sizeOf(Header) * (1 + headers.array.len)),
+                .size = @intCast(u32, @sizeOf(Header) * (1 + self.view_headers.array.len)),
                 .command = command,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -3025,7 +3024,7 @@ pub fn ReplicaType(
                 .exact,
                 Header,
                 std.mem.bytesAsSlice(Header, message.body()),
-                headers.array.constSlice(),
+                self.view_headers.array.constSlice(),
             );
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -5813,7 +5812,16 @@ pub fn ReplicaType(
             const status_before = self.status;
             self.status = .view_change;
 
-            if (status_before == .normal) {
+            // Either:
+            // - Transition from normal status.
+            // - Recovering from normal status.
+            // - Retired primary that didn't finish repair.
+            if (status_before == .normal or
+                (status_before == .recovering and self.log_view == self.view) or
+                (status_before == .view_change and self.log_view == self.view))
+            {
+                assert(self.log_view == self.view);
+
                 self.view_headers.array.len = 0;
                 var op = self.op + 1;
                 while (op > 0) {
@@ -5821,42 +5829,35 @@ pub fn ReplicaType(
                     if (self.journal.header_with_op(op)) |header| {
                         self.view_headers.array.append(header.*) catch break;
                     } else {
+                        const commit_max = std.math.max(
+                            self.commit_max,
+                            self.op -| constants.pipeline_prepare_queue_max,
+                        );
+
                         const count = self.view_headers.array.len;
                         assert(count > 0);
                         // The DVC headers must connect to the cluster's committed ops.
                         // We cannot safely go beyond that in all cases, since during a prior
                         // view-change we might have only accepted a single header from the DVC:
                         // "header.op = op_checkpoint_trigger", and then not completed any repair.
-                        if (self.view_headers.array.get(count - 1).op <= self.commit_max + 1) break;
+                        if (self.view_headers.array.get(count - 1).op <= commit_max + 1) break;
                     }
                 }
             }
-
-            if (status_before == .recovering or
-                (status_before == .view_change and self.log_view == self.view))
-            {
-                // Either:
-                // - Recovering from normal status.
-                // - Retired primary that didn't finish repair.
-                self.view_headers.array.len = 0;
-                var op = self.op + 1;
-                while (op > 0) {
-                    op -= 1;
-                    if (self.journal.header_with_op(op)) |header| {
-                        self.view_headers.array.append(header.*) catch break;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
 
             if (status_before == .recovering_head) {
-                // Don't update view-durable — our op-head is not trusted.
-                // This function is called by a view_jump via on_start_view().
-                // We are about to transition to normal status.
+                // This function was called by a view_jump() via on_start_view(), so we are about to
+                // transition to normal status.
+                // - Updating view_durable would just delay the view_durable update (to the log
+                //   view) that will immediately follow.
+                // - Poison the view_headers — we are joining a running view.
                 self.view = view_new;
+                self.view_headers.array.len = 0;
             } else {
+                vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
+                assert(self.view_headers.array.get(self.view_headers.array.len - 1).op <=
+                    std.math.max(self.commit_max, self.op -| constants.pipeline_prepare_queue_max) + 1);
+
                 if (self.view == view_new) {
                     assert(status_before == .recovering);
                 } else {
