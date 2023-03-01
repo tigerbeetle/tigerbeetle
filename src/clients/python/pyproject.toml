@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "tigerbeetle-python"
+version = "0.1.0"
+description = "TigerBeetle Python Client"
+authors = ["Federico Lorenzi <federico@tigerbeetle.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[tool.poetry.dev-dependencies]
+cffi = "^1.15.1"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
