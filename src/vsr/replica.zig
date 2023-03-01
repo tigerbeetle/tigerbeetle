@@ -1378,7 +1378,7 @@ pub fn ReplicaType(
                 //
                 // TODO State transfer. Currently this is unreachable because the
                 // primary won't checkpoint until all replicas are caught up.
-                unreachable;
+                @panic("unimplemented (state transfer)");
             }
 
             assert(self.status == .view_change or
@@ -3861,7 +3861,9 @@ pub fn ReplicaType(
             // Assert that all headers are now present and connected with a perfect hash chain:
             // TODO(State Transfer): This may fail if the commit max is too far ahead and we
             // couldn't repair it without jumping ahead on the WAL.
-            assert(self.op >= self.commit_max);
+            if (self.op < self.commit_max) {
+                @panic("unimplemented (state transfer)");
+            }
             assert(self.valid_hash_chain_between(self.commit_min, self.op));
 
             // Request and repair any dirty or faulty prepares:
@@ -5301,7 +5303,7 @@ pub fn ReplicaType(
                 //
                 // TODO State transfer. Currently this is unreachable because the
                 // primary won't checkpoint until all replicas are caught up.
-                unreachable;
+                @panic("unimplemented (state transfer)");
             }
 
             self.set_op_and_commit_max(
