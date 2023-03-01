@@ -23,4 +23,5 @@ jobs:
   # don't trigger this, so we call it here
   # https://docs.github.com/en/actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow
   release:
+    needs: scheduled_release
     uses: ./.github/workflows/release_artifacts.yml
