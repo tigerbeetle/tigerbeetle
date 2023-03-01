@@ -615,8 +615,8 @@ pub const ClusterFaultAtlas = struct {
     options: Options,
     faulty_superblock_areas: FaultySuperBlockAreas =
         FaultySuperBlockAreas.initFill(CopySet.initEmpty()),
-    faulty_wal_header_sectors: [constants.replicas_max]FaultyWALHeaders =
-        [_]FaultyWALHeaders{FaultyWALHeaders.initEmpty()} ** constants.replicas_max,
+    faulty_wal_header_sectors: [constants.nodes_max]FaultyWALHeaders =
+        [_]FaultyWALHeaders{FaultyWALHeaders.initEmpty()} ** constants.nodes_max,
 
     pub fn init(replica_count: u8, random: std.rand.Random, options: Options) ClusterFaultAtlas {
         // If there is only one replica in the cluster, WAL/Grid faults are not recoverable.

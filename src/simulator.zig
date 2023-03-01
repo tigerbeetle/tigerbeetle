@@ -79,18 +79,21 @@ pub fn main() !void {
     const random = prng.random();
 
     const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
+    const standby_count = random.uintAtMost(u8, constants.standbys_max);
+    const node_count = replica_count + standby_count;
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
     const cluster_options = Cluster.Options{
         .cluster_id = cluster_id,
         .replica_count = replica_count,
+        .standby_count = standby_count,
         .client_count = client_count,
         .storage_size_limit = vsr.sector_floor(
             constants.storage_size_max - random.uintLessThan(u64, constants.storage_size_max / 10),
         ),
         .seed = random.int(u64),
         .network = .{
-            .replica_count = replica_count,
+            .node_count = node_count,
             .client_count = client_count,
 
             .seed = random.int(u64),
@@ -161,6 +164,7 @@ pub fn main() !void {
         \\          SEED={}
         \\
         \\          replicas={}
+        \\          standbys={}
         \\          clients={}
         \\          request_probability={}%
         \\          idle_on_probability={}%
@@ -191,6 +195,7 @@ pub fn main() !void {
     , .{
         seed,
         cluster_options.replica_count,
+        cluster_options.standby_count,
         cluster_options.client_count,
         simulator_options.request_probability,
         simulator_options.request_idle_on_probability,
@@ -290,7 +295,7 @@ pub const Simulator = struct {
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
         errdefer workload.deinit(allocator);
 
-        var replica_stability = try allocator.alloc(usize, options.cluster.replica_count);
+        var replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_stability);
         std.mem.set(usize, replica_stability, 0);
 
