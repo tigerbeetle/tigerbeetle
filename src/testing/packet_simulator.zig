@@ -8,7 +8,7 @@ const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
 const fuzz = @import("./fuzz.zig");
 
 pub const PacketSimulatorOptions = struct {
-    replica_count: u8,
+    node_count: u8,
     client_count: u8,
     seed: u64,
 
@@ -53,7 +53,7 @@ pub const Path = struct {
 /// are two-way, i.e. if i cannot communicate with j, then
 /// j cannot communicate with i.
 ///
-/// Only replicas are partitioned. There will always be exactly two partitions.
+/// Only nodes (replicas or standbys) are partitioned. There will always be exactly two partitions.
 pub const PartitionMode = enum {
     /// Disable automatic partitioning.
     none,
@@ -66,7 +66,7 @@ pub const PartitionMode = enum {
     /// equal-size partitions.
     uniform_partition,
 
-    /// Isolates exactly one replica.
+    /// Isolates exactly one node.
     isolate_single,
 };
 
@@ -102,15 +102,15 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         /// The "source of truth" for partitions is links[*].enabled.
         auto_partition: []bool,
         auto_partition_active: bool,
-        auto_partition_replicas: []u8,
+        auto_partition_nodes: []u8,
         auto_partition_stability: u32,
 
         pub fn init(allocator: std.mem.Allocator, options: PacketSimulatorOptions) !Self {
-            assert(options.replica_count > 0);
+            assert(options.node_count > 0);
             assert(options.one_way_delay_mean >= options.one_way_delay_min);
 
-            const node_count_ = options.replica_count + options.client_count;
-            const links = try allocator.alloc(Link, @as(usize, node_count_) * node_count_);
+            const process_count_ = options.node_count + options.client_count;
+            const links = try allocator.alloc(Link, @as(usize, process_count_) * process_count_);
             errdefer allocator.free(links);
 
             for (links) |*link, i| {
@@ -122,13 +122,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
             errdefer for (links) |link| link.queue.deinit();
 
-            const auto_partition = try allocator.alloc(bool, @as(usize, options.replica_count));
+            const auto_partition = try allocator.alloc(bool, @as(usize, options.node_count));
             errdefer allocator.free(auto_partition);
             std.mem.set(bool, auto_partition, false);
 
-            const auto_partition_replicas = try allocator.alloc(u8, @as(usize, options.replica_count));
-            errdefer allocator.free(auto_partition_replicas);
-            for (auto_partition_replicas) |*replica, i| replica.* = @intCast(u8, i);
+            const auto_partition_nodes = try allocator.alloc(u8, @as(usize, options.node_count));
+            errdefer allocator.free(auto_partition_nodes);
+            for (auto_partition_nodes) |*node, i| node.* = @intCast(u8, i);
 
             return Self{
                 .options = options,
@@ -137,7 +137,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
                 .auto_partition_active = false,
                 .auto_partition = auto_partition,
-                .auto_partition_replicas = auto_partition_replicas,
+                .auto_partition_nodes = auto_partition_nodes,
                 .auto_partition_stability = options.unpartition_stability,
             };
         }
@@ -150,7 +150,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             allocator.free(self.links);
             allocator.free(self.auto_partition);
-            allocator.free(self.auto_partition_replicas);
+            allocator.free(self.auto_partition_nodes);
         }
 
         fn order_packets(context: void, a: LinkPacket, b: LinkPacket) math.Order {
@@ -159,15 +159,15 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return math.order(a.expiry, b.expiry);
         }
 
-        fn node_count(self: Self) usize {
-            return self.options.replica_count + self.options.client_count;
+        fn process_count(self: Self) usize {
+            return self.options.node_count + self.options.client_count;
         }
 
         fn path_index(self: Self, path: Path) usize {
-            assert(path.source < self.node_count());
-            assert(path.target < self.node_count());
+            assert(path.source < self.process_count());
+            assert(path.target < self.process_count());
 
-            return @as(usize, path.source) * self.node_count() + path.target;
+            return @as(usize, path.source) * self.process_count() + path.target;
         }
 
         fn should_drop(self: *Self) bool {
@@ -216,18 +216,18 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         /// Partitions the network. Guaranteed to isolate at least one replica.
         fn auto_partition_network(self: *Self) void {
-            assert(self.options.replica_count > 1);
+            assert(self.options.node_count > 1);
 
             const random = self.prng.random();
             var partition = self.auto_partition;
             switch (self.options.partition_mode) {
                 .none => std.mem.set(bool, partition, false),
                 .uniform_size => {
-                    // Exclude cases partition_size == 0 and partition_size == replica_count
+                    // Exclude cases partition_size == 0 and partition_size == node_count
                     const partition_size =
-                        1 + random.uintAtMost(u8, self.options.replica_count - 2);
-                    random.shuffle(u8, self.auto_partition_replicas);
-                    for (self.auto_partition_replicas) |r, i| {
+                        1 + random.uintAtMost(u8, self.options.node_count - 2);
+                    random.shuffle(u8, self.auto_partition_nodes);
+                    for (self.auto_partition_nodes) |r, i| {
                         partition[r] = i < partition_size;
                     }
                 },
@@ -236,20 +236,20 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     partition[0] = random.uintLessThan(u8, 2) == 1;
 
                     var i: usize = 1;
-                    while (i < self.options.replica_count) : (i += 1) {
+                    while (i < self.options.node_count) : (i += 1) {
                         partition[i] = random.uintLessThan(u8, 2) == 1;
                         only_same =
                             only_same and (partition[i - 1] == partition[i]);
                     }
 
                     if (only_same) {
-                        const n = random.uintLessThan(u8, self.options.replica_count);
+                        const n = random.uintLessThan(u8, self.options.node_count);
                         partition[n] = true;
                     }
                 },
                 .isolate_single => {
                     std.mem.set(bool, partition, false);
-                    const n = random.uintLessThan(u8, self.options.replica_count);
+                    const n = random.uintLessThan(u8, self.options.node_count);
                     partition[n] = true;
                 },
             }
@@ -259,13 +259,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             const asymmetric_partition_side = random.boolean();
             var from: u8 = 0;
-            while (from < self.node_count()) : (from += 1) {
+            while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
-                while (to < self.node_count()) : (to += 1) {
+                while (to < self.process_count()) : (to += 1) {
                     const path = .{ .source = from, .target = to };
                     self.links[self.path_index(path)].enabled =
-                        from >= self.options.replica_count or
-                        to >= self.options.replica_count or
+                        from >= self.options.node_count or
+                        to >= self.options.node_count or
                         partition[from] == partition[to] or
                         (self.options.partition_symmetry == .asymmetric and
                         partition[from] == asymmetric_partition_side);
@@ -288,7 +288,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         log.warn("unpartitioned network: partition={d}", .{self.auto_partition});
                     }
                 } else {
-                    if (self.options.replica_count > 1 and self.should_partition()) {
+                    if (self.options.node_count > 1 and self.should_partition()) {
                         self.auto_partition_network();
                         log.warn("partitioned network: partition={d}", .{self.auto_partition});
                     }
@@ -296,9 +296,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
 
             var from: u8 = 0;
-            while (from < self.node_count()) : (from += 1) {
+            while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
-                while (to < self.node_count()) : (to += 1) {
+                while (to < self.process_count()) : (to += 1) {
                     const path = .{ .source = from, .target = to };
                     if (self.is_clogged(path)) continue;
 
