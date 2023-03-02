@@ -218,21 +218,23 @@ const (
 	TransferExceedsDebits                              CreateTransferResult = 38
 	TransferCannotPostAndVoidPendingTransfer           CreateTransferResult = 39
 	TransferPendingTransferCannotPostOrVoidAnother     CreateTransferResult = 40
-	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 41
-	TransferPendingIDMustNotBeZero                     CreateTransferResult = 42
-	TransferPendingIDMustNotBeIntMax                   CreateTransferResult = 43
-	TransferPendingIDMustBeDifferent                   CreateTransferResult = 44
-	TransferPendingTransferNotFound                    CreateTransferResult = 45
-	TransferPendingTransferNotPending                  CreateTransferResult = 46
-	TransferPendingTransferHasDifferentDebitAccountID  CreateTransferResult = 47
-	TransferPendingTransferHasDifferentCreditAccountID CreateTransferResult = 48
-	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 49
-	TransferPendingTransferHasDifferentCode            CreateTransferResult = 50
-	TransferExceedsPendingTransferAmount               CreateTransferResult = 51
-	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 52
-	TransferPendingTransferAlreadyPosted               CreateTransferResult = 53
-	TransferPendingTransferAlreadyVoided               CreateTransferResult = 54
-	TransferPendingTransferExpired                     CreateTransferResult = 55
+	TransferCannotBalanceDebit                         CreateTransferResult = 41
+	TransferCannotBalanceCredit                        CreateTransferResult = 42
+	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 43
+	TransferPendingIDMustNotBeZero                     CreateTransferResult = 44
+	TransferPendingIDMustNotBeIntMax                   CreateTransferResult = 45
+	TransferPendingIDMustBeDifferent                   CreateTransferResult = 46
+	TransferPendingTransferNotFound                    CreateTransferResult = 47
+	TransferPendingTransferNotPending                  CreateTransferResult = 48
+	TransferPendingTransferHasDifferentDebitAccountID  CreateTransferResult = 49
+	TransferPendingTransferHasDifferentCreditAccountID CreateTransferResult = 50
+	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 51
+	TransferPendingTransferHasDifferentCode            CreateTransferResult = 52
+	TransferExceedsPendingTransferAmount               CreateTransferResult = 53
+	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 54
+	TransferPendingTransferAlreadyPosted               CreateTransferResult = 55
+	TransferPendingTransferAlreadyVoided               CreateTransferResult = 56
+	TransferPendingTransferExpired                     CreateTransferResult = 57
 )
 
 func (i CreateTransferResult) String() string {
@@ -319,6 +321,10 @@ func (i CreateTransferResult) String() string {
 		return "TransferCannotPostAndVoidPendingTransfer"
 	case TransferPendingTransferCannotPostOrVoidAnother:
 		return "TransferPendingTransferCannotPostOrVoidAnother"
+	case TransferCannotBalanceDebit:
+		return "TransferCannotBalanceDebit"
+	case TransferCannotBalanceCredit:
+		return "TransferCannotBalanceCredit"
 	case TransferTimeoutReservedForPendingTransfer:
 		return "TransferTimeoutReservedForPendingTransfer"
 	case TransferPendingIDMustNotBeZero:
