@@ -1643,7 +1643,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.has_dirty(message.header));
 
             const write = journal.writes.acquire() orelse {
-                assert(replica.replica_count > 1);
+                assert(!replica.sole_replica());
 
                 journal.write_prepare_debug(message.header, "waiting for IOP");
                 callback(replica, null, trigger);
