@@ -21,7 +21,7 @@ const usage = fmt.comptimePrint(
     \\
     \\  tigerbeetle format --cluster=<integer> --replica=<index> <path>
     \\
-    \\  tigerbeetle start --addresses=<addresses> <path>
+    \\  tigerbeetle start --addresses=<addresses> [--standby-count=<integer>] <path>
     \\
     \\  tigerbeetle version [--version]
     \\
@@ -55,6 +55,11 @@ const usage = fmt.comptimePrint(
     \\        will be used.
     \\        "addresses[i]" corresponds to replica "i".
     \\
+    \\  --standby-count=<integer>
+    \\        Set the number of standby replicas.
+    \\        The last "standby-count" replicas in the "addresses" will passively
+    \\        follow the cluster, without participating in consensus.
+    \\
     \\  --verbose
     \\        Print compile-time configuration along with the build version.
     \\
@@ -81,6 +86,7 @@ pub const Command = union(enum) {
     pub const Start = struct {
         args_allocated: std.ArrayList([:0]const u8),
         addresses: []net.Address,
+        standby_count: u8,
         cache_accounts: u32,
         cache_transfers: u32,
         cache_transfers_posted: u32,
@@ -118,6 +124,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var cluster: ?[]const u8 = null;
     var replica: ?[]const u8 = null;
     var addresses: ?[]const u8 = null;
+    var standby_count: ?[]const u8 = null;
     var cache_accounts: ?[]const u8 = null;
     var cache_transfers: ?[]const u8 = null;
     var cache_transfers_posted: ?[]const u8 = null;
@@ -159,6 +166,9 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
         } else if (mem.startsWith(u8, arg, "--addresses")) {
             if (command != .start) fatal("--addresses: supported only by 'start' command", .{});
             addresses = parse_flag("--addresses", arg);
+        } else if (mem.startsWith(u8, arg, "--standby-count")) {
+            if (command != .start) fatal("--standby-count: supported only by 'start' command", .{});
+            standby_count = parse_flag("--standby-count", arg);
         } else if (mem.startsWith(u8, arg, "--cache-accounts")) {
             if (command != .start) fatal("--cache-accounts: supported only by 'start' command", .{});
             cache_accounts = parse_flag("--cache-accounts", arg);
@@ -204,13 +214,14 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
             };
         },
         .start => {
-            return Command{
+            const start_command = Command{
                 .start = .{
                     .args_allocated = args_allocated,
                     .addresses = parse_addresses(
                         allocator,
                         addresses orelse fatal("required: --addresses", .{}),
                     ),
+                    .standby_count = parse_standby_count(standby_count orelse "0"),
                     .cache_accounts = parse_size_to_count(
                         tigerbeetle.Account,
                         cache_accounts,
@@ -230,6 +241,22 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                     .path = path orelse fatal("required: <path>", .{}),
                 },
             };
+
+            const replica_count = start_command.start.addresses.len -| start_command.start.standby_count;
+            if (replica_count == 0) {
+                fatal(
+                    "--standby-count: too many ({}) standbys for {} addresses",
+                    .{ start_command.start.standby_count, start_command.start.addresses.len },
+                );
+            }
+            if (replica_count > constants.replicas_max) {
+                fatal(
+                    "--addresses: too many replicas ({}), at most {} are allowed",
+                    .{ replica_count, constants.replicas_max },
+                );
+            }
+
+            return start_command;
         },
     }
 }
@@ -264,11 +291,11 @@ fn parse_cluster(raw_cluster: []const u8) u32 {
 
 /// Parse and allocate the addresses returning a slice into that array.
 fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []net.Address {
-    return vsr.parse_addresses(allocator, raw_addresses, constants.replicas_max) catch |err| switch (err) {
+    return vsr.parse_addresses(allocator, raw_addresses, constants.nodes_max) catch |err| switch (err) {
         error.AddressHasTrailingComma => fatal("--addresses: invalid trailing comma", .{}),
         error.AddressLimitExceeded => {
             fatal("--addresses: too many addresses, at most {d} are allowed", .{
-                constants.replicas_max,
+                constants.nodes_max,
             });
         },
         error.AddressHasMoreThanOneColon => {
@@ -279,6 +306,17 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
         error.AddressInvalid => fatal("--addresses: invalid IPv4 address", .{}),
         error.OutOfMemory => fatal("out of memory", .{}),
     };
+}
+
+fn parse_standby_count(raw_standby_count: []const u8) u8 {
+    const count = fmt.parseUnsigned(u8, raw_standby_count, 10) catch |err| switch (err) {
+        error.Overflow => fatal("--standby-count: value exceeds a 8-bit unsigned integer", .{}),
+        error.InvalidCharacter => fatal("--standby-count: value contains an invalid character", .{}),
+    };
+    if (count > constants.standbys_max) {
+        fatal("--standby-count: too many standbys; at most {} are alowed", .{constants.standbys_max});
+    }
+    return count;
 }
 
 fn parse_storage_size(size_string: ?[]const u8) u64 {

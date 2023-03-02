@@ -140,7 +140,8 @@ const Command = struct {
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
-            .replica_count = @intCast(u8, args.addresses.len),
+            .replica_count = @intCast(u8, args.addresses.len) - args.standby_count,
+            .standby_count = args.standby_count,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .message_pool = &command.message_pool,
