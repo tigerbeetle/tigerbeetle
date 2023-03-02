@@ -58,13 +58,9 @@ pub const Network = struct {
 
     pub fn init(
         allocator: std.mem.Allocator,
-        node_count: u8,
-        client_count: u8,
         options: NetworkOptions,
     ) !Network {
-        assert(node_count == options.node_count);
-        const process_count = client_count + node_count;
-        assert(process_count <= std.math.maxInt(u8));
+        const process_count = options.client_count + options.node_count;
 
         var buses = try std.ArrayListUnmanaged(*MessageBus).initCapacity(allocator, process_count);
         errdefer buses.deinit(allocator);
@@ -83,8 +79,9 @@ pub const Network = struct {
         // - replica → client paths
         // - client → replica paths
         // but not client→client paths; clients never message one another.
-        const path_count = @as(usize, node_count) * @as(usize, node_count - 1) +
-            2 * @as(usize, node_count) * @as(usize, client_count);
+        const node_count = @as(usize, options.node_count);
+        const client_count = @as(usize, options.client_count);
+        const path_count = node_count * (node_count - 1) + 2 * node_count * client_count;
         const message_pool = try MessagePool.init_capacity(
             allocator,
             // +1 so we can allocate an extra packet when all packet queues are at capacity,
