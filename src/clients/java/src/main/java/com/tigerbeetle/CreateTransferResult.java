@@ -213,79 +213,89 @@ public enum CreateTransferResult {
     PendingTransferCannotPostOrVoidAnother((int) 40),
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#cannot_balance_debit">cannot_balance_debit</a>
+     */
+    CannotBalanceDebit((int) 41),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#cannot_balance_credit">cannot_balance_credit</a>
+     */
+    CannotBalanceCredit((int) 42),
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#timeout_reserved_for_pending_transfer">timeout_reserved_for_pending_transfer</a>
      */
-    TimeoutReservedForPendingTransfer((int) 41),
+    TimeoutReservedForPendingTransfer((int) 43),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_zero">pending_id_must_not_be_zero</a>
      */
-    PendingIdMustNotBeZero((int) 42),
+    PendingIdMustNotBeZero((int) 44),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_int_max">pending_id_must_not_be_int_max</a>
      */
-    PendingIdMustNotBeIntMax((int) 43),
+    PendingIdMustNotBeIntMax((int) 45),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_different">pending_id_must_be_different</a>
      */
-    PendingIdMustBeDifferent((int) 44),
+    PendingIdMustBeDifferent((int) 46),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_found">pending_transfer_not_found</a>
      */
-    PendingTransferNotFound((int) 45),
+    PendingTransferNotFound((int) 47),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_pending">pending_transfer_not_pending</a>
      */
-    PendingTransferNotPending((int) 46),
+    PendingTransferNotPending((int) 48),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_debit_account_id">pending_transfer_has_different_debit_account_id</a>
      */
-    PendingTransferHasDifferentDebitAccountId((int) 47),
+    PendingTransferHasDifferentDebitAccountId((int) 49),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_credit_account_id">pending_transfer_has_different_credit_account_id</a>
      */
-    PendingTransferHasDifferentCreditAccountId((int) 48),
+    PendingTransferHasDifferentCreditAccountId((int) 50),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_ledger">pending_transfer_has_different_ledger</a>
      */
-    PendingTransferHasDifferentLedger((int) 49),
+    PendingTransferHasDifferentLedger((int) 51),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_code">pending_transfer_has_different_code</a>
      */
-    PendingTransferHasDifferentCode((int) 50),
+    PendingTransferHasDifferentCode((int) 52),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_pending_transfer_amount">exceeds_pending_transfer_amount</a>
      */
-    ExceedsPendingTransferAmount((int) 51),
+    ExceedsPendingTransferAmount((int) 53),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_amount">pending_transfer_has_different_amount</a>
      */
-    PendingTransferHasDifferentAmount((int) 52),
+    PendingTransferHasDifferentAmount((int) 54),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_posted">pending_transfer_already_posted</a>
      */
-    PendingTransferAlreadyPosted((int) 53),
+    PendingTransferAlreadyPosted((int) 55),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_voided">pending_transfer_already_voided</a>
      */
-    PendingTransferAlreadyVoided((int) 54),
+    PendingTransferAlreadyVoided((int) 56),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_expired">pending_transfer_expired</a>
      */
-    PendingTransferExpired((int) 55);
+    PendingTransferExpired((int) 57);
 
     public final int value;
 

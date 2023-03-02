@@ -252,6 +252,18 @@ The transfer was not created.
 [`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) and
 [`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer).
 
+### `cannot_balance_debit`
+The transfer was not created.
+[`flags.balancing_debit`](../transfers.md#flagsbalancing_debit) is mutually exclusive with
+[`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) and
+[`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer).
+
+### `cannot_balance_credit`
+The transfer was not created.
+[`flags.balancing_credit`](../transfers.md#flagsbalancing_debit) is mutually exclusive with
+[`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) and
+[`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer).
+
 ### `timeout_reserved_for_pending_transfer`
 The transfer was not created.
 [`Transfer.timeout`](../transfers.md#timeout) is nonzero, but only

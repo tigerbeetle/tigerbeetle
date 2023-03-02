@@ -172,6 +172,8 @@ pub const CreateTransferResult = enum(u32) {
 
     cannot_post_and_void_pending_transfer,
     pending_transfer_cannot_post_or_void_another,
+    cannot_balance_debit,
+    cannot_balance_credit,
     timeout_reserved_for_pending_transfer,
 
     pending_id_must_not_be_zero,

@@ -1029,6 +1029,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 return .cannot_post_and_void_pending_transfer;
             }
             if (t.flags.pending) return .pending_transfer_cannot_post_or_void_another;
+            if (t.flags.balancing_debit) return .cannot_balance_debit;
+            if (t.flags.balancing_credit) return .cannot_balance_credit;
             if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
 
             if (t.pending_id == 0) return .pending_id_must_not_be_zero;
@@ -1057,16 +1059,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             if (t.ledger > 0 and t.ledger != p.ledger) return .pending_transfer_has_different_ledger;
             if (t.code > 0 and t.code != p.code) return .pending_transfer_has_different_code;
 
-            const amount = amount: {
-                if (t.amount == 0) break :amount p.amount;
-
-                if (t.flags.balancing_debit or t.flags.balancing_credit) {
-                    break :amount std.math.min(t.amount, p.amount);
-                } else {
-                    break :amount t.amount;
-                }
-            };
-
+            const amount = if (t.amount > 0) t.amount else p.amount;
             if (amount > p.amount) return .exceeds_pending_transfer_amount;
 
             if (t.flags.void_pending_transfer and amount < p.amount) {
@@ -1972,6 +1965,10 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _   _ _ 16 1 timestamp_must_be_zero
         \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _   _ _ 16 _ cannot_post_and_void_pending_transfer
         \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN   _ VOI   _   _ _ 16 _ pending_transfer_cannot_post_or_void_another
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI BDR BCR _ 16 _ cannot_balance_debit
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI   _ BCR _ 16 _ cannot_balance_credit
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _ POS   _ BDR BCR _ 16 _ cannot_balance_debit
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _ POS   _   _ BCR _ 16 _ cannot_balance_credit
         \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI   _   _ _ 16 _ timeout_reserved_for_pending_transfer
         \\ transfer T101 A8 A9 U2 _  T0    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_id_must_not_be_zero
         \\ transfer T101 A8 A9 U2 _  -0    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_id_must_not_be_int_max
@@ -2214,34 +2211,6 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
         \\ lookup_transfer T2 amount  7
         \\ lookup_transfer T3 amount  3
         \\ lookup_transfer T4 amount  5
-        \\ commit lookup_transfers
-    );
-}
-
-test "create_transfers: balancing_debit/balancing_credit + post_pending_transfer/void_pending_transfer" {
-    try check(
-        \\ account A1 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
-        \\ account A2 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
-        \\ commit create_accounts
-        \\
-        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _   _   _ _ 10 _ ok
-        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _   _   _ _ 10 _ ok
-        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _   _   _ _ 10 _ ok
-        \\ transfer T4 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _   _   _ _ 10 _ ok
-        \\ transfer T5 A1 A2  _ _  T1 _ L1 C1 _   _ POS   _ BDR   _ _  9 _ ok
-        \\ transfer T6 A1 A2  _ _  T2 _ L1 C1 _   _ POS   _ BDR   _ _ 11 _ ok
-        \\ transfer T7 A1 A2  _ _  T3 _ L1 C1 _   _   _ VOI   _ BCR _  9 _ pending_transfer_has_different_amount
-        \\ transfer T8 A1 A2  _ _  T4 _ L1 C1 _   _   _ VOI   _ BCR _ 11 _ ok
-        \\ commit create_transfers
-        \\
-        \\ lookup_account A1 10 19  0  0
-        \\ lookup_account A2  0  0 10 19
-        \\ commit lookup_accounts
-        \\
-        \\ lookup_transfer T5 amount  9
-        \\ lookup_transfer T6 amount 10
-        \\ lookup_transfer T7 exists false
-        \\ lookup_transfer T8 amount 10
         \\ commit lookup_transfers
     );
 }
