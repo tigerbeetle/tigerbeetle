@@ -1621,7 +1621,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.size <= message.buffer.len);
             assert(journal.has(message.header));
             assert(!journal.writing(message.header.op, message.header.checksum));
-            assert(replica.replica_count != 1 or journal.writes.executing() == 0);
+            if (replica.sole_replica()) assert(journal.writes.executing() == 0);
 
             // The underlying header memory must be owned by the buffer and not by journal.headers:
             // Otherwise, concurrent writes may modify the memory of the pointer while we write.

@@ -58,11 +58,12 @@ pub const Network = struct {
 
     pub fn init(
         allocator: std.mem.Allocator,
-        replica_count: u8,
+        node_count: u8,
         client_count: u8,
         options: NetworkOptions,
     ) !Network {
-        const process_count = client_count + replica_count;
+        assert(node_count == options.node_count);
+        const process_count = client_count + node_count;
         assert(process_count <= std.math.maxInt(u8));
 
         var buses = try std.ArrayListUnmanaged(*MessageBus).initCapacity(allocator, process_count);
@@ -82,8 +83,8 @@ pub const Network = struct {
         // - replica → client paths
         // - client → replica paths
         // but not client→client paths; clients never message one another.
-        const path_count = @as(usize, replica_count) * @as(usize, replica_count - 1) +
-            2 * @as(usize, replica_count) * @as(usize, client_count);
+        const path_count = @as(usize, node_count) * @as(usize, node_count - 1) +
+            2 * @as(usize, node_count) * @as(usize, client_count);
         const message_pool = try MessagePool.init_capacity(
             allocator,
             // +1 so we can allocate an extra packet when all packet queues are at capacity,
@@ -119,7 +120,7 @@ pub const Network = struct {
         const raw_process = switch (process) {
             .replica => |replica| replica,
             .client => |client| blk: {
-                assert(client >= constants.replicas_max);
+                assert(client >= constants.nodes_max);
                 break :blk client;
             },
         };
@@ -176,6 +177,7 @@ pub const Network = struct {
         for (network.processes.items) |p, i| {
             if (std.meta.eql(raw_process_to_process(p), process)) return @intCast(u8, i);
         }
+        log.err("no such process: {} (have {any})", .{ process, network.processes.items });
         unreachable;
     }
 
@@ -227,9 +229,9 @@ pub const Network = struct {
 
     fn raw_process_to_process(raw: u128) Process {
         switch (raw) {
-            0...(constants.replicas_max - 1) => return .{ .replica = @intCast(u8, raw) },
+            0...(constants.nodes_max - 1) => return .{ .replica = @intCast(u8, raw) },
             else => {
-                assert(raw >= constants.replicas_max);
+                assert(raw >= constants.nodes_max);
                 return .{ .client = raw };
             },
         }

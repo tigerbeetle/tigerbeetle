@@ -37,7 +37,7 @@ pub const Failure = enum(u8) {
 
 /// Shift the id-generating index because the simulator network expects client ids to never collide
 /// with a replica index.
-const client_id_permutation_shift = constants.replicas_max;
+const client_id_permutation_shift = constants.nodes_max;
 
 pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, comptime constants: anytype) type) type {
     return struct {
@@ -55,6 +55,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         pub const Options = struct {
             cluster_id: u32,
             replica_count: u8,
+            standby_count: u8,
             client_count: u8,
             storage_size_limit: u64,
             storage_fault_atlas: StorageFaultAtlas.Options,
@@ -77,9 +78,12 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         network: *Network,
         storages: []Storage,
         storage_fault_atlas: *StorageFaultAtlas,
+        /// NB: includes both active replicas and standbys. 
         replicas: []Replica,
         replica_pools: []MessagePool,
         replica_health: []ReplicaHealth,
+        replica_count: u8,
+        standby_count: u8,
 
         clients: []Client,
         client_pools: []MessagePool,
@@ -109,6 +113,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             assert(options.storage.replica_index == null);
             assert(options.storage.fault_atlas == null);
 
+            const node_count = options.replica_count + options.standby_count;
+
             var prng = std.rand.DefaultPrng.init(options.seed);
             const random = prng.random();
 
@@ -119,7 +125,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             network.* = try Network.init(
                 allocator,
-                options.replica_count,
+                node_count,
                 options.client_count,
                 options.network,
             );
@@ -135,7 +141,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 options.storage_fault_atlas,
             );
 
-            const storages = try allocator.alloc(Storage, options.replica_count);
+            const storages = try allocator.alloc(Storage, node_count);
             errdefer allocator.free(storages);
 
             for (storages) |*storage, replica_index| {
@@ -148,7 +154,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
             errdefer for (storages) |*storage| storage.deinit(allocator);
 
-            var replica_pools = try allocator.alloc(MessagePool, options.replica_count);
+            var replica_pools = try allocator.alloc(MessagePool, node_count);
             errdefer allocator.free(replica_pools);
 
             for (replica_pools) |*pool, i| {
@@ -157,10 +163,10 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);
 
-            const replicas = try allocator.alloc(Replica, options.replica_count);
+            const replicas = try allocator.alloc(Replica, node_count);
             errdefer allocator.free(replicas);
 
-            const replica_health = try allocator.alloc(ReplicaHealth, options.replica_count);
+            const replica_health = try allocator.alloc(ReplicaHealth, node_count);
             errdefer allocator.free(replica_health);
             mem.set(ReplicaHealth, replica_health, .up);
 
@@ -232,6 +238,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .replicas = replicas,
                 .replica_pools = replica_pools,
                 .replica_health = replica_health,
+                .replica_count = options.replica_count,
+                .standby_count = options.standby_count,
                 .clients = clients,
                 .client_pools = client_pools,
                 .client_id_permutation = client_id_permutation,
@@ -342,7 +350,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             try replica.open(
                 cluster.allocator,
                 .{
-                    .replica_count = @intCast(u8, cluster.replicas.len),
+                    .replica_count = cluster.replica_count,
+                    .standby_count = cluster.standby_count,
                     .storage = &cluster.storages[replica_index],
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,
@@ -354,7 +363,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             );
             assert(replica.cluster == cluster.options.cluster_id);
             assert(replica.replica == replica_index);
-            assert(replica.replica_count == cluster.replicas.len);
+            assert(replica.replica_count == cluster.replica_count);
+            assert(replica.standby_count == cluster.standby_count);
 
             replica.context = cluster;
             replica.on_change_state = on_replica_change_state;

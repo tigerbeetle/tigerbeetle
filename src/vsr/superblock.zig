@@ -618,7 +618,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         ) void {
             assert(!superblock.opened);
 
-            assert(options.replica < constants.replicas_max);
+            assert(options.replica < constants.nodes_max);
 
             // This working copy provides the parent checksum, and will not be written to disk.
             // We therefore use zero values to make this parent checksum as stable as possible.
