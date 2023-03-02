@@ -12,7 +12,14 @@ fi
 COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
-zig/zig build install -Drelease-safe -Dconfig=production
+# Determine the appropriate target flag (to support macos Ventura)
+if [ "$(uname)" = "Linux" ]; then
+    ZIG_TARGET="-Dtarget=native-linux"
+else
+    ZIG_TARGET="-Dtarget=native-macos"
+fi
+
+./scripts/build.sh install -Drelease-safe -Dconfig=production $ZIG_TARGET
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -54,7 +61,7 @@ done
 
 echo ""
 echo "Benchmarking..."
-zig/zig build benchmark -Drelease-safe -Dconfig=production -- "$@"
+./scripts/build.sh benchmark -Drelease-safe -Dconfig=production $ZIG_TARGET -- "$@"
 echo ""
 
 for I in $REPLICAS
