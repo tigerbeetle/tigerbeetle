@@ -813,7 +813,11 @@ pub fn ReplicaType(
             });
 
             if (message.header.invalid()) |reason| {
-                log.err("{}: on_message: invalid ({s})", .{ self.replica, reason });
+                log.err("{}: on_message: invalid (command={}, {s})", .{
+                    self.replica,
+                    message.header.command,
+                    reason,
+                });
                 return;
             }
 
