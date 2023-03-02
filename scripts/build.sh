@@ -17,5 +17,5 @@ GLOBAL_CACHE_ROOT="$HOME/.cache/zig"
 # Using the {os} directly instead of "native" avoids hitting an abort on macos Ventura.
 # TODO The abort was fixed in 0.10 while we're on 0.9. This script can be removed once we update zig.
 $ZIG_EXE run ./scripts/build_runner.zig -target native-$ZIG_OS --main-pkg-path $BUILD_ROOT \
-    -- $ZIG_EXE $BUILD_ROOT $CACHE_ROOT $GLOBAL_CACHE_ROOT \
-    $@
+    -- $ZIG_EXE $BUILD_ROOT $CACHE_ROOT "$GLOBAL_CACHE_ROOT" \
+    "$@"
