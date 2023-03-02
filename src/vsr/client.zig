@@ -602,7 +602,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// (0,x),(1,x),(3,x),(5,x),(20,x)
         ///
         /// Demux list (offset,size):
-        /// (0,2)(2,10),(12,8)(20,1)
+        /// (0,2)(2,10),(12,8),(20,1)
         ///
         /// Demux process:
         /// Reply        | Demux  | Demuxed reply
