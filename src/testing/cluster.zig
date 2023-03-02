@@ -78,7 +78,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         network: *Network,
         storages: []Storage,
         storage_fault_atlas: *StorageFaultAtlas,
-        /// NB: includes both active replicas and standbys. 
+        /// NB: includes both active replicas and standbys.
         replicas: []Replica,
         replica_pools: []MessagePool,
         replica_health: []ReplicaHealth,
@@ -125,8 +125,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             network.* = try Network.init(
                 allocator,
-                node_count,
-                options.client_count,
                 options.network,
             );
             errdefer network.deinit();
