@@ -853,7 +853,7 @@ pub fn ReplicaType(
                 .nack_prepare => self.on_nack_prepare(message),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction, .reply => {
-                    log.warn("{}: on_message: ignoring misdirected {s} message", .{
+                    log.warn("{}: on_message: misdirected message ({s})", .{
                         self.replica,
                         @tagName(message.header.command),
                     });
@@ -886,7 +886,7 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
 
             if (message.header.replica == self.replica) {
-                log.warn("{}: on_ping: ignoring (self)", .{self.replica});
+                log.warn("{}: on_ping: misdirected message (self)", .{self.replica});
                 return;
             }
 
@@ -1170,7 +1170,7 @@ pub fn ReplicaType(
             }
 
             if (self.primary()) {
-                log.warn("{}: on_commit: ignoring (primary)", .{self.replica});
+                log.warn("{}: on_commit: misdirected message (primary)", .{self.replica});
                 return;
             }
 
@@ -3100,8 +3100,7 @@ pub fn ReplicaType(
             assert(message.header.client != 0);
 
             if (self.standby()) {
-                // This may be caused by a fault in the network topology.
-                log.warn("{}: on_ping_client: ignoring (standby)", .{self.replica});
+                log.warn("{}: on_ping_client: misdirected message (standby)", .{self.replica});
                 return true;
             }
 
@@ -3137,13 +3136,12 @@ pub fn ReplicaType(
             if (message.header.view > self.view) {
                 // Another replica is treating us as the primary for a view we do not know about.
                 // This may be caused by a fault in the network topology.
-                log.warn("{}: on_prepare_ok: ignoring (newer view)", .{self.replica});
+                log.warn("{}: on_prepare_ok: misdirected message (newer view)", .{self.replica});
                 return true;
             }
 
             if (self.backup()) {
-                // This may be caused by a fault in the network topology.
-                log.warn("{}: on_prepare_ok: ignoring (backup)", .{self.replica});
+                log.warn("{}: on_prepare_ok: misdirected message (backup)", .{self.replica});
                 return true;
             }
 
@@ -3181,7 +3179,7 @@ pub fn ReplicaType(
             if (self.ignore_repair_message_during_view_change(message)) return true;
 
             if (message.header.replica == self.replica) {
-                log.warn("{}: on_{s}: ignoring (self)", .{ self.replica, command });
+                log.warn("{}: on_{s}: misdirected message (self)", .{ self.replica, command });
                 return true;
             }
 
@@ -3189,7 +3187,7 @@ pub fn ReplicaType(
                 switch (message.header.command) {
                     .headers => {},
                     .request_start_view, .request_headers, .request_prepare, .nack_prepare => {
-                        log.warn("{}: on_{s}: ignoring (standby)", .{ self.replica, command });
+                        log.warn("{}: on_{s}: misdirected message (standby)", .{ self.replica, command });
                         return true;
                     },
                     else => unreachable,
@@ -3200,12 +3198,12 @@ pub fn ReplicaType(
                 switch (message.header.command) {
                     // Only the primary may receive these messages:
                     .request_start_view, .nack_prepare => {
-                        log.warn("{}: on_{s}: ignoring (backup)", .{ self.replica, command });
+                        log.warn("{}: on_{s}: misdirected message (backup)", .{ self.replica, command });
                         return true;
                     },
                     // Only the primary may answer a request for a prepare without a context:
                     .request_prepare => if (message.header.timestamp == 0) {
-                        log.warn("{}: on_{s}: ignoring (no context)", .{ self.replica, command });
+                        log.warn("{}: on_{s}: misdirected message (no context)", .{ self.replica, command });
                         return true;
                     },
                     .headers, .request_headers => {},
@@ -3267,8 +3265,7 @@ pub fn ReplicaType(
             assert(message.header.command == .request);
 
             if (self.standby()) {
-                // This may be caused by a fault in the network topology.
-                log.warn("{}: on_request: ignoring (standby)", .{self.replica});
+                log.warn("{}: on_request: misdirected message (standby)", .{self.replica});
                 return true;
             }
 
@@ -3466,8 +3463,7 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
 
             if (self.standby()) {
-                // This may be caused by a fault in the network topology.
-                log.warn("{}: on_start_view_change: ignoring (standby)", .{self.replica});
+                log.warn("{}: on_start_view_change: misdirected message (standby)", .{self.replica});
                 return true;
             }
 
@@ -3515,17 +3511,16 @@ pub fn ReplicaType(
                 return true;
             }
 
-            // These may be caused by faults in the network topology.
             switch (message.header.command) {
                 .start_view => {
                     if (message.header.replica == self.replica) {
-                        log.warn("{}: on_{s}: ignoring (self)", .{ self.replica, command });
+                        log.warn("{}: on_{s}: misdirected message (self)", .{ self.replica, command });
                         return true;
                     }
                 },
                 .do_view_change => {
                     if (self.standby()) {
-                        log.warn("{}: on_{s}: ignoring (standby)", .{ self.replica, command });
+                        log.warn("{}: on_{s}: misdirected message (standby)", .{ self.replica, command });
                         return true;
                     }
                 },
