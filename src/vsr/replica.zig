@@ -988,6 +988,8 @@ pub fn ReplicaType(
         /// and the primary will resend but to another replica, until it receives enough prepare_ok's.
         fn on_prepare(self: *Self, message: *Message) void {
             assert(message.header.command == .prepare);
+            assert(message.header.replica < self.replica_count);
+
             self.view_jump(message.header);
 
             if (self.is_repair(message)) {
@@ -1144,6 +1146,7 @@ pub fn ReplicaType(
         /// primary as down, but neither can the primary hear from the backups.
         fn on_commit(self: *Self, message: *const Message) void {
             assert(message.header.command == .commit);
+            assert(message.header.replica < self.replica_count);
 
             self.view_jump(message.header);
 
@@ -3111,6 +3114,7 @@ pub fn ReplicaType(
 
         fn ignore_prepare_ok(self: *Self, message: *const Message) bool {
             assert(message.header.command == .prepare_ok);
+            assert(message.header.replica < self.replica_count);
 
             if (self.primary_index(message.header.view) == self.replica) {
                 assert(message.header.view <= self.view);
@@ -3148,6 +3152,10 @@ pub fn ReplicaType(
                 message.header.command == .request_prepare or
                 message.header.command == .headers or
                 message.header.command == .nack_prepare);
+            switch (message.header.command) {
+                .headers, .nack_prepare => assert(message.header.replica < self.replica_count),
+                else => {},
+            }
 
             const command: []const u8 = @tagName(message.header.command);
 
@@ -3451,6 +3459,7 @@ pub fn ReplicaType(
 
         fn ignore_start_view_change_message(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .start_view_change);
+            assert(message.header.replica < self.replica_count);
 
             if (self.standby()) {
                 // This may be caused by a fault in the network topology.
@@ -3483,6 +3492,7 @@ pub fn ReplicaType(
                 message.header.command == .start_view);
             assert(message.header.view > 0); // The initial view is already zero.
             assert(self.status != .recovering); // Single node clusters don't have view changes.
+            assert(message.header.replica < self.replica_count);
 
             const command: []const u8 = @tagName(message.header.command);
 
