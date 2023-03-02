@@ -19,19 +19,128 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         pub const StateMachine = StateMachine_;
 
         pub const Error = error{
+            BatchSizeZero,
+            TooMuchData,
             TooManyOutstandingRequests,
         };
 
-        pub const Request = struct {
-            pub const Callback = fn (
-                user_data: u128,
-                operation: StateMachine.Operation,
-                results: Error![]const u8,
-            ) void;
+        pub const Callback = fn (
             user_data: u128,
-            // Null iff operation=register.
-            callback: ?Callback,
+            operation: StateMachine.Operation,
+            results: Error![]const u8,
+        ) void;
+
+        pub const Request = struct {
+            // Null iif operation=register.
+            demux_list: ?DemuxList,
             message: *Message,
+        };
+
+        pub const BatchLogical = struct {
+            operation: StateMachine.Operation,
+            size: u32,
+            batch_physical: union(enum) {
+                new: *Message,
+                append: struct {
+                    request: *Request,
+                    offset: u32,
+                },
+            },
+
+            pub fn slice(self: *@This()) []u8 {
+                const body = switch (self.batch_physical) {
+                    .new => |value| value.body(),
+                    .append => |value| value.request.message.body()[value.offset..],
+                };
+                return body[0..self.size];
+            }
+
+            pub fn offset(self: *const @This()) u32 {
+                return switch (self.batch_physical) {
+                    .new => 0,
+                    .append => |value| value.offset,
+                };
+            }
+        };
+
+        const DemuxList = struct {
+            head: *Demux,
+            tail: *Demux,
+        };
+
+        const Demux = struct {
+            user_data: u128,
+            callback: Callback,
+            offset: u32,
+            size: u32,
+            next: ?*Demux = null,
+        };
+
+        const DemuxPool = struct {
+            buffer: []Demux,
+            stack: ?*Demux,
+
+            pub fn init(allocator: mem.Allocator) error{OutOfMemory}!@This() {
+                // Max number of logical batches that need to be demuxed is
+                // client_request_queue_max * (max of operations per request):
+                const demux_max = constants.client_request_queue_max * comptime blk: {
+                    var batch_max: usize = 0;
+                    inline for (std.meta.declarations(StateMachine.constants.batch_max)) |decl| {
+                        if (decl.is_pub) {
+                            batch_max = std.math.max(
+                                batch_max,
+                                @field(StateMachine.constants.batch_max, decl.name),
+                            );
+                        }
+                    }
+                    assert(batch_max > 0);
+                    break :blk batch_max;
+                };
+
+                return try init_capacity(allocator, demux_max);
+            }
+
+            pub fn init_capacity(allocator: mem.Allocator, demux_max: usize) error{OutOfMemory}!@This() {
+                var buffer = try allocator.alloc(Demux, demux_max);
+                var list = blk: {
+                    var head: ?*Demux = null;
+                    var tail: ?*Demux = null;
+
+                    for (buffer) |*current| {
+                        current.next = null;
+                        if (tail) |previous| {
+                            previous.next = current;
+                        } else {
+                            head = current;
+                        }
+                        tail = current;
+                    }
+
+                    break :blk head;
+                };
+
+                return @This(){
+                    .buffer = buffer,
+                    .stack = list,
+                };
+            }
+
+            pub fn deinit(self: *@This(), allocator: mem.Allocator) void {
+                allocator.free(self.buffer);
+                self.stack = null;
+            }
+
+            pub fn acquire_demux(self: *@This()) *Demux {
+                const first = self.stack.?;
+                self.stack = first.next;
+                first.next = null;
+                return first;
+            }
+
+            pub fn release_demux(self: *@This(), demux: *Demux) void {
+                demux.next = self.stack;
+                self.stack = demux;
+            }
         };
 
         allocator: mem.Allocator,
@@ -71,6 +180,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
         request_queue: RingBuffer(Request, constants.client_request_queue_max, .array) = .{},
+
+        demux_pool: DemuxPool,
 
         /// The number of ticks without a reply before the client resends the inflight request.
         /// Dynamically adjusted as a function of recent request round-trip time.
@@ -113,12 +224,16 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             );
             errdefer message_bus.deinit(allocator);
 
+            var demux_pool = try DemuxPool.init(allocator);
+            errdefer demux_pool.deinit(allocator);
+
             var self = Self{
                 .allocator = allocator,
                 .message_bus = message_bus,
                 .id = id,
                 .cluster = cluster,
                 .replica_count = replica_count,
+                .demux_pool = demux_pool,
                 .request_timeout = .{
                     .name = "request_timeout",
                     .id = id,
@@ -142,6 +257,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 self.message_bus.unref(inflight.message);
             }
             self.message_bus.deinit(allocator);
+            self.demux_pool.deinit(allocator);
         }
 
         pub fn on_message(message_bus: *MessageBus, message: *Message) void {
@@ -185,13 +301,104 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             if (self.request_timeout.fired()) self.on_request_timeout();
         }
 
-        pub fn request(
+        pub fn get_batch(
+            self: *Self,
+            operation: StateMachine.Operation,
+            size: u32,
+        ) Error!BatchLogical {
+            assert(operation != .reserved);
+            assert(operation != .root);
+            assert(operation != .register);
+
+            if (size == 0) return error.BatchSizeZero;
+            if (size > constants.message_body_size_max) return error.TooMuchData;
+
+            if (!self.request_queue.empty()) {
+                var it = self.request_queue.iterator_mutable();
+                while (it.next_ptr()) |request_ptr| {
+                    const request_operation = request_ptr.message.header.operation.cast(StateMachine);
+                    if (operation == request_operation) {
+                        const message_size = request_ptr.message.header.size + size;
+                        if (message_size <= constants.message_size_max) {
+
+                            // Appending this batch to an existing request:
+                            const offset = @intCast(u32, request_ptr.message.body().len);
+                            request_ptr.message.header.size += size;
+                            return BatchLogical{
+                                .operation = operation,
+                                .size = size,
+                                .batch_physical = .{
+                                    .append = .{
+                                        .request = request_ptr,
+                                        .offset = offset,
+                                    },
+                                },
+                            };
+                        }
+                    }
+                }
+            }
+
+            // Creating a new request for this batch:
+            if (self.request_queue.full()) return error.TooManyOutstandingRequests;
+
+            // We will set request when submiting the batch,
+            // and set parent, context, view and checksums only when sending for the first time:
+            const message = self.get_message();
+            message.header.* = .{
+                .client = self.id,
+                .cluster = self.cluster,
+                .command = .request,
+                .operation = vsr.Operation.from(StateMachine, operation),
+                .size = @intCast(u32, @sizeOf(Header) + size),
+            };
+
+            return BatchLogical{
+                .operation = operation,
+                .size = size,
+                .batch_physical = .{ .new = message },
+            };
+        }
+
+        pub fn submit_batch(
             self: *Self,
             user_data: u128,
-            callback: Request.Callback,
+            callback: Callback,
+            batch_logical: BatchLogical,
+        ) void {
+            assert(batch_logical.operation != .reserved);
+            assert(batch_logical.operation != .root);
+            assert(batch_logical.operation != .register);
+
+            var demux = self.demux_pool.acquire_demux();
+            demux.* = .{
+                .user_data = user_data,
+                .callback = callback,
+                .offset = batch_logical.offset(),
+                .size = batch_logical.size,
+            };
+
+            switch (batch_logical.batch_physical) {
+                .new => |message| {
+                    // Dispatch this batch in a new request
+                    defer self.unref(message);
+                    self.request(demux, batch_logical.operation, message);
+                },
+                .append => |append| {
+                    if (append.request.demux_list) |*demux_list| {
+                        // Append this batch in a queued request
+                        demux_list.tail.next = demux;
+                        demux_list.tail = demux;
+                    } else assert(false);
+                },
+            }
+        }
+
+        fn request(
+            self: *Self,
+            demux: *Demux,
             operation: StateMachine.Operation,
             message: *Message,
-            message_body_size: usize,
         ) void {
             assert(operation != .reserved);
             assert(operation != .root);
@@ -199,37 +406,36 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             self.register();
             assert(self.request_number > 0);
+            message.header.request = self.request_number;
 
-            // We will set parent, context, view and checksums only when sending for the first time:
-            message.header.* = .{
-                .client = self.id,
-                .request = self.request_number,
-                .cluster = self.cluster,
-                .command = .request,
-                .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @intCast(u32, @sizeOf(Header) + message_body_size),
-            };
+            // This function must be called only for the first logical batch
+            assert(demux.offset == 0);
 
             log.debug("{}: request: user_data={} request={} size={} {s}", .{
                 self.id,
-                user_data,
+                demux.user_data,
                 message.header.request,
                 message.header.size,
                 @tagName(operation),
             });
 
-            if (self.request_queue.full()) {
-                callback(user_data, operation, error.TooManyOutstandingRequests);
-                return;
-            }
-
+            // This was checked during the batch acquisition,
+            // it's not expected to change between get_batch and submit_batch calls.
+            assert(!self.request_queue.full());
             const was_empty = self.request_queue.empty();
 
             self.request_number += 1;
-            self.request_queue.push_assume_capacity(.{
-                .user_data = user_data,
-                .callback = callback,
-                .message = message.ref(),
+            self.request_queue.push_assume_capacity(blk: {
+                // TODO: Compiler glitch if .demux_list is initialized inside Request,
+                // both pointer are set as null.
+                const demux_list = DemuxList{
+                    .head = demux,
+                    .tail = demux,
+                };
+                break :blk Request{
+                    .demux_list = demux_list,
+                    .message = message.ref(),
+                };
             });
 
             // If the queue was empty, then there is no request inflight and we must send this one:
@@ -329,7 +535,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
                 self.id,
-                inflight.user_data,
+                0, //PENDING:: Adjust logs.
                 reply.header.request,
                 reply.header.size,
                 @tagName(reply.header.operation.cast(StateMachine)),
@@ -373,16 +579,87 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 on_reply_callback(self, inflight.message, reply);
             }
 
-            if (inflight.callback) |callback| {
+            if (inflight.demux_list) |demux_list| {
                 assert(inflight.message.header.operation != .register);
 
-                callback(
-                    inflight.user_data,
-                    inflight.message.header.operation.cast(StateMachine),
-                    reply.body(),
-                );
+                const operation = inflight.message.header.operation.cast(StateMachine);
+                switch (operation) {
+                    .reserved, .root, .register => unreachable,
+                    .create_accounts => self.decode_reply(.create_accounts, demux_list, reply),
+                    .create_transfers => self.decode_reply(.create_transfers, demux_list, reply),
+                    .lookup_accounts => self.decode_reply(.lookup_accounts, demux_list, reply),
+                    .lookup_transfers => self.decode_reply(.lookup_transfers, demux_list, reply),
+                }
             } else {
                 assert(inflight.message.header.operation == .register);
+            }
+        }
+
+        /// Decoding the state machine reply into multiple logical batches,
+        /// Example for create_accounts and create_transfers:
+        ///
+        /// Response (index,result):
+        /// (0,x),(1,x),(3,x),(5,x),(20,x)
+        ///
+        /// Demux list (offset,size):
+        /// (0,2)(2,10),(12,8)(20,1)
+        ///
+        /// Demux process:
+        /// Reply        | Demux  | Demuxed reply
+        /// -------------|--------|---------------
+        /// (0,x),(1,x)  | (0,2)  | (0,x),(1,x)
+        /// (3,x),(5,x)  | (2,10) | (1,x),(3,x)
+        /// ()           | (12,8) | ()
+        /// (20,x)       | (20,1) | (0,x)
+        fn decode_reply(self: *Self, comptime operation: StateMachine.Operation, demux_list: DemuxList, reply: *Message) void {
+
+            // We don't support batching on lookup operations yet.
+            if (operation == .lookup_accounts or operation == .lookup_transfers) {
+                assert(demux_list.head.next == null);
+                demux_list.head.callback(
+                    demux_list.head.user_data,
+                    operation,
+                    reply.body(),
+                );
+                return;
+            }
+
+            const Event = StateMachine.Event(operation);
+            const Result = StateMachine.Result(operation);
+            const results = std.mem.bytesAsSlice(Result, reply.body());
+
+            var head: ?*Demux = demux_list.head;
+            var index_current: u32 = 0;
+            while (head) |demux| {
+                if (index_current >= results.len) {
+                    // There is no more results to process,
+                    // therefore this is an empty result (all success).
+                    demux.callback(demux.user_data, operation, &.{});
+                } else {
+                    const demux_index_start = @divExact(demux.offset, @sizeOf(Event));
+                    const demux_index_end = demux_index_start + @divExact(demux.size, @sizeOf(Event));
+
+                    const index_start = index_current;
+                    for (results[index_start..]) |*result| {
+                        // If this result is related to a next logical batch
+                        // breaks the loop, calling the callback with the range processed so far.
+                        if (result.index >= demux_index_end) break;
+                        assert(result.index >= demux_index_start);
+
+                        // Adjusts the index relative to the logical batch's offset:
+                        result.index -= demux_index_start;
+                        index_current += 1;
+                    }
+
+                    demux.callback(
+                        demux.user_data,
+                        operation,
+                        std.mem.sliceAsBytes(results[index_start..index_current]),
+                    );
+                }
+
+                head = demux.next;
+                self.demux_pool.release_demux(demux);
             }
         }
 
@@ -461,8 +738,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(self.request_queue.empty());
 
             self.request_queue.push_assume_capacity(.{
-                .user_data = 0,
-                .callback = null,
+                .demux_list = null,
                 .message = message.ref(),
             });
 

@@ -69,7 +69,7 @@ pub fn main() !void {
 
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
-    var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", constants.port)};
+    var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", 3000)};
 
     var io = try IO.init(32, 0);
 
