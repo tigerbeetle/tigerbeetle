@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 set -eu
 
 echo "//registry.npmjs.org/:_authToken=${TIGERBEETLE_NODE_PUBLISH_KEY}" > ~/.npmrc
@@ -16,13 +16,11 @@ if [ "${exists}" = "true" ]; then
 
     rm -rf /tmp/change-package-version && mkdir -p /tmp/change-package-version
     tar -xzpf tigerbeetle-node-*.tgz -C /tmp/change-package-version
+
     jq ".version=\"${NPM_PLUS_ONE_VERSION}\"" /tmp/change-package-version/package/package.json > /tmp/change-package-version/package/package.json-new
-    jq ".version=\"${NPM_PLUS_ONE_VERSION}\" | .packages[\"\"].version=\"${NPM_PLUS_ONE_VERSION}\"" /tmp/change-package-version/package/package-lock.json > /tmp/change-package-version/package/package-lock.json-new
-
     mv -f /tmp/change-package-version/package/package.json-new /tmp/change-package-version/package/package.json
-    mv -f /tmp/change-package-version/package/package-lock.json-new /tmp/change-package-version/package/package-lock.json
 
-    tar -czpf tigerbeetle-node-updated.tgz -C /tmp/change-package-version .
+    tar -czpf tigerbeetle-node-updated.tgz -C /tmp/change-package-version/package .
 
     npm publish tigerbeetle-node-updated.tgz
 else
