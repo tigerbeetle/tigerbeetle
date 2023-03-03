@@ -1413,19 +1413,25 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             switch (decision) {
                 .eql, .nil => {
-                    log.debug("{}: recover_slot: recovered slot={} label={s} decision={s}", .{
+                    log.debug("{}: recover_slot: recovered " ++
+                        "slot={:0>4} label={s} decision={s} command={} op={}", .{
                         journal.replica,
                         slot.index,
                         case.label,
                         @tagName(decision),
+                        journal.headers[slot.index].command,
+                        journal.headers[slot.index].op,
                     });
                 },
                 .fix, .vsr, .cut => {
-                    log.warn("{}: recover_slot: recovered slot={} label={s} decision={s}", .{
+                    log.warn("{}: recover_slot: recovered " ++
+                        "slot={:0>4} label={s} decision={s} command={} op={}", .{
                         journal.replica,
                         slot.index,
                         case.label,
                         @tagName(decision),
+                        journal.headers[slot.index].command,
+                        journal.headers[slot.index].op,
                     });
                 },
             }
