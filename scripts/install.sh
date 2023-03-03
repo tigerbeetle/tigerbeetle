@@ -26,13 +26,17 @@ if [ ! -d "zig" ]; then
     scripts/install_zig.sh
 fi
 
+# Default to specifying "native-macos" if the target is not provided:
+if [ "$target" = "" ]; then
+    if [ "$(./zig/zig targets | grep '"os": "' | cut -d ":" -f 2 | cut -d '"' -f 2)" = "macos" ]; then
+       target="-Dtarget=native-macos"
+    fi
+fi
 
 if [ "$debug" = "true" ]; then
     echo "Building Tigerbeetle debug..."
-    # shellcheck disable=SC2086
-    zig/zig build install -Dcpu=baseline ${target}
+    ./scripts/build.sh install -Dcpu=baseline "${target}"
 else
     echo "Building TigerBeetle..."
-    # shellcheck disable=SC2086
-    zig/zig build install -Dcpu=baseline -Drelease-safe ${target}
+    ./scripts/build.sh install -Dcpu=baseline -Drelease-safe "${target}"
 fi
