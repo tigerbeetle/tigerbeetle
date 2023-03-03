@@ -159,6 +159,9 @@ A transfer with the same `id` already exists, but with a different [`code`](../t
 A transfer with the same `id` already exists, but with a different
 [`amount`](../transfers.md#amount).
 
+If the transfer has `flags.balancing_debit` or `flags.balancing_credit` set, this error refers
+to the actual amount transferred, not the original (possibly higher) balancing amount.
+
 ### `exists`
 A transfer with the same `id` already exists, and is identical to the transfer in the request.
 
