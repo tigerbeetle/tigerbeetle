@@ -15,12 +15,12 @@ if [ "${exists}" = "true" ]; then
     echo "Package tigerbeetle-node@${PACKAGE_JSON_VERSION} already exists - incrementing patch version from latest on npm (${NPM_LATEST_VERSION}) to (${NPM_PLUS_ONE_VERSION})"
 
     rm -rf /tmp/change-package-version && mkdir -p /tmp/change-package-version
-    tar -xzpf tigerbeetle-node-*.tgz -C /tmp/change-package-version
+    tar -xzf tigerbeetle-node-*.tgz -C /tmp/change-package-version
 
     jq ".version=\"${NPM_PLUS_ONE_VERSION}\"" /tmp/change-package-version/package/package.json > /tmp/change-package-version/package/package.json-new
     mv -f /tmp/change-package-version/package/package.json-new /tmp/change-package-version/package/package.json
 
-    tar -czpf tigerbeetle-node-updated.tgz -C /tmp/change-package-version/package .
+    tar -czf tigerbeetle-node-updated.tgz -C /tmp/change-package-version package
 
     npm publish tigerbeetle-node-updated.tgz
 else
