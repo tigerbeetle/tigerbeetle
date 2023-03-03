@@ -3919,10 +3919,19 @@ pub fn ReplicaType(
             };
         }
 
-        /// Starting from the latest journal entry, backfill any missing or disconnected headers.
-        /// A header is disconnected if it breaks the chain with its newer neighbor to the right.
-        /// Since we work back from the latest entry, we should always be able to fix the chain.
-        /// Once headers are connected, backfill any dirty or faulty prepares.
+        /// Repair. Each step happens in sequence — step n+1 executes when step n is done.
+        ///
+        /// 1. Advance the head op to `op_repair_max = min(op_checkpoint_trigger, commit_max)`.
+        ///    To advance the head op we request+await a SV. Either:
+        ///    - the SV's "hook" headers include op_checkpoint_trigger (if we are ≤1 wrap behind), or
+        ///    - the SV is too far ahead, so we will fall back from WAL repair to state transfer.
+        /// 2. Acquire missing or disconnected headers in reverse chronological order, backwards from
+        ///    op_repair_max.
+        ///    A header is disconnected if it breaks the chain with its newer neighbor to the right.
+        /// 3. Repair missing or corrupt prepares in chronological order.
+        ///    If we are the primary, this may result in nack/truncation before we start the view.
+        /// 4. Commit up to op_repair_max. If committing triggers a checkpoint, op_repair_max
+        ///    increases, so go to step 1 and repeat.
         fn repair(self: *Self) void {
             if (!self.repair_timeout.ticking) {
                 log.debug("{}: repair: ignoring (optimistic, not ticking)", .{self.replica});
