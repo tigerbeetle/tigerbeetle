@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - run: ./scripts/set_version.sh
+      - run: ./scripts/version_set.sh
       - run: ./scripts/build.sh
 
       - name: Upload binaries
