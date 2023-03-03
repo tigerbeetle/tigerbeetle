@@ -135,6 +135,15 @@ When a `status=normal` primary receives `command=request_start_view`, it replies
 
 Upon receiving a `start_view` for the new view, the backup installs the suffix, transitions to `status=normal`, and begins repair.
 
+A `start_view` contains the following headers (which may overlap):
+
+  - The suffix: `pipeline_prepare_queue_max` headers from the head op down.
+  - The "hook": the header of the previous checkpoint trigger. This helps a lagging replica catch up.
+  - The "repair-min": the header of the earliest op that the primary currently guarantees is repairable.
+    Backups use this to determine when they should repair their WAL vs fallback to state transfer.
+  - The suffix and hook may include extra preceding headers to aid repair.
+  - (Any of the preceding categories of headers may overlap, in which case headers are not duplicated).
+
 ## Protocol: Repair Journal
 
 `request_headers` and `headers` repair gaps or breaks in a replica's journal headers.

@@ -179,12 +179,12 @@ pub const configs = struct {
             .verify = true,
         },
         .cluster = .{
-            .clients_max = 4 + 3,
-            .pipeline_prepare_queue_max = 4,
-            .view_change_headers_suffix_max = 4,
+            .clients_max = 6,
+            .pipeline_prepare_queue_max = 6,
+            .view_change_headers_suffix_max = 6,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
             .message_size_max = Config.Cluster.message_size_max_min(4),
-            .storage_size_max = 4 * 1024 * 1024 * 1024,
+            .storage_size_max = 400 * 1024 * 1024,
 
             .block_size = sector_size,
             .lsm_batch_multiple = 4,

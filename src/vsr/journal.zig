@@ -1237,7 +1237,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
             if (journal.recover_torn_prepare(&cases)) |torn_slot| {
-                assert(cases[torn_slot.index].decision(replica.replica_count) == .vsr);
+                assert(cases[torn_slot.index].decision(replica.sole_replica()) == .vsr);
                 cases[torn_slot.index] = &case_cut;
 
                 log.warn("{}: recover_slots: torn prepare in slot={}", .{
@@ -1331,7 +1331,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // if there are no faults other than the torn op itself.
             for (cases) |case, index| {
                 // Do not use `faulty.bit()` because the decisions have not been processed yet.
-                if (case.decision(replica.replica_count) == .vsr) {
+                if (case.decision(replica.sole_replica()) == .vsr) {
                     if (checkpoint_index == torn_slot.index) {
                         assert(op_max >= replica.op_checkpoint());
                         assert(torn_op > replica.op_checkpoint());
@@ -1345,7 +1345,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // The prepare is torn.
             assert(!journal.prepare_inhabited[torn_slot.index]);
             assert(!torn_prepare_untrusted.valid_checksum());
-            assert(cases[torn_slot.index].decision(replica.replica_count) == .vsr);
+            assert(cases[torn_slot.index].decision(replica.sole_replica()) == .vsr);
             return torn_slot;
         }
 
@@ -1359,7 +1359,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             const header = header_ok(cluster, slot, &journal.headers_redundant[slot.index]);
             const prepare = header_ok(cluster, slot, &journal.headers[slot.index]);
-            const decision = case.decision(replica.replica_count);
+            const decision = case.decision(replica.sole_replica());
             switch (decision) {
                 .eql => {
                     assert(header.?.command == .prepare);
@@ -1386,7 +1386,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     journal.headers[slot.index] = prepare.?.*;
                     journal.faulty.clear(slot);
                     assert(journal.dirty.bit(slot));
-                    if (replica.replica_count == 1) {
+                    if (replica.sole_replica()) {
                         // @D, @E, @F, @G, @J
                     } else {
                         assert(prepare.?.command == .prepare);
@@ -1450,7 +1450,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         journal.headers_redundant[dirty_slot].checksum);
                 } else {
                     // Case @D for R=1.
-                    assert(replica.replica_count == 1);
+                    assert(replica.sole_replica());
                 }
 
                 const dirty_slot_sector = @divFloor(dirty_slot, headers_per_sector);
@@ -1506,7 +1506,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // Abort if all slots are faulty, since something is very wrong.
             if (journal.faulty.count == slot_count) @panic("WAL is completely corrupt");
-            if (journal.faulty.count > 0 and replica.replica_count == 1) @panic("WAL is corrupt");
+            if (journal.faulty.count > 0 and replica.sole_replica()) @panic("WAL is corrupt");
 
             if (journal.headers[0].op == 0 and journal.headers[0].command == .prepare) {
                 assert(journal.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
@@ -2098,8 +2098,8 @@ const recovery_cases = table: {
     break :table [_]Case{
         // Legend:
         //
-        //    R>1  replica_count > 1
-        //    R=1  replica_count = 1
+        //    R>1  replica_count > 1  or  standby
+        //    R=1  replica_count = 1 and !standby
         //     ok  valid checksum ∧ valid cluster ∧ valid slot ∧ valid command
         //    nil  command == reserved
         //     ✓∑  header.checksum == prepare.checksum
@@ -2193,9 +2193,8 @@ const Case = struct {
         return true;
     }
 
-    fn decision(case: *const Case, replica_count: u8) RecoveryDecision {
-        assert(replica_count > 0);
-        if (replica_count == 1) {
+    fn decision(case: *const Case, sole_replica: bool) RecoveryDecision {
+        if (sole_replica) {
             return case.decision_single;
         } else {
             return case.decision_multiple;

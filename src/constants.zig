@@ -202,7 +202,10 @@ comptime {
 ///   that cannot be repaired because they are gaps. See DVCQuorum for more detail.
 /// - We must provide at least one "hook" header — a header from the previous WAL wrap, to help
 ///   lagging replicas catch up.
-pub const view_change_headers_max = view_change_headers_suffix_max + view_change_headers_hook_max;
+/// - We must provide the header corresponding to the oldest op the primary guarantees is
+///   repairable.
+pub const view_change_headers_max =
+    view_change_headers_suffix_max + view_change_headers_hook_max + 1;
 
 /// Maximum number of headers from the current WAL wrap to include in an SV message.
 pub const view_change_headers_suffix_max = config.cluster.view_change_headers_suffix_max;
