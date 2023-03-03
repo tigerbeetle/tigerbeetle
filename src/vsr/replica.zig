@@ -486,6 +486,17 @@ pub fn ReplicaType(
                 }
                 assert(self.op_head_certain());
 
+                // Solo replicas must increment their view after recovery.
+                // Otherwise, two different versions of an op could exist within a single view
+                // (the former version truncated as a torn write).
+                self.log_view += 1;
+                self.view += 1;
+                self.view_headers.array.len = 0;
+                self.view_headers.array.appendAssumeCapacity(
+                    self.journal.header_with_op(self.op).?.*,
+                );
+                self.view_durable_update();
+
                 if (self.commit_min < self.op) {
                     self.commit_journal(self.op);
                 } else {
@@ -5259,7 +5270,8 @@ pub fn ReplicaType(
         /// `view_durable` and `log_view_durable` will update asynchronously, when their respective
         /// updates are durable.
         fn view_durable_update(self: *Self) void {
-            assert(self.status == .normal or self.status == .view_change);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.sole_replica()));
             assert(self.view >= self.log_view);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
@@ -5267,7 +5279,7 @@ pub fn ReplicaType(
             // The primary must only persist the SV headers after repairs are done.
             // Otherwise headers could be nacked, truncated, then restored after a crash.
             assert(self.log_view < self.view or self.replica != self.primary_index(self.view) or
-                self.status == .normal);
+                self.status == .normal or self.status == .recovering);
             assert(self.view_headers.array.len > 0);
             assert(self.view_headers.array.get(0).view <= self.log_view);
             assert(self.view_headers.array.get(0).op == self.op or self.log_view == self.view);
@@ -5297,7 +5309,8 @@ pub fn ReplicaType(
 
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context_view_change", context);
-            assert(self.status == .normal or self.status == .view_change);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.sole_replica()));
             assert(!self.view_durable_updating());
             assert(self.superblock.working.vsr_state.view <= self.view);
             assert(self.superblock.working.vsr_state.log_view <= self.log_view);
