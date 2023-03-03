@@ -402,9 +402,11 @@ const Environment = struct {
                 env.close();
                 env.deinit();
                 env.storage.reset();
+
+                env.change_state(.fuzzing, .init);
                 try env.init(env.storage);
 
-                env.state = .superblock_open;
+                env.change_state(.init, .superblock_open);
                 try env.open();
 
                 // TODO: currently this checks that everything added to the LSM after checkpoint
