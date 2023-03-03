@@ -376,7 +376,11 @@ The `amount` of the recorded transfer is set to the actual amount that was trans
 less than or equal to the amount that was passed to `create_transfers`.
 
 `flags.balancing_debit` is exclusive with the `flags.post_pending_transfer`/`flags.void_pending_transfer`
-flags because posting or voiding the full amount will never exceed/overflow either account's limits.
+flags because posting or voiding a pending transfer will never exceed/overflow either account's limits.
+
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
+if the amount of the retry differs from the amount that was actually transferred.
 
 ##### Examples
 
@@ -392,7 +396,11 @@ The `amount` of the recorded transfer is set to the actual amount that was trans
 less than or equal to the amount that was passed to `create_transfers`.
 
 `flags.balancing_credit` is exclusive with the `flags.post_pending_transfer`/`flags.void_pending_transfer`
-flags because posting or voiding the full amount will never exceed/overflow either account's limits.
+flags because posting or voiding a pending transfer will never exceed/overflow either account's limits.
+
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
+if the amount of the retry differs from the amount that was actually transferred.
 
 ##### Examples
 
