@@ -277,7 +277,6 @@ const Environment = struct {
 
     fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
         // The forest should behave like a simple key-value data-structure.
-        // We'll compare it to a hash map.
         const Model = struct {
             checkpointed: KVType, // represents persistent state
             log: LogType, // represents in-memory state
@@ -287,9 +286,11 @@ const Environment = struct {
             const LogType = std.fifo.LinearFifo(LogEntry, .Dynamic);
             const Model = @This();
 
-            pub fn init(model: *Model) void {
-                model.checkpointed = KVType.init(allocator);
-                model.log = LogType.init(allocator);
+            pub fn init() Model {
+                return .{
+                    .checkpointed = KVType.init(allocator),
+                    .log = LogType.init(allocator),
+                };
             }
 
             pub fn deinit(model: *Model) void {
@@ -344,8 +345,7 @@ const Environment = struct {
                 model.log.discard(model.log.readableLength());
             }
         };
-        var model: Model = undefined;
-        model.init();
+        var model = Model.init();
         defer model.deinit();
 
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
