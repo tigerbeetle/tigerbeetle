@@ -86,11 +86,7 @@ pub fn ManifestLevelType(
         /// * The table is mutable so that this function can update its snapshot.
         /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
         /// * Asserts that the table exists in the manifest.
-        pub fn set_snapshot_max(
-            level: *Self,
-            snapshot: u64,
-            table: *TableInfo,
-        ) void {
+        pub fn set_snapshot_max(level: *Self, snapshot: u64, table: *TableInfo) void {
             assert(snapshot < lsm.snapshot_latest);
             assert(table.snapshot_max == math.maxInt(u64));
 

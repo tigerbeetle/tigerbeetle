@@ -235,34 +235,36 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             level_a: u8,
             level_b: u8,
             snapshot: u64,
-            table: *TableInfo,
+            table_a: *TableInfo,
         ) void {
             assert(level_b == level_a + 1);
             assert(level_b < constants.lsm_levels);
-            assert(table.snapshot_max >= snapshot);
+            assert(table_a.snapshot_max >= snapshot);
 
+            const table_b = table_a.*;
             const manifest_level_a = &manifest.levels[level_a];
             const manifest_level_b = &manifest.levels[level_b];
+
             if (constants.verify) {
-                assert(manifest_level_a.contains(table));
-                assert(!manifest_level_b.contains(table));
+                assert(manifest_level_a.contains(table_a));
+                assert(!manifest_level_b.contains(table_a));
             }
 
-            // Insert the table into level b and append insert changes to the manifest log.
-            manifest_level_b.insert_table(manifest.node_pool, table);
-            manifest.manifest_log.insert(@intCast(u7, level_b), table);
-
-            // Update the table in level a without appending update changes to the manifest log.
+            // Update the table in level A without appending update changes to the manifest log.
             // To move a table w.r.t manifest log, the previous level's table should not be removed.
             // When replaying the log from open(), inserts are processed in LIFO order while
-            // duplicates are ignored. This means the table will only appear in level_b as moved.
-            manifest_level_a.set_snapshot_max(snapshot, table);
-            assert(table.snapshot_max == snapshot);
+            // duplicates are ignored. This means the table will only appear in level B as moved.
+            manifest_level_a.set_snapshot_max(snapshot, table_a);
+            assert(table_a.snapshot_max == snapshot);
+
+            // The, insert the table into level B and append insert changes to the manifest log.
+            manifest_level_b.insert_table(manifest.node_pool, &table_b);
+            manifest.manifest_log.insert(@intCast(u7, level_b), &table_b);
 
             // Finally, the table address is recorded so that it will not be removed from the
             // manifest log during `remove_invisible_tables`.
             assert(manifest.moved_table_addresses[level_a] == null);
-            manifest.moved_table_addresses[level_a] = table.address;
+            manifest.moved_table_addresses[level_a] = table_a.address;
         }
 
         pub fn remove_invisible_tables(
