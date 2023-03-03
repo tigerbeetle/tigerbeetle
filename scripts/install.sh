@@ -33,10 +33,11 @@ if [ "$target" = "" ]; then
     fi
 fi
 
+# shellcheck disable=SC2086
 if [ "$debug" = "true" ]; then
     echo "Building Tigerbeetle debug..."
-    ./scripts/build.sh install -Dcpu=baseline "${target}"
+    ./scripts/build.sh install -Dcpu=baseline $target
 else
     echo "Building TigerBeetle..."
-    ./scripts/build.sh install -Dcpu=baseline -Drelease-safe "${target}"
+    ./scripts/build.sh install -Dcpu=baseline -Drelease-safe $target
 fi
