@@ -3607,7 +3607,7 @@ pub fn ReplicaType(
         ///
         /// Standbys follow the cluster without participating in consensus. In particular,
         /// standbys receive and replicate prepares, but never send prepare-oks.
-        fn standby(self: *const Self) bool {
+        pub fn standby(self: *const Self) bool {
             assert(self.replica < self.node_count);
             return self.replica >= self.replica_count;
         }
