@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
+      - run: ./scripts/version_set.sh
       - run: ./scripts/build.sh
 
       - name: Upload binaries
