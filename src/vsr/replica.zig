@@ -3726,9 +3726,12 @@ pub fn ReplicaType(
         /// - Repairing committed + not-yet-checkpointed ops is useful because we might crash,
         ///   in which case we will need them to recover.
         /// - Repairing committed + checkpointed ops:
-        ///   - backups don't repair checkpointed ops, since there is no guarantee that they will
-        ///     ever be available (if our head is behind), and we don't want to stall the new view
-        ///     startup.
+        ///   - backups don't repair checkpointed ops because:
+        ///     - repairing an op from the previous checkpoint might "clean" a slot which belongs
+        ///       to a corrupt entry from the current WAL-wrap, leading to the backup incorrectly
+        ///       nacking the latter entry.
+        ///     - there is no guarantee that they will ever be available (if our head is behind),
+        ///       and we don't want to stall the new view startup.
         ///   - primaries do repair checkpointed ops — as many as are guaranteed to exist anywhere in
         ///     the cluster, so that they can help lagging backups catch up.
         fn op_repair_min(self: *const Self) u64 {
@@ -3766,7 +3769,7 @@ pub fn ReplicaType(
             assert(op <= self.op);
             assert(op <= self.commit_min + 1);
             assert(op <= self.op_checkpoint() + 1);
-            assert(op >= self.op -| (constants.journal_slot_count - 1));
+            assert(self.op - op < constants.journal_slot_count);
             return op;
         }
 
