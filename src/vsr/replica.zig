@@ -3977,6 +3977,10 @@ pub fn ReplicaType(
                 self.op_repair_min(),
                 self.op,
             )) |range| {
+                assert(!self.sole_replica());
+                assert(range.op_min >= self.op_repair_min());
+                assert(range.op_max < self.op);
+
                 log.debug(
                     "{}: repair: break: view={} break={}..{} (commit={}..{} op={})",
                     .{
@@ -3989,19 +3993,15 @@ pub fn ReplicaType(
                         self.op,
                     },
                 );
-                assert(range.op_min >= self.op_repair_min());
-                assert(range.op_max < self.op);
 
-                if (self.choose_any_other_replica()) |replica| {
-                    self.send_header_to_replica(replica, .{
-                        .command = .request_headers,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        .view = self.view,
-                        .commit = range.op_min,
-                        .op = range.op_max,
-                    });
-                }
+                self.send_header_to_replica(self.choose_any_other_replica().?, .{
+                    .command = .request_headers,
+                    .cluster = self.cluster,
+                    .replica = self.replica,
+                    .view = self.view,
+                    .commit = range.op_min,
+                    .op = range.op_max,
+                });
                 return;
             }
 
