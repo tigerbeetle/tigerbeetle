@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 
+PACKAGE_JSON_VERSION=$(jq -r '.version' package.json)
 echo "//registry.npmjs.org/:_authToken=${TIGERBEETLE_NODE_PUBLISH_KEY}" > ~/.npmrc
 
 exists="true"
