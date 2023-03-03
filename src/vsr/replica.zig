@@ -2240,8 +2240,8 @@ pub fn ReplicaType(
         }
 
         /// Choose a different replica each time if possible (excluding ourself).
-        fn choose_any_other_replica(self: *Self) ?u8 {
-            if (self.sole_replica()) return null;
+        fn choose_any_other_replica(self: *Self) u8 {
+            assert(!self.sole_replica());
 
             var count: usize = 0;
             while (count < self.replica_count) : (count += 1) {
@@ -3990,6 +3990,10 @@ pub fn ReplicaType(
                 self.op_repair_min(),
                 self.op,
             )) |range| {
+                assert(!self.sole_replica());
+                assert(range.op_min >= self.op_repair_min());
+                assert(range.op_max < self.op);
+
                 log.debug(
                     "{}: repair: break: view={} break={}..{} (commit={}..{} op={})",
                     .{
@@ -4002,19 +4006,15 @@ pub fn ReplicaType(
                         self.op,
                     },
                 );
-                assert(range.op_min >= self.op_repair_min());
-                assert(range.op_max < self.op);
 
-                if (self.choose_any_other_replica()) |replica| {
-                    self.send_header_to_replica(replica, .{
-                        .command = .request_headers,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        .view = self.view,
-                        .commit = range.op_min,
-                        .op = range.op_max,
-                    });
-                }
+                self.send_header_to_replica(self.choose_any_other_replica(), .{
+                    .command = .request_headers,
+                    .cluster = self.cluster,
+                    .replica = self.replica,
+                    .view = self.view,
+                    .commit = range.op_min,
+                    .op = range.op_max,
+                });
                 return;
             }
 
@@ -4637,9 +4637,7 @@ pub fn ReplicaType(
                 // encounters an op awaiting nacks.
                 assert(self.nack_prepare_op == null or self.nack_prepare_op.? > op);
                 assert(request_prepare.context == checksum);
-                if (self.choose_any_other_replica()) |replica| {
-                    self.send_header_to_replica(replica, request_prepare);
-                }
+                self.send_header_to_replica(self.choose_any_other_replica(), request_prepare);
             }
 
             return true;
