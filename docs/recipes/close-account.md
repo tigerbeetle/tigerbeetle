@@ -16,12 +16,12 @@ Given a set of accounts:
 
 The "closing entries" for accounts `A` and `B` are:
 
-| Debit Account   | Credit Account | Amount     | Amount (recorded) | Flags              | Notes               |
-| --------------: | -------------: | ---------: | ----------------: | ------------------ | ------------------- |
-|             `A` |            `C` | `2^64 - 1` |                10 | `balancing_debit`  | (close account `A`) |
-|             `C` |            `B` | `2^64 - 1` |                25 | `balancing_credit` | (close account `B`) |
+| Debit Account   | Credit Account | Amount  | Amount (recorded) | Flags              | Notes               |
+| --------------: | -------------: | ------: | ----------------: | ------------------ | ------------------- |
+|             `A` |            `C` | `0`     |                10 | `balancing_debit`  | (close account `A`) |
+|             `C` |            `B` | `0`     |                25 | `balancing_credit` | (close account `B`) |
 
-(Pass `maxInt(u64)` as the `Transfer.amount` so that the application does not need to know (or query) the balance prior to closing the account).
+(Pass `0` as the `Transfer.amount` so that the application does not need to know (or query) the balance prior to closing the account).
 
 After committing these transfers, `A` and `B`'s balances are zero:
 

@@ -883,7 +883,9 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
             if (t.ledger == 0) return .ledger_must_not_be_zero;
             if (t.code == 0) return .code_must_not_be_zero;
-            if (t.amount == 0) return .amount_must_not_be_zero;
+            if (!t.flags.balancing_debit and !t.flags.balancing_credit) {
+                if (t.amount == 0) return .amount_must_not_be_zero;
+            }
 
             // The etymology of the DR and CR abbreviations for debit/credit is interesting, either:
             // 1. derived from the Latin past participles of debitum/creditum, i.e. debere/credere,
@@ -910,6 +912,10 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
             const amount = amount: {
                 var amount = t.amount;
+                if (t.flags.balancing_debit or t.flags.balancing_credit) {
+                    if (amount == 0) amount = std.math.maxInt(u64);
+                }
+
                 if (t.flags.balancing_debit) {
                     const dr_balance = dr_mut.debits_posted + dr_mut.debits_pending;
                     const dr_limit = if (dr_immut.flags.debits_must_not_exceed_credits)
@@ -2089,8 +2095,6 @@ test "create_transfers: balancing_debit | balancing_credit (*_must_not_exceed_*)
         \\ setup A1 1  0 0 10
         \\ setup A2 0 10 2  0
         \\
-        \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  0 _ amount_must_not_be_zero
-        \\ transfer T1 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  0 _ amount_must_not_be_zero
         \\ transfer T1 A1 A3  _ _   _ _ L2 C1 _ _ _ _ BDR   _ _  3 _ transfer_must_have_the_same_ledger_as_accounts
         \\ transfer T1 A3 A2  _ _   _ _ L2 C1 _ _ _ _   _ BCR _  3 _ transfer_must_have_the_same_ledger_as_accounts
         \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  3 _ ok
@@ -2120,6 +2124,36 @@ test "create_transfers: balancing_debit | balancing_credit (*_must_not_exceed_*)
         \\ lookup_transfer T2 amount 6
         \\ lookup_transfer T3 amount 3
         \\ lookup_transfer T4 amount 5
+        \\ commit lookup_transfers
+    );
+}
+
+test "create_transfers: balancing_debit | balancing_credit (amount=0)" {
+    try check(
+        \\ account A1 _ _ L1 C1 _ D<C   _ _ 0 0 0 0 _ ok
+        \\ account A2 _ _ L1 C1 _   _ C<D _ 0 0 0 0 _ ok
+        \\ account A3 _ _ L1 C1 _   _ C<D _ 0 0 0 0 _ ok
+        \\ account A4 _ _ L1 C1 _   _   _ _ 0 0 0 0 _ ok
+        \\ commit create_accounts
+        \\
+        \\ setup A1 1  0 0 10
+        \\ setup A2 0 10 2  0
+        \\ setup A3 0 10 2  0
+        \\
+        \\ transfer T1 A1 A4  _ _   _ _ L1 C1 _   _ _ _ BDR   _ _  0 _ ok
+        \\ transfer T2 A4 A2  _ _   _ _ L1 C1 _   _ _ _   _ BCR _  0 _ ok
+        \\ transfer T3 A4 A3  _ _   _ _ L1 C1 _ PEN _ _   _ BCR _  0 _ ok
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 1  9  0 10
+        \\ lookup_account A2 0 10  2  8
+        \\ lookup_account A3 0 10 10  0
+        \\ lookup_account A4 8  8  0  9
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 amount 9
+        \\ lookup_transfer T2 amount 8
+        \\ lookup_transfer T3 amount 8
         \\ commit lookup_transfers
     );
 }
@@ -2164,7 +2198,6 @@ test "create_transfers: balancing_debit & balancing_credit" {
         \\ setup A1 0  0 0 20
         \\ setup A2 0 10 0  0
         \\
-        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  0 _ amount_must_not_be_zero
         \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ ok
         \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 12 _ ok
         \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_debits
@@ -2193,7 +2226,6 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
         \\ setup A1 0  0 0 10
         \\ setup A2 0 10 0  0
         \\
-        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  0 _ amount_must_not_be_zero
         \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  3 _ ok
         \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _ 13 _ ok
         \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  1 _ exceeds_credits

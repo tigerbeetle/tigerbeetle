@@ -369,8 +369,10 @@ Mark the transfer as a [void-pending transfer](#void-pending-transfer).
 ### `flags.balancing_debit`
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` if necessary
-to obey the debit account's constraints. If the highest amount transferable is `0`, the respective
-"overflow" or "exceeds" result code is returned.
+to obey the debit account's constraints. If `amount` is set to `0`, transfer at most `2^64 - 1`
+(i.e. as much as possible).
+
+If the highest amount transferable is `0`, the respective "overflow" or "exceeds" result code is returned.
 
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
@@ -389,8 +391,10 @@ if the amount of the retry differs from the amount that was actually transferred
 ### `flags.balancing_credit`
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` if necessary
-to obey the credit account's constraints. If the highest amount transferable is `0`, the respective
-"overflow" or "exceeds" result code is returned.
+to obey the credit account's constraints. If `amount` is set to `0`, transfer at most `2^64 - 1`
+(i.e. as much as possible).
+
+If the highest amount transferable is `0`, the respective "overflow" or "exceeds" result code is returned.
 
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
@@ -425,13 +429,20 @@ Constraints:
 * When `flags.void_pending_transfer` is set:
   * If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
   * If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
-* When `flags.post_pending_transfer` and `flags.void_pending_transfer` are not set, `amount` must
-  not be zero.
+* When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero,
+  it will automatically be set to the maximum amount that does not violate the corresponding
+  account limits. (Equivalent to setting `amount = 2^64 - 1`).
+* When all of the following flags are not set, `amount` must be nonzero:
+  * `flags.post_pending_transfer`
+  * `flags.void_pending_transfer`
+  * `flags.balancing_debit`
+  * `flags.balancing_credit`
 
 #### Examples
 
 - For representing fractional amounts (e.g. `$12.34`), see
   [Fractional Amounts](../recipes/fractional-amounts.md).
+- For balancing transfers, see [Close Account](../recipes/close-account.md).
 
 ### `timestamp`
 
