@@ -322,13 +322,13 @@ pub const Simulator = struct {
     pub fn done(simulator: *Simulator) bool {
         assert(simulator.requests_sent <= simulator.options.requests_max);
 
-        if (!simulator.cluster.state_checker.convergence()) return false;
-        if (!simulator.reply_sequence.empty()) return false;
-        if (simulator.requests_sent < simulator.options.requests_max) return false;
-
         for (simulator.cluster.replica_health) |health| {
             if (health == .down) return false;
         }
+
+        if (!simulator.cluster.state_checker.convergence()) return false;
+        if (!simulator.reply_sequence.empty()) return false;
+        if (simulator.requests_sent < simulator.options.requests_max) return false;
 
         for (simulator.cluster.clients) |*client| {
             if (client.request_queue.count > 0) return false;
@@ -493,7 +493,7 @@ pub const Simulator = struct {
                     }
 
                     log_simulator.debug("{}: crash replica (faults={})", .{ replica.replica, fault });
-                    simulator.cluster.crash_replica(replica.replica) catch unreachable;
+                    simulator.cluster.crash_replica(replica.replica);
                     replica.superblock.storage.faulty = true;
 
                     recoverable_count -= @boolToInt(replica.status == .recovering_head);
@@ -504,7 +504,7 @@ pub const Simulator = struct {
                 },
                 .down => {
                     if (chance_f64(simulator.random, simulator.options.replica_restart_probability)) {
-                        simulator.cluster.restart_replica(replica.replica);
+                        simulator.cluster.restart_replica(replica.replica) catch unreachable;
                         log_simulator.debug("{}: restart replica", .{replica.replica});
                         simulator.replica_stability[replica.replica] =
                             simulator.options.replica_restart_stability;

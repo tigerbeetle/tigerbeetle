@@ -269,7 +269,9 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             cluster.network.deinit();
             for (cluster.clients) |*client| client.deinit(cluster.allocator);
             for (cluster.client_pools) |*pool| pool.deinit(cluster.allocator);
-            for (cluster.replicas) |*replica| replica.deinit(cluster.allocator);
+            for (cluster.replicas) |*replica, i|{
+                if (cluster.replica_health[i] == .up) replica.deinit(cluster.allocator);
+            }
             for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
             for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
 
@@ -300,9 +302,14 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
         }
 
-        pub fn restart_replica(cluster: *Self, replica_index: u8) void {
+        /// Returns whether the replica was crashed.
+        /// Returns an error when the replica was unable to recover (open).
+        pub fn restart_replica(cluster: *Self, replica_index: u8) !void {
             assert(cluster.replica_health[replica_index] == .down);
 
+            // Pass the old replica's Time through to the new replica. It will continue to tick while
+            // the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
+            try cluster.open_replica(replica_index, cluster.replicas[replica_index].time);
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
         }
@@ -310,18 +317,13 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         /// Reset a replica to its initial state, simulating a random crash/panic.
         /// Leave the persistent storage untouched, and leave any currently
         /// inflight messages to/from the replica in the network.
-        ///
-        /// Returns whether the replica was crashed.
-        /// Returns an error when the replica was unable to recover (open).
-        pub fn crash_replica(cluster: *Self, replica_index: u8) !void {
+        pub fn crash_replica(cluster: *Self, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .up);
 
             // Reset the storage before the replica so that pending writes can (partially) finish.
             cluster.storages[replica_index].reset();
 
-            const replica = &cluster.replicas[replica_index];
-            const replica_time = replica.time;
-            replica.deinit(cluster.allocator);
+            cluster.replicas[replica_index].deinit(cluster.allocator);
             cluster.network.process_disable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .down;
 
@@ -333,14 +335,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 while (it) |message| : (it = message.next) messages_in_pool += 1;
             }
             assert(messages_in_pool == message_pool.messages_max_replica);
-
-            // Logically it would make more sense to run this during restart, not immediately following
-            // the crash. But having it here allows the replica's MessageBus to initialize and begin
-            // queueing packets.
-            //
-            // Pass the old replica's Time through to the new replica. It will continue to tick while
-            // the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
-            try cluster.open_replica(replica_index, replica_time);
         }
 
         fn open_replica(cluster: *Self, replica_index: u8, time: Time) !void {
@@ -424,6 +418,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
         fn on_replica_change_state(replica: *const Replica) void {
             const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
+            if (cluster.replica_health[replica.replica] == .down) return;
+
             cluster.state_checker.check_state(replica.replica) catch |err| {
                 fatal(.correctness, "state checker error: {}", .{err});
             };
