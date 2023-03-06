@@ -183,7 +183,7 @@ pub const configs = struct {
             .view_change_headers_max = 4,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
             .message_size_max = Config.Cluster.message_size_max_min(4),
-            .storage_size_max = 4 * 1024 * 1024 * 1024,
+            .storage_size_max = 512 * 1024 * 1024,
 
             .block_size = sector_size,
             .lsm_batch_multiple = 4,

@@ -26,7 +26,7 @@ const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
-const output = std.log.scoped(.state_checker);
+const output = std.log.scoped(.cluster);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
@@ -570,7 +570,7 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (log_state_transitions_only and scope != .state_checker) return;
+    if (log_state_transitions_only and scope != .cluster) return;
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
     const prefix = if (log_state_transitions_only) "" else prefix_default;
