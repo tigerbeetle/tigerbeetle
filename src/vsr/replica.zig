@@ -4189,8 +4189,9 @@ pub fn ReplicaType(
             }
 
             // If we already committed this op, the repair must be the identical message.
-            assert(header.op <= self.op_checkpoint() or header.op > self.commit_min or
-                self.journal.has(header));
+            if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
+                assert(self.journal.has(header));
+            }
 
             self.journal.set_header_as_dirty(header);
             return true;
@@ -4672,8 +4673,9 @@ pub fn ReplicaType(
             assert(header.op <= self.op_checkpoint_trigger());
 
             // If we already committed this op, the repair must be the identical message.
-            assert(header.op <= self.op_checkpoint() or header.op > self.commit_min or
-                self.journal.has(header));
+            if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
+                assert(self.journal.has(header));
+            }
 
             if (header.op < self.op_repair_min()) return;
 
