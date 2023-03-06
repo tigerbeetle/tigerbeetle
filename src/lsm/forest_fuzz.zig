@@ -330,12 +330,11 @@ const Environment = struct {
                     }
                 };
                 const log_size = model.log.readableLength();
-                var log_left = log_size;
-                while (log_left > 0) : (log_left -= 1) {
-                    const entry = model.log.peekItem(log_size - log_left);
+                var log_index: usize = 0;
+                while (log_index < log_size) : (log_index += 1) {
+                    const entry = model.log.peekItem(log_index);
                     if (entry.op > checkpointable) {
-                        const checkpointed_count = log_size - log_left;
-                        model.log.discard(checkpointed_count);
+                        model.log.discard(log_index);
                         break;
                     }
 
@@ -415,9 +414,9 @@ const Environment = struct {
                 // resets to the last checkpoint on crash by looking through what's been added
                 // afterwards. This won't work if we add account removal to the fuzzer though.
                 const log_size = model.log.readableLength();
-                var log_left = log_size;
-                while (log_left > 0) : (log_left -= 1) {
-                    const entry = model.log.peekItem(log_size - log_left);
+                var log_index: usize = 0;
+                while (log_index < log_size) : (log_index += 1) {
+                    const entry = model.log.peekItem(log_index);
                     const id = entry.account.id;
                     if (model.checkpointed.get(id)) |checkpointed_account| {
                         env.prefetch_account(id);
