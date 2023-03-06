@@ -123,9 +123,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         levels: [constants.lsm_levels]Level,
 
-        // Addresses of TableInfo's that were moved on a given level to the next.
-        moved_table_addresses: [constants.lsm_levels]?u64 = [_]?u64{null} ** constants.lsm_levels,
-
         // TODO Set this at startup when reading in the manifest.
         // This should be the greatest TableInfo.snapshot_min/snapshot_max (if deleted) or
         // registered snapshot seen so far.
@@ -235,36 +232,32 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             level_a: u8,
             level_b: u8,
             snapshot: u64,
-            table_a: *TableInfo,
+            table: *const TableInfo,
         ) void {
             assert(level_b == level_a + 1);
             assert(level_b < constants.lsm_levels);
-            assert(table_a.snapshot_max >= snapshot);
+            assert(table.snapshot_max >= snapshot);
 
-            const table_b = table_a.*;
             const manifest_level_a = &manifest.levels[level_a];
             const manifest_level_b = &manifest.levels[level_b];
-
             if (constants.verify) {
-                assert(manifest_level_a.contains(table_a));
-                assert(!manifest_level_b.contains(table_a));
+                assert(manifest_level_a.contains(table));
+                assert(!manifest_level_b.contains(table));
             }
 
-            // Update the table in level A without appending update changes to the manifest log.
+            // Remove the table from level A without appending update changes to the manifest log.
+            //
             // To move a table w.r.t manifest log, the previous level's table should not be removed.
             // When replaying the log from open(), inserts are processed in LIFO order while
             // duplicates are ignored. This means the table will only appear in level B as moved.
-            manifest_level_a.set_snapshot_max(snapshot, table_a);
-            assert(table_a.snapshot_max == snapshot);
+            //
+            // Instead of updating the tables snapshot and waiting until remove_invisible_tables(),
+            // the table is directly removed from the ManifestLevel here atomically to the caller.
+            manifest_level_a.remove_table(manifest.node_pool, &.{snapshot}, table);
 
-            // The, insert the table into level B and append insert changes to the manifest log.
-            manifest_level_b.insert_table(manifest.node_pool, &table_b);
-            manifest.manifest_log.insert(@intCast(u7, level_b), &table_b);
-
-            // Finally, the table address is recorded so that it will not be removed from the
-            // manifest log during `remove_invisible_tables`.
-            assert(manifest.moved_table_addresses[level_a] == null);
-            manifest.moved_table_addresses[level_a] = table_a.address;
+            // Finally, insert the table into level B and append insert changes to the manifest log.
+            manifest_level_b.insert_table(manifest.node_pool, table);
+            manifest.manifest_log.insert(@intCast(u7, level_b), table);
         }
 
         pub fn remove_invisible_tables(
@@ -282,7 +275,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const direction = .descending;
             const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
-            const moved_table_address = &manifest.moved_table_addresses[level];
 
             var it = manifest_level.iterator(
                 .invisible,
@@ -296,18 +288,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(compare_keys(key_min, table.key_max) != .gt);
                 assert(compare_keys(key_max, table.key_min) != .lt);
 
-                // Only remove invisible tables from manifest log that weren't moved to next level.
-                // Moved tables explictly should not be removed: see `ManifestLog.insert` comment.
-                if (moved_table_address.* != null and moved_table_address.*.? == table.address) {
-                    moved_table_address.* = null;
-                } else {
-                    manifest.manifest_log.remove(@intCast(u7, level), table);
-                }
-
+                // Append remove changes to the manifest log and purge from memory (ManifestLevel):
+                manifest.manifest_log.remove(@intCast(u7, level), table);
                 manifest_level.remove_table(manifest.node_pool, &snapshots, table);
             }
 
-            assert(moved_table_address.* == null);
             if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
         }
 
@@ -444,9 +429,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // The last level is not compacted into another.
             assert(level_a < constants.lsm_levels - 1);
 
-            // Double check that there aren't any pending moved tables from a compaction.
-            for (manifest.moved_table_addresses) |address| assert(address == null);
-
             const table_count_visible_max = table_count_max_for_level(growth_factor, level_a);
             assert(table_count_visible_max > 0);
 
@@ -521,9 +503,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         ) CompactionRange {
             assert(level_b < constants.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
-
-            // Double check that there aren't any pending moved tables from a compaction.
-            for (manifest.moved_table_addresses) |address| assert(address == null);
 
             var range = CompactionRange{
                 .table_count = 1,
@@ -625,9 +604,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(manifest.compact_callback == null);
             assert(manifest.checkpoint_callback == null);
             manifest.checkpoint_callback = callback;
-
-            // Double check that there aren't any pending moved tables from a compaction.
-            for (manifest.moved_table_addresses) |address| assert(address == null);
 
             manifest.manifest_log.checkpoint(manifest_log_checkpoint_callback);
         }
