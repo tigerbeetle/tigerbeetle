@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.state_machine);
@@ -108,7 +109,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 .reserved, .root => unreachable,
                 .register => return 0,
                 .echo => {
-                    std.mem.copy(u8, output, input);
+                    stdx.copy_disjoint(.exact, u8, output, input);
                     return input.len;
                 },
             }
