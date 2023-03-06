@@ -55,6 +55,39 @@ The transfer was not created.
 The transfer was not created.
 [`Transfer.id`](../transfers.md#id) is `2^128 - 1`, which is a reserved value.
 
+### `flags_are_mutually_exclusive`
+The transfer was not created.
+An account cannot be created with the specified combination of
+[`Transfer.flags`](../transfers.md#flags).
+
+Flag compatibility (✓ = compatible, ✗ = mutually exclusive):
+
+- [`flags.pending`](../transfers.md#flagspending)
+  - ✗ [`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer)
+  - ✗ [`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfers.md#flagsbalancing_debit)
+  - ✓ [`flags.balancing_credit`](../transfers.md#flagsbalancing_credit)
+- [`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer)
+  - ✗ [`flags.pending`](../transfers.md#flagspending)
+  - ✗ [`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer)
+  - ✗ [`flags.balancing_debit`](../transfers.md#flagsbalancing_debit)
+  - ✗ [`flags.balancing_credit`](../transfers.md#flagsbalancing_credit)
+- [`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer)
+  - ✗ [`flags.pending`](../transfers.md#flagspending)
+  - ✗ [`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer)
+  - ✗ [`flags.balancing_debit`](../transfers.md#flagsbalancing_debit)
+  - ✗ [`flags.balancing_credit`](../transfers.md#flagsbalancing_credit)
+- [`flags.balancing_debit`](../transfers.md#flagsbalancing_debit)
+  - ✓ [`flags.pending`](../transfers.md#flagspending)
+  - ✗ [`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer)
+  - ✗ [`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer)
+  - ✓ [`flags.balancing_credit`](../transfers.md#flagsbalancing_credit)
+- [`flags.balancing_credit`](../transfers.md#flagsbalancing_credit)
+  - ✓ [`flags.pending`](../transfers.md#flagspending)
+  - ✗ [`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer)
+  - ✗ [`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer)
+  - ✓ [`flags.balancing_debit`](../transfers.md#flagsbalancing_debit)
+
 ### `debit_account_id_must_not_be_zero`
 The transfer was not created.
 [`Transfer.debit_account_id`](../transfers.md#debit_account_id) is zero, but must be a valid
@@ -90,6 +123,27 @@ Either:
 - [`Transfer.flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) must be set, or
 - [`Transfer.flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer) must be set, or
 - [`Transfer.pending_id`](../transfers.md#pending_id) must be zero.
+
+### `pending_id_must_not_be_zero`
+The transfer was not created.
+[`Transfer.flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) or
+[`Transfer.flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer) is set,
+but [`Transfer.pending_id`](../transfers.md#pending_id) is zero. A posting or voiding transfer must
+reference a [`pending`](../transfers.md#flagspending) transfer.
+
+### `pending_id_must_not_be_int_max`
+The transfer was not created.
+[`Transfer.pending_id`](../transfers.md#pending_id) is `2^128 - 1`, which is a reserved value.
+
+### `pending_id_must_be_different`
+The transfer was not created.
+[`Transfer.pending_id`](../transfers.md#pending_id) is set to the same id as
+[`Transfer.id`](../transfers.md#id). Instead it should refer to a different (existing) transfer.
+
+### `timeout_reserved_for_pending_transfer`
+The transfer was not created.
+[`Transfer.timeout`](../transfers.md#timeout) is nonzero, but only
+[pending](../transfers.md#flagspending) transfers have nonzero timeouts.
 
 ### `ledger_must_not_be_zero`
 The transfer was not created.
@@ -243,50 +297,6 @@ would exceed `credit_account.debits_posted`.
 If `flags.balancing_credit` is set,
 `debit_account.credits_pending + debit_account.credits_posted + 1`
 would exceed `debit_account.debits_posted`.
-
-### `cannot_post_and_void_pending_transfer`
-The transfer was not created.
-[`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) and
-[`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer) are mutually exclusive.
-
-### `pending_transfer_cannot_post_or_void_another`
-The transfer was not created.
-[`flags.pending`](../transfers.md#flagspending) is mutually exclusive with
-[`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) and
-[`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer).
-
-### `cannot_balance_debit`
-The transfer was not created.
-[`flags.balancing_debit`](../transfers.md#flagsbalancing_debit) is mutually exclusive with
-[`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) and
-[`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer).
-
-### `cannot_balance_credit`
-The transfer was not created.
-[`flags.balancing_credit`](../transfers.md#flagsbalancing_debit) is mutually exclusive with
-[`flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) and
-[`flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer).
-
-### `timeout_reserved_for_pending_transfer`
-The transfer was not created.
-[`Transfer.timeout`](../transfers.md#timeout) is nonzero, but only
-[pending](../transfers.md#flagspending) transfers have nonzero timeouts.
-
-### `pending_id_must_not_be_zero`
-The transfer was not created.
-[`Transfer.flags.post_pending_transfer`](../transfers.md#flagspost_pending_transfer) or
-[`Transfer.flags.void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer) is set,
-but [`Transfer.pending_id`](../transfers.md#pending_id) is zero. A posting or voiding transfer must
-reference a [`pending`](../transfers.md#flagspending) transfer.
-
-### `pending_id_must_not_be_int_max`
-The transfer was not created.
-[`Transfer.pending_id`](../transfers.md#pending_id) is `2^128 - 1`, which is a reserved value.
-
-### `pending_id_must_be_different`
-The transfer was not created.
-[`Transfer.pending_id`](../transfers.md#pending_id) is set to the same id as
-[`Transfer.id`](../transfers.md#id). Instead it should refer to a different (existing) transfer.
 
 ### `pending_transfer_not_found`
 The transfer was not created.

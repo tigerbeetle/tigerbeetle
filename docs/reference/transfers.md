@@ -309,6 +309,8 @@ This specifies (optional) transfer behavior.
 Constraints:
 
 * Type is 16-bit unsigned integer (2 bytes)
+* Some flags are mutually exclusive; see
+  [`flags_are_mutually_exclusive`](./operations/create_transfers.md#flags_are_mutually_exclusive).
 
 #### `flags.linked`
 
@@ -374,15 +376,17 @@ to obey the debit account's constraints. If `amount` is set to `0`, transfer at 
 
 If the highest amount transferable is `0`, the respective "overflow" or "exceeds" result code is returned.
 
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
+if the amount of the retry differs from the amount that was actually transferred.
+
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
 
 `flags.balancing_debit` is exclusive with the `flags.post_pending_transfer`/`flags.void_pending_transfer`
 flags because posting or voiding a pending transfer will never exceed/overflow either account's limits.
 
-Retrying a balancing transfer will return
-[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
-if the amount of the retry differs from the amount that was actually transferred.
+`flags.balancing_debit` is compatible with (and orthogonal to) `flags.balancing_credit`.
 
 ##### Examples
 
@@ -396,15 +400,17 @@ to obey the credit account's constraints. If `amount` is set to `0`, transfer at
 
 If the highest amount transferable is `0`, the respective "overflow" or "exceeds" result code is returned.
 
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
+if the amount of the retry differs from the amount that was actually transferred.
+
 The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
 less than or equal to the amount that was passed to `create_transfers`.
 
 `flags.balancing_credit` is exclusive with the `flags.post_pending_transfer`/`flags.void_pending_transfer`
 flags because posting or voiding a pending transfer will never exceed/overflow either account's limits.
 
-Retrying a balancing transfer will return
-[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
-if the amount of the retry differs from the amount that was actually transferred.
+`flags.balancing_credit` is compatible with (and orthogonal to) `flags.balancing_debit`.
 
 ##### Examples
 

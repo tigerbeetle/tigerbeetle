@@ -312,39 +312,39 @@ namespace TigerBeetle
         IdMustNotBeIntMax = 7,
 
         /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_accounts#flags_are_mutually_exclusive
+        /// </summary>
+        FlagsAreMutuallyExclusive = 8,
+
+        /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_accounts#ledger_must_not_be_zero
         /// </summary>
-        LedgerMustNotBeZero = 8,
+        LedgerMustNotBeZero = 9,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_accounts#code_must_not_be_zero
         /// </summary>
-        CodeMustNotBeZero = 9,
+        CodeMustNotBeZero = 10,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_pending_must_be_zero
         /// </summary>
-        DebitsPendingMustBeZero = 10,
+        DebitsPendingMustBeZero = 11,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_posted_must_be_zero
         /// </summary>
-        DebitsPostedMustBeZero = 11,
+        DebitsPostedMustBeZero = 12,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_pending_must_be_zero
         /// </summary>
-        CreditsPendingMustBeZero = 12,
+        CreditsPendingMustBeZero = 13,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_posted_must_be_zero
         /// </summary>
-        CreditsPostedMustBeZero = 13,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_accounts#mutually_exclusive_flags
-        /// </summary>
-        MutuallyExclusiveFlags = 14,
+        CreditsPostedMustBeZero = 14,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_flags
@@ -416,254 +416,239 @@ namespace TigerBeetle
         IdMustNotBeIntMax = 7,
 
         /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#flags_are_mutually_exclusive
+        /// </summary>
+        FlagsAreMutuallyExclusive = 8,
+
+        /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_zero
         /// </summary>
-        DebitAccountIdMustNotBeZero = 8,
+        DebitAccountIdMustNotBeZero = 9,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_int_max
         /// </summary>
-        DebitAccountIdMustNotBeIntMax = 9,
+        DebitAccountIdMustNotBeIntMax = 10,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_zero
         /// </summary>
-        CreditAccountIdMustNotBeZero = 10,
+        CreditAccountIdMustNotBeZero = 11,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_int_max
         /// </summary>
-        CreditAccountIdMustNotBeIntMax = 11,
+        CreditAccountIdMustNotBeIntMax = 12,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_be_different
         /// </summary>
-        AccountsMustBeDifferent = 12,
+        AccountsMustBeDifferent = 13,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_zero
         /// </summary>
-        PendingIdMustBeZero = 13,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#ledger_must_not_be_zero
-        /// </summary>
-        LedgerMustNotBeZero = 14,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#code_must_not_be_zero
-        /// </summary>
-        CodeMustNotBeZero = 15,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#amount_must_not_be_zero
-        /// </summary>
-        AmountMustNotBeZero = 16,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_not_found
-        /// </summary>
-        DebitAccountNotFound = 17,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_not_found
-        /// </summary>
-        CreditAccountNotFound = 18,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_have_the_same_ledger
-        /// </summary>
-        AccountsMustHaveTheSameLedger = 19,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#transfer_must_have_the_same_ledger_as_accounts
-        /// </summary>
-        TransferMustHaveTheSameLedgerAsAccounts = 20,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_flags
-        /// </summary>
-        ExistsWithDifferentFlags = 21,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_debit_account_id
-        /// </summary>
-        ExistsWithDifferentDebitAccountId = 22,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_credit_account_id
-        /// </summary>
-        ExistsWithDifferentCreditAccountId = 23,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data
-        /// </summary>
-        ExistsWithDifferentUserData = 24,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_pending_id
-        /// </summary>
-        ExistsWithDifferentPendingId = 25,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_timeout
-        /// </summary>
-        ExistsWithDifferentTimeout = 26,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_code
-        /// </summary>
-        ExistsWithDifferentCode = 27,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_amount
-        /// </summary>
-        ExistsWithDifferentAmount = 28,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists
-        /// </summary>
-        Exists = 29,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending
-        /// </summary>
-        OverflowsDebitsPending = 30,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending
-        /// </summary>
-        OverflowsCreditsPending = 31,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted
-        /// </summary>
-        OverflowsDebitsPosted = 32,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted
-        /// </summary>
-        OverflowsCreditsPosted = 33,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits
-        /// </summary>
-        OverflowsDebits = 34,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits
-        /// </summary>
-        OverflowsCredits = 35,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout
-        /// </summary>
-        OverflowsTimeout = 36,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits
-        /// </summary>
-        ExceedsCredits = 37,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits
-        /// </summary>
-        ExceedsDebits = 38,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#cannot_post_and_void_pending_transfer
-        /// </summary>
-        CannotPostAndVoidPendingTransfer = 39,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_cannot_post_or_void_another
-        /// </summary>
-        PendingTransferCannotPostOrVoidAnother = 40,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#cannot_balance_debit
-        /// </summary>
-        CannotBalanceDebit = 41,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#cannot_balance_credit
-        /// </summary>
-        CannotBalanceCredit = 42,
-
-        /// <summary>
-        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#timeout_reserved_for_pending_transfer
-        /// </summary>
-        TimeoutReservedForPendingTransfer = 43,
+        PendingIdMustBeZero = 14,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_zero
         /// </summary>
-        PendingIdMustNotBeZero = 44,
+        PendingIdMustNotBeZero = 15,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_int_max
         /// </summary>
-        PendingIdMustNotBeIntMax = 45,
+        PendingIdMustNotBeIntMax = 16,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_different
         /// </summary>
-        PendingIdMustBeDifferent = 46,
+        PendingIdMustBeDifferent = 17,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#timeout_reserved_for_pending_transfer
+        /// </summary>
+        TimeoutReservedForPendingTransfer = 18,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#ledger_must_not_be_zero
+        /// </summary>
+        LedgerMustNotBeZero = 19,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#code_must_not_be_zero
+        /// </summary>
+        CodeMustNotBeZero = 20,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#amount_must_not_be_zero
+        /// </summary>
+        AmountMustNotBeZero = 21,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_not_found
+        /// </summary>
+        DebitAccountNotFound = 22,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_not_found
+        /// </summary>
+        CreditAccountNotFound = 23,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_have_the_same_ledger
+        /// </summary>
+        AccountsMustHaveTheSameLedger = 24,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#transfer_must_have_the_same_ledger_as_accounts
+        /// </summary>
+        TransferMustHaveTheSameLedgerAsAccounts = 25,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_flags
+        /// </summary>
+        ExistsWithDifferentFlags = 26,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_debit_account_id
+        /// </summary>
+        ExistsWithDifferentDebitAccountId = 27,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_credit_account_id
+        /// </summary>
+        ExistsWithDifferentCreditAccountId = 28,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data
+        /// </summary>
+        ExistsWithDifferentUserData = 29,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_pending_id
+        /// </summary>
+        ExistsWithDifferentPendingId = 30,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_timeout
+        /// </summary>
+        ExistsWithDifferentTimeout = 31,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_code
+        /// </summary>
+        ExistsWithDifferentCode = 32,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_amount
+        /// </summary>
+        ExistsWithDifferentAmount = 33,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exists
+        /// </summary>
+        Exists = 34,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending
+        /// </summary>
+        OverflowsDebitsPending = 35,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending
+        /// </summary>
+        OverflowsCreditsPending = 36,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted
+        /// </summary>
+        OverflowsDebitsPosted = 37,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted
+        /// </summary>
+        OverflowsCreditsPosted = 38,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits
+        /// </summary>
+        OverflowsDebits = 39,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits
+        /// </summary>
+        OverflowsCredits = 40,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout
+        /// </summary>
+        OverflowsTimeout = 41,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits
+        /// </summary>
+        ExceedsCredits = 42,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits
+        /// </summary>
+        ExceedsDebits = 43,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_found
         /// </summary>
-        PendingTransferNotFound = 47,
+        PendingTransferNotFound = 44,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_pending
         /// </summary>
-        PendingTransferNotPending = 48,
+        PendingTransferNotPending = 45,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_debit_account_id
         /// </summary>
-        PendingTransferHasDifferentDebitAccountId = 49,
+        PendingTransferHasDifferentDebitAccountId = 46,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_credit_account_id
         /// </summary>
-        PendingTransferHasDifferentCreditAccountId = 50,
+        PendingTransferHasDifferentCreditAccountId = 47,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_ledger
         /// </summary>
-        PendingTransferHasDifferentLedger = 51,
+        PendingTransferHasDifferentLedger = 48,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_code
         /// </summary>
-        PendingTransferHasDifferentCode = 52,
+        PendingTransferHasDifferentCode = 49,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_pending_transfer_amount
         /// </summary>
-        ExceedsPendingTransferAmount = 53,
+        ExceedsPendingTransferAmount = 50,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_amount
         /// </summary>
-        PendingTransferHasDifferentAmount = 54,
+        PendingTransferHasDifferentAmount = 51,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_posted
         /// </summary>
-        PendingTransferAlreadyPosted = 55,
+        PendingTransferAlreadyPosted = 52,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_voided
         /// </summary>
-        PendingTransferAlreadyVoided = 56,
+        PendingTransferAlreadyVoided = 53,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_expired
         /// </summary>
-        PendingTransferExpired = 57,
+        PendingTransferExpired = 54,
 
     }
 

@@ -816,13 +816,13 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
             if (a.id == 0) return .id_must_not_be_zero;
             if (a.id == math.maxInt(u128)) return .id_must_not_be_int_max;
-            if (a.ledger == 0) return .ledger_must_not_be_zero;
-            if (a.code == 0) return .code_must_not_be_zero;
 
             if (a.flags.debits_must_not_exceed_credits and a.flags.credits_must_not_exceed_debits) {
-                return .mutually_exclusive_flags;
+                return .flags_are_mutually_exclusive;
             }
 
+            if (a.ledger == 0) return .ledger_must_not_be_zero;
+            if (a.code == 0) return .code_must_not_be_zero;
             if (a.debits_pending != 0) return .debits_pending_must_be_zero;
             if (a.debits_posted != 0) return .debits_posted_must_be_zero;
             if (a.credits_pending != 0) return .credits_pending_must_be_zero;
@@ -1032,16 +1032,16 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
 
             if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
-                return .cannot_post_and_void_pending_transfer;
+                return .flags_are_mutually_exclusive;
             }
-            if (t.flags.pending) return .pending_transfer_cannot_post_or_void_another;
-            if (t.flags.balancing_debit) return .cannot_balance_debit;
-            if (t.flags.balancing_credit) return .cannot_balance_credit;
-            if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
+            if (t.flags.pending) return .flags_are_mutually_exclusive;
+            if (t.flags.balancing_debit) return .flags_are_mutually_exclusive;
+            if (t.flags.balancing_credit) return .flags_are_mutually_exclusive;
 
             if (t.pending_id == 0) return .pending_id_must_not_be_zero;
             if (t.pending_id == math.maxInt(u128)) return .pending_id_must_not_be_int_max;
             if (t.pending_id == t.id) return .pending_id_must_be_different;
+            if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
 
             const p = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
             assert(p.id == t.pending_id);
@@ -1717,7 +1717,9 @@ fn print_results(
         if (o == operation) {
             const Result = TestContext.StateMachine.Result(o);
             const results = std.mem.bytesAsSlice(Result, reply);
-            std.debug.print("{s}={any}\n", .{ label, results });
+            for (results) |result, i| {
+                std.debug.print("{s}[{}]={}\n", .{ label, i, result });
+            }
             return;
         }
     }
@@ -1732,9 +1734,9 @@ test "create_accounts" {
         \\ account A0  _ 1 L0 C0 _ D<C C<D _  1  1  1  1 _ reserved_field
         \\ account A0  _ _ L0 C0 _ D<C C<D _  1  1  1  1 _ id_must_not_be_zero
         \\ account -0  _ _ L0 C0 _ D<C C<D _  1  1  1  1 _ id_must_not_be_int_max
-        \\ account A1 U1 _ L0 C0 _ D<C C<D _  1  1  1  1 _ ledger_must_not_be_zero
-        \\ account A1 U1 _ L9 C0 _ D<C C<D _  1  1  1  1 _ code_must_not_be_zero
-        \\ account A1 U1 _ L9 C9 _ D<C C<D _ -0 -0 -0 -0 _ mutually_exclusive_flags
+        \\ account A1 U1 _ L0 C0 _ D<C C<D _  1  1  1  1 _ flags_are_mutually_exclusive
+        \\ account A1 U1 _ L0 C0 _ D<C   _ _  1  1  1  1 _ ledger_must_not_be_zero
+        \\ account A1 U1 _ L9 C0 _ D<C   _ _  1  1  1  1 _ code_must_not_be_zero
         \\ account A1 U1 _ L9 C9 _ D<C   _ _  1  1  1  1 _ debits_pending_must_be_zero
         \\ account A1 U1 _ L9 C9 _ D<C   _ _  0  1  1  1 _ debits_posted_must_be_zero
         \\ account A1 U1 _ L9 C9 _ D<C   _ _  0  0  1  1 _ credits_pending_must_be_zero
@@ -1968,17 +1970,24 @@ test "create/lookup 2-phase transfers" {
 
         // Second phase.
         \\ transfer T101 A1 A2 U1 _  T2    _ L1 C1 _   _ POS   _   _   _ _ 13 _ ok
-        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _   _ _ 16 1 timestamp_must_be_zero
-        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _   _ _ 16 _ cannot_post_and_void_pending_transfer
-        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN   _ VOI   _   _ _ 16 _ pending_transfer_cannot_post_or_void_another
-        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI BDR BCR _ 16 _ cannot_balance_debit
-        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI   _ BCR _ 16 _ cannot_balance_credit
-        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _ POS   _ BDR BCR _ 16 _ cannot_balance_debit
-        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _ POS   _   _ BCR _ 16 _ cannot_balance_credit
-        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI   _   _ _ 16 _ timeout_reserved_for_pending_transfer
-        \\ transfer T101 A8 A9 U2 _  T0    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_id_must_not_be_zero
-        \\ transfer T101 A8 A9 U2 _  -0    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_id_must_not_be_int_max
-        \\ transfer T101 A8 A9 U2 _ 101    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_id_must_be_different
+        \\ transfer   T0 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _   _ _ 16 1 timestamp_must_be_zero
+        \\ transfer   T0 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _   _ _ 16 _ id_must_not_be_zero
+        \\ transfer   -0 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _   _ _ 16 _ id_must_not_be_int_max
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _   _ _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI BDR   _ _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI BDR BCR _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN POS VOI   _ BCR _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _ PEN   _ VOI   _   _ _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI BDR   _ _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI BDR BCR _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI   _ BCR _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _ POS   _ BDR   _ _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _ POS   _ BDR BCR _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _ POS   _   _ BCR _ 16 _ flags_are_mutually_exclusive
+        \\ transfer T101 A8 A9 U2 _  T0   50 L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_id_must_not_be_zero
+        \\ transfer T101 A8 A9 U2 _  -0   50 L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_id_must_not_be_int_max
+        \\ transfer T101 A8 A9 U2 _ 101   50 L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_id_must_be_different
+        \\ transfer T101 A8 A9 U2 _ 102   50 L6 C7 _   _   _ VOI   _   _ _ 16 _ timeout_reserved_for_pending_transfer
         \\ transfer T101 A8 A9 U2 _ 102    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_not_found
         \\ transfer T101 A8 A9 U2 _  T1    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_not_pending
         \\ transfer T101 A8 A9 U2 _  T2    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_debit_account_id

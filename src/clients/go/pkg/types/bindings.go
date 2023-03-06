@@ -114,13 +114,13 @@ const (
 	AccountReservedField               CreateAccountResult = 5
 	AccountIDMustNotBeZero             CreateAccountResult = 6
 	AccountIDMustNotBeIntMax           CreateAccountResult = 7
-	AccountLedgerMustNotBeZero         CreateAccountResult = 8
-	AccountCodeMustNotBeZero           CreateAccountResult = 9
-	AccountDebitsPendingMustBeZero     CreateAccountResult = 10
-	AccountDebitsPostedMustBeZero      CreateAccountResult = 11
-	AccountCreditsPendingMustBeZero    CreateAccountResult = 12
-	AccountCreditsPostedMustBeZero     CreateAccountResult = 13
-	AccountMutuallyExclusiveFlags      CreateAccountResult = 14
+	AccountFlagsAreMutuallyExclusive   CreateAccountResult = 8
+	AccountLedgerMustNotBeZero         CreateAccountResult = 9
+	AccountCodeMustNotBeZero           CreateAccountResult = 10
+	AccountDebitsPendingMustBeZero     CreateAccountResult = 11
+	AccountDebitsPostedMustBeZero      CreateAccountResult = 12
+	AccountCreditsPendingMustBeZero    CreateAccountResult = 13
+	AccountCreditsPostedMustBeZero     CreateAccountResult = 14
 	AccountExistsWithDifferentFlags    CreateAccountResult = 15
 	AccountExistsWithDifferentUserData CreateAccountResult = 16
 	AccountExistsWithDifferentLedger   CreateAccountResult = 17
@@ -146,6 +146,8 @@ func (i CreateAccountResult) String() string {
 		return "AccountIDMustNotBeZero"
 	case AccountIDMustNotBeIntMax:
 		return "AccountIDMustNotBeIntMax"
+	case AccountFlagsAreMutuallyExclusive:
+		return "AccountFlagsAreMutuallyExclusive"
 	case AccountLedgerMustNotBeZero:
 		return "AccountLedgerMustNotBeZero"
 	case AccountCodeMustNotBeZero:
@@ -158,8 +160,6 @@ func (i CreateAccountResult) String() string {
 		return "AccountCreditsPendingMustBeZero"
 	case AccountCreditsPostedMustBeZero:
 		return "AccountCreditsPostedMustBeZero"
-	case AccountMutuallyExclusiveFlags:
-		return "AccountMutuallyExclusiveFlags"
 	case AccountExistsWithDifferentFlags:
 		return "AccountExistsWithDifferentFlags"
 	case AccountExistsWithDifferentUserData:
@@ -185,56 +185,53 @@ const (
 	TransferReservedField                              CreateTransferResult = 5
 	TransferIDMustNotBeZero                            CreateTransferResult = 6
 	TransferIDMustNotBeIntMax                          CreateTransferResult = 7
-	TransferDebitAccountIDMustNotBeZero                CreateTransferResult = 8
-	TransferDebitAccountIDMustNotBeIntMax              CreateTransferResult = 9
-	TransferCreditAccountIDMustNotBeZero               CreateTransferResult = 10
-	TransferCreditAccountIDMustNotBeIntMax             CreateTransferResult = 11
-	TransferAccountsMustBeDifferent                    CreateTransferResult = 12
-	TransferPendingIDMustBeZero                        CreateTransferResult = 13
-	TransferLedgerMustNotBeZero                        CreateTransferResult = 14
-	TransferCodeMustNotBeZero                          CreateTransferResult = 15
-	TransferAmountMustNotBeZero                        CreateTransferResult = 16
-	TransferDebitAccountNotFound                       CreateTransferResult = 17
-	TransferCreditAccountNotFound                      CreateTransferResult = 18
-	TransferAccountsMustHaveTheSameLedger              CreateTransferResult = 19
-	TransferTransferMustHaveTheSameLedgerAsAccounts    CreateTransferResult = 20
-	TransferExistsWithDifferentFlags                   CreateTransferResult = 21
-	TransferExistsWithDifferentDebitAccountID          CreateTransferResult = 22
-	TransferExistsWithDifferentCreditAccountID         CreateTransferResult = 23
-	TransferExistsWithDifferentUserData                CreateTransferResult = 24
-	TransferExistsWithDifferentPendingID               CreateTransferResult = 25
-	TransferExistsWithDifferentTimeout                 CreateTransferResult = 26
-	TransferExistsWithDifferentCode                    CreateTransferResult = 27
-	TransferExistsWithDifferentAmount                  CreateTransferResult = 28
-	TransferExists                                     CreateTransferResult = 29
-	TransferOverflowsDebitsPending                     CreateTransferResult = 30
-	TransferOverflowsCreditsPending                    CreateTransferResult = 31
-	TransferOverflowsDebitsPosted                      CreateTransferResult = 32
-	TransferOverflowsCreditsPosted                     CreateTransferResult = 33
-	TransferOverflowsDebits                            CreateTransferResult = 34
-	TransferOverflowsCredits                           CreateTransferResult = 35
-	TransferOverflowsTimeout                           CreateTransferResult = 36
-	TransferExceedsCredits                             CreateTransferResult = 37
-	TransferExceedsDebits                              CreateTransferResult = 38
-	TransferCannotPostAndVoidPendingTransfer           CreateTransferResult = 39
-	TransferPendingTransferCannotPostOrVoidAnother     CreateTransferResult = 40
-	TransferCannotBalanceDebit                         CreateTransferResult = 41
-	TransferCannotBalanceCredit                        CreateTransferResult = 42
-	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 43
-	TransferPendingIDMustNotBeZero                     CreateTransferResult = 44
-	TransferPendingIDMustNotBeIntMax                   CreateTransferResult = 45
-	TransferPendingIDMustBeDifferent                   CreateTransferResult = 46
-	TransferPendingTransferNotFound                    CreateTransferResult = 47
-	TransferPendingTransferNotPending                  CreateTransferResult = 48
-	TransferPendingTransferHasDifferentDebitAccountID  CreateTransferResult = 49
-	TransferPendingTransferHasDifferentCreditAccountID CreateTransferResult = 50
-	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 51
-	TransferPendingTransferHasDifferentCode            CreateTransferResult = 52
-	TransferExceedsPendingTransferAmount               CreateTransferResult = 53
-	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 54
-	TransferPendingTransferAlreadyPosted               CreateTransferResult = 55
-	TransferPendingTransferAlreadyVoided               CreateTransferResult = 56
-	TransferPendingTransferExpired                     CreateTransferResult = 57
+	TransferFlagsAreMutuallyExclusive                  CreateTransferResult = 8
+	TransferDebitAccountIDMustNotBeZero                CreateTransferResult = 9
+	TransferDebitAccountIDMustNotBeIntMax              CreateTransferResult = 10
+	TransferCreditAccountIDMustNotBeZero               CreateTransferResult = 11
+	TransferCreditAccountIDMustNotBeIntMax             CreateTransferResult = 12
+	TransferAccountsMustBeDifferent                    CreateTransferResult = 13
+	TransferPendingIDMustBeZero                        CreateTransferResult = 14
+	TransferPendingIDMustNotBeZero                     CreateTransferResult = 15
+	TransferPendingIDMustNotBeIntMax                   CreateTransferResult = 16
+	TransferPendingIDMustBeDifferent                   CreateTransferResult = 17
+	TransferTimeoutReservedForPendingTransfer          CreateTransferResult = 18
+	TransferLedgerMustNotBeZero                        CreateTransferResult = 19
+	TransferCodeMustNotBeZero                          CreateTransferResult = 20
+	TransferAmountMustNotBeZero                        CreateTransferResult = 21
+	TransferDebitAccountNotFound                       CreateTransferResult = 22
+	TransferCreditAccountNotFound                      CreateTransferResult = 23
+	TransferAccountsMustHaveTheSameLedger              CreateTransferResult = 24
+	TransferTransferMustHaveTheSameLedgerAsAccounts    CreateTransferResult = 25
+	TransferExistsWithDifferentFlags                   CreateTransferResult = 26
+	TransferExistsWithDifferentDebitAccountID          CreateTransferResult = 27
+	TransferExistsWithDifferentCreditAccountID         CreateTransferResult = 28
+	TransferExistsWithDifferentUserData                CreateTransferResult = 29
+	TransferExistsWithDifferentPendingID               CreateTransferResult = 30
+	TransferExistsWithDifferentTimeout                 CreateTransferResult = 31
+	TransferExistsWithDifferentCode                    CreateTransferResult = 32
+	TransferExistsWithDifferentAmount                  CreateTransferResult = 33
+	TransferExists                                     CreateTransferResult = 34
+	TransferOverflowsDebitsPending                     CreateTransferResult = 35
+	TransferOverflowsCreditsPending                    CreateTransferResult = 36
+	TransferOverflowsDebitsPosted                      CreateTransferResult = 37
+	TransferOverflowsCreditsPosted                     CreateTransferResult = 38
+	TransferOverflowsDebits                            CreateTransferResult = 39
+	TransferOverflowsCredits                           CreateTransferResult = 40
+	TransferOverflowsTimeout                           CreateTransferResult = 41
+	TransferExceedsCredits                             CreateTransferResult = 42
+	TransferExceedsDebits                              CreateTransferResult = 43
+	TransferPendingTransferNotFound                    CreateTransferResult = 44
+	TransferPendingTransferNotPending                  CreateTransferResult = 45
+	TransferPendingTransferHasDifferentDebitAccountID  CreateTransferResult = 46
+	TransferPendingTransferHasDifferentCreditAccountID CreateTransferResult = 47
+	TransferPendingTransferHasDifferentLedger          CreateTransferResult = 48
+	TransferPendingTransferHasDifferentCode            CreateTransferResult = 49
+	TransferExceedsPendingTransferAmount               CreateTransferResult = 50
+	TransferPendingTransferHasDifferentAmount          CreateTransferResult = 51
+	TransferPendingTransferAlreadyPosted               CreateTransferResult = 52
+	TransferPendingTransferAlreadyVoided               CreateTransferResult = 53
+	TransferPendingTransferExpired                     CreateTransferResult = 54
 )
 
 func (i CreateTransferResult) String() string {
@@ -255,6 +252,8 @@ func (i CreateTransferResult) String() string {
 		return "TransferIDMustNotBeZero"
 	case TransferIDMustNotBeIntMax:
 		return "TransferIDMustNotBeIntMax"
+	case TransferFlagsAreMutuallyExclusive:
+		return "TransferFlagsAreMutuallyExclusive"
 	case TransferDebitAccountIDMustNotBeZero:
 		return "TransferDebitAccountIDMustNotBeZero"
 	case TransferDebitAccountIDMustNotBeIntMax:
@@ -267,6 +266,14 @@ func (i CreateTransferResult) String() string {
 		return "TransferAccountsMustBeDifferent"
 	case TransferPendingIDMustBeZero:
 		return "TransferPendingIDMustBeZero"
+	case TransferPendingIDMustNotBeZero:
+		return "TransferPendingIDMustNotBeZero"
+	case TransferPendingIDMustNotBeIntMax:
+		return "TransferPendingIDMustNotBeIntMax"
+	case TransferPendingIDMustBeDifferent:
+		return "TransferPendingIDMustBeDifferent"
+	case TransferTimeoutReservedForPendingTransfer:
+		return "TransferTimeoutReservedForPendingTransfer"
 	case TransferLedgerMustNotBeZero:
 		return "TransferLedgerMustNotBeZero"
 	case TransferCodeMustNotBeZero:
@@ -317,22 +324,6 @@ func (i CreateTransferResult) String() string {
 		return "TransferExceedsCredits"
 	case TransferExceedsDebits:
 		return "TransferExceedsDebits"
-	case TransferCannotPostAndVoidPendingTransfer:
-		return "TransferCannotPostAndVoidPendingTransfer"
-	case TransferPendingTransferCannotPostOrVoidAnother:
-		return "TransferPendingTransferCannotPostOrVoidAnother"
-	case TransferCannotBalanceDebit:
-		return "TransferCannotBalanceDebit"
-	case TransferCannotBalanceCredit:
-		return "TransferCannotBalanceCredit"
-	case TransferTimeoutReservedForPendingTransfer:
-		return "TransferTimeoutReservedForPendingTransfer"
-	case TransferPendingIDMustNotBeZero:
-		return "TransferPendingIDMustNotBeZero"
-	case TransferPendingIDMustNotBeIntMax:
-		return "TransferPendingIDMustNotBeIntMax"
-	case TransferPendingIDMustBeDifferent:
-		return "TransferPendingIDMustBeDifferent"
 	case TransferPendingTransferNotFound:
 		return "TransferPendingTransferNotFound"
 	case TransferPendingTransferNotPending:
