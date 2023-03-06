@@ -471,7 +471,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
         // Let's crash this party, but not too much that nothing happens (less often than checkpoint)
-        .storage_reset = 0.05,
+        .storage_reset = random.floatExp(f64) / 4.0,
     };
     log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
