@@ -334,6 +334,8 @@ const Environment = struct {
                 while (log_left > 0) : (log_left -= 1) {
                     const entry = model.log.peekItem(log_size - log_left);
                     if (entry.op > checkpointable) {
+                        const checkpointed_count = log_size - log_left;
+                        model.log.discard(checkpointed_count);
                         break;
                     }
 
