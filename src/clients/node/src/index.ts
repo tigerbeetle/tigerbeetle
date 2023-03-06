@@ -106,14 +106,15 @@ export enum CreateAccountError {
 
   id_must_not_be_zero,
   id_must_not_be_int_max,
+
+  flags_are_mutually_exclusive,
+
   ledger_must_not_be_zero,
   code_must_not_be_zero,
   debits_pending_must_be_zero,
   debits_posted_must_be_zero,
   credits_pending_must_be_zero,
   credits_posted_must_be_zero,
-
-  mutually_exclusive_flags,
 
   exists_with_different_flags,
   exists_with_different_user_data,

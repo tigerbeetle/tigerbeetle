@@ -104,14 +104,15 @@ pub const CreateAccountResult = enum(u32) {
 
     id_must_not_be_zero,
     id_must_not_be_int_max,
+
+    flags_are_mutually_exclusive,
+
     ledger_must_not_be_zero,
     code_must_not_be_zero,
     debits_pending_must_be_zero,
     debits_posted_must_be_zero,
     credits_pending_must_be_zero,
     credits_posted_must_be_zero,
-
-    mutually_exclusive_flags,
 
     exists_with_different_flags,
     exists_with_different_user_data,
@@ -131,6 +132,9 @@ pub const CreateTransferResult = enum(u32) {
 
     id_must_not_be_zero,
     id_must_not_be_int_max,
+
+    flags_are_mutually_exclusive,
+
     debit_account_id_must_not_be_zero,
     debit_account_id_must_not_be_int_max,
     credit_account_id_must_not_be_zero,
@@ -138,6 +142,10 @@ pub const CreateTransferResult = enum(u32) {
     accounts_must_be_different,
 
     pending_id_must_be_zero,
+    pending_id_must_not_be_zero,
+    pending_id_must_not_be_int_max,
+    pending_id_must_be_different,
+    timeout_reserved_for_pending_transfer,
 
     ledger_must_not_be_zero,
     code_must_not_be_zero,
@@ -169,16 +177,6 @@ pub const CreateTransferResult = enum(u32) {
 
     exceeds_credits,
     exceeds_debits,
-
-    cannot_post_and_void_pending_transfer,
-    pending_transfer_cannot_post_or_void_another,
-    cannot_balance_debit,
-    cannot_balance_credit,
-    timeout_reserved_for_pending_transfer,
-
-    pending_id_must_not_be_zero,
-    pending_id_must_not_be_int_max,
-    pending_id_must_be_different,
 
     pending_transfer_not_found,
     pending_transfer_not_pending,
