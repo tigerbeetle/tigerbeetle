@@ -499,8 +499,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                     // Can only checkpoint on the last beat of the bar.
                     compact_op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
                     compact_op > constants.lsm_batch_multiple and
-                    // Checkpoint at roughly the same rate as log wraparound.
-                    random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
+                    // Never checkpoint at the same op twice
+                    compact_op > checkpointed_op + constants.lsm_batch_multiple;
                 if (checkpoint) {
                     checkpointed_op = op - constants.lsm_batch_multiple;
                 }
