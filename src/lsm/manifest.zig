@@ -232,7 +232,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             level_a: u8,
             level_b: u8,
             snapshot: u64,
-            table: *const TableInfo,
+            table: *TableInfo,
         ) void {
             assert(level_b == level_a + 1);
             assert(level_b < constants.lsm_levels);
@@ -245,19 +245,24 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(!manifest_level_b.contains(table));
             }
 
-            // Remove the table from level A without appending update changes to the manifest log.
-            //
-            // To move a table w.r.t manifest log, the previous level's table should not be removed.
-            // When replaying the log from open(), inserts are processed in LIFO order while
-            // duplicates are ignored. This means the table will only appear in level B as moved.
-            //
-            // Instead of updating the tables snapshot and waiting until remove_invisible_tables(),
-            // the table is directly removed from the ManifestLevel here atomically to the caller.
-            manifest_level_a.remove_table(manifest.node_pool, &.{snapshot}, table);
-
-            // Finally, insert the table into level B and append insert changes to the manifest log.
+            // First, insert the table into the level B and append the changes to the manifest log.
+            // To move a table w.r.t manifest log, a "remove" change should NOT be appended for
+            // the previous level A; When replaying the log from open(), inserts are processed in
+            // LIFO order while duplicates are ignored. This means the table will only appear in
+            // level B instead of the old one in level A.
             manifest_level_b.insert_table(manifest.node_pool, table);
             manifest.manifest_log.insert(@intCast(u7, level_b), table);
+
+            // Then, update the table's snapshot_max in level A.
+            // This marks the table as invisible to the snapshot so it can be removed.
+            manifest_level_a.set_snapshot_max(snapshot, table);
+            assert(table.snapshot_max == snapshot);
+
+            // Finally, remove the table from the level A
+            // while ensuring it's no longer visible to future snapshots.
+            const snapshots = [_]u64{ snapshot + 1, snapshot_latest };
+            assert(table.invisible(&snapshots));
+            manifest_level_a.remove_table(manifest.node_pool, &snapshots, table);
         }
 
         pub fn remove_invisible_tables(
