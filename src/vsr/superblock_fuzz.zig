@@ -23,6 +23,7 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("superblock.zig").data_file_size_min;
 const VSRState = @import("superblock.zig").SuperBlockHeader.VSRState;
+const SuperBlockHeader = @import("superblock.zig").SuperBlockHeader;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../testing/fuzz.zig");
@@ -147,6 +148,9 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
 }
 
 const Environment = struct {
+    const replica = 0;
+    const replica_count = 6;
+
     /// Track the expected value of parameters at a particular sequence.
     /// Indexed by sequence.
     const SequenceStates = std.ArrayList(struct {
@@ -167,7 +171,15 @@ const Environment = struct {
     latest_sequence: u64 = 0,
     latest_checksum: u128 = 0,
     latest_parent: u128 = 0,
-    latest_vsr_state: VSRState = std.mem.zeroes(VSRState),
+    latest_vsr_state: VSRState = SuperBlockHeader.VSRState{
+        .commit_min_checksum = 0,
+        .commit_min = 0,
+        .commit_max = 0,
+        .log_view = 0,
+        .view = 0,
+        .replica = replica,
+        .replica_count = replica_count,
+    },
 
     context_format: SuperBlock.Context = undefined,
     context_open: SuperBlock.Context = undefined,
@@ -266,7 +278,8 @@ const Environment = struct {
         env.pending.insert(.format);
         env.superblock.format(format_callback, &env.context_format, .{
             .cluster = cluster,
-            .replica = 0,
+            .replica = replica,
+            .replica_count = replica_count,
         });
 
         var vsr_headers = vsr.Headers.Array{ .buffer = undefined };
@@ -275,7 +288,11 @@ const Environment = struct {
         assert(env.sequence_states.items.len == 0);
         try env.sequence_states.append(undefined); // skip sequence=0
         try env.sequence_states.append(.{
-            .vsr_state = VSRState.root(cluster),
+            .vsr_state = VSRState.root(.{
+                .cluster = cluster,
+                .replica = replica,
+                .replica_count = replica_count,
+            }),
             .vsr_headers = vsr_headers,
             .free_set = checksum_free_set(env.superblock),
         });
@@ -299,7 +316,8 @@ const Environment = struct {
         env.pending.remove(.open);
 
         assert(env.superblock.working.sequence == 1);
-        assert(env.superblock.working.replica == 0);
+        assert(env.superblock.working.vsr_state.replica == replica);
+        assert(env.superblock.working.vsr_state.replica_count == replica_count);
         assert(env.superblock.working.cluster == cluster);
     }
 
@@ -313,6 +331,8 @@ const Environment = struct {
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
             .log_view = env.superblock.staging.vsr_state.log_view + 4,
             .view = env.superblock.staging.vsr_state.view + 5,
+            .replica = replica,
+            .replica_count = replica_count,
         };
 
         var vsr_headers = vsr.Headers.Array{ .buffer = undefined };
@@ -356,6 +376,8 @@ const Environment = struct {
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
             .log_view = env.superblock.staging.vsr_state.log_view,
             .view = env.superblock.staging.vsr_state.view,
+            .replica = replica,
+            .replica_count = replica_count,
         };
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);

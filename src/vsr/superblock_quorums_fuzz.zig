@@ -122,10 +122,13 @@ fn test_quorums_working(
         header.* = std.mem.zeroInit(SuperBlockHeader, .{
             .copy = @intCast(u8, i),
             .version = SuperBlockVersion,
-            .replica = 1,
             .storage_size_max = superblock.data_file_size_min,
             .sequence = copies[i].sequence,
             .parent = checksums[copies[i].sequence - 1],
+            .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
+                .replica = 1,
+                .replica_count = 6,
+            }),
         });
 
         var checksum: ?u128 = null;
@@ -148,7 +151,7 @@ fn test_quorums_working(
                 if (misdirect) {
                     header.cluster += 1;
                 } else {
-                    header.replica += 1;
+                    header.vsr_state.replica += 1;
                 }
             },
             .invalid_vsr_state => header.vsr_state.view += 1,
@@ -255,10 +258,14 @@ pub fn fuzz_quorum_repairs(
             header.* = std.mem.zeroInit(SuperBlockHeader, .{
                 .copy = @intCast(u8, i),
                 .version = SuperBlockVersion,
-                .replica = 1,
                 .storage_size_max = superblock.data_file_size_min,
                 .sequence = 123,
+                .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
+                    .replica = 1,
+                    .replica_count = 6,
+                }),
             });
+
             header.set_checksum();
         }
         break :blk headers;

@@ -7,9 +7,9 @@ sidebar_position: 3
 First, provision the data file for each node:
 
 ```
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=0 /data/0_0.tigerbeetle
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=1 /data/0_1.tigerbeetle
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=2 /data/0_2.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
 ```
 
 Then create a docker-compose.yml file:
@@ -19,7 +19,7 @@ version: "3.7"
 
 ##
 # Note: this example might only work with linux + using `network_mode:host` because of 2 reasons:
-# 
+#
 # 1. When specifying an internal docker network, other containers are only available using dns based routing:
 #    e.g. from tigerbeetle_0, the other replicas are available at `tigerbeetle_1:3002` and
 #    `tigerbeetle_2:3003` respectively.

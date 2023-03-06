@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	TIGERBEETLE_PORT              = "3000"
-	TIGERBEETLE_CLUSTER_ID uint32 = 0
-	TIGERBEETLE_REPLICA_ID uint32 = 0
+	TIGERBEETLE_PORT                 = "3000"
+	TIGERBEETLE_CLUSTER_ID    uint32 = 0
+	TIGERBEETLE_REPLICA_ID    uint32 = 0
+	TIGERBEETLE_REPLICA_COUNT uint32 = 1
 )
 
 func toU128(value string) *types.Uint128 {
@@ -37,12 +38,13 @@ func WithClient(s testing.TB, withClient func(Client)) {
 
 	addressArg := "--addresses=" + TIGERBEETLE_PORT
 	replicaArg := fmt.Sprintf("--replica=%d", TIGERBEETLE_REPLICA_ID)
+	replicaCountArg := fmt.Sprintf("--replica-count=%d", TIGERBEETLE_REPLICA_COUNT)
 	clusterArg := fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID)
 
 	fileName := fmt.Sprintf("./%d_%d.tigerbeetle", TIGERBEETLE_CLUSTER_ID, TIGERBEETLE_REPLICA_ID)
 	_ = os.Remove(fileName)
 
-	tbInit := exec.Command(tigerbeetlePath, "format", clusterArg, replicaArg, fileName)
+	tbInit := exec.Command(tigerbeetlePath, "format", clusterArg, replicaArg, replicaCountArg, fileName)
 	var tbErr bytes.Buffer
 	tbInit.Stdout = &tbErr
 	tbInit.Stderr = &tbErr

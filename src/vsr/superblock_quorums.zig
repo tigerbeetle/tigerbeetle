@@ -149,11 +149,11 @@ pub fn QuorumsType(comptime options: Options) type {
                     continue;
                 }
 
-                if (a.header.replica != b.header.replica) {
+                if (a.header.vsr_state.replica != b.header.vsr_state.replica) {
                     log.warn("superblock copy={} has replica={} instead of {}", .{
                         a.header.copy,
-                        a.header.replica,
-                        b.header.replica,
+                        a.header.vsr_state.replica,
+                        b.header.vsr_state.replica,
                     });
                     continue;
                 }
@@ -174,7 +174,7 @@ pub fn QuorumsType(comptime options: Options) type {
                 if (a.header.sequence + 1 == b.header.sequence) {
                     assert(a.header.checksum != b.header.checksum);
                     assert(a.header.cluster == b.header.cluster);
-                    assert(a.header.replica == b.header.replica);
+                    assert(a.header.vsr_state.replica == b.header.vsr_state.replica);
 
                     if (a.header.checksum != b.header.parent) {
                         return error.ParentNotConnected;
@@ -255,7 +255,7 @@ pub fn QuorumsType(comptime options: Options) type {
             } else if (quorum.copies.isSet(copy.copy)) {
                 // Ignore the duplicate copy.
             } else {
-                quorum.slots[slot] = copy.copy;
+                quorum.slots[slot] = @intCast(u8, copy.copy);
                 quorum.copies.set(copy.copy);
             }
 
