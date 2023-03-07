@@ -499,7 +499,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                     compact_op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
                     compact_op > constants.lsm_batch_multiple and
                     // Never checkpoint at the same op twice
-                    compact_op > checkpointed_op + constants.lsm_batch_multiple;
+                    compact_op > checkpointed_op + constants.lsm_batch_multiple and
+                    // Checkpoint at roughly the same rate as log wraparound.
+                    random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
                 if (checkpoint) {
                     checkpointed_op = op - constants.lsm_batch_multiple;
                 }
