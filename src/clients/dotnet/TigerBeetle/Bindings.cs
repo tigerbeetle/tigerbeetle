@@ -606,49 +606,59 @@ namespace TigerBeetle
         Exists = 45,
 
         /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#already_balanced_debit_account
+        /// </summary>
+        AlreadyBalancedDebitAccount = 46,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/create_transfers#already_balanced_credit_account
+        /// </summary>
+        AlreadyBalancedCreditAccount = 47,
+
+        /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending
         /// </summary>
-        OverflowsDebitsPending = 46,
+        OverflowsDebitsPending = 48,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending
         /// </summary>
-        OverflowsCreditsPending = 47,
+        OverflowsCreditsPending = 49,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted
         /// </summary>
-        OverflowsDebitsPosted = 48,
+        OverflowsDebitsPosted = 50,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted
         /// </summary>
-        OverflowsCreditsPosted = 49,
+        OverflowsCreditsPosted = 51,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits
         /// </summary>
-        OverflowsDebits = 50,
+        OverflowsDebits = 52,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits
         /// </summary>
-        OverflowsCredits = 51,
+        OverflowsCredits = 53,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout
         /// </summary>
-        OverflowsTimeout = 52,
+        OverflowsTimeout = 54,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits
         /// </summary>
-        ExceedsCredits = 53,
+        ExceedsCredits = 55,
 
         /// <summary>
         /// https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits
         /// </summary>
-        ExceedsDebits = 54,
+        ExceedsDebits = 56,
 
     }
 

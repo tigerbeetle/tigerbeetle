@@ -238,49 +238,59 @@ public enum CreateTransferResult {
     Exists((int) 45),
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#already_balanced_debit_account">already_balanced_debit_account</a>
+     */
+    AlreadyBalancedDebitAccount((int) 46),
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#already_balanced_credit_account">already_balanced_credit_account</a>
+     */
+    AlreadyBalancedCreditAccount((int) 47),
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending">overflows_debits_pending</a>
      */
-    OverflowsDebitsPending((int) 46),
+    OverflowsDebitsPending((int) 48),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending">overflows_credits_pending</a>
      */
-    OverflowsCreditsPending((int) 47),
+    OverflowsCreditsPending((int) 49),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted">overflows_debits_posted</a>
      */
-    OverflowsDebitsPosted((int) 48),
+    OverflowsDebitsPosted((int) 50),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted">overflows_credits_posted</a>
      */
-    OverflowsCreditsPosted((int) 49),
+    OverflowsCreditsPosted((int) 51),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits">overflows_debits</a>
      */
-    OverflowsDebits((int) 50),
+    OverflowsDebits((int) 52),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits">overflows_credits</a>
      */
-    OverflowsCredits((int) 51),
+    OverflowsCredits((int) 53),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout">overflows_timeout</a>
      */
-    OverflowsTimeout((int) 52),
+    OverflowsTimeout((int) 54),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits">exceeds_credits</a>
      */
-    ExceedsCredits((int) 53),
+    ExceedsCredits((int) 55),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits">exceeds_debits</a>
      */
-    ExceedsDebits((int) 54);
+    ExceedsDebits((int) 56);
 
     public final int value;
 
