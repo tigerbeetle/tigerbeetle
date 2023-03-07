@@ -93,6 +93,9 @@ pub const TransferFlags = packed struct {
     }
 };
 
+/// Error codes are ordered by descending precedence.
+/// When errors do not have an obvious/natural precedence (e.g. "*_must_be_zero"),
+/// the ordering matches struct field order.
 pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
@@ -121,6 +124,9 @@ pub const CreateAccountResult = enum(u32) {
     exists,
 };
 
+/// Error codes are ordered by descending precedence.
+/// When errors do not have an obvious/natural precedence (e.g. "*_must_not_be_zero"),
+/// the ordering matches struct field order.
 pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
@@ -157,27 +163,6 @@ pub const CreateTransferResult = enum(u32) {
     accounts_must_have_the_same_ledger,
     transfer_must_have_the_same_ledger_as_accounts,
 
-    exists_with_different_flags,
-    exists_with_different_debit_account_id,
-    exists_with_different_credit_account_id,
-    exists_with_different_user_data,
-    exists_with_different_pending_id,
-    exists_with_different_timeout,
-    exists_with_different_code,
-    exists_with_different_amount,
-    exists,
-
-    overflows_debits_pending,
-    overflows_credits_pending,
-    overflows_debits_posted,
-    overflows_credits_posted,
-    overflows_debits,
-    overflows_credits,
-    overflows_timeout,
-
-    exceeds_credits,
-    exceeds_debits,
-
     pending_transfer_not_found,
     pending_transfer_not_pending,
 
@@ -193,6 +178,27 @@ pub const CreateTransferResult = enum(u32) {
     pending_transfer_already_voided,
 
     pending_transfer_expired,
+
+    exists_with_different_flags,
+    exists_with_different_debit_account_id,
+    exists_with_different_credit_account_id,
+    exists_with_different_pending_id,
+    exists_with_different_user_data,
+    exists_with_different_timeout,
+    exists_with_different_code,
+    exists_with_different_amount,
+    exists,
+
+    overflows_debits_pending,
+    overflows_credits_pending,
+    overflows_debits_posted,
+    overflows_credits_posted,
+    overflows_debits,
+    overflows_credits,
+    overflows_timeout,
+
+    exceeds_credits,
+    exceeds_debits,
 };
 
 pub const CreateAccountsResult = extern struct {

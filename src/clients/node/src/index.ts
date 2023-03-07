@@ -163,6 +163,9 @@ export enum CreateTransferError {
 
   id_must_not_be_zero,
   id_must_not_be_int_max,
+
+  flags_are_mutually_exclusive,
+
   debit_account_id_must_not_be_zero,
   debit_account_id_must_not_be_int_max,
   credit_account_id_must_not_be_zero,
@@ -170,6 +173,10 @@ export enum CreateTransferError {
   accounts_must_be_different,
 
   pending_id_must_be_zero,
+  pending_id_must_not_be_zero,
+  pending_id_must_not_be_int_max,
+  pending_id_must_be_different,
+  timeout_reserved_for_pending_transfer,
 
   ledger_must_not_be_zero,
   code_must_not_be_zero,
@@ -180,6 +187,22 @@ export enum CreateTransferError {
 
   accounts_must_have_the_same_ledger,
   transfer_must_have_the_same_ledger_as_accounts,
+
+  pending_transfer_not_found,
+  pending_transfer_not_pending,
+
+  pending_transfer_has_different_debit_account_id,
+  pending_transfer_has_different_credit_account_id,
+  pending_transfer_has_different_ledger,
+  pending_transfer_has_different_code,
+
+  exceeds_pending_transfer_amount,
+  pending_transfer_has_different_amount,
+
+  pending_transfer_already_posted,
+  pending_transfer_already_voided,
+
+  pending_transfer_expired,
 
   exists_with_different_flags,
   exists_with_different_debit_account_id,
@@ -201,30 +224,6 @@ export enum CreateTransferError {
 
   exceeds_credits,
   exceeds_debits,
-
-  cannot_post_and_void_pending_transfer,
-  pending_transfer_cannot_post_or_void_another,
-  timeout_reserved_for_pending_transfer,
-
-  pending_id_must_not_be_zero,
-  pending_id_must_not_be_int_max,
-  pending_id_must_be_different,
-
-  pending_transfer_not_found,
-  pending_transfer_not_pending,
-
-  pending_transfer_has_different_debit_account_id,
-  pending_transfer_has_different_credit_account_id,
-  pending_transfer_has_different_ledger,
-  pending_transfer_has_different_code,
-
-  exceeds_pending_transfer_amount,
-  pending_transfer_has_different_amount,
-
-  pending_transfer_already_posted,
-  pending_transfer_already_voided,
-
-  pending_transfer_expired,
 }
 
 export type CreateTransfersError = {

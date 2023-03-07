@@ -183,6 +183,76 @@ The transfer was not created. The accounts referred to by
 [`Transfer.credit_account_id`](../transfers.md#credit_account_id) are equivalent, but
 differ from the [`Transfer.ledger`](../transfers.md#ledger).
 
+### `pending_transfer_not_found`
+The transfer was not created.
+The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) does not exist.
+
+### `pending_transfer_not_pending`
+The transfer was not created.
+The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but does not
+have [`flags.pending`](../transfers.md#flagspending) set.
+
+### `pending_transfer_has_different_debit_account_id`
+The transfer was not created.
+The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but with a
+different [`debit_account_id`](../transfers.md#debit_account_id).
+
+The post/void transfer's `debit_account_id` must either be `0` or identical to the pending
+transfer's `debit_account_id`.
+
+### `pending_transfer_has_different_credit_account_id`
+The transfer was not created.
+The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but with a
+different [`credit_account_id`](../transfers.md#credit_account_id).
+
+The post/void transfer's `credit_account_id` must either be `0` or identical to the pending
+transfer's `credit_account_id`.
+
+### `pending_transfer_has_different_ledger`
+The transfer was not created.
+The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but with a
+different [`ledger`](../transfers.md#ledger).
+
+The post/void transfer's `ledger` must either be `0` or identical to the pending
+transfer's `ledger`.
+
+### `pending_transfer_has_different_code`
+The transfer was not created.
+The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but with a
+different [`code`](../transfers.md#code).
+
+The post/void transfer's `code` must either be `0` or identical to the pending
+transfer's `code`.
+
+### `exceeds_pending_transfer_amount`
+The transfer was not created.
+The transfer's [`amount`](../transfers.md#amount) exceeds the `amount` of its
+[pending](../transfers.md#pending_id) transfer.
+
+### `pending_transfer_has_different_amount`
+The transfer was not created.
+The transfer is attempting to [void](../transfers.md#flagsvoid_pending_transfer) a pending transfer.
+The voiding transfer's [`amount`](../transfers.md#amount) must be either `0` or exactly the `amount`
+of the pending transfer.
+
+To partially void a transfer, create a [posting transfer](../transfers.md#flagspost_pending_transfer)
+with an amount between `0` and the pending transfer's `amount`.
+
+### `pending_transfer_already_posted`
+The transfer was not created.
+The referenced [pending](../transfers.md#pending_id) transfer was already posted by a
+[`post_pending_transfer`](../transfers.md#flagspost_pending_transfer).
+
+### `pending_transfer_already_voided`
+The transfer was not created.
+The referenced [pending](../transfers.md#pending_id) transfer was already voided by a
+[`void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer).
+
+### `pending_transfer_expired`
+The transfer was not created.
+The referenced [pending](../transfers.md#pending_id) transfer was already voided because its
+[timeout](../transfers.md#timeout) has passed.
+
 ### `exists_with_different_flags`
 A transfer with the same `id` already exists, but with different [`flags`](../transfers.md#flags).
 
@@ -297,73 +367,3 @@ would exceed `credit_account.debits_posted`.
 If `flags.balancing_credit` is set,
 `debit_account.credits_pending + debit_account.credits_posted + 1`
 would exceed `debit_account.debits_posted`.
-
-### `pending_transfer_not_found`
-The transfer was not created.
-The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) does not exist.
-
-### `pending_transfer_not_pending`
-The transfer was not created.
-The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but does not
-have [`flags.pending`](../transfers.md#flagspending) set.
-
-### `pending_transfer_has_different_debit_account_id`
-The transfer was not created.
-The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but with a
-different [`debit_account_id`](../transfers.md#debit_account_id).
-
-The post/void transfer's `debit_account_id` must either be `0` or identical to the pending
-transfer's `debit_account_id`.
-
-### `pending_transfer_has_different_credit_account_id`
-The transfer was not created.
-The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but with a
-different [`credit_account_id`](../transfers.md#credit_account_id).
-
-The post/void transfer's `credit_account_id` must either be `0` or identical to the pending
-transfer's `credit_account_id`.
-
-### `pending_transfer_has_different_ledger`
-The transfer was not created.
-The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but with a
-different [`ledger`](../transfers.md#ledger).
-
-The post/void transfer's `ledger` must either be `0` or identical to the pending
-transfer's `ledger`.
-
-### `pending_transfer_has_different_code`
-The transfer was not created.
-The transfer referenced by [`Transfer.pending_id`](../transfers.md#pending_id) exists, but with a
-different [`code`](../transfers.md#code).
-
-The post/void transfer's `code` must either be `0` or identical to the pending
-transfer's `code`.
-
-### `exceeds_pending_transfer_amount`
-The transfer was not created.
-The transfer's [`amount`](../transfers.md#amount) exceeds the `amount` of its
-[pending](../transfers.md#pending_id) transfer.
-
-### `pending_transfer_has_different_amount`
-The transfer was not created.
-The transfer is attempting to [void](../transfers.md#flagsvoid_pending_transfer) a pending transfer.
-The voiding transfer's [`amount`](../transfers.md#amount) must be either `0` or exactly the `amount`
-of the pending transfer.
-
-To partially void a transfer, create a [posting transfer](../transfers.md#flagspost_pending_transfer)
-with an amount between `0` and the pending transfer's `amount`.
-
-### `pending_transfer_already_posted`
-The transfer was not created.
-The referenced [pending](../transfers.md#pending_id) transfer was already posted by a
-[`post_pending_transfer`](../transfers.md#flagspost_pending_transfer).
-
-### `pending_transfer_already_voided`
-The transfer was not created.
-The referenced [pending](../transfers.md#pending_id) transfer was already voided by a
-[`void_pending_transfer`](../transfers.md#flagsvoid_pending_transfer).
-
-### `pending_transfer_expired`
-The transfer was not created.
-The referenced [pending](../transfers.md#pending_id) transfer was already voided because its
-[timeout](../transfers.md#timeout) has passed.
