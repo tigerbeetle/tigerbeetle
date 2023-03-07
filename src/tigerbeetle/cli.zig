@@ -65,15 +65,15 @@ const usage = fmt.comptimePrint(
     \\
     \\Examples:
     \\
-    \\  tigerbeetle format --cluster=7 --replica=0 7_0.tigerbeetle
-    \\  tigerbeetle format --cluster=7 --replica=1 7_1.tigerbeetle
-    \\  tigerbeetle format --cluster=7 --replica=2 7_2.tigerbeetle
+    \\  tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
+    \\  tigerbeetle format --cluster=0 --replica=1 0_1.tigerbeetle
+    \\  tigerbeetle format --cluster=0 --replica=2 0_2.tigerbeetle
     \\
-    \\  tigerbeetle start --addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 7_0.tigerbeetle
-    \\  tigerbeetle start --addresses=3003,3001,3002 7_1.tigerbeetle
-    \\  tigerbeetle start --addresses=3003,3001,3002 7_2.tigerbeetle
+    \\  tigerbeetle start --addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 0_0.tigerbeetle
+    \\  tigerbeetle start --addresses=3003,3001,3002 0_1.tigerbeetle
+    \\  tigerbeetle start --addresses=3003,3001,3002 0_2.tigerbeetle
     \\
-    \\  tigerbeetle start --addresses=192.168.0.1,192.168.0.2,192.168.0.3 7_0.tigerbeetle
+    \\  tigerbeetle start --addresses=192.168.0.1,192.168.0.2,192.168.0.3 0_0.tigerbeetle
     \\
     \\  tigerbeetle version --verbose
     \\
@@ -428,10 +428,16 @@ fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime defau
 }
 
 fn parse_replica(raw_replica: []const u8) u8 {
-    comptime assert(constants.replicas_max <= std.math.maxInt(u8));
+    comptime assert(constants.nodes_max <= std.math.maxInt(u8));
     const replica = fmt.parseUnsigned(u8, raw_replica, 10) catch |err| switch (err) {
         error.Overflow => fatal("--replica: value exceeds an 8-bit unsigned integer", .{}),
         error.InvalidCharacter => fatal("--replica: value contains an invalid character", .{}),
     };
+    if (replica >= constants.nodes_max) {
+        fatal(
+            "--replica: value is too large ({}), at most {} is allowed",
+            .{ replica, constants.nodes_max - 1 },
+        );
+    }
     return replica;
 }
