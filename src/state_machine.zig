@@ -1990,13 +1990,13 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T101 A8 A9 U2 _ 102   50 L6 C7 _   _   _ VOI   _   _ _ 16 _ timeout_reserved_for_pending_transfer
         \\ transfer T101 A8 A9 U2 _ 102    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_not_found
         \\ transfer T101 A8 A9 U2 _  T1    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_not_pending
-        \\ transfer T101 A8 A9 U2 _  T2    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_debit_account_id
-        \\ transfer T101 A1 A9 U2 _  T2    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_credit_account_id
-        \\ transfer T101 A1 A2 U2 _  T2    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_ledger
-        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_code
-        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C1 _   _   _ VOI   _   _ _ 16 _ exceeds_pending_transfer_amount
-        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C1 _   _   _ VOI   _   _ _ 14 _ pending_transfer_has_different_amount
-        \\ transfer T101 A1 A2 U2 _  T2    _ L1 C1 _   _   _ VOI   _   _ _ 15 _ exists_with_different_flags
+        \\ transfer T101 A8 A9 U2 _  T3    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_debit_account_id
+        \\ transfer T101 A1 A9 U2 _  T3    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_credit_account_id
+        \\ transfer T101 A1 A2 U2 _  T3    _ L6 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_ledger
+        \\ transfer T101 A1 A2 U2 _  T3    _ L1 C7 _   _   _ VOI   _   _ _ 16 _ pending_transfer_has_different_code
+        \\ transfer T101 A1 A2 U2 _  T3    _ L1 C1 _   _   _ VOI   _   _ _ 16 _ exceeds_pending_transfer_amount
+        \\ transfer T101 A1 A2 U2 _  T3    _ L1 C1 _   _   _ VOI   _   _ _ 14 _ pending_transfer_has_different_amount
+        \\ transfer T101 A1 A2 U2 _  T3    _ L1 C1 _   _   _ VOI   _   _ _ 15 _ exists_with_different_flags
         \\ transfer T101 A1 A2 U2 _  T3    _ L1 C1 _   _ POS   _   _   _ _ 14 _ exists_with_different_pending_id
         \\ transfer T101 A1 A2 U2 _  T2    _ L1 C1 _   _ POS   _   _   _ _ 14 _ exists_with_different_user_data
         \\ transfer T101 A1 A2 U0 _  T2    _ L1 C1 _   _ POS   _   _   _ _ 14 _ exists_with_different_user_data
