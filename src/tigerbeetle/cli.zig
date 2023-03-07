@@ -428,10 +428,16 @@ fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime defau
 }
 
 fn parse_replica(raw_replica: []const u8) u8 {
-    comptime assert(constants.replicas_max <= std.math.maxInt(u8));
+    comptime assert(constants.nodes_max <= std.math.maxInt(u8));
     const replica = fmt.parseUnsigned(u8, raw_replica, 10) catch |err| switch (err) {
         error.Overflow => fatal("--replica: value exceeds an 8-bit unsigned integer", .{}),
         error.InvalidCharacter => fatal("--replica: value contains an invalid character", .{}),
     };
+    if (replica >= constants.nodes_max) {
+        fatal(
+            "--replica: value is too large ({}), at most {} is allowed",
+            .{ replica, constants.nodes_max - 1 },
+        );
+    }
     return replica;
 }
