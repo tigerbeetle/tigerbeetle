@@ -357,8 +357,8 @@ const Environment = struct {
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
             const model_size = (model.log.readableLength() + model.checkpointed.count()) * @sizeOf(Account);
-            // FIXME: This isn't accurate anymore because the model can contain multiple copies of an account in the log
-            log.debug("space_amplification = {d:.2}", .{
+            // NOTE: This isn't accurate anymore because the model can contain multiple copies of an account in the log
+            log.debug("space_amplification ~= {d:.2}", .{
                 @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
             });
 
