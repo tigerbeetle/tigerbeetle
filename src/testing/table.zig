@@ -106,7 +106,7 @@ fn field(comptime Enum: type, name: []const u8) Enum {
             return @field(Enum, variant.name);
         }
     }
-    std.debug.panic("Unkown field name={s} for type={}", .{ name, Enum });
+    std.debug.panic("Unknown field name={s} for type={}", .{ name, Enum });
 }
 
 fn test_parse(
