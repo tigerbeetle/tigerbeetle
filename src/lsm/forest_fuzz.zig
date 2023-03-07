@@ -334,12 +334,12 @@ const Environment = struct {
                 while (log_index < log_size) : (log_index += 1) {
                     const entry = model.log.peekItem(log_index);
                     if (entry.op > checkpointable) {
-                        model.log.discard(log_index);
                         break;
                     }
 
                     try model.checkpointed.put(entry.account.id, entry.account);
                 }
+                model.log.discard(log_index);
             }
 
             pub fn storage_reset(model: *Model) void {
