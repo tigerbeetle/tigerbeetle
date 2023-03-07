@@ -322,13 +322,7 @@ const Environment = struct {
             }
 
             pub fn checkpoint(model: *Model, op: u64) !void {
-                const checkpointable = blk: {
-                    if (op > constants.lsm_batch_multiple) {
-                        break :blk op - (op % constants.lsm_batch_multiple) - 1;
-                    } else {
-                        break :blk 0;
-                    }
-                };
+                const checkpointable = op - (op % constants.lsm_batch_multiple) -| 1;
                 const log_size = model.log.readableLength();
                 var log_index: usize = 0;
                 while (log_index < log_size) : (log_index += 1) {
