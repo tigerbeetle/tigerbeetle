@@ -34,8 +34,12 @@ const FuzzOp = union(enum) {
         op: u64,
         checkpoint: bool,
     },
-    put_account: Account,
+    put_account: struct {
+        op: u64,
+        account: Account,
+    },
     get_account: u128,
+    storage_reset: void,
 };
 const FuzzOpTag = std.meta.Tag(FuzzOp);
 
@@ -88,28 +92,45 @@ const Environment = struct {
     forest: Forest,
     checkpoint_op: ?u64,
 
-    pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
-        var env: Environment = undefined;
-        env.state = .init;
+    fn init(env: *Environment, storage: *Storage) !void {
         env.storage = storage;
-
         env.message_pool = try MessagePool.init(allocator, .replica);
-        defer env.message_pool.deinit(allocator);
 
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = env.storage,
             .storage_size_limit = constants.storage_size_max,
             .message_pool = &env.message_pool,
         });
-        defer env.superblock.deinit(allocator);
 
         env.grid = try Grid.init(allocator, &env.superblock);
-        defer env.grid.deinit(allocator);
 
         env.forest = undefined;
         env.checkpoint_op = null;
+    }
 
-        try env.open_then_apply(fuzz_ops);
+    fn deinit(env: *Environment) void {
+        env.message_pool.deinit(allocator);
+        env.superblock.deinit(allocator);
+        env.grid.deinit(allocator);
+    }
+
+    pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
+        var env: Environment = undefined;
+        env.state = .init;
+        try env.init(storage);
+        defer env.deinit();
+
+        env.change_state(.init, .superblock_format);
+        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
+            .cluster = cluster,
+            .replica = replica,
+        });
+        env.tick_until_state_change(.superblock_format, .superblock_open);
+
+        try env.open();
+        defer env.close();
+
+        try env.apply(fuzz_ops);
     }
 
     fn change_state(env: *Environment, current_state: State, next_state: State) void {
@@ -124,25 +145,19 @@ const Environment = struct {
         assert(env.state == next_state);
     }
 
-    pub fn open_then_apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-        env.change_state(.init, .superblock_format);
-        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-            .cluster = cluster,
-            .replica = replica,
-        });
-
-        env.tick_until_state_change(.superblock_format, .superblock_open);
+    fn open(env: *Environment) !void {
         env.superblock.open(superblock_open_callback, &env.superblock_context);
-
         env.tick_until_state_change(.superblock_open, .forest_init);
-        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
-        defer env.forest.deinit(allocator);
 
+        env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
         env.change_state(.forest_init, .forest_open);
         env.forest.open(forest_open_callback);
 
         env.tick_until_state_change(.forest_open, .fuzzing);
-        try env.apply(fuzz_ops);
+    }
+
+    fn close(env: *Environment) void {
+        env.forest.deinit(allocator);
     }
 
     fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
@@ -262,8 +277,70 @@ const Environment = struct {
 
     fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
         // The forest should behave like a simple key-value data-structure.
-        // We'll compare it to a hash map.
-        var model = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+        const Model = struct {
+            checkpointed: KVType, // represents persistent state
+            log: LogType, // represents in-memory state
+
+            const KVType = std.hash_map.AutoHashMap(u128, Account);
+            const LogEntry = struct { op: u64, account: Account };
+            const LogType = std.fifo.LinearFifo(LogEntry, .Dynamic);
+            const Model = @This();
+
+            pub fn init() Model {
+                return .{
+                    .checkpointed = KVType.init(allocator),
+                    .log = LogType.init(allocator),
+                };
+            }
+
+            pub fn deinit(model: *Model) void {
+                model.checkpointed.deinit();
+                model.log.deinit();
+            }
+
+            pub fn put_account(model: *Model, account: *const Account, op: u64) !void {
+                try model.log.writeItem(.{ .op = op, .account = account.* });
+            }
+
+            pub fn get_account(model: *const Model, id: u128) ?Account {
+                var latest_op: ?u64 = null;
+                const log_size = model.log.readableLength();
+                var log_left = log_size;
+                while (log_left > 0) : (log_left -= 1) {
+                    const entry = model.log.peekItem(log_left - 1); // most recent first
+                    if (latest_op == null) {
+                        latest_op = entry.op;
+                    }
+
+                    assert(latest_op.? >= entry.op);
+
+                    if (entry.account.id == id) {
+                        return entry.account;
+                    }
+                }
+                return model.checkpointed.get(id);
+            }
+
+            pub fn checkpoint(model: *Model, op: u64) !void {
+                const checkpointable = op - (op % constants.lsm_batch_multiple) -| 1;
+                const log_size = model.log.readableLength();
+                var log_index: usize = 0;
+                while (log_index < log_size) : (log_index += 1) {
+                    const entry = model.log.peekItem(log_index);
+                    if (entry.op > checkpointable) {
+                        break;
+                    }
+
+                    try model.checkpointed.put(entry.account.id, entry.account);
+                }
+                model.log.discard(log_index);
+            }
+
+            pub fn storage_reset(model: *Model) void {
+                model.log.discard(model.log.readableLength());
+            }
+        };
+        var model = Model.init();
         defer model.deinit();
 
         for (fuzz_ops) |fuzz_op, fuzz_op_index| {
@@ -273,41 +350,83 @@ const Environment = struct {
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = model.count() * @sizeOf(Account);
-            log.debug("space_amplification = {d:.2}", .{
+            const model_size = (model.log.readableLength() + model.checkpointed.count()) * @sizeOf(Account);
+            // NOTE: This isn't accurate anymore because the model can contain multiple copies of an account in the log
+            log.debug("space_amplification ~= {d:.2}", .{
                 @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
             });
 
             // Apply fuzz_op to the forest and the model.
-            switch (fuzz_op) {
-                .compact => |compact| {
-                    env.compact(compact.op);
-                    if (compact.checkpoint) env.checkpoint(compact.op);
-                },
-                .put_account => |account| {
-                    // The forest requires prefetch before put.
-                    env.prefetch_account(account.id);
-                    env.put_account(&account);
-                    try model.put(account.id, account);
-                },
-                .get_account => |id| {
-                    // Get account from lsm.
-                    env.prefetch_account(id);
-                    const lsm_account = env.get_account(id);
+            try env.apply_op(fuzz_op, &model);
+        }
+    }
 
-                    // Compare result to model.
-                    const model_account = model.get(id);
-                    if (model_account == null) {
-                        assert(lsm_account == null);
-                    } else {
-                        assert(std.mem.eql(
-                            u8,
-                            std.mem.asBytes(&model_account.?),
-                            std.mem.asBytes(&lsm_account.?),
-                        ));
+    fn apply_op(env: *Environment, fuzz_op: FuzzOp, model: anytype) !void {
+        switch (fuzz_op) {
+            .compact => |compact| {
+                env.compact(compact.op);
+                if (compact.checkpoint) {
+                    try model.checkpoint(compact.op);
+                    env.checkpoint(compact.op);
+                }
+            },
+            .put_account => |put| {
+                // The forest requires prefetch before put.
+                env.prefetch_account(put.account.id);
+                env.put_account(&put.account);
+                try model.put_account(&put.account, put.op);
+            },
+            .get_account => |id| {
+                // Get account from lsm.
+                env.prefetch_account(id);
+                const lsm_account = env.get_account(id);
+
+                // Compare result to model.
+                const model_account = model.get_account(id);
+                if (model_account == null) {
+                    assert(lsm_account == null);
+                } else {
+                    assert(std.mem.eql(
+                        u8,
+                        std.mem.asBytes(&model_account.?),
+                        std.mem.asBytes(&lsm_account.?),
+                    ));
+                }
+            },
+            .storage_reset => {
+                env.close();
+                env.deinit();
+                env.storage.reset();
+
+                env.change_state(.fuzzing, .init);
+                try env.init(env.storage);
+
+                env.change_state(.init, .superblock_open);
+                try env.open();
+
+                // TODO: currently this checks that everything added to the LSM after checkpoint
+                // resets to the last checkpoint on crash by looking through what's been added
+                // afterwards. This won't work if we add account removal to the fuzzer though.
+                const log_size = model.log.readableLength();
+                var log_index: usize = 0;
+                while (log_index < log_size) : (log_index += 1) {
+                    const entry = model.log.peekItem(log_index);
+                    const id = entry.account.id;
+                    if (model.checkpointed.get(id)) |checkpointed_account| {
+                        env.prefetch_account(id);
+                        if (env.get_account(id)) |lsm_account| {
+                            assert(std.mem.eql(
+                                u8,
+                                std.mem.asBytes(&lsm_account),
+                                std.mem.asBytes(&checkpointed_account),
+                            ));
+                        } else {
+                            std.debug.panic("Account checkpointed but not in lsm after crash.\n {}\n", .{checkpointed_account});
+                        }
                     }
-                },
-            }
+                }
+                model.storage_reset();
+            },
         }
     }
 };
@@ -340,10 +459,12 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     var fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (random.boolean()) 0 else 1,
-        // Always do puts, and always more puts than removes.
+        // Always do puts.
         .put_account = constants.lsm_batch_multiple * 2,
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        // Maybe crash and recover from the last checkpoint a few times per fuzzer run.
+        .storage_reset = if (random.boolean()) 0 else 1E-4,
     };
     log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
@@ -354,6 +475,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     defer id_to_account.deinit();
 
     var op: u64 = 1;
+    var persisted_op: u64 = op;
     var puts_since_compact: usize = 0;
     for (fuzz_ops) |*fuzz_op, fuzz_op_index| {
         const fuzz_op_tag: FuzzOpTag = if (puts_since_compact >= Environment.puts_since_compact_max)
@@ -370,8 +492,13 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                     // Can only checkpoint on the last beat of the bar.
                     compact_op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1 and
                     compact_op > constants.lsm_batch_multiple and
+                    // Never checkpoint at the same op twice
+                    compact_op > persisted_op + constants.lsm_batch_multiple and
                     // Checkpoint at roughly the same rate as log wraparound.
                     random.uintLessThan(usize, Environment.compacts_per_checkpoint) == 0;
+                if (checkpoint) {
+                    persisted_op = op - constants.lsm_batch_multiple;
+                }
                 break :compact FuzzOp{
                     .compact = .{
                         .op = compact_op,
@@ -406,16 +533,22 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 account.credits_posted = random.int(u64);
 
                 try id_to_account.put(account.id, account);
-                break :put_account FuzzOp{ .put_account = account };
+                break :put_account FuzzOp{ .put_account = .{
+                    .op = op,
+                    .account = account,
+                } };
             },
-            .get_account => FuzzOp{
-                .get_account = random_id(random, u128),
+            .get_account => FuzzOp{ .get_account = random_id(random, u128) },
+            .storage_reset => storage_reset: {
+                op = persisted_op;
+                break :storage_reset FuzzOp{ .storage_reset = {} };
             },
         };
         switch (fuzz_op.*) {
             .compact => puts_since_compact = 0,
             .put_account => puts_since_compact += 1,
             .get_account => {},
+            .storage_reset => {},
         }
     }
 
@@ -444,6 +577,9 @@ pub fn main() !void {
         .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
         .write_latency_min = 0,
         .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
+        // We can't actually recover from a crash in this fuzzer since we would need
+        // to transfer state from a different replica to continue
+        .crash_fault_probability = 0,
     }, fuzz_ops);
 
     log.info("Passed!", .{});
