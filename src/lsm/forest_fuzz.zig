@@ -459,12 +459,12 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     var fuzz_op_distribution = fuzz.Distribution(FuzzOpTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (random.boolean()) 0 else 1,
-        // Always do puts, and always more puts than removes.
+        // Always do puts.
         .put_account = constants.lsm_batch_multiple * 2,
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
-        // Let's crash this party, but not too much that nothing happens (less often than checkpoint)
-        .storage_reset = random.floatExp(f64) / 4.0,
+        // Maybe crash and recover from the last checkpoint a few times per fuzzer run.
+        .storage_reset = if (random.boolean()) 0 else 1E-4,
     };
     log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
 
