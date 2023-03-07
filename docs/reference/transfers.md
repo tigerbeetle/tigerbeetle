@@ -370,11 +370,12 @@ Mark the transfer as a [void-pending transfer](#void-pending-transfer).
 
 ### `flags.balancing_debit`
 
-Transfer at most [`amount`](#amount) — automatically transferring less than `amount` if necessary
-to obey the debit account's constraints. If `amount` is set to `0`, transfer at most `2^64 - 1`
-(i.e. as much as possible).
+Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
+such that `debit_account.debits_pending + debit_account.debits_posted ≤ debit_account.credits_posted`.
+If `amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
 
-If the highest amount transferable is `0`, the respective "overflow" or "exceeds" result code is returned.
+If the highest amount transferable is `0`, returns
+[`already_balanced_debit_account`](./operations/create_transfers.md#already_balanced_debit_account).
 
 Retrying a balancing transfer will return
 [`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
@@ -394,11 +395,12 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 
 ### `flags.balancing_credit`
 
-Transfer at most [`amount`](#amount) — automatically transferring less than `amount` if necessary
-to obey the credit account's constraints. If `amount` is set to `0`, transfer at most `2^64 - 1`
-(i.e. as much as possible).
+Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
+such that `credit_account.credits_pending + credit_account.credits_posted ≤ credit_account.debits_posted`.
+If `amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
 
-If the highest amount transferable is `0`, the respective "overflow" or "exceeds" result code is returned.
+If the highest amount transferable is `0`, returns
+[`already_balanced_credit_account`](./operations/create_transfers.md#already_balanced_credit_account).
 
 Retrying a balancing transfer will return
 [`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)

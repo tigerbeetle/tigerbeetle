@@ -223,15 +223,17 @@ const (
 	TransferExistsWithDifferentCode                    CreateTransferResult = 43
 	TransferExistsWithDifferentAmount                  CreateTransferResult = 44
 	TransferExists                                     CreateTransferResult = 45
-	TransferOverflowsDebitsPending                     CreateTransferResult = 46
-	TransferOverflowsCreditsPending                    CreateTransferResult = 47
-	TransferOverflowsDebitsPosted                      CreateTransferResult = 48
-	TransferOverflowsCreditsPosted                     CreateTransferResult = 49
-	TransferOverflowsDebits                            CreateTransferResult = 50
-	TransferOverflowsCredits                           CreateTransferResult = 51
-	TransferOverflowsTimeout                           CreateTransferResult = 52
-	TransferExceedsCredits                             CreateTransferResult = 53
-	TransferExceedsDebits                              CreateTransferResult = 54
+	TransferAlreadyBalancedDebitAccount                CreateTransferResult = 46
+	TransferAlreadyBalancedCreditAccount               CreateTransferResult = 47
+	TransferOverflowsDebitsPending                     CreateTransferResult = 48
+	TransferOverflowsCreditsPending                    CreateTransferResult = 49
+	TransferOverflowsDebitsPosted                      CreateTransferResult = 50
+	TransferOverflowsCreditsPosted                     CreateTransferResult = 51
+	TransferOverflowsDebits                            CreateTransferResult = 52
+	TransferOverflowsCredits                           CreateTransferResult = 53
+	TransferOverflowsTimeout                           CreateTransferResult = 54
+	TransferExceedsCredits                             CreateTransferResult = 55
+	TransferExceedsDebits                              CreateTransferResult = 56
 )
 
 func (i CreateTransferResult) String() string {
@@ -328,6 +330,10 @@ func (i CreateTransferResult) String() string {
 		return "TransferExistsWithDifferentAmount"
 	case TransferExists:
 		return "TransferExists"
+	case TransferAlreadyBalancedDebitAccount:
+		return "TransferAlreadyBalancedDebitAccount"
+	case TransferAlreadyBalancedCreditAccount:
+		return "TransferAlreadyBalancedCreditAccount"
 	case TransferOverflowsDebitsPending:
 		return "TransferOverflowsDebitsPending"
 	case TransferOverflowsCreditsPending:

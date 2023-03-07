@@ -914,28 +914,22 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 var amount = t.amount;
                 if (t.flags.balancing_debit or t.flags.balancing_credit) {
                     if (amount == 0) amount = std.math.maxInt(u64);
+                } else {
+                    assert(amount != 0);
                 }
 
                 if (t.flags.balancing_debit) {
                     const dr_balance = dr_mut.debits_posted + dr_mut.debits_pending;
-                    const dr_limit = if (dr_immut.flags.debits_must_not_exceed_credits)
-                        dr_mut.credits_posted
-                    else
-                        std.math.maxInt(u64);
-                    amount = std.math.min(amount, dr_limit - dr_balance);
+                    amount = std.math.min(amount, dr_mut.credits_posted -| dr_balance);
+                    if (amount == 0) return .already_balanced_debit_account;
                 }
 
                 if (t.flags.balancing_credit) {
                     const cr_balance = cr_mut.credits_posted + cr_mut.credits_pending;
-                    const cr_limit = if (cr_immut.flags.credits_must_not_exceed_debits)
-                        cr_mut.debits_posted
-                    else
-                        std.math.maxInt(u64);
-                    amount = std.math.min(amount, cr_limit - cr_balance);
+                    amount = std.math.min(amount, cr_mut.debits_posted -| cr_balance);
+                    if (amount == 0) return .already_balanced_credit_account;
                 }
-
-                // If amount was 0, we will need to return an overflow/exceeds error.
-                break :amount std.math.max(amount, 1);
+                break :amount amount;
             };
 
             if (t.flags.pending) {
@@ -2110,10 +2104,10 @@ test "create_transfers: balancing_debit | balancing_credit (*_must_not_exceed_*)
         \\ transfer T2 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 13 _ ok
         \\ transfer T3 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  3 _ ok
         \\ transfer T4 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 13 _ ok
-        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  1 _ exceeds_credits
-        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
-        \\ transfer T5 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  1 _ exceeds_debits
-        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
+        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  1 _ already_balanced_debit_account
+        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ already_balanced_debit_account
+        \\ transfer T5 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  1 _ already_balanced_credit_account
+        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ already_balanced_debit_account
 
         // "exists" requires that the amount matches exactly, even when BDR/BCR is set.
         \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  2 _ exists_with_different_amount
@@ -2133,6 +2127,39 @@ test "create_transfers: balancing_debit | balancing_credit (*_must_not_exceed_*)
         \\ lookup_transfer T2 amount 6
         \\ lookup_transfer T3 amount 3
         \\ lookup_transfer T4 amount 5
+        \\ lookup_transfer T5 exists false
+        \\ commit lookup_transfers
+    );
+}
+
+test "create_transfers: balancing_debit | balancing_credit (¬*_must_not_exceed_*)" {
+    try check(
+        \\ account A1 _ _ L1 C1 _   _   _ _ 0 0 0 0 _ ok
+        \\ account A2 _ _ L1 C1 _   _   _ _ 0 0 0 0 _ ok
+        \\ account A3 _ _ L1 C1 _   _   _ _ 0 0 0 0 _ ok
+        \\ commit create_accounts
+        \\
+        \\ setup A1 1  0 0 10
+        \\ setup A2 0 10 2  0
+        \\
+        \\ transfer T1 A3 A1  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 99 _ already_balanced_debit_account
+        \\ transfer T1 A3 A1  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 99 _ already_balanced_debit_account
+        \\ transfer T1 A2 A3  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 99 _ already_balanced_credit_account
+        \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 99 _ ok
+        \\ transfer T2 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 99 _ already_balanced_debit_account
+        \\ transfer T3 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 99 _ ok
+        \\ transfer T4 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 99 _ already_balanced_credit_account
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 1  9 0 10
+        \\ lookup_account A2 0 10 2  8
+        \\ lookup_account A3 0  8 0  9
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 amount 9
+        \\ lookup_transfer T2 exists false
+        \\ lookup_transfer T3 amount 8
+        \\ lookup_transfer T4 exists false
         \\ commit lookup_transfers
     );
 }
@@ -2167,36 +2194,6 @@ test "create_transfers: balancing_debit | balancing_credit (amount=0)" {
     );
 }
 
-test "create_transfers: balancing_debit | balancing_credit (overflow)" {
-    try check(
-        \\ account A1 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
-        \\ account A2 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
-        \\ account A3 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
-        \\ account A4 _ _ L1 C1 _ _ _ _ 0 0 0 0 _ ok
-        \\ commit create_accounts
-        \\
-        \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _   _   _ _  1 _ ok
-        \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ -0 _ ok
-        \\ transfer T3 A3 A4  _ _   _ _ L1 C1 _ _ _ _   _   _ _  1 _ ok
-        \\ transfer T4 A3 A4  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ -0 _ ok
-        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  1 _ overflows_debits_posted
-        \\ transfer T6 A1 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  1 _ overflows_debits_posted
-        \\ commit create_transfers
-        \\
-        \\ lookup_account A1 0 -0 0  0
-        \\ lookup_account A2 0  0 0 -0
-        \\ lookup_account A3 0 -0 0  0
-        \\ lookup_account A4 0  0 0 -0
-        \\ commit lookup_accounts
-        \\
-        \\ lookup_transfer T1 amount  1
-        \\ lookup_transfer T2 amount -1
-        \\ lookup_transfer T3 amount  1
-        \\ lookup_transfer T4 amount -1
-        \\ commit lookup_transfers
-    );
-}
-
 test "create_transfers: balancing_debit & balancing_credit" {
     try check(
         \\ account A1 _ _ L1 C1 _ D<C   _ _ 0 0 0 0 _ ok
@@ -2206,22 +2203,24 @@ test "create_transfers: balancing_debit & balancing_credit" {
         \\
         \\ setup A1 0  0 0 20
         \\ setup A2 0 10 0  0
+        \\ setup A3 0 99 0  0
         \\
         \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ ok
         \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 12 _ ok
-        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_debits
+        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ already_balanced_credit_account
         \\ transfer T3 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 12 _ ok
-        \\ transfer T4 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
+        \\ transfer T4 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ already_balanced_debit_account
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 20 0 20
         \\ lookup_account A2 0 10 0 10
-        \\ lookup_account A3 0  0 0 10
+        \\ lookup_account A3 0 99 0 10
         \\ commit lookup_accounts
         \\
         \\ lookup_transfer T1 amount  1
         \\ lookup_transfer T2 amount  9
         \\ lookup_transfer T3 amount 10
+        \\ lookup_transfer T4 exists false
         \\ commit lookup_transfers
     );
 }
@@ -2237,7 +2236,7 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
         \\
         \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  3 _ ok
         \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _ 13 _ ok
-        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  1 _ exceeds_credits
+        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  1 _ already_balanced_debit_account
         \\ commit create_transfers
         \\
         \\ lookup_account A1 10  0  0 10
