@@ -336,8 +336,7 @@ pub fn ReplicaType(
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
         const OpenOptions = struct {
-            replica_count: u8,
-            standby_count: u8,
+            node_count: u8,
             storage_size_limit: u64,
             storage: *Storage,
             message_pool: *MessagePool,
@@ -371,13 +370,15 @@ pub fn ReplicaType(
             self.opened = false;
             self.superblock.open(superblock_open_callback, &self.superblock_context);
             while (!self.opened) self.superblock.storage.tick();
-            assert(self.superblock.working.vsr_state.internally_consistent());
+            self.superblock.working.vsr_state.assert_internally_consistent();
 
-            const node_count = options.replica_count + options.standby_count;
-            if (self.superblock.working.replica >= node_count) {
-                log.err("{}: open: no address for replica (node_count={})", .{
-                    self.superblock.working.replica,
-                    node_count,
+            const replica = self.superblock.working.vsr_state.replica;
+            const replica_count = self.superblock.working.vsr_state.replica_count;
+            if (replica >= options.node_count or replica_count > options.node_count) {
+                log.err("{}: open: no address for replica (replica_count={} node_count={})", .{
+                    self.superblock.working.vsr_state.replica,
+                    replica_count,
+                    options.node_count,
                 });
                 return error.NoAddress;
             }
@@ -385,9 +386,9 @@ pub fn ReplicaType(
             // Initialize the replica:
             try self.init(allocator, .{
                 .cluster = self.superblock.working.cluster,
-                .replica_index = self.superblock.working.replica,
-                .replica_count = options.replica_count,
-                .standby_count = options.standby_count,
+                .replica_index = replica,
+                .replica_count = replica_count,
+                .standby_count = options.node_count - replica_count,
                 .storage = options.storage,
                 .time = options.time,
                 .message_pool = options.message_pool,
@@ -550,7 +551,7 @@ pub fn ReplicaType(
 
             assert(self.opened);
             assert(self.superblock.opened);
-            assert(self.superblock.working.vsr_state.internally_consistent());
+            self.superblock.working.vsr_state.assert_internally_consistent();
 
             const quorums = vsr.quorums(replica_count);
             const quorum_replication = quorums.replication;

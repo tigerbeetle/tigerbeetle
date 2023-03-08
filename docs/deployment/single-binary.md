@@ -11,7 +11,7 @@ GitHub.
 
 ```bash
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
-$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip 
+$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 $ tigerbeetle version --verbose | head -n6
 TigerBeetle version experimental
@@ -36,7 +36,7 @@ $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-1
 
 ```bash
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
-$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip 
+$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 $ tigerbeetle version --verbose | head -n6
 TigerBeetle version experimental
@@ -89,7 +89,7 @@ $ DEBUG=true ./scripts/install.sh
 Now create the TigerBeetle data file.
 
 ```bash
-$ ./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
+$ ./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
 ```

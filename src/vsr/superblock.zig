@@ -1,6 +1,7 @@
 //! SuperBlock invariants:
 //!
 //!   * vsr_state
+//!     - vsr_state.replica and vsr_state.replica_count are immutable for now.
 //!     - vsr_state.commit_min is initially 0 (for a newly-formatted replica).
 //!     - vsr_state.commit_min ≤ vsr_state.commit_max
 //!     - vsr_state.log_view ≤ vsr_state.view
@@ -43,10 +44,8 @@ pub const SuperBlockHeader = extern struct {
     /// For example, if multiple reads are all misdirected to a single copy of the superblock.
     /// Excluded from the checksum calculation to ensure that all copies have the same checksum.
     /// This simplifies writing and comparing multiple copies.
-    copy: u8 = 0,
-
-    /// Protects against writing to or reading from the wrong data file.
-    replica: u8,
+    /// TODO: u8 should be enough here, we use u16 only for alignment.
+    copy: u16 = 0,
 
     /// The version of the superblock format in use, reserved for major breaking changes.
     version: u16,
@@ -130,7 +129,13 @@ pub const SuperBlockHeader = extern struct {
         /// The view number of the replica.
         view: u32,
 
-        reserved: [8]u8 = [_]u8{0} ** 8,
+        /// Identity of the replica, part of VSR configuration.
+        replica: u8,
+
+        /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
+        replica_count: u8,
+
+        reserved: [6]u8 = [_]u8{0} ** 6,
 
         comptime {
             assert(@sizeOf(VSRState) == 48);
@@ -138,9 +143,11 @@ pub const SuperBlockHeader = extern struct {
             assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
         }
 
-        pub fn root(cluster: u32) VSRState {
+        pub fn root(options: struct { cluster: u32, replica: u8, replica_count: u8 }) VSRState {
             return .{
-                .commit_min_checksum = vsr.Header.root_prepare(cluster).checksum,
+                .replica = options.replica,
+                .replica_count = options.replica_count,
+                .commit_min_checksum = vsr.Header.root_prepare(options.cluster).checksum,
                 .commit_min = 0,
                 .commit_max = 0,
                 .log_view = 0,
@@ -148,17 +155,22 @@ pub const SuperBlockHeader = extern struct {
             };
         }
 
-        pub fn internally_consistent(state: VSRState) bool {
-            return state.commit_max >= state.commit_min and state.view >= state.log_view;
+        pub fn assert_internally_consistent(state: VSRState) void {
+            assert(state.commit_max >= state.commit_min);
+            assert(state.view >= state.log_view);
+            assert(state.replica_count > 0);
+            assert(state.replica_count <= constants.replicas_max);
+            assert(state.replica < state.replica_count + constants.standbys_max);
         }
 
         pub fn monotonic(old: VSRState, new: VSRState) bool {
-            assert(old.internally_consistent());
-            assert(new.internally_consistent());
-            // The last case is for when checking monotonic() from the sequence=0 header.
+            old.assert_internally_consistent();
+            new.assert_internally_consistent();
             assert(old.commit_min != new.commit_min or
                 old.commit_min_checksum == new.commit_min_checksum or
                 (old.commit_min_checksum == 0 and old.commit_min == 0));
+            assert(old.replica == new.replica);
+            assert(old.replica_count == new.replica_count);
 
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
@@ -230,7 +242,7 @@ pub const SuperBlockHeader = extern struct {
         comptime assert(checksum_size == @sizeOf(u128));
 
         const copy_size = @sizeOf(@TypeOf(superblock.copy));
-        comptime assert(copy_size == 1);
+        comptime assert(copy_size == 2);
 
         const ignore_size = checksum_size + copy_size;
 
@@ -243,7 +255,7 @@ pub const SuperBlockHeader = extern struct {
         assert(superblock.flags == 0);
 
         for (mem.bytesAsSlice(u64, &superblock.reserved)) |word| assert(word == 0);
-        for (mem.bytesAsSlice(u64, &superblock.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u16, &superblock.vsr_state.reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &superblock.vsr_headers_reserved)) |word| assert(word == 0);
 
         superblock.checksum = superblock.calculate_checksum();
@@ -258,14 +270,13 @@ pub const SuperBlockHeader = extern struct {
         for (mem.bytesAsSlice(u64, &a.reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &b.reserved)) |word| assert(word == 0);
 
-        for (mem.bytesAsSlice(u64, &a.vsr_state.reserved)) |word| assert(word == 0);
-        for (mem.bytesAsSlice(u64, &b.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u16, &a.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u16, &b.vsr_state.reserved)) |word| assert(word == 0);
 
         for (mem.bytesAsSlice(u64, &a.vsr_headers_reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &b.vsr_headers_reserved)) |word| assert(word == 0);
 
         if (a.version != b.version) return false;
-        if (a.replica != b.replica) return false;
         if (a.cluster != b.cluster) return false;
         if (a.storage_size != b.storage_size) return false;
         if (a.storage_size_max != b.storage_size_max) return false;
@@ -608,6 +619,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         pub const FormatOptions = struct {
             cluster: u32,
             replica: u8,
+            replica_count: u8,
         };
 
         pub fn format(
@@ -618,7 +630,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
         ) void {
             assert(!superblock.opened);
 
-            assert(options.replica < constants.nodes_max);
+            assert(options.replica_count > 0);
+            assert(options.replica_count <= constants.replicas_max);
+            assert(options.replica < options.replica_count + constants.standbys_max);
 
             // This working copy provides the parent checksum, and will not be written to disk.
             // We therefore use zero values to make this parent checksum as stable as possible.
@@ -626,7 +640,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .copy = 0,
                 .version = SuperBlockVersion,
                 .sequence = 0,
-                .replica = options.replica,
                 .cluster = options.cluster,
                 .storage_size = 0,
                 .storage_size_max = constants.storage_size_max,
@@ -640,6 +653,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .commit_max = 0,
                     .log_view = 0,
                     .view = 0,
+                    .replica = options.replica,
+                    .replica_count = options.replica_count,
                 },
                 .snapshots = undefined,
                 .manifest_size = 0,
@@ -661,7 +676,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .superblock = superblock,
                 .callback = callback,
                 .caller = .format,
-                .vsr_state = SuperBlockHeader.VSRState.root(options.cluster),
+                .vsr_state = SuperBlockHeader.VSRState.root(.{
+                    .cluster = options.cluster,
+                    .replica = options.replica,
+                    .replica_count = options.replica_count,
+                }),
                 .vsr_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
             };
 
@@ -713,6 +732,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .commit_max = update.commit_max,
                 .log_view = superblock.staging.vsr_state.log_view,
                 .view = superblock.staging.vsr_state.view,
+                .replica = superblock.staging.vsr_state.replica,
+                .replica_count = superblock.staging.vsr_state.replica_count,
             };
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
@@ -760,8 +781,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .commit_max = update.commit_max,
                 .log_view = update.log_view,
                 .view = update.view,
+                .replica = superblock.staging.vsr_state.replica,
+                .replica_count = superblock.staging.vsr_state.replica_count,
             };
-            assert(vsr_state.internally_consistent());
+            vsr_state.assert_internally_consistent();
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
             assert(superblock.staging.vsr_state.monotonic(vsr_state));
 
@@ -810,7 +833,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.caller != .open);
             assert(context.caller == .format or superblock.opened);
             assert(context.copy == null);
-            assert(context.vsr_state.?.internally_consistent());
+            context.vsr_state.?.assert_internally_consistent();
             assert(superblock.queue_head == context);
             assert(superblock.queue_tail == null);
             assert(superblock.working.vsr_state.would_be_updated_by(context.vsr_state.?));
@@ -1043,7 +1066,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             // The superblock cluster and replica should never change once formatted:
             assert(superblock.staging.cluster == superblock.working.cluster);
-            assert(superblock.staging.replica == superblock.working.replica);
+            assert(superblock.staging.vsr_state.replica == superblock.working.vsr_state.replica);
 
             assert(superblock.staging.storage_size >= data_file_size_min);
             assert(superblock.staging.storage_size <= superblock.staging.storage_size_max);
@@ -1058,7 +1081,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const offset = areas.header.offset(context.copy.?);
 
             log.debug("{}: {s}: write_header: checksum={x} sequence={} copy={} size={} offset={}", .{
-                superblock.staging.replica,
+                superblock.staging.vsr_state.replica,
                 @tagName(context.caller),
                 superblock.staging.checksum,
                 superblock.staging.sequence,
@@ -1196,6 +1219,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
                     assert(working.vsr_state.view == 0);
+                    assert(working.vsr_state.replica_count <= constants.replicas_max);
+                    assert(
+                        working.vsr_state.replica <
+                            working.vsr_state.replica_count + constants.standbys_max,
+                    );
                     assert(working.vsr_headers_count == 1);
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
@@ -1213,7 +1241,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.checksum,
                         superblock.working.sequence,
                         superblock.working.cluster,
-                        superblock.working.replica,
+                        superblock.working.vsr_state.replica,
                         superblock.working.storage_size,
                         superblock.working.vsr_state.commit_min_checksum,
                         superblock.working.vsr_state.commit_min,
@@ -1626,6 +1654,6 @@ test "SuperBlockHeader" {
     a.copy += 1;
     try expect(a.valid_checksum());
 
-    a.replica += 1;
+    a.version += 1;
     try expect(!a.valid_checksum());
 }

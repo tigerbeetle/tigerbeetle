@@ -56,7 +56,7 @@ Let's turn up the log level some more (and your favorite album), so you can see 
 
 - Start a single replica cluster:
 Format the data file:
-`./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle`
+`./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle`
 Start the replica from the data file:
 `./tigerbeetle start --addresses=3001 0_0.tigerbeetle &`
 
