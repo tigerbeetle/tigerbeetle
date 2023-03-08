@@ -3104,7 +3104,7 @@ pub fn ReplicaType(
                 .timestamp = if (command == .do_view_change) self.log_view else 0,
                 .op = self.op,
                 // See the comment in `on_do_view_change()` for why `commit_min` is crucial:
-                .commit = if (command == .do_view_change) self.commit_min else self.commit_max,
+                .commit = self.commit_min,
             };
 
             stdx.copy_disjoint(
@@ -5168,6 +5168,8 @@ pub fn ReplicaType(
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
+                    assert(message.header.commit == self.commit_min);
+                    assert(message.header.commit == self.commit_max);
                 },
                 .headers => {
                     assert(!self.standby());
@@ -6138,11 +6140,6 @@ pub fn ReplicaType(
                 else => unreachable,
             };
 
-            switch (self.status) {
-                .normal, .view_change, .recovering_head => {},
-                .recovering => return,
-            }
-
             if (header.view < self.view) return;
 
             // Compare status transitions and decide whether to view jump or ignore:
@@ -6167,7 +6164,7 @@ pub fn ReplicaType(
                 },
                 // We need a start_view from any other replica — don't request it from ourselves.
                 .recovering_head => if (self.primary_index(header.view) == self.replica) return,
-                else => unreachable,
+                .recovering => return,
             }
 
             switch (to) {
