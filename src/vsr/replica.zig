@@ -1126,7 +1126,8 @@ pub fn ReplicaType(
             // TODO: When Block recover & state transfer are implemented, this can be removed.
             const threshold =
                 if (prepare.message.header.op == self.op_checkpoint_trigger() or
-                prepare.message.header.op == self.op_checkpoint() + constants.lsm_batch_multiple + 1)
+                (self.op_checkpoint() != 0 and
+                prepare.message.header.op == self.op_checkpoint() + constants.lsm_batch_multiple + 1))
                 self.replica_count
             else
                 self.quorum_replication;
@@ -1295,14 +1296,11 @@ pub fn ReplicaType(
 
         fn on_start_view_change(self: *Self, message: *Message) void {
             assert(message.header.command == .start_view_change);
+            self.view_jump(message.header);
             if (self.ignore_start_view_change_message(message)) return;
 
             assert(!self.solo());
             assert(self.status == .normal or self.status == .view_change);
-            assert(message.header.view >= self.view);
-
-            self.view_jump(message.header);
-
             assert(message.header.view == self.view);
 
             // Wait until we have `f + 1` messages (possibly including ourself) for quorum.
@@ -1330,9 +1328,10 @@ pub fn ReplicaType(
                 });
                 return;
             }
-            log.debug("{}: on_start_view_change: view={} quorum received", .{
+            log.debug("{}: on_start_view_change: view={} quorum received replicas={b}", .{
                 self.replica,
                 self.view,
+                self.start_view_change_from_all_replicas.mask,
             });
 
             self.transition_to_view_change_status(self.view + 1);
@@ -6046,7 +6045,10 @@ pub fn ReplicaType(
         fn view_jump(self: *Self, header: *const Header) void {
             const to: Status = switch (header.command) {
                 .prepare, .commit => .normal,
-                .start_view_change, .do_view_change, .start_view => .view_change,
+                .do_view_change, .start_view => .view_change,
+                // When we are recovering_head we can't participate in a view-change anyway.
+                // But there is a chance that the primary is still running, despite the SVC.
+                .start_view_change => if (self.status == .recovering_head) Status.normal else .view_change,
                 else => unreachable,
             };
 
