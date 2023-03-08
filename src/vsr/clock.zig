@@ -12,7 +12,7 @@ const window_max: u64 = constants.clock_synchronization_window_max_ms * std.time
 
 const Marzullo = @import("marzullo.zig").Marzullo;
 
-pub fn Clock(comptime Time: type) type {
+pub fn ClockType(comptime Time: type) type {
     return struct {
         const Self = @This();
 
@@ -457,7 +457,7 @@ pub fn Clock(comptime Time: type) type {
 const testing = std.testing;
 const OffsetType = @import("../testing/time.zig").OffsetType;
 const DeterministicTime = @import("../testing/time.zig").Time;
-const DeterministicClock = Clock(DeterministicTime);
+const DeterministicClock = ClockType(DeterministicTime);
 
 const ClockUnitTestContainer = struct {
     const Self = @This();
