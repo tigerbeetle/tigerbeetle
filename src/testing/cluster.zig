@@ -214,8 +214,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 try vsr.format(
                     Storage,
                     allocator,
-                    options.cluster_id,
-                    @intCast(u8, replica_index),
+                    .{
+                        .cluster = options.cluster_id,
+                        .replica = @intCast(u8, replica_index),
+                        .replica_count = options.replica_count,
+                    },
                     storage,
                     &superblock,
                 );
@@ -346,8 +349,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             try replica.open(
                 cluster.allocator,
                 .{
-                    .replica_count = cluster.replica_count,
-                    .standby_count = cluster.standby_count,
+                    .node_count = cluster.options.replica_count + cluster.options.standby_count,
                     .storage = &cluster.storages[replica_index],
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,

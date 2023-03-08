@@ -1230,8 +1230,8 @@ public class IntegrationTest {
                     break;
             }
 
-            var format = Runtime.getRuntime()
-                    .exec(new String[] {exe, "format", "--cluster=0", "--replica=0", TB_FILE});
+            var format = Runtime.getRuntime().exec(new String[] {exe, "format", "--cluster=0",
+                    "--replica=0", "--replica-count=1", TB_FILE});
             if (format.waitFor() != 0) {
                 var reader = new BufferedReader(new InputStreamReader(format.getErrorStream()));
                 var error = reader.lines().collect(Collectors.joining(". "));

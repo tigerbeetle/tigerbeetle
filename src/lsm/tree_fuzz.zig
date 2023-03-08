@@ -81,6 +81,7 @@ const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
 
 const cluster = 32;
 const replica = 4;
+const replica_count = 6;
 const node_count = 1024;
 const tree_options = .{
     // This is the smallest size that set_associative_cache will allow us.
@@ -184,6 +185,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.superblock.format(superblock_format_callback, &env.superblock_context, .{
                 .cluster = cluster,
                 .replica = replica,
+                .replica_count = replica_count,
             });
 
             env.tick_until_state_change(.superblock_format, .superblock_open);

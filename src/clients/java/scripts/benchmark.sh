@@ -41,7 +41,7 @@ do
         rm "$FILE"
     fi
 
-    ../../../tigerbeetle format --cluster=0 --replica="$I" "$FILE" > benchmark.log 2>&1
+    ../../../tigerbeetle format --cluster=0 --replica="$I" --replica-count=1 "$FILE" > benchmark.log 2>&1
 done
 
 for I in $REPLICAS
