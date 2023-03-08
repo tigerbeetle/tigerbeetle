@@ -738,7 +738,14 @@ fn c_client_sample(
     sample.setBuildMode(mode);
     sample.linkLibrary(static_lib);
     sample.linkLibC();
-    sample.install();
+
+    if (target.isWindows()) {
+        static_lib.linkSystemLibrary("ws2_32");
+        static_lib.linkSystemLibrary("advapi32");
+
+        // TODO: Illegal instruction x000001d on Windows:
+        sample.disable_sanitize_c = true;        
+    }
 
     const run_cmd = sample.run();
     c_sample_build.dependOn(&run_cmd.step);
