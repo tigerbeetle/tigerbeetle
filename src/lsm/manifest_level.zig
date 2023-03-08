@@ -672,7 +672,7 @@ pub fn TestContext(
 
             if (tables.items.len > 0) {
                 for (tables.items) |*table| {
-                    context.level.remove_table(&context.pool, snapshots, table);
+                    context.level.remove_table_invisible(&context.pool, snapshots, table);
                 }
             }
         }
@@ -733,7 +733,7 @@ pub fn TestContext(
 
                 if (to_remove.items.len > 0) {
                     for (to_remove.items) |*table| {
-                        context.level.remove_table(
+                        context.level.remove_table_invisible(
                             &context.pool,
                             context.snapshots.slice(),
                             table,
