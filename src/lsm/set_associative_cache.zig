@@ -188,13 +188,6 @@ pub fn SetAssociativeCache(
             mem.set(u64, self.clocks.words, 0);
         }
 
-        /// Returns whether an entry with the given key is cached,
-        /// without modifying the entry's counter.
-        pub fn exists(self: *Self, key: Key) bool {
-            const set = self.associate(key);
-            return self.search(set, key) != null;
-        }
-
         pub fn get_index(self: *Self, key: Key) ?usize {
             const set = self.associate(key);
             const way = self.search(set, key) orelse return null;
