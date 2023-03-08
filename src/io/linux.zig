@@ -112,14 +112,11 @@ pub const IO = struct {
         }
 
         // Run completions only after all completions have been flushed:
-        // Loop on a copy of the linked list, having reset the list first, so that any synchronous
-        // append on running a completion is executed only the next time round the event loop,
-        // without creating an infinite loop.
-        {
-            var copy = self.completed;
-            self.completed = .{};
-            while (copy.pop()) |completion| completion.complete();
-        }
+        // Loop until all completions are processed. Calls to complete() may queue more work
+        // and extend the duration of the loop, but this is fine as it 1) executes completions
+        // that become ready without going through another syscall from flush_submissions() and
+        // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
+        while (self.completed.pop()) |completion| completion.complete();
 
         // At this point, unqueued could have completions either by 1) those who didn't get an SQE
         // during the popping of unqueued or 2) completion.complete() which start new IO. These
