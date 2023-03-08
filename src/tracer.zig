@@ -194,7 +194,8 @@ pub const EventGroup = union(enum) {
     }
 };
 
-pub const PlotId = enum {
+/// All strings in PlotId must be comptime constants to ensure that they live until after `tracer.deinit` is called.
+pub const PlotId = union(enum) {
     grid_write_queue_count,
     grid_read_queue_count,
     grid_read_pending_queue_count,
@@ -202,10 +203,22 @@ pub const PlotId = enum {
     io_unqueued_count,
     io_completed_count,
     storage_next_tick_count,
+    cache_hits: [:0]const u8,
+    cache_misses: [:0]const u8,
 
     // NOTE: Returns a comptime constant because `tracy_emit_plot` prefers unique string pointers.
     fn name(plot_id: PlotId) [:0]const u8 {
-        return @tagName(plot_id);
+        return switch (plot_id) {
+            .grid_write_queue_count,
+            .grid_read_queue_count,
+            .grid_read_pending_queue_count,
+            .grid_read_recovery_queue_count,
+            .io_unqueued_count,
+            .io_completed_count,
+            .storage_next_tick_count,
+            => @tagName(plot_id),
+            .cache_hits, .cache_misses => |name| name,
+        };
     }
 };
 

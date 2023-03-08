@@ -135,6 +135,7 @@ pub fn GridType(comptime Storage: type) type {
                 .ways = set_associative_cache_ways,
                 .value_alignment = @alignOf(u64),
             },
+            "grid",
         );
 
         superblock: *SuperBlock,
