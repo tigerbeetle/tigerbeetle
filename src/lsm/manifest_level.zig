@@ -68,7 +68,7 @@ pub fn ManifestLevelType(
             level.tables.deinit(allocator, node_pool);
         }
 
-        /// Inserts an ordered batch of tables into the level, then rebuilds the indexes.
+        /// Inserts the given table into the ManifestLevel.
         pub fn insert_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
             assert(level.keys.len() == level.tables.len());
 
@@ -117,9 +117,41 @@ pub fn ManifestLevelType(
             level.table_count_visible -= 1;
         }
 
+        /// Remove the given table from the level assuming it's visible to `lsm.snapshot_latest`.
+        /// Returns the same, unmodified table passed in to differentiate itself from 
+        /// remove_table_invisible and guard against using the wrong function.
+        pub fn remove_table(
+            level: *Self,
+            node_pool: *NodePool,
+            table: *const TableInfo,
+        ) *const TableInfo {
+            assert(level.keys.len() == level.tables.len());
+            assert(compare_keys(table.key_min, table.key_max) != .gt);
+
+            // Use `key_min` for both ends of the iterator; we are looking for a single table.
+            const cursor_start = level.iterator_start(table.key_min, table.key_min, .ascending).?;
+            var absolute_index = level.keys.absolute_index_for_cursor(cursor_start);
+
+            var it = level.tables.iterator_from_index(absolute_index, .ascending);
+            while (it.next()) |level_table| : (absolute_index += 1) {
+                if (level_table.equal(table)) {
+                    assert(table.visible(lsm.snapshot_latest));
+                    level.table_count_visible -= 1;
+
+                    level.keys.remove_elements(node_pool, absolute_index, 1);
+                    level.tables.remove_elements(node_pool, absolute_index, 1);
+
+                    assert(level.keys.len() == level.tables.len());
+                    return table;
+                }
+            }
+
+            @panic("remove_table() called with a table that was never inserted");
+        }
+
         /// Remove the given table from the ManifestLevel, asserting that it is not visible
         /// by any snapshot in `snapshots` or by `lsm.snapshot_latest`.
-        pub fn remove_table(
+        pub fn remove_table_invisible(
             level: *Self,
             node_pool: *NodePool,
             snapshots: []const u64,
