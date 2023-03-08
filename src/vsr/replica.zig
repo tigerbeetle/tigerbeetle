@@ -76,7 +76,7 @@ pub fn ReplicaType(
         const Self = @This();
 
         const Journal = vsr.JournalType(Self, Storage);
-        const Clock = vsr.Clock(Time);
+        const Clock = vsr.ClockType(Time);
 
         /// We use this allocator during open/init and then disable it.
         /// An accidental dynamic allocation after open/init will cause an assertion failure.
