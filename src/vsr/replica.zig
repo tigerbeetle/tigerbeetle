@@ -1411,6 +1411,37 @@ pub fn ReplicaType(
             assert(!self.do_view_change_quorum);
             self.do_view_change_quorum = true;
 
+            const dvc_latest = DVCQuorum.dvc_latest(self.do_view_change_from_all_replicas);
+            if (dvc_latest.header.op > self.op_checkpoint_trigger()) {
+                // When the cluster is at a checkpoint ahead of the local checkpoint, abdicate
+                // as primary.
+                //
+                // This serves a few purposes:
+                // 1. Availability: We pick a primary to minimize the number of WAL repairs, to
+                //    minimize the likelihood of a repair-deadlock.
+                // 2. Optimization: The cluster does not need to wait for a lagging replicas before
+                //    prepares/commits can resume.
+                // 3. Simplify repair: A new primary never needs to fast-forward to a new checkpoint.
+                // As a further optimization, skip ahead to a view where the most up-to-date replica
+                // will be primary, rather than simply cycling.
+                assert(dvc_latest.header.replica != self.replica);
+
+                var view_next = self.view;
+                while (self.primary_index(view_next) != dvc_latest.header.replica) view_next += 1;
+                assert(self.primary_index(view_next) != self.replica);
+
+                log.debug("{}: on_do_view_change: lagging primary; abdicating " ++
+                    "(view={}..{} op={}..{})", .{
+                    self.replica,
+                    self.view,
+                    view_next,
+                    self.op,
+                    dvc_latest.header.op,
+                });
+                self.transition_to_view_change_status(view_next);
+                return;
+            }
+
             self.primary_set_log_from_do_view_change_messages();
             // We aren't status=normal yet, but our headers from our prior log_view may have been
             // replaced. If we participate in another DVC (before reaching status=normal, which
@@ -4093,13 +4124,6 @@ pub fn ReplicaType(
                 });
                 return;
             }
-
-            // Assert that all headers are now present and connected with a perfect hash chain:
-            // TODO(State Transfer): This may fail if the commit max is too far ahead and we
-            // couldn't repair it without jumping ahead on the WAL.
-            if (self.op < self.commit_max) {
-                stdx.unimplemented("state transfer");
-            }
             assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
             // Request and repair any dirty or faulty prepares:
@@ -4111,6 +4135,7 @@ pub fn ReplicaType(
                 self.commit_journal(self.commit_max);
                 return;
             }
+            assert(self.commit_max <= self.op);
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
                 // Repair the pipeline, which may discover faulty prepares and drive more repairs.
@@ -5529,6 +5554,8 @@ pub fn ReplicaType(
             assert(dvcs_canonical.len > 0);
 
             for (dvcs_all.constSlice()) |message| {
+                assert(message.header.op <= self.op_checkpoint_trigger());
+
                 log.debug(
                     "{}: on_do_view_change: dvc: " ++
                         "replica={} log_view={} op={} commit_min={}",
@@ -5581,16 +5608,7 @@ pub fn ReplicaType(
             assert(header_head.op >= self.op_checkpoint());
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
-
-            if (header_head.op > self.op_checkpoint_trigger()) {
-                // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
-                // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
-                // precluding recovery.
-                //
-                // TODO State transfer. Currently this is unreachable because the
-                // primary won't checkpoint until all replicas are caught up.
-                stdx.unimplemented("state transfer");
-            }
+            assert(header_head.op <= self.op_checkpoint_trigger());
 
             self.set_op_and_commit_max(
                 header_head.op,
@@ -5651,6 +5669,7 @@ pub fn ReplicaType(
             assert(self.primary_repair_pipeline() == .done);
 
             assert(self.commit_min == self.commit_max);
+            assert(self.commit_max <= self.op);
             assert(self.journal.dirty.count == 0);
             assert(self.journal.faulty.count == 0);
             assert(self.nack_prepare_op == null);
@@ -6430,6 +6449,25 @@ const DVCQuorum = struct {
             }
         }
         return array;
+    }
+
+    /// Returns the DVC with the highest head op.
+    ///
+    /// Note that the DVC in question is not necessarily canonical. If only canonical DVCs were
+    /// considered, it would be possible for now-truncated prepares to have overwritten some
+    /// prepares from the prior WAL wrap, which would then be unavailable to catch the lagging
+    /// replica up to the current checkpoint.
+    fn dvc_latest(dvc_quorum: QuorumMessages) *const Message {
+        const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
+        assert(dvcs.len > 0);
+
+        var message: ?*const Message = null;
+        for (dvcs.constSlice()) |dvc| {
+            if (message == null or message.?.header.op < dvc.header.op) {
+                message = dvc;
+            }
+        }
+        return message.?;
     }
 
     /// Returns the highest `log_view` of any DVC.
