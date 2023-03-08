@@ -104,7 +104,7 @@ public abstract class Batch {
     /**
      * Adds a new element at the end of this batch.
      * <p>
-     * If successfully, moves the current {@link #setPosition position} to the newly created
+     * If successful, moves the current {@link #setPosition position} to the newly created
      * element.
      *
      * @throws IllegalStateException if this batch is read-only.

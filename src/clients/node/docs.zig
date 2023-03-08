@@ -4,7 +4,14 @@ pub const NodeDocs = Docs{
     .readme = "node/README.md",
     .markdown_name = "javascript",
     .extension = "js",
-    .test_linux_docker_image = "node:18",
+
+    // Phil: While installing TigerBeetle on Node 14 works, building
+    // (`npm install --include dev`) seems to require a newer Node
+    // version. I've tried this on alpine and debian images and
+    // couldn't get the install to work on either with Node 14.
+    .test_linux_docker_image = "node:16-alpine",
+    .test_source_path = "",
+
     .name = "tigerbeetle-node",
     .description = 
     \\The TigerBeetle client for Node.js.
@@ -12,9 +19,14 @@ pub const NodeDocs = Docs{
     .prerequisites = 
     \\* NodeJS >= `14`
     \\
-    \\> Your operating system should be Linux (kernel >= v5.6) or macOS.
-    \\> Windows support is not yet available.
+    \\> Windows support is not yet available for the Node client.
     ,
+
+    .project_file = "",
+    .project_file_name = "",
+    .test_file_name = "",
+
+    .install_prereqs = "apk add -U python3",
 
     .install_sample_file = 
     \\const { createClient } = require("tigerbeetle-node");
@@ -23,17 +35,24 @@ pub const NodeDocs = Docs{
 
     .install_sample_file_build_commands = "npm install typescript @types/node && npx tsc --allowJs --noEmit test.js",
     .install_sample_file_test_commands = "node run test.js",
+
+    .current_commit_pre_install_commands = "",
+    .current_commit_post_install_commands = 
+    \\npm remove tigerbeetle-node
+    \\npm install ./tigerbeetle/src/clients/node/tigerbeetle-node-*.tgz
+    ,
+
     .install_commands = "npm install tigerbeetle-node",
     .install_documentation = 
     \\If you run into issues, check out the distribution-specific install
     \\steps that are run in CI to test support:
     \\
-    \\* [Alpine](./scripts/test_install_on_alpine.sh)
-    \\* [Amazon Linux](./scripts/test_install_on_amazonlinux.sh)
-    \\* [Debian](./scripts/test_install_on_debian.sh)
-    \\* [Fedora](./scripts/test_install_on_fedora.sh)
-    \\* [Ubuntu](./scripts/test_install_on_ubuntu.sh)
-    \\* [RHEL](./scripts/test_install_on_rhelubi.sh)
+    \\* [Alpine](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_alpine.sh)
+    \\* [Amazon Linux](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_amazonlinux.sh)
+    \\* [Debian](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_debian.sh)
+    \\* [Fedora](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_fedora.sh)
+    \\* [Ubuntu](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_ubuntu.sh)
+    \\* [RHEL](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_rhelubi.sh)
     \\
     \\### Sidenote: `BigInt`
     \\TigerBeetle uses 64-bit integers for many fields while JavaScript's
@@ -68,10 +87,6 @@ pub const NodeDocs = Docs{
     \\};
     \\
     \\let accountErrors = await client.createAccounts([account]);
-    \\if (accountErrors.length) {
-    \\  // Grab a human-readable message from the response
-    \\  console.log(CreateAccountError[accountErrors[0].code]);
-    \\}
     ,
     .create_accounts_documentation = "",
     .account_flags_documentation = 
@@ -92,9 +107,10 @@ pub const NodeDocs = Docs{
     \\accountErrors = await client.createAccounts([account0, account1]);
     ,
     .create_accounts_errors_example = 
-    \\accountErrors = await client.createAccounts([account1, account2, account3]);
-    \\
-    \\// accountErrors = [{ index: 1, code: 1 }];
+    \\let account2 = { /* ... account values ... */ };
+    \\let account3 = { /* ... account values ... */ };
+    \\let account4 = { /* ... account values ... */ };
+    \\accountErrors = await client.createAccounts([account2, account3, account4]);
     \\for (const error of accountErrors) {
     \\  switch (error.code) {
     \\    case CreateAccountError.exists:
@@ -283,20 +299,20 @@ pub const NodeDocs = Docs{
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
-    .developer_setup_bash_commands = 
-    \\rm -rf tigerbeetle
+    .developer_setup_sh_commands = 
     \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
     \\cd tigerbeetle
-    \\git checkout $GIT_SHA # Optional
+    \\git checkout $GIT_SHA
     \\./scripts/install_zig.sh
     \\cd src/clients/node
     \\npm install --include dev
     \\npm pack
+    \\[ "$TEST" = "true" ] && mvn test || echo "Skipping client unit tests"
     ,
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
-    .developer_setup_windows_commands = "",
+    .developer_setup_pwsh_commands = "",
     .test_main_prefix = 
     \\const { createClient } = require("tigerbeetle-node");
     \\
@@ -306,5 +322,4 @@ pub const NodeDocs = Docs{
     \\}
     \\main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
     ,
-    .code_format_commands = "npm install -g prettier && prettier --write .",
 };

@@ -55,7 +55,7 @@ public final class AccountBatch extends Batch {
 
     /**
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
-     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -77,14 +77,24 @@ public final class AccountBatch extends Batch {
     }
 
     /**
-     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit value.
-     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#id">id</a>
      */
     public void setId(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.Id), leastSignificant, mostSignificant);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#id">id</a>
+     */
+    public void setId(final long leastSignificant) {
+        putUInt128(at(Struct.Id), leastSignificant, 0);
     }
 
     /**
@@ -98,7 +108,7 @@ public final class AccountBatch extends Batch {
 
     /**
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
-     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
@@ -120,14 +130,24 @@ public final class AccountBatch extends Batch {
     }
 
     /**
-     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit value.
-     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data">user_data</a>
      */
     public void setUserData(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.UserData), leastSignificant, mostSignificant);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data">user_data</a>
+     */
+    public void setUserData(final long leastSignificant) {
+        putUInt128(at(Struct.UserData), leastSignificant, 0);
     }
 
     /**
