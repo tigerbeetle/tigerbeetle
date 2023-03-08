@@ -89,7 +89,7 @@ pub fn GridType(comptime Storage: type) type {
             block_type: BlockType,
 
             pending: ReadPending = .{},
-            resolves: FIFO(ReadPending) = .{},
+            resolves: FIFO(ReadPending) = .{ .plot_id = null },
 
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
@@ -145,18 +145,18 @@ pub fn GridType(comptime Storage: type) type {
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_iop_tracer_slots: [write_iops_max]?tracer.SpanStart = .{null} ** write_iops_max,
-        write_queue: FIFO(Write) = .{},
+        write_queue: FIFO(Write) = .{ .plot_id = .grid_write_queue_count },
 
         // Each read_iops has a corresponding block.
         read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
         read_iop_tracer_slots: [read_iops_max]?tracer.SpanStart = .{null} ** read_iops_max,
-        read_queue: FIFO(Read) = .{},
+        read_queue: FIFO(Read) = .{ .plot_id = .grid_read_queue_count },
 
         // List if Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
-        read_pending_queue: FIFO(ReadPending) = .{},
+        read_pending_queue: FIFO(ReadPending) = .{ .plot_id = .grid_read_pending_queue_count },
         // TODO interrogate this list and do recovery in Replica.tick().
-        read_recovery_queue: FIFO(Read) = .{},
+        read_recovery_queue: FIFO(Read) = .{ .plot_id = .grid_read_recovery_queue_count },
         // True if there's a read thats resolving callbacks. If so, the read cache must not be invalidated.
         read_resolving: bool = false,
 
