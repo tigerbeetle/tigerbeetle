@@ -1,24 +1,33 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
-#include <pthread.h>
-#include <sys/time.h>
 #include "../tb_client.h"
 
+#if _WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <sys/time.h>
+#endif
+
 // config.message_size_max - @sizeOf(vsr.Header):
-const int MAX_MESSAGE_SIZE = (1024 * 1024) - 128;
+#define MAX_MESSAGE_SIZE (1024 * 1024) - 128
 
 // Synchronization context between the callback and the main thread.
 typedef struct completion_context {
-    // Pointer to the reply's body.
-    // In real usage, this memory should be copied to application's ownership before
-    // the packet is returned to be reused in a next request.
-    void* reply;
+    uint8_t reply[MAX_MESSAGE_SIZE];
     int size;
+    bool completed;
 
     // In this example we synchronize using a condition variable:
+    #if _WIN32
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE cv;
+    #else
     pthread_mutex_t lock;
     pthread_cond_t cv;
+    #endif
 
 } completion_context_t;
 
@@ -26,7 +35,7 @@ void completion_context_init(completion_context_t *ctx);
 void completion_context_destroy(completion_context_t *ctx);
 
 // Sends and blocks the current thread until the reply arrives.
-void send(
+void send_request(
     tb_client_t client,
     tb_packet_list_t *packets,
     completion_context_t *ctx
@@ -42,17 +51,7 @@ void on_completion(
     tb_packet_t *packet, 
     const uint8_t *data, 
     uint32_t size
-) {    
-    // The user_data gives context to a request:
-    completion_context_t* ctx = (completion_context_t*)packet->user_data;
-
-    // Signaling the main thread we received the reply:
-    pthread_mutex_lock(&ctx->lock);
-    ctx->size = size;
-    ctx->reply = (void*)data;
-    pthread_cond_signal(&ctx->cv);
-    pthread_mutex_unlock(&ctx->lock);
-}
+);
 
 int main(int argc, char **argv) {
     printf("TigerBeetle C Sample\n");
@@ -86,12 +85,12 @@ int main(int argc, char **argv) {
     ////////////////////////////////////////////////////////////
     // Submitting a batch of accounts:                        //
     ////////////////////////////////////////////////////////////
-    const int accounts_len = 2;
-    const int accounts_size = sizeof(tb_account_t) * accounts_len;
-    tb_account_t accounts[accounts_len];
+    #define ACCOUNTS_LEN 2
+    #define ACCOUNTS_SIZE sizeof(tb_account_t) * ACCOUNTS_LEN
+    tb_account_t accounts[ACCOUNTS_LEN];
     
     // Zeroing the memory, so we don't have to initialize every field.
-    memset(&accounts, 0, accounts_size);
+    memset(&accounts, 0, ACCOUNTS_SIZE);
     
     accounts[0].id = 1;
     accounts[0].code = 2;
@@ -106,13 +105,13 @@ int main(int argc, char **argv) {
     // multiple packets, for handling multiple concurrent requests:
     printf("Creating accounts...\n");    
     packets.head->operation = TB_OPERATION_CREATE_ACCOUNTS;  // The operation to be performed.
-    packets.head->data = &accounts;                          // The data to be sent.
-    packets.head->data_size = accounts_size;                 //
+    packets.head->data = accounts;                          // The data to be sent.
+    packets.head->data_size = ACCOUNTS_SIZE;                 //
     packets.head->user_data = &ctx;                          // User-defined context.
     packets.head->status = TB_PACKET_OK;                     // Will be set when the reply arrives.
     packets.tail = packets.head;
 
-    send(client, &packets, &ctx);
+    send_request(client, &packets, &ctx);
     
     if (packets.head->status != TB_PACKET_OK) {
         // Checking if the request failed:
@@ -122,7 +121,7 @@ int main(int argc, char **argv) {
 
     if (ctx.size != 0) {
         // Checking for errors creating the accounts:
-        tb_create_accounts_result_t *results = (tb_create_accounts_result_t*) ctx.reply;
+        tb_create_accounts_result_t *results = (tb_create_accounts_result_t*)ctx.reply;
         int results_len = ctx.size / sizeof(tb_create_accounts_result_t);
         printf("create_account results:\n");
         for(int i=0;i<results_len;i++) {
@@ -137,17 +136,17 @@ int main(int argc, char **argv) {
     ////////////////////////////////////////////////////////////
 
     printf("Creating transfers...\n");
-    const int max_batches = 100;
-    const int transfers_per_batch = MAX_MESSAGE_SIZE / sizeof(tb_transfer_t);
+    #define MAX_BATCHES 100
+    #define TRANSFERS_PER_BATCH ((MAX_MESSAGE_SIZE) / sizeof(tb_transfer_t))
     long max_latency_ms = 0;
     long total_time_ms = 0;
-    for (int i=0; i< max_batches;i++) {
-        tb_transfer_t transfers[transfers_per_batch];
+    for (int i=0; i< MAX_BATCHES;i++) {
+        tb_transfer_t transfers[TRANSFERS_PER_BATCH];
         // Zeroing the memory, so we don't have to initialize every field.
-        memset(&transfers, 0, MAX_MESSAGE_SIZE);
+        memset(transfers, 0, MAX_MESSAGE_SIZE);
         
-        for (int j=0; j< transfers_per_batch; j++) {
-            transfers[j].id = j + 1 + (i * transfers_per_batch);
+        for (int j=0; j<TRANSFERS_PER_BATCH; j++) {
+            transfers[j].id = j + 1 + (i * TRANSFERS_PER_BATCH);
             transfers[j].debit_account_id = accounts[0].id;
             transfers[j].credit_account_id = accounts[1].id;
             transfers[j].code = 2;
@@ -156,14 +155,14 @@ int main(int argc, char **argv) {
         }
         
         packets.head->operation = TB_OPERATION_CREATE_TRANSFERS;  // The operation to be performed.
-        packets.head->data = &transfers;                          // The data to be sent.
+        packets.head->data = transfers;                          // The data to be sent.
         packets.head->data_size = MAX_MESSAGE_SIZE;               //
         packets.head->user_data = &ctx;                           // User-defined context.
         packets.head->status = TB_PACKET_OK;                      // Will be set when the reply arrives.
         packets.tail = packets.head;
 
         long long now = get_time_ms();
-        send(client, &packets, &ctx);
+        send_request(client, &packets, &ctx);
   
         long elapsed_ms = get_time_ms() - now;
         if (elapsed_ms > max_latency_ms) max_latency_ms = elapsed_ms;
@@ -186,31 +185,30 @@ int main(int argc, char **argv) {
             exit(-1);
         }
     }
-    printf("Transfers created successfully\n");
 
+    printf("Transfers created successfully\n");
 	printf("============================================\n");
 
-    printf("%d transfers per second\n", (max_batches * transfers_per_batch * 1000) / total_time_ms);
-	printf("create_transfers max p100 latency per %d transfers = %dms\n", transfers_per_batch, max_latency_ms);
-	printf("total %d transfers in %dms\n", max_batches * transfers_per_batch, total_time_ms);    
+    printf("%d transfers per second\n", (MAX_BATCHES * TRANSFERS_PER_BATCH * 1000) / total_time_ms);
+	printf("create_transfers max p100 latency per %d transfers = %dms\n", TRANSFERS_PER_BATCH, max_latency_ms);
+	printf("total %d transfers in %dms\n", MAX_BATCHES * TRANSFERS_PER_BATCH, total_time_ms);    
     printf("\n");
 
     ////////////////////////////////////////////////////////////
     // Looking up accounts:                                   //
     ////////////////////////////////////////////////////////////
+
     printf("Looking up accounts ...\n");
-    tb_uint128_t ids[2];
-    ids[0] = accounts[0].id;
-    ids[1] = accounts[1].id;
+    tb_uint128_t ids[ACCOUNTS_LEN] = { accounts[0].id, accounts[1].id };
     
     packets.head->operation = TB_OPERATION_LOOKUP_ACCOUNTS;
-    packets.head->data = &ids;
-    packets.head->data_size = sizeof(tb_uint128_t) * 2;
+    packets.head->data = ids;
+    packets.head->data_size = sizeof(tb_uint128_t) * ACCOUNTS_LEN;
     packets.head->user_data = &ctx;
     packets.head->status = TB_PACKET_OK;
     packets.tail = packets.head;
 
-    send(client, &packets, &ctx);
+    send_request(client, &packets, &ctx);
     
     if (packets.head->status != TB_PACKET_OK) {
         // Checking if the request failed:
@@ -225,10 +223,11 @@ int main(int argc, char **argv) {
         // Printing the account's balance:
         tb_account_t *results = (tb_account_t*)ctx.reply;
         int results_len = ctx.size / sizeof(tb_account_t);
-        printf("Accounts:\n");
+        printf("%d Account(s) found\n", results_len);
         printf("============================================\n");
-        for(int i=0;i<results_len;i++) {
-            printf("id=%d\n", results[i].id);
+
+        for(int i=0;i<results_len;i++) {            
+            printf("id=%d\n", (long)results[i].id);
             printf("debits_posted=%d\n", results[i].debits_posted);
             printf("credits_posted=%d\n", results[i].credits_posted);
             printf("\n");
@@ -240,7 +239,85 @@ int main(int argc, char **argv) {
     tb_client_deinit(client);
 }
 
-// Sends and blocks the current thread until the reply arrives.
+#if _WIN32
+
+void on_completion(
+    uintptr_t context, 
+    tb_client_t client, 
+    tb_packet_t *packet, 
+    const uint8_t *data, 
+    uint32_t size
+) {    
+    // The user_data gives context to a request:
+    completion_context_t* ctx = (completion_context_t*)packet->user_data;
+
+    // Signaling the main thread we received the reply:
+    EnterCriticalSection(&ctx->lock);
+    
+    memcpy (ctx->reply, data, size);
+    ctx->size = size;
+    ctx->completed = true;
+    
+    WakeConditionVariable(&ctx->cv);
+    LeaveCriticalSection(&ctx->lock);
+}
+
+void send_request(
+    tb_client_t client,
+    tb_packet_list_t *packets,
+    completion_context_t *ctx
+) {
+    // Locks the mutex:
+    EnterCriticalSection(&ctx->lock);
+
+    // Submits the request asynchronously:
+    ctx->completed = false;
+    tb_client_submit(client, packets);
+
+    // Uses a condvar to sync this thread with the callback:
+    while (!ctx->completed) {
+        SleepConditionVariableCS (&ctx->cv, &ctx->lock, INFINITE);
+    }
+    
+    LeaveCriticalSection(&ctx->lock);
+}
+
+void completion_context_init(completion_context_t *ctx) {
+    InitializeCriticalSection(&ctx->lock);
+    InitializeConditionVariable(&ctx->cv);
+}
+
+void completion_context_destroy(completion_context_t *ctx) {
+    DeleteCriticalSection(&ctx->lock);
+}
+
+long long get_time_ms(void) {
+    return GetTickCount();
+}
+
+#else
+
+void on_completion(
+    uintptr_t context, 
+    tb_client_t client, 
+    tb_packet_t *packet, 
+    const uint8_t *data, 
+    uint32_t size
+) {    
+    // The user_data gives context to a request:
+    completion_context_t* ctx = (completion_context_t*)packet->user_data;
+
+    // Signaling the main thread we received the reply:
+    pthread_mutex_lock(&ctx->lock);
+
+    memcpy (ctx->reply, data, size);
+    ctx->size = size;
+    ctx->completed = true;
+    
+    pthread_cond_signal(&ctx->cv);
+    pthread_mutex_unlock(&ctx->lock);
+}
+
 void send(
     tb_client_t client,
     tb_packet_list_t *packets,
@@ -253,12 +330,11 @@ void send(
     }
 
     // Submits the request asynchronously:
-    ctx->reply = NULL;
-    ctx->size = 0;    
+    ctx->completed = false;
     tb_client_submit(client, packets);
 
     // Uses a condvar to sync this thread with the callback:
-    while (ctx->reply == NULL) {
+    while (!ctx->completed) {
         if (pthread_cond_wait(&ctx->cv, &ctx->lock) != 0) {
             printf("Failed to wait condvar\n");
             exit(-1);
@@ -296,3 +372,5 @@ long long get_time_ms(void) {
     }
     return (((long long)tv.tv_sec)*1000)+(tv.tv_usec/1000);
 }
+
+#endif
