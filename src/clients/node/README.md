@@ -7,39 +7,47 @@ The TigerBeetle client for Node.js.
 
 ### Prerequisites
 
+Linux >= 5.6 is the only production environment we
+support. But for ease of development we support macOS and
+Windows unless otherwise noted.
+
 * NodeJS >= `14`
 
-> Your operating system should be Linux (kernel >= v5.6) or macOS.
-> Windows support is not yet available.
+> Windows support is not yet available for the Node client.
 
 ## Setup
+
+Run:
 
 ```console
 $ npm install tigerbeetle-node
 ```
 
-Create `test.js` and copy this into it:
+Now, create `test.js` and copy this into it:
 
 ```javascript
 const { createClient } = require("tigerbeetle-node");
 console.log("Import ok!");
 ```
 
-And run:
+Finally, build and run:
 
 ```console
 $ node run test.js
 ```
 
+Now that all prerequisites and depencies are correctly set
+up, let's dig into using TigerBeetle.
+
 If you run into issues, check out the distribution-specific install
 steps that are run in CI to test support:
 
-* [Alpine](./scripts/test_install_on_alpine.sh)
-* [Amazon Linux](./scripts/test_install_on_amazonlinux.sh)
-* [Debian](./scripts/test_install_on_debian.sh)
-* [Fedora](./scripts/test_install_on_fedora.sh)
-* [Ubuntu](./scripts/test_install_on_ubuntu.sh)
-* [RHEL](./scripts/test_install_on_rhelubi.sh)
+* [Alpine](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_alpine.sh)
+* [Amazon Linux](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_amazonlinux.sh)
+* [Debian](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_debian.sh)
+* [Fedora](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_fedora.sh)
+* [Ubuntu](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_ubuntu.sh)
+* [RHEL](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_rhelubi.sh)
 
 ### Sidenote: `BigInt`
 TigerBeetle uses 64-bit integers for many fields while JavaScript's
@@ -55,6 +63,13 @@ A client is created with a cluster ID and replica
 addresses for all replicas in the cluster. The cluster
 ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
+
+Clients are thread-safe. But for better
+performance, a single instance should be shared between
+multiple concurrent tasks.
+
+Multiple clients are useful when connecting to more than
+one TigerBeetle cluster.
 
 In this example the cluster ID is `0` and there are
 three replicas running on ports `3001`, `3002`, and
@@ -93,10 +108,6 @@ let account = {
 };
 
 let accountErrors = await client.createAccounts([account]);
-if (accountErrors.length) {
-  // Grab a human-readable message from the response
-  console.log(CreateAccountError[accountErrors[0].code]);
-}
 ```
 
 ### Account Flags
@@ -114,7 +125,7 @@ bitwise-or:
 * `AccountFlags.credits_must_not_exceed_credits`
 
 
-For example, to link `account0` and `account1`, where `account0`
+For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```javascript
@@ -137,9 +148,10 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
 
 ```javascript
-accountErrors = await client.createAccounts([account1, account2, account3]);
-
-// accountErrors = [{ index: 1, code: 1 }];
+let account2 = { /* ... account values ... */ };
+let account3 = { /* ... account values ... */ };
+let account4 = { /* ... account values ... */ };
+accountErrors = await client.createAccounts([account2, account3, account4]);
 for (const error of accountErrors) {
   switch (error.code) {
     case CreateAccountError.exists:
@@ -150,11 +162,6 @@ for (const error of accountErrors) {
   }
 }
 ```
-
-The example above shows that the account in index 1 failed
-with error 1. This error here means that `account1` and
-`account3` were created successfully. But `account2` was not
-created.
 
 To handle errors you can either 1) exactly match error codes returned
 from `client.createAccounts` with enum values in the
@@ -171,8 +178,6 @@ that account. So the order of accounts in the response is
 not necessarily the same as the order of IDs in the
 request. You can refer to the ID field in the response to
 distinguish accounts.
-
-In this example, account `137` exists while account `138` does not.
 
 ```javascript
 const accounts = await client.lookupAccounts([137n, 138n]);
@@ -358,8 +363,6 @@ transfer. So the order of transfers in the response is not necessarily
 the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
-In this example, transfer `1` exists while transfer `2` does not.
-
 ```javascript
 const transfers = await client.lookupTransfers([1n, 2n]);
 console.log(transfers);
@@ -445,15 +448,17 @@ const errors = await client.createTransfers(batch);
 
 ### On Linux and macOS
 
+In a POSIX shell run:
+
 ```console
-$ rm -rf tigerbeetle
 $ git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
 $ cd tigerbeetle
-$ git checkout $GIT_SHA # Optional
+$ git checkout $GIT_SHA
 $ ./scripts/install_zig.sh
 $ cd src/clients/node
 $ npm install --include dev
 $ npm pack
+$ [ "$TEST" = "true" ] && mvn test || echo "Skipping client unit tests"
 ```
 
 ### On Windows

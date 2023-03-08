@@ -38,5 +38,5 @@ mtime of each README changes only as needed.
 To format all Zig files:
 
 ```console
-$ find . -name "*.zig" -depth 2 | xargs -I {} zig fmt {}
+$ find . -maxdepth 2 -name "*.zig" | xargs -I {} ../../zig/zig fmt {}
 ```

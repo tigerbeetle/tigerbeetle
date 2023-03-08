@@ -35,7 +35,7 @@ public final class IdBatch extends Batch {
     /**
      * Adds a new id at the end of this batch.
      * <p>
-     * If successfully, moves the current {@link #setPosition position} to the newly created id.
+     * If successful, moves the current {@link #setPosition position} to the newly created id.
      *
      * @param id an array of 16 bytes representing the 128-bit value.
      *
@@ -50,7 +50,7 @@ public final class IdBatch extends Batch {
     /**
      * Adds a new id at the end of this batch.
      * <p>
-     * If successfully, moves the current {@link #setPosition position} to the newly created id.
+     * If successful, moves the current {@link #setPosition position} to the newly created id.
      *
      * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
      *        value.
@@ -62,6 +62,22 @@ public final class IdBatch extends Batch {
     public void add(final long leastSignificant, final long mostSignificant) {
         super.add();
         setId(leastSignificant, mostSignificant);
+    }
+
+    /**
+     * Adds a new id at the end of this batch.
+     * <p>
+     * If successful, moves the current {@link #setPosition position} to the newly created id.
+     *
+     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
+     *        value.
+     *
+     * @throws IllegalStateException if this batch is read-only.
+     * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
+     */
+    public void add(final long leastSignificant) {
+        super.add();
+        setId(leastSignificant, 0);
     }
 
     /**

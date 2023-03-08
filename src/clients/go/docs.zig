@@ -6,7 +6,8 @@ pub const GoDocs = Docs{
     .markdown_name = "go",
     .extension = "go",
 
-    .test_linux_docker_image = "golang:1.18",
+    .test_linux_docker_image = "golang:1.18-alpine",
+    .test_source_path = "",
 
     .name = "tigerbeetle-go",
     .description = 
@@ -22,6 +23,11 @@ pub const GoDocs = Docs{
     \\* Go >= 1.17
     ,
 
+    .project_file = "",
+    .project_file_name = "",
+
+    .test_file_name = "",
+
     .install_sample_file = 
     \\package main
     \\
@@ -32,6 +38,8 @@ pub const GoDocs = Docs{
     \\	fmt.Println("Import ok!")
     \\}
     ,
+
+    .install_prereqs = "",
 
     .install_commands = 
     \\go mod init tbtest
@@ -46,8 +54,9 @@ pub const GoDocs = Docs{
     .examples = 
     \\## Basic
     \\
-    \\See [./samples/basic](./samples/basic) for a Go project
-    \\showing many features of the client.
+    \\See
+    \\[here](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/go/samples/basic)
+    \\for a complete Go project showing many features of the client.
     \\
     \\### Sidenote: `uint128`
     \\
@@ -126,18 +135,25 @@ pub const GoDocs = Docs{
     \\account0 := tb_types.Account{ /* ... account values ... */ }
     \\account1 := tb_types.Account{ /* ... account values ... */ }
     \\account0.Flags = tb_types.AccountFlags{Linked: true}.ToUint16()
+    \\
     \\accountErrors, err := client.CreateAccounts([]tb_types.Account{account0, account1})
-    \\log.Println(accountErrors, err)
-    ,
-
-    .create_accounts_errors_example = 
-    \\res, err := client.CreateAccounts([]tb_types.Account{account1, account2, account3})
     \\if err != nil {
     \\	log.Printf("Error creating accounts: %s", err)
     \\	return
     \\}
+    ,
+
+    .create_accounts_errors_example = 
+    \\account2 := tb_types.Account{ /* ... account values ... */ }
+    \\account3 := tb_types.Account{ /* ... account values ... */ }
+    \\account4 := tb_types.Account{ /* ... account values ... */ }
     \\
-    \\for _, err := range res {
+    \\accountErrors, err = client.CreateAccounts([]tb_types.Account{account2, account3, account4})
+    \\if err != nil {
+    \\	log.Printf("Error creating accounts: %s", err)
+    \\	return
+    \\}
+    \\for _, err := range accountErrors {
     \\	log.Printf("Error creating account %d: %s", err.Index, err.Result)
     \\	return
     \\}
@@ -190,7 +206,7 @@ pub const GoDocs = Docs{
     .create_transfers_errors_documentation = "",
 
     .no_batch_example = 
-    \\for (let i = 0; i < len(transfers); i++) {
+    \\for i := 0; i < len(transfers); i++ {
     \\	errors := client.CreateTransfers(transfers[i]);
     \\	// error handling omitted
     \\}
@@ -272,7 +288,7 @@ pub const GoDocs = Docs{
     \\
     \\// A chain of 2 transfers (the first transfer fails the chain):
     \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... */ Flags: linkedFlag })
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ Flags: linkedFlag })
+    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ })
     \\
     \\// A chain of 2 transfers (successful):
     \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ Flags: linkedFlag })
@@ -284,28 +300,32 @@ pub const GoDocs = Docs{
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
-    .developer_setup_bash_commands = 
-    \\rm -rf tigerbeetle
+    .developer_setup_sh_commands = 
     \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
     \\cd tigerbeetle
-    \\git checkout $GIT_SHA # Optional
+    \\git checkout $GIT_SHA
     \\./scripts/install_zig.sh
     \\./zig/zig build go_client -Drelease-safe
     \\cd src/clients/go
-    \\./zgo.sh test
+    \\[ "$TEST" = "true" ] && ./zgo.sh test || echo "Skipping client unit tests"
+    ,
+
+    .current_commit_pre_install_commands = "",
+    .current_commit_post_install_commands = 
+    \\printf 'module tbtest\nreplace github.com/tigerbeetledb/tigerbeetle-go => '$(pwd)'/tigerbeetle/src/clients/go\ngo 1.18' > go.mod
+    \\go mod tidy
     ,
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
-    .developer_setup_windows_commands = 
-    \\rd -r tigerbeetle
+    .developer_setup_pwsh_commands = 
     \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
     \\cd tigerbeetle
-    \\git checkout $GIT_SHA # Optional
+    \\git checkout $GIT_SHA
     \\./scripts/install_zig.bat
     \\./zig/zig build go_client -Drelease-safe
     \\cd tigerbeetle/src/clients/go
-    \\./zgo.bat test
+    \\[ "$TEST" = "true" ] && ./zgo.bat test || echo "Skipping client unit tests"
     ,
 
     .test_main_prefix = 
@@ -328,6 +348,4 @@ pub const GoDocs = Docs{
     ,
 
     .test_main_suffix = "}",
-
-    .code_format_commands = "gofmt -w -s *.go",
 };

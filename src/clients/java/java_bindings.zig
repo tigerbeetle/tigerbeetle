@@ -570,7 +570,7 @@ fn emit_u128_batch_accessors(
     try buffer.writer().print(
         \\    /**
         \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value is to be retrieved.
-        \\     * @return a {{@code long}} representing the the first 8 bytes of the 128-bit value if
+        \\     * @return a {{@code long}} representing the first 8 bytes of the 128-bit value if
         \\     *         {{@link UInt128#LeastSignificant}} is informed, or the last 8 bytes if
         \\     *         {{@link UInt128#MostSignificant}}.
         \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
@@ -647,8 +647,8 @@ fn emit_u128_batch_accessors(
     // Set long:
     try buffer.writer().print(
         \\    /**
-        \\     * @param leastSignificant a {{@code long}} representing the the first 8 bytes of the 128-bit value.
-        \\     * @param mostSignificant a {{@code long}} representing the the last 8 bytes of the 128-bit value.
+        \\     * @param leastSignificant a {{@code long}} representing the first 8 bytes of the 128-bit value.
+        \\     * @param mostSignificant a {{@code long}} representing the last 8 bytes of the 128-bit value.
         \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
         \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
         \\
@@ -673,6 +673,42 @@ fn emit_u128_batch_accessors(
     try buffer.writer().print(
         \\    {[visibility]s}void set{[property]s}(final long leastSignificant, final long mostSignificant) {{
         \\        putUInt128(at(Struct.{[property]s}), leastSignificant, mostSignificant);
+        \\    }}
+        \\
+        \\
+    , .{
+        .visibility = if (is_private or is_read_only) @as([]const u8, "") else "public ",
+        .property = to_case(field.name, .pascal),
+    });
+
+    // Set long without most significant bits
+    try buffer.writer().print(
+        \\    /**
+        \\     * @param leastSignificant a {{@code long}} representing the first 8 bytes of the 128-bit value.
+        \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
+        \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
+        \\
+    , .{});
+
+    if (mapping.docs_link) |docs_link| {
+        try buffer.writer().print(
+            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
+            \\     */
+            \\
+        , .{
+            .docs_link = docs_link,
+            .field_name = field.name,
+        });
+    } else {
+        try buffer.writer().print(
+            \\     */
+            \\
+        , .{});
+    }
+
+    try buffer.writer().print(
+        \\    {[visibility]s}void set{[property]s}(final long leastSignificant) {{
+        \\        putUInt128(at(Struct.{[property]s}), leastSignificant, 0);
         \\    }}
         \\
         \\
