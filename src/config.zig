@@ -83,7 +83,6 @@ const ConfigCluster = struct {
     clients_max: usize,
     pipeline_prepare_queue_max: usize = 8,
     view_change_headers_suffix_max: usize = 8,
-    view_change_headers_hook_max: usize = 1,
     quorum_replication_max: u8 = 3,
     journal_slot_count: usize = 1024,
     message_size_max: usize = 1 * 1024 * 1024,
