@@ -205,6 +205,8 @@ pub const PlotId = union(enum) {
     storage_next_tick_count,
     cache_hits: [:0]const u8,
     cache_misses: [:0]const u8,
+    filter_block_hits: [:0]const u8,
+    filter_block_misses: [:0]const u8,
 
     // NOTE: Returns a comptime constant because `tracy_emit_plot` prefers unique string pointers.
     fn name(plot_id: PlotId) [:0]const u8 {
@@ -217,7 +219,11 @@ pub const PlotId = union(enum) {
             .io_completed_count,
             .storage_next_tick_count,
             => @tagName(plot_id),
-            .cache_hits, .cache_misses => |name| name,
+            .cache_hits,
+            .cache_misses,
+            .filter_block_hits,
+            .filter_block_misses,
+            => |name| name,
         };
     }
 };

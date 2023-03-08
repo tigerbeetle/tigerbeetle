@@ -150,6 +150,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         open_callback: ?fn (*Tree) void,
 
         tracer_slot: ?tracer.SpanStart = null,
+        filter_block_hits: u64 = 0,
+        filter_block_misses: u64 = 0,
 
         pub const Options = struct {
             /// The number of objects to cache in the set-associative value cache.
@@ -407,6 +409,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
                 const filter_bytes = Table.filter_block_filter_const(filter_block);
                 if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
+                    context.tree.filter_block_hits += 1;
+                    tracer.plot(
+                        .{ .filter_block_hits = tree_name ++ "_filter_block_hits" },
+                        @intToFloat(f64, context.tree.filter_block_hits),
+                    );
+
                     context.tree.grid.read_block(
                         read_data_block_callback,
                         completion,
@@ -415,6 +423,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         .data,
                     );
                 } else {
+                    context.tree.filter_block_misses += 1;
+                    tracer.plot(
+                        .{ .filter_block_misses = tree_name ++ "_filter_block_misses" },
+                        @intToFloat(f64, context.tree.filter_block_misses),
+                    );
+
                     // The key is not present in this table, check the next level.
                     context.advance_to_next_level();
                 }
