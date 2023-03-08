@@ -126,15 +126,15 @@ const Command = struct {
     }
 
     pub fn start(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Start) !void {
-        var tracer_allocator = if (constants.tracer_backend == .tracy)
-            tracer.TracerAllocator.init(arena.allocator())
+        var traced_allocator = if (constants.tracer_backend == .tracy)
+            tracer.TracedAllocator.init(arena.allocator())
         else
             arena;
 
         // TODO Panic if the data file's size is larger that args.storage_size_limit.
         // (Here or in Replica.open()?).
 
-        const allocator = tracer_allocator.allocator();
+        const allocator = traced_allocator.allocator();
 
         try tracer.init(allocator);
         defer tracer.deinit(allocator);

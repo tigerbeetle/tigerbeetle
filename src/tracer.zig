@@ -351,21 +351,21 @@ const TracerTracy = struct {
     }
 
     // Copied from zig/src/tracy.zig
-    pub const TracerAllocator = struct {
+    pub const TracedAllocator = struct {
         parent_allocator: std.mem.Allocator,
 
-        pub fn init(parent_allocator: std.mem.Allocator) TracerAllocator {
+        pub fn init(parent_allocator: std.mem.Allocator) TracedAllocator {
             return .{
                 .parent_allocator = parent_allocator,
             };
         }
 
-        pub fn allocator(self: *TracerAllocator) std.mem.Allocator {
+        pub fn allocator(self: *TracedAllocator) std.mem.Allocator {
             return std.mem.Allocator.init(self, allocFn, resizeFn, freeFn);
         }
 
         fn allocFn(
-            self: *TracerAllocator,
+            self: *TracedAllocator,
             len: usize,
             ptr_align: u29,
             len_align: u29,
@@ -381,7 +381,7 @@ const TracerTracy = struct {
         }
 
         fn resizeFn(
-            self: *TracerAllocator,
+            self: *TracedAllocator,
             buf: []u8,
             buf_align: u29,
             new_len: usize,
@@ -406,7 +406,7 @@ const TracerTracy = struct {
             return null;
         }
 
-        fn freeFn(self: *TracerAllocator, buf: []u8, buf_align: u29, ret_addr: usize) void {
+        fn freeFn(self: *TracedAllocator, buf: []u8, buf_align: u29, ret_addr: usize) void {
             self.parent_allocator.rawFree(buf, buf_align, ret_addr);
             // this condition is to handle free being called on an empty slice that was never even allocated
             // example case: `std.process.getSelfExeSharedLibPaths` can return `&[_][:0]u8{}`
