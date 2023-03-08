@@ -1491,12 +1491,19 @@ pub fn ReplicaType(
                 const primary_repair_min =
                     self.view_headers.array.get(self.view_headers.array.len - 1).op;
                 var op = self.commit_min + 1;
-                while (op < primary_repair_min) : (op += 1) {
-                    const slot = self.journal.slot_with_op(op) orelse break;
-                    if (self.journal.dirty.bit(slot)) break;
-                }
 
-                if (op < primary_repair_min) {
+                // Use "op ≤ primary_repair_min" instead of "=" to force the logs to intersect.
+                // This will cause a state transfer in the case where:
+                // - the repairing replica has a pristine log up to its op_checkpoint_trigger=X
+                // - the SV headers begin at op X+1
+                // But in exchange it avoids a special-case to update the commit_max and verify
+                // X's header.
+                const repairable = while (op <= primary_repair_min) : (op += 1) {
+                    const slot = self.journal.slot_with_op(op) orelse break false;
+                    if (self.journal.dirty.bit(slot)) break false;
+                } else true;
+
+                if (!repairable) {
                     // This replica is too far behind, i.e. the new `self.op` is too far ahead of
                     // the last checkpoint. If we wrap now, we overwrite un-checkpointed transfers
                     // in the WAL, precluding recovery.
@@ -1516,7 +1523,20 @@ pub fn ReplicaType(
                         break;
                     }
                 }
-            } else unreachable;
+            } else {
+                log.err("{}: on_start_view: missing checkpoint trigger " ++
+                    "(view={} op_checkpoint_trigger={} op_head={})", .{
+                    self.replica,
+                    self.view,
+                    self.op_checkpoint_trigger(),
+                    self.op,
+                });
+
+                for (self.view_headers.array.constSlice()) |*header| {
+                    log.err("{}: on_start_view: header={}", .{ self.replica, header.* });
+                }
+                unreachable;
+            }
 
             for (self.view_headers.array.constSlice()) |*header| {
                 if (header.op <= self.op_checkpoint_trigger()) {
