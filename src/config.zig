@@ -125,8 +125,6 @@ pub const ConfigBase = enum {
 
 pub const TracerBackend = enum {
     none,
-    // Writes to a file (./tracer.json) which can be uploaded to https://ui.perfetto.dev/
-    perfetto,
     // Sends data to https://github.com/wolfpld/tracy.
     tracy,
 };
