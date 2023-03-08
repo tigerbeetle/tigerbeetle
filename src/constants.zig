@@ -200,29 +200,27 @@ comptime {
 /// - We must provide enough headers to cover all uncommitted headers so that the new
 ///   primary (if we are in a view change) can decide whether to discard uncommitted headers
 ///   that cannot be repaired because they are gaps. See DVCQuorum for more detail.
-/// - We must provide at least one "hook" header — a header from the previous WAL wrap, to help
-///   lagging replicas catch up.
-pub const view_change_headers_max = view_change_headers_suffix_max + view_change_headers_hook_max;
+/// - +2: We must provide the header corresponding to each checkpoint-trigger in the intact
+///   suffix of our journal.
+///   - These help a lagging replica catch up when its `op < commit_max`.
+///   - There are at most two of these in the journal.
+///     (There are 2 immediately after we checkpoint, until we prepare enough to overwrite one).
+/// - +1: We must provide the header corresponding to the oldest op the primary guarantees is
+///   repairable.
+pub const view_change_headers_max = view_change_headers_suffix_max + 2 + 1;
 
 /// Maximum number of headers from the current WAL wrap to include in an SV message.
 pub const view_change_headers_suffix_max = config.cluster.view_change_headers_suffix_max;
-/// Maximum number of headers from the previous WAL wrap to include in an SV message.
-pub const view_change_headers_hook_max = config.cluster.view_change_headers_hook_max;
 
 comptime {
     assert(view_change_headers_suffix_max > 0);
     assert(view_change_headers_suffix_max >= pipeline_prepare_queue_max);
 
-    assert(view_change_headers_hook_max > 0);
-    // Only 1 batch is guaranteed to overlap between checkpoints.
-    assert(view_change_headers_hook_max <= lsm_batch_multiple);
-
     assert(view_change_headers_max > 0);
-    assert(view_change_headers_max >= pipeline_prepare_queue_max + 1);
+    assert(view_change_headers_max >= pipeline_prepare_queue_max + 3);
     assert(view_change_headers_max <= journal_slot_count);
     assert(view_change_headers_max <= @divFloor(message_body_size_max, @sizeOf(vsr.Header)));
     assert(view_change_headers_max > view_change_headers_suffix_max);
-    assert(view_change_headers_max > view_change_headers_hook_max);
 }
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
