@@ -244,7 +244,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
 
             // First, remove the table from level A without appending changes to the manifest log.
-            const removed = manifest_level_a.remove_table(manifest.node_pool, table);
+            const removed = manifest_level_a.remove_table_visible(manifest.node_pool, table);
             assert(table.equal(removed));
 
             // Then, insert the table into the level B and append these changes to the manifest log.
