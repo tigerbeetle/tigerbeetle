@@ -80,6 +80,12 @@ pub const Event = union(enum) {
     tree_compaction_merge: struct {
         level_b: u8,
     },
+    grid_read_iop: struct {
+        index: usize,
+    },
+    grid_write_iop: struct {
+        index: usize,
+    },
 
     pub fn format(
         event: Event,
@@ -98,7 +104,7 @@ pub const Event = union(enum) {
             .state_machine_compact,
             .tree_compaction_beat,
             => try writer.writeAll(@tagName(event)),
-            .commit => |commit| try writer.print("commit({})", .{commit.op}),
+            .commit => |args| try writer.print("commit({})", .{args.op}),
             .tree_compaction_tick => |args| {
                 if (args.level_b == 0)
                     try writer.print(
@@ -135,6 +141,8 @@ pub const Event = union(enum) {
                         },
                     );
             },
+            .grid_read_iop => |args| try writer.print("grid_read_iop({})", .{args.index}),
+            .grid_write_iop => |args| try writer.print("grid_write_iop({})", .{args.index}),
         }
     }
 };
@@ -149,13 +157,39 @@ pub const EventGroup = union(enum) {
     tree_compaction: struct {
         compaction_name: [:0]const u8,
     },
+    grid_read_iop: struct {
+        index: usize,
+    },
+    grid_write_iop: struct {
+        index: usize,
+    },
 
+    // NOTE: Returns a comptime constant because `tracy_fiber_enter` requires unique string pointers.
     fn name(event_group: EventGroup) [:0]const u8 {
         return switch (event_group) {
-            .main => "main",
-            .tracer => "tracer",
+            .main, .tracer => @tagName(event_group),
             .tree => |args| args.tree_name,
             .tree_compaction => |args| args.compaction_name,
+            .grid_read_iop => |args| {
+                // TODO Use inline switch in zig 0.10
+                comptime var index: usize = 0;
+                inline while (index < constants.grid_iops_read_max) : (index += 1) {
+                    if (args.index == index) {
+                        return std.fmt.comptimePrint("grid_read_iop({})", .{index});
+                    }
+                }
+                unreachable;
+            },
+            .grid_write_iop => |args| {
+                // TODO Use inline switch in zig 0.10
+                comptime var index: usize = 0;
+                inline while (index < constants.grid_iops_write_max) : (index += 1) {
+                    if (args.index == index) {
+                        return std.fmt.comptimePrint("grid_write_iop({})", .{index});
+                    }
+                }
+                unreachable;
+            },
         };
     }
 };
