@@ -194,6 +194,21 @@ pub const EventGroup = union(enum) {
     }
 };
 
+pub const PlotId = enum {
+    grid_write_queue_count,
+    grid_read_queue_count,
+    grid_read_pending_queue_count,
+    grid_read_recovery_queue_count,
+    io_unqueued_count,
+    io_completed_count,
+    storage_next_tick_count,
+
+    // NOTE: Returns a comptime constant because `tracy_emit_plot` prefers unique string pointers.
+    fn name(plot_id: PlotId) [:0]const u8 {
+        return @tagName(plot_id);
+    }
+};
+
 usingnamespace switch (constants.tracer_backend) {
     .none => TracerNone,
     .perfetto => TracerPerfetto,
@@ -223,6 +238,10 @@ pub const TracerNone = struct {
         _ = slot;
         _ = event_group;
         _ = event;
+    }
+    pub fn plot(plot_id: PlotId, value: f64) void {
+        _ = plot_id;
+        _ = value;
     }
     pub fn flush() void {}
 };
@@ -325,6 +344,11 @@ pub const TracerPerfetto = struct {
             .event = span_start.event,
         });
         slot.* = null;
+    }
+
+    pub fn plot(plot_id: PlotId, value: f64) void {
+        _ = plot_id;
+        _ = value;
     }
 
     pub fn flush() void {
@@ -470,6 +494,12 @@ const TracerTracy = struct {
         c.___tracy_fiber_enter(event_group.name());
         c.___tracy_emit_zone_end(tracy_context);
         slot.* = null;
+    }
+
+    pub fn plot(plot_id: PlotId, value: f64) void {
+        // TODO We almost always want staircase plots, but can't configure this from zig yet.
+        //      See https://github.com/wolfpld/tracy/issues/537.
+        c.___tracy_emit_plot(plot_id.name(), value);
     }
 
     pub fn flush() void {}

@@ -16,10 +16,10 @@ pub const IO = struct {
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: FIFO(Completion) = .{},
+    unqueued: FIFO(Completion) = .{ .plot_id = .io_unqueued_count },
 
     /// Completions that are ready to have their callbacks run.
-    completed: FIFO(Completion) = .{},
+    completed: FIFO(Completion) = .{ .plot_id = .io_completed_count },
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
@@ -107,7 +107,7 @@ pub const IO = struct {
         // Loop over a copy to avoid an infinite loop of `enqueue()` re-adding to `self.unqueued`.
         {
             var copy = self.unqueued;
-            self.unqueued = .{};
+            self.unqueued = .{ .plot_id = copy.plot_id };
             while (copy.pop()) |completion| self.enqueue(completion);
         }
 

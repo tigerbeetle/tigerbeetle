@@ -1,6 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const tracer = @import("./tracer.zig");
+
 /// An intrusive first in/first out linked list.
 /// The element type T must have a field called "next" of type ?*T
 pub fn FIFO(comptime T: type) type {
@@ -9,6 +11,9 @@ pub fn FIFO(comptime T: type) type {
 
         in: ?*T = null,
         out: ?*T = null,
+        count: u64 = 0,
+        // This should only be null if you're sure we'll never want to monitor `count`.
+        plot_id: ?tracer.PlotId,
 
         pub fn push(self: *Self, elem: *T) void {
             assert(elem.next == null);
@@ -20,6 +25,8 @@ pub fn FIFO(comptime T: type) type {
                 self.in = elem;
                 self.out = elem;
             }
+            self.count += 1;
+            self.plot();
         }
 
         pub fn pop(self: *Self) ?*T {
@@ -27,6 +34,8 @@ pub fn FIFO(comptime T: type) type {
             self.out = ret.next;
             ret.next = null;
             if (self.in == ret) self.in = null;
+            self.count -= 1;
+            self.plot();
             return ret;
         }
 
@@ -52,9 +61,17 @@ pub fn FIFO(comptime T: type) type {
                     if (to_remove == self.in) self.in = elem;
                     elem.next = to_remove.next;
                     to_remove.next = null;
+                    self.count -= 1;
+                    self.plot();
                     break;
                 }
             } else unreachable;
+        }
+
+        fn plot(self: Self) void {
+            if (self.plot_id) |plot_id| {
+                tracer.plot(plot_id, @intToFloat(f64, self.count));
+            }
         }
     };
 }
