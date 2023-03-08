@@ -120,13 +120,13 @@ pub fn ManifestLevelType(
         /// Remove the given table from the level assuming it's visible to `lsm.snapshot_latest`.
         /// Returns the same, unmodified table passed in to differentiate itself from 
         /// remove_table_invisible and guard against using the wrong function.
-        pub fn remove_table(
+        pub fn remove_table_visible(
             level: *Self,
             node_pool: *NodePool,
             table: *const TableInfo,
         ) *const TableInfo {
             assert(table.visible(lsm.snapshot_latest));
-            level.remove(node_pool, table);
+            level.remove_table(node_pool, table);
             level.table_count_visible -= 1;
             return table;
         }
@@ -140,10 +140,10 @@ pub fn ManifestLevelType(
             table: *const TableInfo,
         ) void {
             assert(table.invisible(snapshots));
-            level.remove(node_pool, table);
+            level.remove_table(node_pool, table);
         }
 
-        fn remove(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
+        fn remove_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
             assert(level.keys.len() == level.tables.len());
             assert(compare_keys(table.key_min, table.key_max) != .gt);
 
