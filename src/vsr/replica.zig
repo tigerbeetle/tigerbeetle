@@ -460,17 +460,12 @@ pub fn ReplicaType(
                     // Typically if there is an op in the WAL higher than the durable headers'
                     // head op, we must have crashed with a durable SV, not a durable DVC.
                     //
-                    // There is one exception:
-                    // 1. New-primary sends (and persists) a DVC: 5,6,7.
-                    // 2. New-primary receives DVC quorum. Suffix is 6,7,8.
-                    //    It already has 6,7. op=8 is new to us, but part of our prior log_view.
-                    // 3. New-primary repairs 8 (writes it to the WAL).
-                    // 4. New-primary crashes/recovers — op=8 was part of the same log_view, so the
-                    //    journal doesn't truncate it, and the primary recovers with a new head.
+                    // However, we could have joined a view and finished some repair before ever
+                    // updating our view_durable.
+                    //
                     // To avoid special-casing this all over, we pretend this higher op doesn't
                     // exist. This is safe because the prior view-change didn't complete.
-                    assert(self.log_view == self.view or
-                        self.replica == self.primary_index(self.view));
+                    maybe(self.log_view == self.view);
 
                     if (self.log_view == self.view) op_head = header.op;
                 }
