@@ -125,28 +125,10 @@ pub fn ManifestLevelType(
             node_pool: *NodePool,
             table: *const TableInfo,
         ) *const TableInfo {
-            assert(level.keys.len() == level.tables.len());
-            assert(compare_keys(table.key_min, table.key_max) != .gt);
-
-            // Use `key_min` for both ends of the iterator; we are looking for a single table.
-            const cursor_start = level.iterator_start(table.key_min, table.key_min, .ascending).?;
-            var absolute_index = level.keys.absolute_index_for_cursor(cursor_start);
-
-            var it = level.tables.iterator_from_index(absolute_index, .ascending);
-            while (it.next()) |level_table| : (absolute_index += 1) {
-                if (level_table.equal(table)) {
-                    assert(table.visible(lsm.snapshot_latest));
-                    level.table_count_visible -= 1;
-
-                    level.keys.remove_elements(node_pool, absolute_index, 1);
-                    level.tables.remove_elements(node_pool, absolute_index, 1);
-
-                    assert(level.keys.len() == level.tables.len());
-                    return table;
-                }
-            }
-
-            @panic("remove_table() called with a table that was never inserted");
+            assert(table.visible(lsm.snapshot_latest));
+            level.remove(node_pool, table);
+            level.table_count_visible -= 1;
+            return table;
         }
 
         /// Remove the given table from the ManifestLevel, asserting that it is not visible
@@ -157,8 +139,12 @@ pub fn ManifestLevelType(
             snapshots: []const u64,
             table: *const TableInfo,
         ) void {
+            assert(table.invisible(snapshots));
+            level.remove(node_pool, table);
+        }
+
+        fn remove(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
             assert(level.keys.len() == level.tables.len());
-            // The batch may contain a single table, with a single key, i.e. key_min == key_max:
             assert(compare_keys(table.key_min, table.key_max) != .gt);
 
             // Use `key_min` for both ends of the iterator; we are looking for a single table.
@@ -167,18 +153,15 @@ pub fn ManifestLevelType(
 
             var it = level.tables.iterator_from_index(absolute_index, .ascending);
             while (it.next()) |level_table| : (absolute_index += 1) {
-                if (level_table.invisible(snapshots)) {
-                    assert(level_table.equal(table));
-
+                if (level_table.equal(table)) {
                     level.keys.remove_elements(node_pool, absolute_index, 1);
                     level.tables.remove_elements(node_pool, absolute_index, 1);
-                    break;
+                    assert(level.keys.len() == level.tables.len());
+                    return;
                 }
-            } else {
-                unreachable;
             }
 
-            assert(level.keys.len() == level.tables.len());
+            @panic("remove() called with a table that was never inserted");
         }
 
         pub const Visibility = enum {
