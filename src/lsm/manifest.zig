@@ -247,7 +247,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const removed = manifest_level_a.remove_table_visible(manifest.node_pool, table);
             assert(table.equal(removed));
 
-            // Then, insert the table into the level B and append these changes to the manifest log.
+            // Then, insert the table into level B and append these changes to the manifest log.
             // To move a table w.r.t manifest log, a "remove" change should NOT be appended for
             // the previous level A; When replaying the log from open(), inserts are processed in
             // LIFO order and duplicates are ignored. This means the table will only be replayed in
