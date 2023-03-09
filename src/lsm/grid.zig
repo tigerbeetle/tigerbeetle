@@ -195,6 +195,9 @@ pub fn GridType(comptime Storage: type) type {
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
             for (&grid.read_iop_blocks) |block| allocator.free(block);
 
+            for (grid.read_iop_tracer_slots) |slot| assert(slot == null);
+            for (grid.write_iop_tracer_slots) |slot| assert(slot == null);
+
             grid.cache.deinit(allocator);
 
             for (grid.cache_blocks) |block| allocator.free(block);
