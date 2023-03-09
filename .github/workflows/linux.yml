@@ -35,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
       - run: zig/zig build c_sample -Drelease-safe
 
   # I don't like this - having everything manually listed out here, but need to think of a better
