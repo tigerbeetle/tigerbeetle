@@ -12,8 +12,8 @@ pub const IO = struct {
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
-    timeouts: FIFO(Completion) = .{},
-    completed: FIFO(Completion) = .{},
+    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
+    completed: FIFO(Completion) = .{ .name = "io_completed" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -115,7 +115,7 @@ pub const IO = struct {
         // Must read all `completions` before invoking the callbacks
         // as the callbacks could potentially submit more completions.
         var completed = self.completed;
-        self.completed = .{};
+        self.completed.reset();
         while (completed.pop()) |completion| {
             (completion.callback)(Completion.Context{
                 .io = self,

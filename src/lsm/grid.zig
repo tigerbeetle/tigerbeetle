@@ -13,6 +13,7 @@ const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeC
 const stdx = @import("../stdx.zig");
 
 const log = std.log.scoped(.grid);
+const tracer = @import("../tracer.zig");
 
 /// A block's type is implicitly determined by how its address is stored (e.g. in the index block).
 /// BlockType is an additional check that a block has the expected type on read.
@@ -56,9 +57,8 @@ pub fn GridType(comptime Storage: type) type {
     return struct {
         const Grid = @This();
 
-        // TODO put more thought into how low/high these limits should be.
-        pub const read_iops_max = 16;
-        pub const write_iops_max = 16;
+        pub const read_iops_max = constants.grid_iops_read_max;
+        pub const write_iops_max = constants.grid_iops_write_max;
 
         pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
@@ -89,7 +89,7 @@ pub fn GridType(comptime Storage: type) type {
             block_type: BlockType,
 
             pending: ReadPending = .{},
-            resolves: FIFO(ReadPending) = .{},
+            resolves: FIFO(ReadPending) = .{ .name = null },
 
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
@@ -135,6 +135,7 @@ pub fn GridType(comptime Storage: type) type {
                 .ways = set_associative_cache_ways,
                 .value_alignment = @alignOf(u64),
             },
+            "grid",
         );
 
         superblock: *SuperBlock,
@@ -144,17 +145,19 @@ pub fn GridType(comptime Storage: type) type {
         cache: Cache,
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
-        write_queue: FIFO(Write) = .{},
+        write_iop_tracer_slots: [write_iops_max]?tracer.SpanStart = .{null} ** write_iops_max,
+        write_queue: FIFO(Write) = .{ .name = "grid_write" },
 
         // Each read_iops has a corresponding block.
         read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
-        read_queue: FIFO(Read) = .{},
+        read_iop_tracer_slots: [read_iops_max]?tracer.SpanStart = .{null} ** read_iops_max,
+        read_queue: FIFO(Read) = .{ .name = "grid_read" },
 
         // List if Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
-        read_pending_queue: FIFO(ReadPending) = .{},
+        read_pending_queue: FIFO(ReadPending) = .{ .name = "grid_read_pending" },
         // TODO interrogate this list and do recovery in Replica.tick().
-        read_recovery_queue: FIFO(Read) = .{},
+        read_recovery_queue: FIFO(Read) = .{ .name = "grid_read_recovery" },
         // True if there's a read thats resolving callbacks. If so, the read cache must not be invalidated.
         read_resolving: bool = false,
 
@@ -191,6 +194,9 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
             for (&grid.read_iop_blocks) |block| allocator.free(block);
+
+            for (grid.read_iop_tracer_slots) |slot| assert(slot == null);
+            for (grid.write_iop_tracer_slots) |slot| assert(slot == null);
 
             grid.cache.deinit(allocator);
 
@@ -320,6 +326,13 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn write_block_with(grid: *Grid, iop: *WriteIOP, write: *Write) void {
+            const write_iop_index = grid.write_iops.index(iop);
+            tracer.start(
+                &grid.write_iop_tracer_slots[write_iop_index],
+                .{ .grid_write_iop = .{ .index = write_iop_index } },
+                @src(),
+            );
+
             iop.* = .{
                 .grid = grid,
                 .completion = undefined,
@@ -351,6 +364,12 @@ pub fn GridType(comptime Storage: type) type {
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
             std.mem.set(u8, completed_write.block.*, 0);
+
+            const write_iop_index = grid.write_iops.index(iop);
+            tracer.end(
+                &grid.write_iop_tracer_slots[write_iop_index],
+                .{ .grid_write_iop = .{ .index = write_iop_index } },
+            );
 
             // Start a queued write if possible *before* calling the completed
             // write's callback. This ensures that if the callback calls
@@ -445,6 +464,13 @@ pub fn GridType(comptime Storage: type) type {
             // We can only update the cache if the Grid is not resolving callbacks with a cache block.
             assert(!grid.read_resolving);
 
+            const read_iop_index = grid.read_iops.index(iop);
+            tracer.start(
+                &grid.read_iop_tracer_slots[read_iop_index],
+                .{ .grid_read_iop = .{ .index = read_iop_index } },
+                @src(),
+            );
+
             iop.* = .{
                 .completion = undefined,
                 .read = read,
@@ -471,6 +497,12 @@ pub fn GridType(comptime Storage: type) type {
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, iop_block, cache_block);
             std.mem.set(u8, iop_block.*, 0);
+
+            const read_iop_index = grid.read_iops.index(iop);
+            tracer.end(
+                &grid.read_iop_tracer_slots[read_iop_index],
+                .{ .grid_read_iop = .{ .index = read_iop_index } },
+            );
 
             // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {

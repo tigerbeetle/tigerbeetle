@@ -11,6 +11,8 @@ const constants = @import("../constants.zig");
 const div_ceil = @import("../stdx.zig").div_ceil;
 const verify = constants.verify;
 
+const tracer = @import("../tracer.zig");
+
 pub const Layout = struct {
     ways: u64 = 16,
     tag_bits: u64 = 8,
@@ -28,6 +30,7 @@ pub fn SetAssociativeCache(
     comptime hash: fn (Key) callconv(.Inline) u64,
     comptime equal: fn (Key, Key) callconv(.Inline) bool,
     comptime layout: Layout,
+    comptime name: [:0]const u8,
 ) type {
     assert(math.isPowerOfTwo(@sizeOf(Key)));
     assert(math.isPowerOfTwo(@sizeOf(Value)));
@@ -88,6 +91,9 @@ pub fn SetAssociativeCache(
         const Clock = meta.Int(.unsigned, clock_hand_bits);
 
         sets: u64,
+
+        hits: u64 = 0,
+        misses: u64 = 0,
 
         /// A short, partial hash of a Key, corresponding to a Value.
         /// Because the tag is small, collisions are possible:
@@ -188,21 +194,19 @@ pub fn SetAssociativeCache(
             mem.set(u64, self.clocks.words, 0);
         }
 
-        /// Returns whether an entry with the given key is cached,
-        /// without modifying the entry's counter.
-        pub fn exists(self: *Self, key: Key) bool {
-            const set = self.associate(key);
-            return self.search(set, key) != null;
-        }
-
         pub fn get_index(self: *Self, key: Key) ?usize {
             const set = self.associate(key);
-            const way = self.search(set, key) orelse return null;
-
-            const count = self.counts.get(set.offset + way);
-            self.counts.set(set.offset + way, count +| 1);
-
-            return set.offset + way;
+            if (self.search(set, key)) |way| {
+                self.hits += 1;
+                tracer.plot(.{ .cache_hits = .{ .cache_name = name } }, @intToFloat(f64, self.hits));
+                const count = self.counts.get(set.offset + way);
+                self.counts.set(set.offset + way, count +| 1);
+                return set.offset + way;
+            } else {
+                self.misses += 1;
+                tracer.plot(.{ .cache_misses = .{ .cache_name = name } }, @intToFloat(f64, self.misses));
+                return null;
+            }
         }
 
         pub fn get(self: *Self, key: Key) ?*align(value_alignment) Value {
@@ -393,6 +397,7 @@ fn set_associative_cache_test(
         context.hash,
         context.equal,
         layout,
+        "test",
     );
 
     return struct {
@@ -778,6 +783,7 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
         context.hash,
         context.equal,
         layout,
+        "test",
     );
 
     const reference = struct {

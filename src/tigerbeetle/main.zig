@@ -42,6 +42,9 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
+    try tracer.init(allocator);
+    defer tracer.deinit(allocator);
+
     var parse_args = try cli.parse_args(allocator);
     defer parse_args.deinit(allocator);
 
@@ -126,18 +129,15 @@ const Command = struct {
     }
 
     pub fn start(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Start) !void {
-        var tracer_allocator = if (constants.tracer_backend == .tracy)
-            tracer.TracerAllocator.init(arena.allocator())
+        var traced_allocator = if (constants.tracer_backend == .tracy)
+            tracer.TracedAllocator.init(arena.allocator())
         else
             arena;
 
         // TODO Panic if the data file's size is larger that args.storage_size_limit.
         // (Here or in Replica.open()?).
 
-        const allocator = tracer_allocator.allocator();
-
-        try tracer.init(allocator);
-        defer tracer.deinit(allocator);
+        const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
         try command.init(allocator, args.path, false);

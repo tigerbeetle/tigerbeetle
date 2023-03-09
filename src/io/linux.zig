@@ -6,6 +6,7 @@ const IO_Uring = linux.IO_Uring;
 const io_uring_cqe = linux.io_uring_cqe;
 const io_uring_sqe = linux.io_uring_sqe;
 const log = std.log.scoped(.io);
+const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
@@ -16,10 +17,13 @@ pub const IO = struct {
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: FIFO(Completion) = .{},
+    unqueued: FIFO(Completion) = .{ .name = "io_unqueued" },
 
     /// Completions that are ready to have their callbacks run.
-    completed: FIFO(Completion) = .{},
+    completed: FIFO(Completion) = .{ .name = "io_completed" },
+
+    flush_tracer_slot: ?tracer.SpanStart = null,
+    callback_tracer_slot: ?tracer.SpanStart = null,
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
@@ -34,6 +38,9 @@ pub const IO = struct {
     }
 
     pub fn deinit(self: *IO) void {
+        assert(self.flush_tracer_slot == null);
+        assert(self.callback_tracer_slot == null);
+
         self.ring.deinit();
     }
 
@@ -96,6 +103,12 @@ pub const IO = struct {
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
+        tracer.start(
+            &self.flush_tracer_slot,
+            .io_flush,
+            @src(),
+        );
+
         // Flush any queued SQEs and reuse the same syscall to wait for completions if required:
         try self.flush_submissions(wait_nr, timeouts, etime);
         // We can now just peek for any CQEs without waiting and without another syscall:
@@ -107,7 +120,7 @@ pub const IO = struct {
         // Loop over a copy to avoid an infinite loop of `enqueue()` re-adding to `self.unqueued`.
         {
             var copy = self.unqueued;
-            self.unqueued = .{};
+            self.unqueued.reset();
             while (copy.pop()) |completion| self.enqueue(completion);
         }
 
@@ -116,11 +129,16 @@ pub const IO = struct {
         // and extend the duration of the loop, but this is fine as it 1) executes completions
         // that become ready without going through another syscall from flush_submissions() and
         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
-        while (self.completed.pop()) |completion| completion.complete();
+        while (self.completed.pop()) |completion| completion.complete(&self.callback_tracer_slot);
 
         // At this point, unqueued could have completions either by 1) those who didn't get an SQE
         // during the popping of unqueued or 2) completion.complete() which start new IO. These
         // unqueued completions will get priority to acquiring SQEs on the next flush().
+
+        tracer.end(
+            &self.flush_tracer_slot,
+            .io_flush,
+        );
     }
 
     fn flush_completions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
@@ -244,7 +262,7 @@ pub const IO = struct {
             sqe.user_data = @ptrToInt(completion);
         }
 
-        fn complete(completion: *Completion) void {
+        fn complete(completion: *Completion, callback_tracer_slot: *?tracer.SpanStart) void {
             switch (completion.operation) {
                 .accept => {
                     const result = blk: {
@@ -274,7 +292,7 @@ pub const IO = struct {
                             break :blk @intCast(os.socket_t, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .close => {
                     const result = blk: {
@@ -292,7 +310,7 @@ pub const IO = struct {
                             assert(completion.result == 0);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .connect => {
                     const result = blk: {
@@ -326,7 +344,7 @@ pub const IO = struct {
                             assert(completion.result == 0);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .read => {
                     const result = blk: {
@@ -356,7 +374,7 @@ pub const IO = struct {
                             break :blk @intCast(usize, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .recv => {
                     const result = blk: {
@@ -384,7 +402,7 @@ pub const IO = struct {
                             break :blk @intCast(usize, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .send => {
                     const result = blk: {
@@ -419,7 +437,7 @@ pub const IO = struct {
                             break :blk @intCast(usize, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .timeout => {
                     assert(completion.result < 0);
@@ -432,7 +450,7 @@ pub const IO = struct {
                         .TIME => {}, // A success.
                         else => |errno| os.unexpectedErrno(errno),
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .write => {
                     const result = blk: {
@@ -463,11 +481,28 @@ pub const IO = struct {
                             break :blk @intCast(usize, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
             }
         }
     };
+
+    fn call_callback(
+        completion: *Completion,
+        result: *const anyopaque,
+        callback_tracer_slot: *?tracer.SpanStart,
+    ) void {
+        tracer.start(
+            callback_tracer_slot,
+            .io_callback,
+            @src(),
+        );
+        completion.callback(completion.context, completion, result);
+        tracer.end(
+            callback_tracer_slot,
+            .io_callback,
+        );
+    }
 
     /// This union encodes the set of operations supported as well as their arguments.
     const Operation = union(enum) {
