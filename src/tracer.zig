@@ -70,6 +70,8 @@ pub const Event = union(enum) {
     grid_write_iop: struct {
         index: usize,
     },
+    io_flush,
+    io_callback,
 
     pub fn format(
         event: Event,
@@ -85,6 +87,8 @@ pub const Event = union(enum) {
             .state_machine_prefetch,
             .state_machine_commit,
             .state_machine_compact,
+            .io_flush,
+            .io_callback,
             => try writer.writeAll(@tagName(event)),
             .tree_compaction_beat => |args| try writer.print(
                 "tree_compaction_beat({s})",
@@ -144,6 +148,7 @@ pub const Event = union(enum) {
             .grid_write_iop => |args| .{ .grid_write_iop = .{
                 .index = args.index,
             } },
+            .io_flush, .io_callback => .io,
         };
     }
 };
@@ -166,6 +171,7 @@ const Fiber = union(enum) {
     grid_write_iop: struct {
         index: usize,
     },
+    io,
 
     pub fn format(
         fiber: Fiber,
@@ -176,7 +182,7 @@ const Fiber = union(enum) {
         _ = fmt;
         _ = options;
         return switch (fiber) {
-            .main => try writer.writeAll("main"),
+            .main, .io => try writer.writeAll(@tagName(fiber)),
             .tree => |args| try writer.print(
                 "tree({s})",
                 .{
