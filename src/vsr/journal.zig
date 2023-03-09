@@ -1237,7 +1237,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
             if (journal.recover_torn_prepare(&cases)) |torn_slot| {
-                assert(cases[torn_slot.index].decision(replica.sole_replica()) == .vsr);
+                assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
                 cases[torn_slot.index] = &case_cut;
 
                 log.warn("{}: recover_slots: torn prepare in slot={}", .{
@@ -1331,7 +1331,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // if there are no faults other than the torn op itself.
             for (cases) |case, index| {
                 // Do not use `faulty.bit()` because the decisions have not been processed yet.
-                if (case.decision(replica.sole_replica()) == .vsr) {
+                if (case.decision(replica.solo()) == .vsr) {
                     if (checkpoint_index == torn_slot.index) {
                         assert(op_max >= replica.op_checkpoint());
                         assert(torn_op > replica.op_checkpoint());
@@ -1345,7 +1345,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // The prepare is torn.
             assert(!journal.prepare_inhabited[torn_slot.index]);
             assert(!torn_prepare_untrusted.valid_checksum());
-            assert(cases[torn_slot.index].decision(replica.sole_replica()) == .vsr);
+            assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
             return torn_slot;
         }
 
@@ -1359,7 +1359,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             const header = header_ok(cluster, slot, &journal.headers_redundant[slot.index]);
             const prepare = header_ok(cluster, slot, &journal.headers[slot.index]);
-            const decision = case.decision(replica.sole_replica());
+            const decision = case.decision(replica.solo());
             switch (decision) {
                 .eql => {
                     assert(header.?.command == .prepare);
@@ -1386,7 +1386,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     journal.headers[slot.index] = prepare.?.*;
                     journal.faulty.clear(slot);
                     assert(journal.dirty.bit(slot));
-                    if (replica.sole_replica()) {
+                    if (replica.solo()) {
                         // @D, @E, @F, @G, @J
                     } else {
                         assert(prepare.?.command == .prepare);
@@ -1456,7 +1456,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         journal.headers_redundant[dirty_slot].checksum);
                 } else {
                     // Case @D for R=1.
-                    assert(replica.sole_replica());
+                    assert(replica.solo());
                 }
 
                 const dirty_slot_sector = @divFloor(dirty_slot, headers_per_sector);
@@ -1512,7 +1512,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // Abort if all slots are faulty, since something is very wrong.
             if (journal.faulty.count == slot_count) @panic("WAL is completely corrupt");
-            if (journal.faulty.count > 0 and replica.sole_replica()) @panic("WAL is corrupt");
+            if (journal.faulty.count > 0 and replica.solo()) @panic("WAL is corrupt");
 
             if (journal.headers[0].op == 0 and journal.headers[0].command == .prepare) {
                 assert(journal.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
@@ -1627,7 +1627,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.size <= message.buffer.len);
             assert(journal.has(message.header));
             assert(!journal.writing(message.header.op, message.header.checksum));
-            if (replica.sole_replica()) assert(journal.writes.executing() == 0);
+            if (replica.solo()) assert(journal.writes.executing() == 0);
 
             // The underlying header memory must be owned by the buffer and not by journal.headers:
             // Otherwise, concurrent writes may modify the memory of the pointer while we write.
@@ -1649,7 +1649,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.has_dirty(message.header));
 
             const write = journal.writes.acquire() orelse {
-                assert(!replica.sole_replica());
+                assert(!replica.solo());
 
                 journal.write_prepare_debug(message.header, "waiting for IOP");
                 callback(replica, null, trigger);
@@ -2199,8 +2199,8 @@ const Case = struct {
         return true;
     }
 
-    fn decision(case: *const Case, sole_replica: bool) RecoveryDecision {
-        if (sole_replica) {
+    fn decision(case: *const Case, solo: bool) RecoveryDecision {
+        if (solo) {
             return case.decision_single;
         } else {
             return case.decision_multiple;
