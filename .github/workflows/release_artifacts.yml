@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         debug: ["", "--debug"]
-        target: [aarch64-linux-gnu, x86_64-linux-gnu, aarch64-macos-gnu, x86_64-macos-gnu]
+        target: [aarch64-linux, x86_64-linux, aarch64-macos, x86_64-macos, x86_64-windows]
     runs-on: ubuntu-latest
 
     steps:
@@ -32,7 +32,8 @@ jobs:
       run: |
         export GIT_TAG=`git tag --points-at ${{ github.sha }}` && \
         export RELEASE_ID=`curl -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' "https://api.github.com/repos/tigerbeetledb/tigerbeetle/releases/tags/${GIT_TAG}" | jq '.id'` && \
-        zip -9 tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip tigerbeetle && \
+        export BINARY="$([ ${{ matrix.target }} = x86_64-windows ] && echo tigerbeetle.exe || echo tigerbeetle)" && \
+        zip -9 tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip $BINARY && \
         curl --fail \
           -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
           -H "Content-Type: application/zip" \
