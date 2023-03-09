@@ -5566,15 +5566,6 @@ pub fn ReplicaType(
                 }
             }
 
-            const do_view_change_commit_min_max = DVCQuorum.commit_min_max(
-                self.do_view_change_from_all_replicas,
-                .{
-                    .replica = self.replica,
-                    .commit_min = self.commit_min,
-                },
-            );
-            assert(do_view_change_commit_min_max >= self.commit_min);
-
             // The `prepare_timestamp` prevents a primary's own clock from running backwards.
             // Therefore, `prepare_timestamp`:
             // 1. is advanced if behind the cluster, but never reset if ahead of the cluster, i.e.
@@ -5587,28 +5578,29 @@ pub fn ReplicaType(
 
             var headers_canonical = DVCQuorum.headers_canonical(self.do_view_change_from_all_replicas);
             const header_head = headers_canonical.next().?;
-            assert(header_head.op >= do_view_change_commit_min_max);
             assert(header_head.op >= self.op_checkpoint());
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
             assert(header_head.op <= self.op_checkpoint_trigger());
+            for (dvcs_all.constSlice()) |dvc| assert(header_head.op >= dvc.header.commit);
 
-            self.set_op_and_commit_max(
-                header_head.op,
-                std.math.max(
-                    self.commit_max,
-                    std.math.max(
-                        // `set_op_and_commit_max()` expects the highest commit_max that we know of.
-                        // But DVCs include replica's `commit_min`, not `commit_max`.
-                        do_view_change_commit_min_max,
-                        // An op cannot be uncommitted if it is definitely outside the pipeline.
-                        // Use `do_view_change_op_head` instead of `replica.op` since the former is
-                        // about to become the new `replica.op`.
-                        header_head.op -| constants.pipeline_prepare_queue_max,
-                    ),
-                ),
-                "on_do_view_change",
+            // When computing the new commit_max, we cannot simply rely on the fact that our own
+            // commit_min is attached to our own DVC in the quorum.
+            // Consider the case:
+            // 1. Start committing op=N…M.
+            // 2. Send `do_view_change` to self.
+            // 3. Finish committing op=N…M.
+            // 4. Remaining `do_view_change` messages arrive, completing the quorum.
+            // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
+            // Don't let the commit backtrack.
+            const commit_max = std.math.max(
+                self.commit_min,
+                DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
             );
+            assert(self.commit_min >=
+                self.do_view_change_from_all_replicas[self.replica].?.header.commit);
+
+            self.set_op_and_commit_max(header_head.op, commit_max, "on_do_view_change");
             // "`replica.op` exists" invariant may be broken briefly between set_op_and_commit_max()
             // and replace_header().
             self.replace_header(&header_head);
@@ -6469,43 +6461,26 @@ const DVCQuorum = struct {
         return log_view_max_.?;
     }
 
-    /// Returns the highest `commit_min` from any DVC (this is not a `commit_max`).
-    fn commit_min_max(dvc_quorum: QuorumMessages, local: struct {
-        replica: u64,
-        commit_min: u64,
-    }) u64 {
-        assert(dvc_quorum[local.replica].?.header.commit <= local.commit_min);
-
-        var commit_min_max_: ?u64 = null;
+    fn commit_max(dvc_quorum: QuorumMessages) u64 {
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
-        for (dvcs.constSlice()) |message| {
-            if (commit_min_max_ == null or commit_min_max_.? < message.header.commit) {
-                commit_min_max_ = message.header.commit;
-            }
+        assert(dvcs.len > 0);
+
+        var commit_max_: u64 = 0;
+        for (dvcs.constSlice()) |dvc| {
+            const dvc_headers = message_body_as_headers_chain_disjoint(dvc);
+            // The DVC is connected to the committed ops.
+            const dvc_commit_max_connected = dvc_headers[dvc_headers.len - 1].op -| 1;
+            // An op cannot be uncommitted if it is definitely outside the pipeline.
+            // Use `do_view_change_op_head` instead of `replica.op` since the former is
+            // about to become the new `replica.op`.
+            const dvc_commit_max_pipeline =
+                dvc.header.op -| constants.pipeline_prepare_queue_max;
+
+            commit_max_ = std.math.max(commit_max_, dvc_commit_max_connected);
+            commit_max_ = std.math.max(commit_max_, dvc_commit_max_pipeline);
+            commit_max_ = std.math.max(commit_max_, dvc.header.commit);
         }
-
-        // Consider the case:
-        // 1. Start committing op=N…M.
-        // 2. Send `do_view_change` to self.
-        // 3. Finish committing op=N…M.
-        // 4. Remaining `do_view_change` messages arrive, completing the quorum.
-        // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
-        // Don't let the commit backtrack.
-        if (commit_min_max_.? < local.commit_min) {
-            const dvc_old = dvc_quorum[local.replica].?;
-            assert(dvc_old.header.commit < local.commit_min);
-            assert(dvc_old.header.commit <= commit_min_max_.?);
-
-            log.debug("{}: on_do_view_change: bump commit_min commit={}..{}", .{
-                local.replica,
-                commit_min_max_.?,
-                local.commit_min,
-            });
-            commit_min_max_ = local.commit_min;
-        }
-
-        assert(commit_min_max_.? >= local.commit_min);
-        return commit_min_max_.?;
+        return commit_max_;
     }
 
     /// Returns the highest `timestamp` from any replica.
