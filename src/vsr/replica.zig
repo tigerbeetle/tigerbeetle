@@ -217,7 +217,8 @@ pub fn ReplicaType(
         },
 
         /// When "log_view < view": The DVC headers.
-        /// When "log_view = view": The SV headers.
+        /// When "log_view = view": The SV headers. (Just as a cache,
+        //  since they are regenerated for every request_start_view).
         ///
         /// Invariants:
         /// - view_change_headers.len     > 0
@@ -449,9 +450,8 @@ pub fn ReplicaType(
                 }
             }
 
-            var op_head = for (vsr_headers.slice) |*header| {
-                if (header.op <= self.op_checkpoint_trigger()) break header.op;
-            } else unreachable; // TODO State transfer, this won't be unreachable.
+            var op_head = vsr_headers.slice[0].op;
+            assert(op_head <= self.op_checkpoint_trigger());
 
             for (self.journal.headers) |*header| {
                 assert(header.op <= self.op_checkpoint_trigger());
@@ -3079,7 +3079,6 @@ pub fn ReplicaType(
                     const op_min = if (range) |r| r.op_max + 1 else range_min;
                     assert(op_min <= op);
                     assert(op_min <= self.op_repair_min());
-                    assert(op_min <= self.op_checkpoint_trigger_previous());
 
                     // The SV includes headers corresponding to:
                     // - the triggers for preceding checkpoints (as many as we have and can help
@@ -3839,16 +3838,6 @@ pub fn ReplicaType(
         /// See `op_checkpoint_next` for more detail.
         fn op_checkpoint_trigger(self: *const Self) u64 {
             return self.op_checkpoint_next() + constants.lsm_batch_multiple;
-        }
-
-        /// Returns the op that triggered the current (i.e. most recent) checkpoint.
-        fn op_checkpoint_trigger_previous(self: *const Self) u64 {
-            if (self.op_checkpoint() == 0) {
-                // 0 isn't really a checkpoint trigger, but its as close as we have.
-                return 0;
-            } else {
-                return self.op_checkpoint() + constants.lsm_batch_multiple;
-            }
         }
 
         /// Returns the oldest op that the replica must/(is permitted to) repair.
