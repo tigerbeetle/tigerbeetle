@@ -337,7 +337,7 @@ pub fn CompactionType(
             switch (compaction.strategy) {
                 .merge => {
                     compaction.callback = callback;
-                    
+
                     tracer.start(
                         &compaction.tracer_slot,
                         .{ .tree_compaction_tick = .{
