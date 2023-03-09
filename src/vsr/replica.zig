@@ -1134,14 +1134,7 @@ pub fn ReplicaType(
 
             // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
             // const threshold = self.quorum_replication;
-            // TODO: When Block recover & state transfer are implemented, this can be removed.
-            const threshold =
-                if (prepare.message.header.op == self.op_checkpoint_trigger() or
-                (self.op_checkpoint() != 0 and
-                prepare.message.header.op == self.op_checkpoint() + constants.lsm_batch_multiple + 1))
-                self.replica_count
-            else
-                self.quorum_replication;
+            const threshold = self.quorum_replication;
 
             if (!prepare.ok_from_all_replicas.isSet(message.header.replica)) {
                 self.primary_abdicating = false;
@@ -1950,9 +1943,7 @@ pub fn ReplicaType(
             }
 
             if (waiting_len == 0) {
-                // TODO: This assert will be valid when the state-transfer is implemented and the
-                // threshold=replica_count hack is removed from on_prepare_ok.
-                // assert(self.quorum_replication == self.replica_count);
+                assert(self.quorum_replication == self.replica_count);
                 assert(!prepare.ok_from_all_replicas.isSet(self.replica));
                 assert(prepare.ok_from_all_replicas.count() == self.replica_count - 1);
                 assert(prepare.message.header.op <= self.op);
