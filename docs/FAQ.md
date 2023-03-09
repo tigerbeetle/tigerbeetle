@@ -80,7 +80,7 @@ would store large objects in an object store, or streaming data in a
 queue, you really do want separation of concerns for your financial
 data and a mission critical database to store it.
 
-## What is two-phase commit?
+## What is a two-phase transfer?
 
 This is a reference to the [two-phase commit protocol for distributed
 transactions](https://en.wikipedia.org/wiki/Two-phase_commit_protocol).
