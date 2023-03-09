@@ -303,14 +303,19 @@ pub const direct_io = config.process.direct_io;
 pub const direct_io_required = config.process.direct_io_required;
 
 // TODO Add in the Grid's IOPS and the upper-bound that the Superblock will use.
-pub const iops_read_max = journal_iops_read_max;
-pub const iops_write_max = journal_iops_write_max;
+pub const iops_read_max = journal_iops_read_max + grid_iops_read_max;
+pub const iops_write_max = journal_iops_write_max + grid_iops_write_max;
 
 /// The maximum number of concurrent WAL read I/O operations to allow at once.
 pub const journal_iops_read_max = config.process.journal_iops_read_max;
 /// The maximum number of concurrent WAL write I/O operations to allow at once.
 /// Ideally this is at least as high as pipeline_prepare_queue_max, but it is safe to be lower.
 pub const journal_iops_write_max = config.process.journal_iops_write_max;
+
+/// The maximum number of concurrent grid read I/O operations to allow at once.
+pub const grid_iops_read_max = config.process.grid_iops_read_max;
+/// The maximum number of concurrent grid write I/O operations to allow at once.
+pub const grid_iops_write_max = config.process.grid_iops_write_max;
 
 /// The number of redundant copies of the superblock in the superblock storage zone.
 /// This must be either { 4, 6, 8 }, i.e. an even number, for more efficient flexible quorums.

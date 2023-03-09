@@ -3,69 +3,49 @@
 //! In order to create event spans, you need somewhere to store the `SpanStart`.
 //!
 //!     var slot: ?SpanStart = null;
-//!     tracer.start(&slot, group, event, @src());
+//!     tracer.start(&slot, event, @src());
 //!     ... do stuff ...
-//!     tracer.end(&slot, group, event);
+//!     tracer.end(&slot, event);
 //!
 //! Each slot can be used as many times as you like,
 //! but you must alternate calls to start and end,
 //! and you must end every event.
 //!
 //!     // good
-//!     tracer.start(&slot, group_a, event_a, @src());
-//!     tracer.end(&slot, group_a, event_a);
-//!     tracer.start(&slot, group_b, event_b, @src());
-//!     tracer.end(&slot, group_b, event_b);
+//!     tracer.start(&slot, event_a, @src());
+//!     tracer.end(&slot, event_a);
+//!     tracer.start(&slot, event_b, @src());
+//!     tracer.end(&slot, event_b);
 //!
 //!     // bad
-//!     tracer.start(&slot, group_a, event_a, @src());
-//!     tracer.start(&slot, group_b, event_b, @src());
-//!     tracer.end(&slot, group_b, event_b);
-//!     tracer.end(&slot, group_a, event_a);
+//!     tracer.start(&slot, event_a, @src());
+//!     tracer.start(&slot, event_b, @src());
+//!     tracer.end(&slot, event_b);
+//!     tracer.end(&slot, event_a);
 //!
 //!     // bad
-//!     tracer.end(&slot, group_a, event_a);
-//!     tracer.start(&slot, group_a, event_a, @src());
+//!     tracer.end(&slot, event_a);
+//!     tracer.start(&slot, event_a, @src());
 //!
 //!     // bad
-//!     tracer.start(&slot, group_a, event_a, @src());
+//!     tracer.start(&slot, event_a, @src());
 //!     std.os.exit(0);
 //!
 //! Before freeing a slot, you should `assert(slot == null)`
 //! to ensure that you didn't forget to end an event.
-//!
-//! Each `Event` has an `EventGroup`.
-//! Within each group, event spans should form a tree.
-//!
-//!     // good
-//!     tracer.start(&a, group, ...);
-//!     tracer.start(&b, group, ...);
-//!     tracer.end(&b, group, ...);
-//!     tracer.end(&a, group, ...);
-//!
-//!     // bad
-//!     tracer.start(&a, group, ...);
-//!     tracer.start(&b, group, ...);
-//!     tracer.end(&a, group, ...);
-//!     tracer.end(&b, group, ...);
-//!
-//! The tracer itself will not object to non-tree spans, but
-//! some constants.tracer_backends will either refuse to open the trace or will render it weirdly.
-//!
-//! If you're having trouble making your spans form a tree, feel free to just add new groups.
 
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const panic = std.debug.panic;
+const AutoHashMap = std.AutoHashMap;
 const log = std.log.scoped(.tracer);
 
 const constants = @import("./constants.zig");
 const Time = @import("./time.zig").Time;
 const stdx = @import("stdx.zig");
 
-/// All strings in Event must be comptime constants to ensure that they live until after `tracer.deinit` is called.
 pub const Event = union(enum) {
-    tracer_flush,
     commit: struct {
         op: u64,
     },
@@ -73,13 +53,25 @@ pub const Event = union(enum) {
     state_machine_prefetch,
     state_machine_commit,
     state_machine_compact,
-    tree_compaction_beat,
+    tree_compaction_beat: struct {
+        tree_name: []const u8,
+    },
     tree_compaction_tick: struct {
+        tree_name: []const u8,
         level_b: u8,
     },
     tree_compaction_merge: struct {
+        tree_name: []const u8,
         level_b: u8,
     },
+    grid_read_iop: struct {
+        index: usize,
+    },
+    grid_write_iop: struct {
+        index: usize,
+    },
+    io_flush,
+    io_callback,
 
     pub fn format(
         event: Event,
@@ -89,80 +81,186 @@ pub const Event = union(enum) {
     ) !void {
         _ = fmt;
         _ = options;
-
         switch (event) {
-            .tracer_flush,
+            .commit => |args| try writer.print("commit({})", .{args.op}),
             .checkpoint,
             .state_machine_prefetch,
             .state_machine_commit,
             .state_machine_compact,
-            .tree_compaction_beat,
+            .io_flush,
+            .io_callback,
             => try writer.writeAll(@tagName(event)),
-            .commit => |commit| try writer.print("commit({})", .{commit.op}),
+            .tree_compaction_beat => |args| try writer.print(
+                "tree_compaction_beat({s})",
+                .{
+                    args.tree_name,
+                },
+            ),
             .tree_compaction_tick => |args| {
-                if (args.level_b == 0)
-                    try writer.print(
-                        "tree_compaction_tick({s}->{})",
-                        .{
-                            "immutable",
-                            args.level_b,
-                        },
-                    )
-                else
-                    try writer.print(
-                        "tree_compaction_tick({}->{})",
-                        .{
-                            args.level_b - 1,
-                            args.level_b,
-                        },
-                    );
+                const level_a = LevelA{ .level_b = args.level_b };
+                try writer.print(
+                    "tree_compaction_tick({s}, {}->{})",
+                    .{
+                        args.tree_name,
+                        level_a,
+                        args.level_b,
+                    },
+                );
             },
             .tree_compaction_merge => |args| {
-                if (args.level_b == 0)
-                    try writer.print(
-                        "tree_compaction_merge({s}->{})",
-                        .{
-                            "immutable",
-                            args.level_b,
-                        },
-                    )
-                else
-                    try writer.print(
-                        "tree_compaction_merge({}->{})",
-                        .{
-                            args.level_b - 1,
-                            args.level_b,
-                        },
-                    );
+                const level_a = LevelA{ .level_b = args.level_b };
+                try writer.print(
+                    "tree_compaction_merge({s}, {s}->{})",
+                    .{
+                        args.tree_name,
+                        level_a,
+                        args.level_b,
+                    },
+                );
             },
+            .grid_read_iop => |args| try writer.print("grid_read_iop({})", .{args.index}),
+            .grid_write_iop => |args| try writer.print("grid_write_iop({})", .{args.index}),
         }
+    }
+
+    fn fiber(event: Event) Fiber {
+        return switch (event) {
+            .commit,
+            .checkpoint,
+            .state_machine_prefetch,
+            .state_machine_commit,
+            .state_machine_compact,
+            => .main,
+            .tree_compaction_beat => |args| .{ .tree = .{
+                .tree_name = args.tree_name,
+            } },
+            .tree_compaction_tick => |args| .{ .tree_compaction = .{
+                .tree_name = args.tree_name,
+                .level_b = args.level_b,
+            } },
+            .tree_compaction_merge => |args| .{ .tree_compaction = .{
+                .tree_name = args.tree_name,
+                .level_b = args.level_b,
+            } },
+            .grid_read_iop => |args| .{ .grid_read_iop = .{
+                .index = args.index,
+            } },
+            .grid_write_iop => |args| .{ .grid_write_iop = .{
+                .index = args.index,
+            } },
+            .io_flush, .io_callback => .io,
+        };
     }
 };
 
-/// All strings in EventGroup must be comptime constants to ensure that they live until after `tracer.deinit` is called.
-pub const EventGroup = union(enum) {
+/// Tracy requires all spans within a single thread/fiber to be nested.
+/// Since we don't have threads or fibers to structure our spans,
+/// we hardcode a structure that nests events where possible.
+const Fiber = union(enum) {
     main,
-    tracer,
     tree: struct {
-        tree_name: [:0]const u8,
+        tree_name: []const u8,
     },
     tree_compaction: struct {
-        compaction_name: [:0]const u8,
+        tree_name: []const u8,
+        level_b: u8,
+    },
+    grid_read_iop: struct {
+        index: usize,
+    },
+    grid_write_iop: struct {
+        index: usize,
+    },
+    io,
+
+    pub fn format(
+        fiber: Fiber,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        return switch (fiber) {
+            .main, .io => try writer.writeAll(@tagName(fiber)),
+            .tree => |args| try writer.print(
+                "tree({s})",
+                .{
+                    args.tree_name,
+                },
+            ),
+            .tree_compaction => |args| {
+                const level_a = LevelA{ .level_b = args.level_b };
+                try writer.print(
+                    "tree_compaction({s}, {}->{})",
+                    .{
+                        args.tree_name,
+                        level_a,
+                        args.level_b,
+                    },
+                );
+            },
+            .grid_read_iop => |args| try writer.print("grid_read_iop({})", .{args.index}),
+            .grid_write_iop => |args| try writer.print("grid_write_iop({})", .{args.index}),
+        };
+    }
+};
+
+const LevelA = struct {
+    level_b: u8,
+
+    pub fn format(
+        level_a: LevelA,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        if (level_a.level_b == 0)
+            try writer.writeAll("immutable")
+        else
+            try writer.print("{}", .{level_a.level_b - 1});
+    }
+};
+
+pub const PlotId = union(enum) {
+    queue_count: struct {
+        queue_name: []const u8,
+    },
+    cache_hits: struct {
+        cache_name: []const u8,
+    },
+    cache_misses: struct {
+        cache_name: []const u8,
+    },
+    filter_block_hits: struct {
+        tree_name: []const u8,
+    },
+    filter_block_misses: struct {
+        tree_name: []const u8,
     },
 
-    fn name(event_group: EventGroup) [:0]const u8 {
-        return switch (event_group) {
-            .main => "main",
-            .tracer => "tracer",
-            .tree => |args| args.tree_name,
-            .tree_compaction => |args| args.compaction_name,
+    pub fn format(
+        plot_id: PlotId,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        return switch (plot_id) {
+            .queue_count => |args| try writer.print("queue_count({s})", .{args.queue_name}),
+            .cache_hits => |args| try writer.print("cache_hits({s})", .{args.cache_name}),
+            .cache_misses => |args| try writer.print("cache_misses({s})", .{args.cache_name}),
+            .filter_block_hits => |args| try writer.print("filter_block_hits({s})", .{args.tree_name}),
+            .filter_block_misses => |args| try writer.print("filter_block_misses({s})", .{args.tree_name}),
         };
     }
 };
 
 usingnamespace switch (constants.tracer_backend) {
     .none => TracerNone,
-    .perfetto => TracerPerfetto,
     .tracy => TracerTracy,
 };
 
@@ -176,205 +274,20 @@ pub const TracerNone = struct {
     }
     pub fn start(
         slot: *?SpanStart,
-        event_group: EventGroup,
         event: Event,
         src: std.builtin.SourceLocation,
     ) void {
         _ = src;
         _ = slot;
-        _ = event_group;
         _ = event;
     }
-    pub fn end(slot: *?SpanStart, event_group: EventGroup, event: Event) void {
+    pub fn end(slot: *?SpanStart, event: Event) void {
         _ = slot;
-        _ = event_group;
         _ = event;
     }
-    pub fn flush() void {}
-};
-
-pub const TracerPerfetto = struct {
-    var is_initialized = false;
-    var timer = Time{};
-    var span_id_next: u64 = 0;
-    var spans: std.ArrayList(Span) = undefined;
-    var flush_slot: ?SpanStart = null;
-    var log_file: std.fs.File = undefined;
-
-    const span_count_max = 1 << 20;
-    const log_path = "./tracer.json";
-
-    const SpanId = u64;
-
-    pub const SpanStart = struct {
-        id: SpanId,
-        start_time_ns: u64,
-        group: EventGroup,
-        event: Event,
-    };
-
-    const Span = struct {
-        id: SpanId,
-        start_time_ns: u64,
-        end_time_ns: u64,
-        group: EventGroup,
-        event: Event,
-    };
-
-    pub fn init(allocator: Allocator) !void {
-        assert(!is_initialized);
-
-        spans = try std.ArrayList(Span).initCapacity(allocator, span_count_max);
-        errdefer spans.deinit();
-
-        log_file = try std.fs.cwd().createFile(log_path, .{ .truncate = true });
-        errdefer log_file.close();
-
-        try log_file.writeAll(
-            \\{"traceEvents":[
-            \\
-        );
-
-        is_initialized = true;
-    }
-
-    pub fn deinit(allocator: Allocator) void {
-        _ = allocator;
-
-        assert(is_initialized);
-
-        flush();
-        log_file.close();
-        assert(flush_slot == null);
-        spans.deinit();
-        is_initialized = false;
-    }
-
-    pub fn start(
-        slot: *?SpanStart,
-        event_group: EventGroup,
-        event: Event,
-        src: std.builtin.SourceLocation,
-    ) void {
-        _ = src;
-        assert(is_initialized);
-
-        // The event must not have already been started.
-        assert(slot.* == null);
-
-        slot.* = .{
-            .id = span_id_next,
-            .start_time_ns = timer.monotonic(),
-            .group = event_group,
-            .event = event,
-        };
-        span_id_next += 1;
-    }
-
-    pub fn end(slot: *?SpanStart, event_group: EventGroup, event: Event) void {
-        assert(is_initialized);
-
-        // The event must have already been started.
-        const span_start = &slot.*.?;
-        assert(std.meta.eql(span_start.group, event_group));
-        assert(std.meta.eql(span_start.event, event));
-
-        // Make sure we have room in spans.
-        if (spans.items.len >= span_count_max) flush();
-        assert(spans.items.len < span_count_max);
-
-        spans.appendAssumeCapacity(.{
-            .id = span_start.id,
-            .start_time_ns = span_start.start_time_ns,
-            .end_time_ns = timer.monotonic(),
-            .group = span_start.group,
-            .event = span_start.event,
-        });
-        slot.* = null;
-    }
-
-    pub fn flush() void {
-        assert(is_initialized);
-
-        if (spans.items.len == 0) return;
-
-        start(&flush_slot, .tracer, .tracer_flush, @src());
-        flush_or_err() catch |err| {
-            log.err("Could not flush tracer log, discarding instead: {}", .{err});
-        };
-        spans.shrinkRetainingCapacity(0);
-        end(&flush_slot, .tracer, .tracer_flush);
-    }
-
-    fn flush_or_err() !void {
-        for (spans.items) |span| {
-            // Perfetto requires this json format:
-            // https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
-            const NameJson = struct {
-                event: Event,
-
-                pub fn jsonStringify(
-                    name_json: @This(),
-                    options: std.json.StringifyOptions,
-                    writer: anytype,
-                ) @TypeOf(writer).Error!void {
-                    _ = options;
-                    try writer.writeAll("\"");
-                    try writer.print("{}", .{name_json.event});
-                    try writer.writeAll("\"");
-                }
-            };
-            const SpanJson = struct {
-                name: NameJson,
-                cat: []const u8 = "default",
-                ph: []const u8 = "X",
-                ts: f64,
-                dur: f64,
-                pid: u64 = 0,
-                tid: u64,
-            };
-            const MetaJson = struct {
-                name: []const u8,
-                ph: []const u8 = "M",
-                pid: u64 = 0,
-                tid: u64,
-                args: struct {
-                    name: []const u8,
-                },
-            };
-
-            const tid_64 = std.hash_map.hashString(span.group.name());
-            const tid = @truncate(u32, tid_64) ^ @truncate(u32, tid_64 >> 32);
-
-            var buffered_writer = std.io.bufferedWriter(log_file.writer());
-            const writer = buffered_writer.writer();
-
-            try std.json.stringify(
-                SpanJson{
-                    .name = .{ .event = span.event },
-                    .ts = @intToFloat(f64, span.start_time_ns) / 1000,
-                    .dur = @intToFloat(f64, span.end_time_ns - span.start_time_ns) / 1000,
-                    .tid = tid,
-                },
-                .{},
-                writer,
-            );
-            try writer.writeAll(",\n");
-
-            // TODO Only emit metadata once per group name.
-            try std.json.stringify(
-                MetaJson{
-                    .name = "thread_name",
-                    .tid = tid,
-                    .args = .{ .name = span.group.name() },
-                },
-                .{},
-                writer,
-            );
-            try writer.writeAll(",\n");
-
-            try buffered_writer.flush();
-        }
+    pub fn plot(plot_id: PlotId, value: f64) void {
+        _ = plot_id;
+        _ = value;
     }
 };
 
@@ -390,30 +303,95 @@ const TracerTracy = struct {
 
     pub const SpanStart = c.___tracy_c_zone_context;
 
-    var print_buffer: [1024]u8 = undefined;
-
-    pub fn init(allocator: Allocator) !void {
-        _ = allocator;
+    pub fn Interns(comptime Key: type) type {
+        return std.HashMap(
+            Key,
+            [:0]const u8,
+            struct {
+                pub fn hash(self: @This(), key: Key) u64 {
+                    _ = self;
+                    var hasher = std.hash.Wyhash.init(0);
+                    std.hash.autoHashStrat(
+                        &hasher,
+                        key,
+                        // We can get away with shallow as long as all string fields are comptime constants.
+                        .Shallow,
+                    );
+                    return hasher.final();
+                }
+                pub fn eql(self: @This(), a: Key, b: Key) bool {
+                    _ = self;
+                    return std.meta.eql(a, b);
+                }
+            },
+            std.hash_map.default_max_load_percentage,
+        );
     }
 
-    pub fn deinit(allocator: Allocator) void {
-        _ = allocator;
+    var message_buffer: [1024]u8 = undefined;
+
+    var allocator: Allocator = undefined;
+    var fiber_interns: Interns(Fiber) = undefined;
+    var event_interns: Interns(Event) = undefined;
+    var plot_id_interns: Interns(PlotId) = undefined;
+
+    pub fn init(allocator_: Allocator) !void {
+        allocator = allocator_;
+        fiber_interns = Interns(Fiber).init(allocator_);
+        event_interns = Interns(Event).init(allocator_);
+        plot_id_interns = Interns(PlotId).init(allocator_);
+    }
+
+    pub fn deinit(allocator_: Allocator) void {
+        _ = allocator_;
+        {
+            var iter = plot_id_interns.iterator();
+            while (iter.next()) |entry| {
+                allocator.free(entry.value_ptr.*);
+            }
+            plot_id_interns.deinit();
+        }
+        {
+            var iter = event_interns.iterator();
+            while (iter.next()) |entry| {
+                allocator.free(entry.value_ptr.*);
+            }
+            event_interns.deinit();
+        }
+        {
+            var iter = fiber_interns.iterator();
+            while (iter.next()) |entry| {
+                allocator.free(entry.value_ptr.*);
+            }
+            fiber_interns.deinit();
+        }
+    }
+
+    fn intern_name(item: anytype) [:0]const u8 {
+        const interns = switch (@TypeOf(item)) {
+            Fiber => &fiber_interns,
+            Event => &event_interns,
+            PlotId => &plot_id_interns,
+            else => @compileError("Don't know how to intern " ++ @typeName(@TypeOf(item))),
+        };
+        const entry = interns.getOrPut(item) catch
+            panic("OOM in tracer", .{});
+        if (!entry.found_existing) {
+            entry.value_ptr.* = std.fmt.allocPrintZ(allocator, "{}", .{item}) catch
+                panic("OOM in tracer", .{});
+        }
+        return entry.value_ptr.*;
     }
 
     pub fn start(
         slot: *?SpanStart,
-        event_group: EventGroup,
         event: Event,
         src: std.builtin.SourceLocation,
     ) void {
         // The event must not already have been started.
         assert(slot.* == null);
-        c.___tracy_fiber_enter(event_group.name());
-        const name = std.fmt.bufPrint(&print_buffer, "{}", .{event}) catch name: {
-            const dots = "...";
-            stdx.copy_disjoint(.exact, u8, print_buffer[print_buffer.len - dots.len ..], dots);
-            break :name &print_buffer;
-        };
+        c.___tracy_fiber_enter(intern_name(event.fiber()));
+        const name = intern_name(event);
         // TODO The alloc_srcloc here is not free and should be unnecessary,
         //      but the alloc-free version currently crashes:
         //      https://github.com/ziglang/zig/issues/13315#issuecomment-1331099909.
@@ -428,17 +406,21 @@ const TracerTracy = struct {
         ), callstack_depth, 1);
     }
 
-    pub fn end(slot: *?SpanStart, event_group: EventGroup, event: Event) void {
+    pub fn end(slot: *?SpanStart, event: Event) void {
         _ = event;
 
         // The event must already have been started.
         const tracy_context = slot.*.?;
-        c.___tracy_fiber_enter(event_group.name());
+        c.___tracy_fiber_enter(intern_name(event.fiber()));
         c.___tracy_emit_zone_end(tracy_context);
         slot.* = null;
     }
 
-    pub fn flush() void {}
+    pub fn plot(plot_id: PlotId, value: f64) void {
+        // TODO We almost always want staircase plots, but can't configure this from zig yet.
+        //      See https://github.com/wolfpld/tracy/issues/537.
+        c.___tracy_emit_plot(intern_name(plot_id), value);
+    }
 
     pub fn log_fn(
         comptime level: std.log.Level,
@@ -449,34 +431,34 @@ const TracerTracy = struct {
         const level_text = comptime level.asText();
         const prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
         const message = std.fmt.bufPrint(
-            &print_buffer,
+            &message_buffer,
             level_text ++ prefix ++ format,
             args,
         ) catch message: {
             const dots = "...";
-            stdx.copy_disjoint(.exact, u8, print_buffer[print_buffer.len - dots.len ..], dots);
-            break :message &print_buffer;
+            stdx.copy_disjoint(.exact, u8, message_buffer[message_buffer.len - dots.len ..], dots);
+            break :message &message_buffer;
         };
-        c.___tracy_fiber_enter((EventGroup{ .main = {} }).name());
+        c.___tracy_fiber_enter(intern_name(Fiber{ .main = {} }));
         c.___tracy_emit_message(message.ptr, message.len, callstack_depth);
     }
 
     // Copied from zig/src/tracy.zig
-    pub const TracerAllocator = struct {
+    pub const TracedAllocator = struct {
         parent_allocator: std.mem.Allocator,
 
-        pub fn init(parent_allocator: std.mem.Allocator) TracerAllocator {
+        pub fn init(parent_allocator: std.mem.Allocator) TracedAllocator {
             return .{
                 .parent_allocator = parent_allocator,
             };
         }
 
-        pub fn allocator(self: *TracerAllocator) std.mem.Allocator {
+        pub fn allocator(self: *TracedAllocator) std.mem.Allocator {
             return std.mem.Allocator.init(self, allocFn, resizeFn, freeFn);
         }
 
         fn allocFn(
-            self: *TracerAllocator,
+            self: *TracedAllocator,
             len: usize,
             ptr_align: u29,
             len_align: u29,
@@ -492,7 +474,7 @@ const TracerTracy = struct {
         }
 
         fn resizeFn(
-            self: *TracerAllocator,
+            self: *TracedAllocator,
             buf: []u8,
             buf_align: u29,
             new_len: usize,
@@ -517,7 +499,7 @@ const TracerTracy = struct {
             return null;
         }
 
-        fn freeFn(self: *TracerAllocator, buf: []u8, buf_align: u29, ret_addr: usize) void {
+        fn freeFn(self: *TracedAllocator, buf: []u8, buf_align: u29, ret_addr: usize) void {
             self.parent_allocator.rawFree(buf, buf_align, ret_addr);
             // this condition is to handle free being called on an empty slice that was never even allocated
             // example case: `std.process.getSelfExeSharedLibPaths` can return `&[_][:0]u8{}`

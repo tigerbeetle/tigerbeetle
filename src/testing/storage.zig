@@ -144,7 +144,7 @@ pub const Storage = struct {
     writes: PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
-    next_tick_queue: FIFO(NextTick) = .{},
+    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(options.write_latency_mean >= options.write_latency_min);
@@ -208,7 +208,7 @@ pub const Storage = struct {
         assert(storage.writes.len == 0);
 
         storage.reads.len = 0;
-        storage.next_tick_queue = .{};
+        storage.next_tick_queue.reset();
     }
 
     /// Returns the number of bytes that have been written to, assuming that (the simulated)

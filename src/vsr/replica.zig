@@ -874,9 +874,6 @@ pub fn ReplicaType(
 
             // Any message handlers that loopback must take responsibility for the flush.
             assert(self.loopback_queue == null);
-
-            // We have to regularly flush the tracer to get output from short benchmarks.
-            tracer.flush();
         }
 
         /// Pings are used by replicas to synchronise cluster time and to probe for network connectivity.
@@ -2439,7 +2436,6 @@ pub fn ReplicaType(
 
             tracer.start(
                 &self.tracer_slot_commit,
-                .main,
                 .{ .commit = .{ .op = prepare.header.op } },
                 @src(),
             );
@@ -2525,7 +2521,6 @@ pub fn ReplicaType(
                 });
                 tracer.start(
                     &self.tracer_slot_checkpoint,
-                    .main,
                     .checkpoint,
                     @src(),
                 );
@@ -2584,7 +2579,6 @@ pub fn ReplicaType(
             });
             tracer.end(
                 &self.tracer_slot_checkpoint,
-                .main,
                 .checkpoint,
             );
 
@@ -2606,7 +2600,6 @@ pub fn ReplicaType(
 
             tracer.end(
                 &self.tracer_slot_commit,
-                .main,
                 .{ .commit = .{ .op = op } },
             );
 

@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: ["build_benchmark_ewah", "build_benchmark_eytzinger", "build_benchmark_segmented_array", "-Dtracer-backend=perfetto", "-Dtracer-backend=tracy"]
+        target: ["build_benchmark_ewah", "build_benchmark_eytzinger", "build_benchmark_segmented_array", "-Dtracer-backend=tracy"]
     steps:
       - uses: actions/checkout@v3
         with:

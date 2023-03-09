@@ -91,7 +91,7 @@ pub fn CompactionType(
         };
 
         /// Used only for debugging/tracing.
-        name: [:0]const u8,
+        tree_name: []const u8,
 
         grid: *Grid,
         grid_reservation: Grid.Reservation,
@@ -130,7 +130,7 @@ pub fn CompactionType(
 
         tracer_slot: ?tracer.SpanStart = null,
 
-        pub fn init(allocator: mem.Allocator, name: [:0]const u8) !Compaction {
+        pub fn init(allocator: mem.Allocator, tree_name: [:0]const u8) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
             errdefer iterator_a.deinit(allocator);
 
@@ -141,7 +141,7 @@ pub fn CompactionType(
             errdefer table_builder.deinit(allocator);
 
             return Compaction{
-                .name = name,
+                .tree_name = tree_name,
 
                 // Assigned by start()
                 .grid = undefined,
@@ -208,7 +208,7 @@ pub fn CompactionType(
             assert(drop_tombstones or level_b < constants.lsm_levels - 1);
 
             compaction.* = .{
-                .name = compaction.name,
+                .tree_name = compaction.tree_name,
 
                 .grid = grid,
                 // Reserve enough blocks to write our output tables in the worst case, where:
@@ -319,8 +319,10 @@ pub fn CompactionType(
 
             tracer.start(
                 &compaction.tracer_slot,
-                .{ .tree_compaction = .{ .compaction_name = compaction.name } },
-                .{ .tree_compaction_tick = .{ .level_b = compaction.level_b } },
+                .{ .tree_compaction_tick = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.level_b,
+                } },
                 @src(),
             );
 
@@ -403,8 +405,10 @@ pub fn CompactionType(
             var tracer_slot: ?tracer.SpanStart = null;
             tracer.start(
                 &tracer_slot,
-                .{ .tree_compaction = .{ .compaction_name = compaction.name } },
-                .{ .tree_compaction_merge = .{ .level_b = compaction.level_b } },
+                .{ .tree_compaction_merge = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.level_b,
+                } },
                 @src(),
             );
 
@@ -430,13 +434,17 @@ pub fn CompactionType(
 
             tracer.end(
                 &tracer_slot,
-                .{ .tree_compaction = .{ .compaction_name = compaction.name } },
-                .{ .tree_compaction_merge = .{ .level_b = compaction.level_b } },
+                .{ .tree_compaction_merge = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.level_b,
+                } },
             );
             tracer.end(
                 &compaction.tracer_slot,
-                .{ .tree_compaction = .{ .compaction_name = compaction.name } },
-                .{ .tree_compaction_tick = .{ .level_b = compaction.level_b } },
+                .{ .tree_compaction_tick = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.level_b,
+                } },
             );
 
             // TODO Implement pacing here by deciding if we should do another compact_tick()

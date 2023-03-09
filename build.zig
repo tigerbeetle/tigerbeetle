@@ -399,7 +399,7 @@ fn link_tracer_backend(
     target: std.zig.CrossTarget,
 ) void {
     switch (tracer_backend) {
-        .none, .perfetto => {},
+        .none => {},
         .tracy => {
             // Code here is based on
             // https://github.com/ziglang/zig/blob/a660df4900520c505a0865707552dcc777f4b791/build.zig#L382

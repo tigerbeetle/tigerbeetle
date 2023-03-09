@@ -67,6 +67,8 @@ const ConfigProcess = struct {
     clock_epoch_max_ms: u64 = 60000,
     clock_synchronization_window_min_ms: u64 = 2000,
     clock_synchronization_window_max_ms: u64 = 20000,
+    grid_iops_read_max: u64 = 16,
+    grid_iops_write_max: u64 = 16,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -123,8 +125,6 @@ pub const ConfigBase = enum {
 
 pub const TracerBackend = enum {
     none,
-    // Writes to a file (./tracer.json) which can be uploaded to https://ui.perfetto.dev/
-    perfetto,
     // Sends data to https://github.com/wolfpld/tracy.
     tracy,
 };

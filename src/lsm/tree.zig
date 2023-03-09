@@ -95,7 +95,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
         const Grid = @import("grid.zig").GridType(Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
-        pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
+        pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table, tree_name);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 
         const CompactionType = @import("compaction.zig").CompactionType;
@@ -150,6 +150,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         open_callback: ?fn (*Tree) void,
 
         tracer_slot: ?tracer.SpanStart = null,
+        filter_block_hits: u64 = 0,
+        filter_block_misses: u64 = 0,
 
         pub const Options = struct {
             /// The number of objects to cache in the set-associative value cache.
@@ -191,7 +193,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             var compaction_table_immutable = try CompactionTableImmutable.init(
                 allocator,
-                std.fmt.comptimePrint("{s}(immutable->0)", .{tree_name}),
+                tree_name,
             );
             errdefer compaction_table_immutable.deinit(allocator);
 
@@ -200,14 +202,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 comptime var i: usize = 0;
                 inline while (i < compaction_table.len) : (i += 1) {
                     errdefer for (compaction_table[0..i]) |*c| c.deinit(allocator);
-                    const compaction_name = std.fmt.comptimePrint("{s}({}->{}/{}->{})", .{
-                        tree_name,
-                        2 * i,
-                        2 * i + 1,
-                        2 * i + 1,
-                        2 * i + 2,
-                    });
-                    compaction_table[i] = try CompactionTable.init(allocator, compaction_name);
+                    compaction_table[i] = try CompactionTable.init(allocator, tree_name);
                 }
             }
             errdefer for (compaction_table) |*c| c.deinit(allocator);
@@ -407,6 +402,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
                 const filter_bytes = Table.filter_block_filter_const(filter_block);
                 if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
+                    context.tree.filter_block_hits += 1;
+                    tracer.plot(
+                        .{ .filter_block_hits = .{ .tree_name = tree_name } },
+                        @intToFloat(f64, context.tree.filter_block_hits),
+                    );
+
                     context.tree.grid.read_block(
                         read_data_block_callback,
                         completion,
@@ -415,6 +416,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         .data,
                     );
                 } else {
+                    context.tree.filter_block_misses += 1;
+                    tracer.plot(
+                        .{ .filter_block_misses = .{ .tree_name = tree_name } },
+                        @intToFloat(f64, context.tree.filter_block_misses),
+                    );
+
                     // The key is not present in this table, check the next level.
                     context.advance_to_next_level();
                 }
@@ -575,8 +582,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             tracer.start(
                 &tree.tracer_slot,
-                .{ .tree = .{ .tree_name = tree_name } },
-                .tree_compaction_beat,
+                .{ .tree_compaction_beat = .{ .tree_name = tree_name } },
                 @src(),
             );
 
@@ -950,8 +956,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             tracer.end(
                 &tree.tracer_slot,
-                .{ .tree = .{ .tree_name = tree_name } },
-                .tree_compaction_beat,
+                .{ .tree_compaction_beat = .{ .tree_name = tree_name } },
             );
 
             if (constants.verify) {
