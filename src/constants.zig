@@ -209,7 +209,9 @@ comptime {
 ///   repairable.
 pub const view_change_headers_max = view_change_headers_suffix_max + 2 + 1;
 
-/// Maximum number of headers from the current WAL wrap to include in an SV message.
+/// Maximum number of headers from the WAL suffix to include in an SV message.
+/// Must at least cover the full pipeline.
+/// Increasing this reduces likelihood that backups will need to repair their suffix's headers.
 pub const view_change_headers_suffix_max = config.cluster.view_change_headers_suffix_max;
 
 comptime {
