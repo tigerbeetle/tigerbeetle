@@ -12,8 +12,8 @@ pub const IO = struct {
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
-    timeouts: FIFO(Completion) = .{},
-    completed: FIFO(Completion) = .{},
+    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
+    completed: FIFO(Completion) = .{ .name = "io_completed" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;

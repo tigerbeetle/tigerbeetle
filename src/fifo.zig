@@ -88,7 +88,7 @@ test "push/pop/peek/remove/empty" {
     var two: Foo = .{};
     var three: Foo = .{};
 
-    var fifo: FIFO(Foo) = .{};
+    var fifo: FIFO(Foo) = .{ .name = null };
     try testing.expect(fifo.empty());
 
     fifo.push(&one);
