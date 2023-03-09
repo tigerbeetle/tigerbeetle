@@ -733,7 +733,7 @@ fn c_client_sample(
     static_lib.addOptions("vsr_options", options);
     link_tracer_backend(static_lib, tracer_backend, target);
     c_sample_build.dependOn(&static_lib.step);
-    
+
     const sample = b.addExecutable("c_sample", "src/clients/c/samples/main.c");
     sample.setBuildMode(mode);
     sample.setTarget(target);
