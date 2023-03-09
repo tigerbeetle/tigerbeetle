@@ -14,4 +14,5 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-      - run: zig/zig build c_sample -Drelease-safe
+      - run: .\scripts\install_zig.bat
+      - run: zig\zig.exe build c_sample -Drelease-safe

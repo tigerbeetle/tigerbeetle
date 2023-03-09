@@ -22,6 +22,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
       - run: zig/zig build c_sample -Drelease-safe
 
   # TODO(Phil): This never worked, get it working.
