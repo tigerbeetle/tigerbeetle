@@ -235,9 +235,9 @@ pub fn CompactionType(
                 // (And likewise release the reservation at the end of each beat, instead of at the
                 // end of each half-bar).
                 .grid_reservation = switch (strategy) {
+                    .merge => grid.reserve(range.table_count * Table.block_count_max).?,
                     // Don't reserve these when we just move the table to the next level.
                     .move => null,
-                    .merge => grid.reserve(range.table_count * Table.block_count_max).?,
                 },
                 .range = range,
                 .op_min = op_min,
@@ -265,8 +265,6 @@ pub fn CompactionType(
             assert(compaction.data.state == .building);
 
             switch (compaction.strategy) {
-                // Nothing else to start when only moving table_a between levels.
-                .move => {},
                 // Start the compaction iterators if we need to merge tables between levels.
                 .merge => {
                     const iterator_b_context = .{
@@ -283,6 +281,8 @@ pub fn CompactionType(
                     compaction.iterator_a.start(iterator_a_context, iterator_a_io_callback);
                     compaction.iterator_b.start(iterator_b_context, iterator_b_io_callback);
                 },
+                // Nothing else to start when only moving table_a between levels.
+                .move => {},
             }
         }
 
@@ -335,22 +335,6 @@ pub fn CompactionType(
             assert(!compaction.merge_done);
 
             switch (compaction.strategy) {
-                .move => {
-                    const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
-                    const level_b = compaction.level_b;
-                    const level_a = level_b - 1;
-
-                    const table_a = compaction.level_a_input.?;
-                    assert(table_a.snapshot_max >= snapshot_max);
-                    assert(compaction.range.table_count == 1);
-                    assert(compaction.grid_reservation == null);
-
-                    compaction.manifest.move_table(level_a, level_b, &table_a);
-
-                    compaction.merge_done = true;
-                    compaction.status = .done;
-                    callback(compaction);
-                },
                 .merge => {
                     compaction.callback = callback;
                     
@@ -378,6 +362,22 @@ pub fn CompactionType(
                     compaction.io_write_start(.data);
                     compaction.io_write_start(.filter);
                     compaction.io_write_start(.index);
+                },
+                .move => {
+                    const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
+                    const level_b = compaction.level_b;
+                    const level_a = level_b - 1;
+
+                    const table_a = &compaction.level_a_input.?;
+                    assert(table_a.snapshot_max >= snapshot_max);
+                    assert(compaction.range.table_count == 1);
+                    assert(compaction.grid_reservation == null);
+
+                    compaction.manifest.move_table(level_a, level_b, &table_a);
+
+                    compaction.merge_done = true;
+                    compaction.status = .done;
+                    callback(compaction);
                 },
             }
         }
