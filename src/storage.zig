@@ -76,7 +76,7 @@ pub const Storage = struct {
     io: *IO,
     fd: os.fd_t,
 
-    next_tick_queue: FIFO(NextTick) = .{ .plot_id = .storage_next_tick_count },
+    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
     next_tick_completion_scheduled: bool = false,
     next_tick_completion: IO.Completion = undefined,
 

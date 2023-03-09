@@ -13,7 +13,7 @@ pub fn FIFO(comptime T: type) type {
         out: ?*T = null,
         count: u64 = 0,
         // This should only be null if you're sure we'll never want to monitor `count`.
-        plot_id: ?tracer.PlotId,
+        name: ?[]const u8,
 
         pub fn push(self: *Self, elem: *T) void {
             assert(elem.next == null);
@@ -69,8 +69,11 @@ pub fn FIFO(comptime T: type) type {
         }
 
         fn plot(self: Self) void {
-            if (self.plot_id) |plot_id| {
-                tracer.plot(plot_id, @intToFloat(f64, self.count));
+            if (self.name) |name| {
+                tracer.plot(
+                    .{ .queue_count = .{ .queue_name = name } },
+                    @intToFloat(f64, self.count),
+                );
             }
         }
     };
