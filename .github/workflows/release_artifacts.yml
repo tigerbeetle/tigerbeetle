@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         debug: ["", "--debug"]
-        target: [aarch64-linux-gnu, x86_64-linux-gnu, aarch64-macos-gnu, x86_64-macos-gnu, x86_64-windows]
+        target: [aarch64-linux, x86_64-linux, aarch64-macos, x86_64-macos, x86_64-windows]
     runs-on: ubuntu-latest
 
     steps:
