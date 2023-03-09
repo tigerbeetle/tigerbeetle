@@ -469,7 +469,7 @@ pub fn ReplicaType(
             const header_head = self.journal.header_with_op(self.op).?;
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
-            if (self.sole_replica()) {
+            if (self.solo()) {
                 if (self.journal.faulty.count > 0) {
                     @panic("journal is corrupt");
                 }
@@ -499,7 +499,7 @@ pub fn ReplicaType(
             }
 
             assert(
-                (self.status == .recovering and self.sole_replica()) or
+                (self.status == .recovering and self.solo()) or
                     self.status == .normal or
                     self.status == .view_change or
                     self.status == .recovering_head,
@@ -1272,7 +1272,7 @@ pub fn ReplicaType(
             assert(message.header.command == .start_view_change);
             if (self.ignore_start_view_change_message(message)) return;
 
-            assert(!self.sole_replica());
+            assert(!self.solo());
             assert(self.status == .normal or self.status == .view_change);
             assert(message.header.view >= self.view);
 
@@ -1351,7 +1351,7 @@ pub fn ReplicaType(
             }
 
             // Wait until we have `f + 1` messages (including ourself) for quorum:
-            assert(!self.sole_replica());
+            assert(!self.solo());
             const threshold = self.quorum_view_change;
 
             const count = self.reference_message_and_receive_quorum_exactly_once(
@@ -1703,7 +1703,7 @@ pub fn ReplicaType(
             // replica_count=5 - quorum_replication=3 + 1 = 2 + 1 = 3 nacks required
             //
             // Otherwise, if we know we do not have the op, then we can exclude ourselves.
-            assert(!self.sole_replica());
+            assert(!self.solo());
 
             const threshold = if (self.journal.faulty.bit(slot))
                 self.replica_count - self.quorum_replication + 1
@@ -1796,7 +1796,7 @@ pub fn ReplicaType(
 
             const prepare = self.primary_pipeline_pending().?;
 
-            if (self.sole_replica()) {
+            if (self.solo()) {
                 // Replica=1 doesn't write prepares concurrently to avoid gaps in its WAL.
                 assert(self.journal.writes.executing() <= 1);
                 assert(self.journal.writes.executing() == 1 or self.committing);
@@ -1883,7 +1883,7 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.primary_pipeline_pending() != null);
             self.primary_abdicate_timeout.reset();
-            if (self.sole_replica()) return;
+            if (self.solo()) return;
 
             log.debug("{}: on_primary_abdicate_timeout: abdicating (view={})", .{
                 self.replica,
@@ -1935,7 +1935,7 @@ pub fn ReplicaType(
             assert(self.backup());
             self.normal_heartbeat_timeout.reset();
 
-            if (self.sole_replica()) return;
+            if (self.solo()) return;
 
             log.debug("{}: on_normal_heartbeat_timeout: heartbeat lost (view={})", .{
                 self.replica,
@@ -1947,7 +1947,7 @@ pub fn ReplicaType(
         fn on_start_view_change_window_timeout(self: *Self) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.start_view_change_from_all_replicas.count() > 0);
-            assert(!self.sole_replica());
+            assert(!self.solo());
             self.start_view_change_window_timeout.stop();
 
             if (self.standby()) return;
@@ -1962,7 +1962,7 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             self.start_view_change_message_timeout.reset();
 
-            if (self.sole_replica()) return;
+            if (self.solo()) return;
             if (self.standby()) return;
 
             if (self.start_view_change_from_all_replicas.isSet(self.replica)) {
@@ -1972,7 +1972,7 @@ pub fn ReplicaType(
 
         fn on_view_change_status_timeout(self: *Self) void {
             assert(self.status == .view_change);
-            assert(!self.sole_replica());
+            assert(!self.solo());
             self.view_change_status_timeout.reset();
 
             self.send_start_view_change();
@@ -1980,7 +1980,7 @@ pub fn ReplicaType(
 
         fn on_do_view_change_message_timeout(self: *Self) void {
             assert(self.status == .view_change);
-            assert(!self.sole_replica());
+            assert(!self.solo());
             self.do_view_change_message_timeout.reset();
 
             if (self.primary_index(self.view) == self.replica and self.do_view_change_quorum) {
@@ -2030,7 +2030,7 @@ pub fn ReplicaType(
             assert(message.header.view == self.view);
             switch (message.header.command) {
                 .do_view_change => {
-                    assert(!self.sole_replica());
+                    assert(!self.solo());
                     if (self.replica_count == 2) assert(threshold == 2);
 
                     assert(self.status == .view_change);
@@ -2138,7 +2138,7 @@ pub fn ReplicaType(
                     assert(self.primary());
                 },
                 .nack_prepare => {
-                    assert(!self.sole_replica());
+                    assert(!self.solo());
                     if (self.replica_count == 2) assert(threshold >= 1);
 
                     assert(self.status == .view_change);
@@ -2195,7 +2195,7 @@ pub fn ReplicaType(
             assert(message.header.view == self.view);
             assert(message.header.op == self.op);
 
-            if (self.sole_replica() and self.pipeline.queue.prepare_queue.count > 1) {
+            if (self.solo() and self.pipeline.queue.prepare_queue.count > 1) {
                 // In a cluster-of-one, the prepares must always be written to the WAL sequentially
                 // (never concurrently). This ensures that there will be no gaps in the WAL during
                 // crash recovery.
@@ -2239,7 +2239,7 @@ pub fn ReplicaType(
 
         /// Choose a different replica each time if possible (excluding ourself).
         fn choose_any_other_replica(self: *Self) u8 {
-            assert(!self.sole_replica());
+            assert(!self.solo());
 
             var count: usize = 0;
             while (count < self.replica_count) : (count += 1) {
@@ -2259,7 +2259,7 @@ pub fn ReplicaType(
         /// `view_jump()`. Otherwise, we may fork the log.
         fn commit_journal(self: *Self, commit: u64) void {
             assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.sole_replica()));
+                (self.status == .recovering and self.solo()));
             assert(!(self.status == .normal and self.primary()));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
@@ -2306,14 +2306,14 @@ pub fn ReplicaType(
         fn commit_journal_next(self: *Self) void {
             assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.sole_replica()));
+                (self.status == .recovering and self.solo()));
             assert(!(self.status == .normal and self.primary()));
             assert(self.pipeline == .cache);
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
             if (!self.valid_hash_chain("commit_journal_next")) {
-                assert(!self.sole_replica());
+                assert(!self.solo());
                 self.commit_ops_done();
                 return;
             }
@@ -2346,13 +2346,13 @@ pub fn ReplicaType(
                 if (self.status == .view_change and self.repairs_allowed()) self.repair();
 
                 if (self.status == .recovering) {
-                    assert(self.sole_replica());
+                    assert(self.solo());
                     assert(self.commit_min == self.commit_max);
                     assert(self.commit_min == self.op);
                     self.transition_to_normal_from_recovering_status();
                 } else {
                     // We expect that a cluster-of-one only calls commit_journal() in recovering status.
-                    assert(!self.sole_replica());
+                    assert(!self.solo());
                 }
             }
         }
@@ -2364,7 +2364,7 @@ pub fn ReplicaType(
             if (prepare == null) {
                 self.commit_ops_done();
                 log.debug("{}: commit_journal_next_callback: prepare == null", .{self.replica});
-                if (self.sole_replica()) @panic("cannot recover corrupt prepare");
+                if (self.solo()) @panic("cannot recover corrupt prepare");
                 return;
             }
 
@@ -2377,14 +2377,14 @@ pub fn ReplicaType(
                             self.replica,
                             self.view,
                         });
-                        assert(!self.sole_replica());
+                        assert(!self.solo());
                         return;
                     }
                     // Only the primary may commit during a view change before starting the new view.
                     // Fall through if this is indeed the case.
                 },
                 .recovering => {
-                    assert(self.sole_replica());
+                    assert(self.solo());
                     assert(self.primary_index(self.view) == self.replica);
                 },
                 .recovering_head => unreachable,
@@ -2426,7 +2426,7 @@ pub fn ReplicaType(
         ) void {
             assert(self.committing);
             assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.sole_replica()));
+                (self.status == .recovering and self.solo()));
             assert(self.commit_prepare == null);
             assert(self.commit_callback == null);
             assert(prepare.header.command == .prepare);
@@ -2480,7 +2480,7 @@ pub fn ReplicaType(
                     assert(next.message.header.op == self.commit_min + 1);
                     assert(next.message.header.op == self.commit_prepare.?.header.op + 1);
 
-                    if (self.sole_replica()) {
+                    if (self.solo()) {
                         // Write the next message in the queue.
                         // A cluster-of-one writes prepares sequentially to avoid gaps in the
                         // WAL caused by reordered writes.
@@ -2612,7 +2612,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.? == prepare);
             assert(self.commit_callback != null);
             assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.sole_replica()));
+                (self.status == .recovering and self.solo()));
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
@@ -3561,8 +3561,8 @@ pub fn ReplicaType(
         /// Single-replica clusters often are a special case (no viewchanges or
         /// repairs, prepares are written to WAL sequentially).
         ///
-        /// Note that a sole-replica cluster might still have standby nodes.
-        pub fn sole_replica(self: *const Self) bool {
+        /// Note that a solo cluster might still have standby nodes.
+        pub fn solo(self: *const Self) bool {
             return self.replica_count == 1 and !self.standby();
         }
 
@@ -3987,7 +3987,7 @@ pub fn ReplicaType(
                 self.op_repair_min(),
                 self.op,
             )) |range| {
-                assert(!self.sole_replica());
+                assert(!self.solo());
                 assert(range.op_min >= self.op_repair_min());
                 assert(range.op_max < self.op);
 
@@ -4028,7 +4028,7 @@ pub fn ReplicaType(
 
             // Commit ops, which may in turn discover faulty prepares and drive more repairs:
             if (self.commit_min < self.commit_max) {
-                assert(!self.sole_replica());
+                assert(!self.solo());
                 self.commit_journal(self.commit_max);
                 return;
             }
@@ -4546,7 +4546,7 @@ pub fn ReplicaType(
                 assert(prepare.header.op == op);
                 assert(prepare.header.checksum == checksum);
 
-                if (self.sole_replica()) {
+                if (self.solo()) {
                     // This op won't start writing until all ops in the pipeline preceding it have
                     // been written.
                     log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
@@ -4888,7 +4888,7 @@ pub fn ReplicaType(
 
         fn send_start_view_change(self: *Self) void {
             assert(self.status == .normal or self.status == .view_change);
-            assert(!self.sole_replica());
+            assert(!self.solo());
 
             if (self.standby()) return;
 
@@ -4909,7 +4909,7 @@ pub fn ReplicaType(
 
         fn send_do_view_change(self: *Self) void {
             assert(self.status == .view_change);
-            assert(!self.sole_replica());
+            assert(!self.solo());
             assert(self.view > self.log_view);
             assert(!self.do_view_change_quorum);
 
@@ -5436,7 +5436,7 @@ pub fn ReplicaType(
             assert(self.status == .view_change);
             assert(self.view > self.log_view);
             assert(self.primary_index(self.view) == self.replica);
-            assert(!self.sole_replica());
+            assert(!self.solo());
             assert(self.do_view_change_quorum);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
@@ -5623,7 +5623,7 @@ pub fn ReplicaType(
             assert(self.view == self.log_view);
             assert(self.op >= self.commit_min);
             assert(!self.committing);
-            assert(!self.sole_replica());
+            assert(!self.solo());
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
 
@@ -5640,7 +5640,7 @@ pub fn ReplicaType(
             assert(self.status == .recovering);
             assert(self.view == self.log_view);
             assert(!self.committing);
-            assert(!self.sole_replica() or self.commit_min == self.op);
+            assert(!self.solo() or self.commit_min == self.op);
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
 
@@ -5655,7 +5655,7 @@ pub fn ReplicaType(
                     },
                 );
 
-                assert(self.sole_replica());
+                assert(self.solo());
                 assert(!self.prepare_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.normal_heartbeat_timeout.ticking);
