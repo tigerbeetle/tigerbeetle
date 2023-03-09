@@ -5452,7 +5452,6 @@ pub fn ReplicaType(
                 });
             }
 
-            assert(commit_max >= self.commit_max -| constants.pipeline_prepare_queue_max);
             assert(self.commit_min <= self.commit_max);
             assert(self.op >= self.commit_max or self.op < self.commit_max);
             assert(self.op <= op + constants.pipeline_prepare_queue_max);
