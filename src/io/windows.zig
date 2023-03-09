@@ -115,7 +115,7 @@ pub const IO = struct {
         // Must read all `completions` before invoking the callbacks
         // as the callbacks could potentially submit more completions.
         var completed = self.completed;
-        self.completed = .{};
+        self.completed.reset();
         while (completed.pop()) |completion| {
             (completion.callback)(Completion.Context{
                 .io = self,

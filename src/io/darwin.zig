@@ -125,7 +125,7 @@ pub const IO = struct {
         }
 
         var completed = self.completed;
-        self.completed = .{};
+        self.completed.reset();
         while (completed.pop()) |completion| {
             (completion.callback)(self, completion);
         }

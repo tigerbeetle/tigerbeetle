@@ -208,7 +208,7 @@ pub const Storage = struct {
         assert(storage.writes.len == 0);
 
         storage.reads.len = 0;
-        storage.next_tick_queue = .{ .name = storage.next_tick_queue.name };
+        storage.next_tick_queue.reset();
     }
 
     /// Returns the number of bytes that have been written to, assuming that (the simulated)
