@@ -5931,7 +5931,7 @@ pub fn ReplicaType(
                     }
                 }
                 assert(self.view_headers.array.len > 0);
-                assert(self.view_headers.array.len <= constants.view_change_headers_suffix_max);
+                assert(self.view_headers.array.len <= constants.pipeline_prepare_queue_max);
                 // We could safely include any additional chained headers.
                 // However, that can make view-change bugs harder to trigger.
             }
