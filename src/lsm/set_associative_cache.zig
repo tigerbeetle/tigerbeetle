@@ -397,6 +397,7 @@ fn set_associative_cache_test(
         context.hash,
         context.equal,
         layout,
+        "test",
     );
 
     return struct {
@@ -782,6 +783,7 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
         context.hash,
         context.equal,
         layout,
+        "test",
     );
 
     const reference = struct {
