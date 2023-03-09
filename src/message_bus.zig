@@ -719,7 +719,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                                 "message from unexpected peer: peer={} header={}",
                                 .{ connection.peer, header },
                             );
-                            unreachable;
+                            connection.terminate(bus, .shutdown);
+                            return null;
                         },
                         // The client connects only to replicas and should set peer when connecting:
                         .client => assert(connection.peer == .replica),
