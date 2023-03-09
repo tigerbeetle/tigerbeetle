@@ -42,6 +42,9 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
+    try tracer.init(allocator);
+    defer tracer.deinit(allocator);
+
     var parse_args = try cli.parse_args(allocator);
     defer parse_args.deinit(allocator);
 
@@ -135,9 +138,6 @@ const Command = struct {
         // (Here or in Replica.open()?).
 
         const allocator = traced_allocator.allocator();
-
-        try tracer.init(allocator);
-        defer tracer.deinit(allocator);
 
         var command: Command = undefined;
         try command.init(allocator, args.path, false);

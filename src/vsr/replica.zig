@@ -2436,7 +2436,6 @@ pub fn ReplicaType(
 
             tracer.start(
                 &self.tracer_slot_commit,
-                .main,
                 .{ .commit = .{ .op = prepare.header.op } },
                 @src(),
             );
@@ -2522,7 +2521,6 @@ pub fn ReplicaType(
                 });
                 tracer.start(
                     &self.tracer_slot_checkpoint,
-                    .main,
                     .checkpoint,
                     @src(),
                 );
@@ -2581,7 +2579,6 @@ pub fn ReplicaType(
             });
             tracer.end(
                 &self.tracer_slot_checkpoint,
-                .main,
                 .checkpoint,
             );
 
@@ -2603,7 +2600,6 @@ pub fn ReplicaType(
 
             tracer.end(
                 &self.tracer_slot_commit,
-                .main,
                 .{ .commit = .{ .op = op } },
             );
 

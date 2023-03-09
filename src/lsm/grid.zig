@@ -89,7 +89,7 @@ pub fn GridType(comptime Storage: type) type {
             block_type: BlockType,
 
             pending: ReadPending = .{},
-            resolves: FIFO(ReadPending) = .{ .plot_id = null },
+            resolves: FIFO(ReadPending) = .{ .name = null },
 
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
@@ -146,18 +146,18 @@ pub fn GridType(comptime Storage: type) type {
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_iop_tracer_slots: [write_iops_max]?tracer.SpanStart = .{null} ** write_iops_max,
-        write_queue: FIFO(Write) = .{ .plot_id = .grid_write_queue_count },
+        write_queue: FIFO(Write) = .{ .name = "grid_write" },
 
         // Each read_iops has a corresponding block.
         read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPS(ReadIOP, read_iops_max) = .{},
         read_iop_tracer_slots: [read_iops_max]?tracer.SpanStart = .{null} ** read_iops_max,
-        read_queue: FIFO(Read) = .{ .plot_id = .grid_read_queue_count },
+        read_queue: FIFO(Read) = .{ .name = "grid_read" },
 
         // List if Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
-        read_pending_queue: FIFO(ReadPending) = .{ .plot_id = .grid_read_pending_queue_count },
+        read_pending_queue: FIFO(ReadPending) = .{ .name = "grid_read_pending" },
         // TODO interrogate this list and do recovery in Replica.tick().
-        read_recovery_queue: FIFO(Read) = .{ .plot_id = .grid_read_recovery_queue_count },
+        read_recovery_queue: FIFO(Read) = .{ .name = "grid_read_recovery" },
         // True if there's a read thats resolving callbacks. If so, the read cache must not be invalidated.
         read_resolving: bool = false,
 
@@ -327,7 +327,6 @@ pub fn GridType(comptime Storage: type) type {
             tracer.start(
                 &grid.write_iop_tracer_slots[write_iop_index],
                 .{ .grid_write_iop = .{ .index = write_iop_index } },
-                .{ .grid_write_iop = .{ .index = write_iop_index } },
                 @src(),
             );
 
@@ -366,7 +365,6 @@ pub fn GridType(comptime Storage: type) type {
             const write_iop_index = grid.write_iops.index(iop);
             tracer.end(
                 &grid.write_iop_tracer_slots[write_iop_index],
-                .{ .grid_write_iop = .{ .index = write_iop_index } },
                 .{ .grid_write_iop = .{ .index = write_iop_index } },
             );
 
@@ -467,7 +465,6 @@ pub fn GridType(comptime Storage: type) type {
             tracer.start(
                 &grid.read_iop_tracer_slots[read_iop_index],
                 .{ .grid_read_iop = .{ .index = read_iop_index } },
-                .{ .grid_read_iop = .{ .index = read_iop_index } },
                 @src(),
             );
 
@@ -501,7 +498,6 @@ pub fn GridType(comptime Storage: type) type {
             const read_iop_index = grid.read_iops.index(iop);
             tracer.end(
                 &grid.read_iop_tracer_slots[read_iop_index],
-                .{ .grid_read_iop = .{ .index = read_iop_index } },
                 .{ .grid_read_iop = .{ .index = read_iop_index } },
             );
 

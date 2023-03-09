@@ -198,13 +198,13 @@ pub fn SetAssociativeCache(
             const set = self.associate(key);
             if (self.search(set, key)) |way| {
                 self.hits += 1;
-                tracer.plot(.{ .cache_hits = name ++ "_cache_hits" }, @intToFloat(f64, self.hits));
+                tracer.plot(.{ .cache_hits = .{ .cache_name = name } }, @intToFloat(f64, self.hits));
                 const count = self.counts.get(set.offset + way);
                 self.counts.set(set.offset + way, count +| 1);
                 return set.offset + way;
             } else {
                 self.misses += 1;
-                tracer.plot(.{ .cache_misses = name ++ "_cache_misses" }, @intToFloat(f64, self.misses));
+                tracer.plot(.{ .cache_misses = .{ .cache_name = name } }, @intToFloat(f64, self.misses));
                 return null;
             }
         }
