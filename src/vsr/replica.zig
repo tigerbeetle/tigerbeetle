@@ -4048,7 +4048,7 @@ pub fn ReplicaType(
             // This handles the case of an idle cluster, where a backup will not otherwise advance.
             // This is not required for correctness, but for durability.
             if (self.op < self.op_repair_max()) {
-                assert(!self.sole_replica());
+                assert(!self.solo());
                 assert(self.replica != self.primary_index(self.view));
 
                 log.debug(
@@ -5357,7 +5357,7 @@ pub fn ReplicaType(
         /// updates are durable.
         fn view_durable_update(self: *Self) void {
             assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.sole_replica()));
+                (self.status == .recovering and self.solo()));
             assert(self.view >= self.log_view);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
@@ -5396,7 +5396,7 @@ pub fn ReplicaType(
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context_view_change", context);
             assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.sole_replica()));
+                (self.status == .recovering and self.solo()));
             assert(!self.view_durable_updating());
             assert(self.superblock.working.vsr_state.view <= self.view);
             assert(self.superblock.working.vsr_state.log_view <= self.log_view);
