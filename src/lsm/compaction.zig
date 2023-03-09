@@ -373,7 +373,7 @@ pub fn CompactionType(
                     assert(compaction.range.table_count == 1);
                     assert(compaction.grid_reservation == null);
 
-                    compaction.manifest.move_table(level_a, level_b, &table_a);
+                    compaction.manifest.move_table(level_a, level_b, table_a);
 
                     compaction.merge_done = true;
                     compaction.status = .done;
