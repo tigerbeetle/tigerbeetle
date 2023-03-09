@@ -277,6 +277,8 @@ tb_packet_t* acquire_packet(tb_packet_list_t *packet_list) {
     }
 
     packet_list->head = packet->next;
+    packet->next = NULL;
+    
     if (packet_list->head == NULL) {
         packet_list->tail = NULL;
     }
