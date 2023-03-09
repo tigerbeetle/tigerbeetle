@@ -717,7 +717,7 @@ fn c_client_sample(
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
-    const c_sample_build = b.step("c_sample", "Run the C client sample");
+    const c_sample_build = b.step("c_sample", "Build the C client sample");
     for (dependencies) |dependency| {
         c_sample_build.dependOn(dependency);
     }
@@ -733,9 +733,10 @@ fn c_client_sample(
     static_lib.addOptions("vsr_options", options);
     link_tracer_backend(static_lib, tracer_backend, target);
     c_sample_build.dependOn(&static_lib.step);
-
+    
     const sample = b.addExecutable("c_sample", "src/clients/c/samples/main.c");
     sample.setBuildMode(mode);
+    sample.setTarget(target);
     sample.linkLibrary(static_lib);
     sample.linkLibC();
 
@@ -743,10 +744,10 @@ fn c_client_sample(
         static_lib.linkSystemLibrary("ws2_32");
         static_lib.linkSystemLibrary("advapi32");
 
-        // TODO: Illegal instruction x000001d on Windows:
-        sample.disable_sanitize_c = true;        
+        // TODO: Illegal instruction on Windows:
+        sample.disable_sanitize_c = true;
     }
 
-    const run_cmd = sample.run();
-    c_sample_build.dependOn(&run_cmd.step);
+    const install_step = b.addInstallArtifact(sample);
+    c_sample_build.dependOn(&install_step.step);
 }
