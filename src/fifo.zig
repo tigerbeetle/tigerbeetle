@@ -68,6 +68,10 @@ pub fn FIFO(comptime T: type) type {
             } else unreachable;
         }
 
+        pub fn reset(self: *Self) void {
+            self.* = .{ .name = self.name };
+        }
+
         fn plot(self: Self) void {
             if (self.name) |name| {
                 tracer.plot(

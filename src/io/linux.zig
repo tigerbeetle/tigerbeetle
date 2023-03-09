@@ -107,7 +107,7 @@ pub const IO = struct {
         // Loop over a copy to avoid an infinite loop of `enqueue()` re-adding to `self.unqueued`.
         {
             var copy = self.unqueued;
-            self.unqueued = .{ .name = copy.name };
+            self.unqueued.reset();
             while (copy.pop()) |completion| self.enqueue(completion);
         }
 
