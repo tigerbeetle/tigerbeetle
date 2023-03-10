@@ -130,6 +130,8 @@ pub fn CompactionType(
 
         tracer_slot: ?tracer.SpanStart = null,
 
+        tick_count_remaining: u8 = 0,
+
         pub fn init(allocator: mem.Allocator, tree_name: [:0]const u8) !Compaction {
             var iterator_a = try IteratorA.init(allocator);
             errdefer iterator_a.deinit(allocator);
@@ -309,13 +311,22 @@ pub fn CompactionType(
             grid.release(Table.index_block_address(index_block));
         }
 
-        pub fn compact_tick(compaction: *Compaction, callback: Callback) void {
+        pub fn compact_tick_batch(compaction: *Compaction, tick_count_max: u8, callback: Callback) void {
             assert(compaction.status == .processing);
             assert(compaction.callback == null);
             assert(compaction.io_pending == 0);
             assert(!compaction.merge_done);
+            assert(tick_count_max > 0);
 
+            compaction.tick_count_remaining = tick_count_max;
             compaction.callback = callback;
+
+            compaction.compact_tick();
+        }
+
+        fn compact_tick(compaction: *Compaction) void {
+            assert(compaction.tick_count_remaining > 0);
+            compaction.tick_count_remaining -= 1;
 
             tracer.start(
                 &compaction.tracer_slot,
@@ -447,12 +458,15 @@ pub fn CompactionType(
                 } },
             );
 
-            // TODO Implement pacing here by deciding if we should do another compact_tick()
-            // instead of invoking the callback, using compaction.range.table_count as the heuristic.
-
-            const callback = compaction.callback.?;
-            compaction.callback = null;
-            callback(compaction);
+            if (compaction.status == .processing and
+                compaction.tick_count_remaining > 0)
+            {
+                compaction.compact_tick();
+            } else {
+                const callback = compaction.callback.?;
+                compaction.callback = null;
+                callback(compaction);
+            }
         }
 
         fn cpu_merge(compaction: *Compaction) void {

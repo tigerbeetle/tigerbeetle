@@ -742,14 +742,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             if (@TypeOf(compaction.*) == CompactionTableImmutable) {
                 assert(compaction.level_b == 0);
                 log.debug(tree_name ++ ": compact_tick() for immutable table to level 0", .{});
-                compaction.compact_tick(Tree.compact_tick_callback_table_immutable);
+                compaction.compact_tick_batch(64, Tree.compact_tick_callback_table_immutable);
             } else {
                 assert(@TypeOf(compaction.*) == CompactionTable);
                 log.debug(tree_name ++ ": compact_tick() for level {d} to level {d}", .{
                     compaction.level_b - 1,
                     compaction.level_b,
                 });
-                compaction.compact_tick(Tree.compact_tick_callback_table);
+                compaction.compact_tick_batch(64, Tree.compact_tick_callback_table);
             }
         }
 
