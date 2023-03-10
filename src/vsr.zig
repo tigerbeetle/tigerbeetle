@@ -4,6 +4,8 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.vsr);
 
+const Blake3 = @import("blake3.zig").Blake3;
+
 // vsr.zig is the root of a zig package, reexport all public APIs.
 //
 // Note that we don't promise any stability of these interfaces yet.
@@ -1031,7 +1033,7 @@ pub fn checksum(source: []const u8) u128 {
     @setEvalBranchQuota(4000);
 
     var target: [32]u8 = undefined;
-    std.crypto.hash.Blake3.hash(source, target[0..], .{});
+    Blake3.hash(source, target[0..], .{});
     return @bitCast(u128, target[0..@sizeOf(u128)].*);
 }
 
