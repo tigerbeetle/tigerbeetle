@@ -12,16 +12,22 @@ this repo and subdirectory.
 
 ### Prerequisites
 
+Linux >= 5.6 is the only production environment we
+support. But for ease of development we support macOS and
+Windows unless otherwise noted.
+
 * Go >= 1.17
 
 ## Setup
+
+Run:
 
 ```console
 $ go mod init tbtest
 $ go mod tidy
 ```
 
-Create `test.go` and copy this into it:
+Now, create `test.go` and copy this into it:
 
 ```go
 package main
@@ -34,18 +40,22 @@ func main() {
 }
 ```
 
-And run:
+Finally, build and run:
 
 ```console
 $ go run test.go
 ```
 
+Now that all prerequisites and depencies are correctly set
+up, let's dig into using TigerBeetle.
+
 ## Examples
 
 ## Basic
 
-See [./samples/basic](./samples/basic) for a Go project
-showing many features of the client.
+See
+[here](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/go/samples/basic)
+for a complete Go project showing many features of the client.
 
 ### Sidenote: `uint128`
 
@@ -70,6 +80,13 @@ A client is created with a cluster ID and replica
 addresses for all replicas in the cluster. The cluster
 ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
+
+Clients are thread-safe. But for better
+performance, a single instance should be shared between
+multiple concurrent tasks.
+
+Multiple clients are useful when connecting to more than
+one TigerBeetle cluster.
 
 In this example the cluster ID is `0` and there are
 three replicas running on ports `3001`, `3002`, and
@@ -141,15 +158,19 @@ few examples:
 * `tb_types.AccountFlags{DebitsMustNotExceedCredits: true}.ToUint16()`
 * `tb_types.AccountFlags{CreditsMustNotExceedDebits: true}.ToUint16()`
 
-For example, to link `account0` and `account1`, where `account0`
+For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```go
 account0 := tb_types.Account{ /* ... account values ... */ }
 account1 := tb_types.Account{ /* ... account values ... */ }
 account0.Flags = tb_types.AccountFlags{Linked: true}.ToUint16()
+
 accountErrors, err := client.CreateAccounts([]tb_types.Account{account0, account1})
-log.Println(accountErrors, err)
+if err != nil {
+	log.Printf("Error creating accounts: %s", err)
+	return
+}
 ```
 
 ### Response and Errors
@@ -165,22 +186,20 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
 
 ```go
-res, err := client.CreateAccounts([]tb_types.Account{account1, account2, account3})
+account2 := tb_types.Account{ /* ... account values ... */ }
+account3 := tb_types.Account{ /* ... account values ... */ }
+account4 := tb_types.Account{ /* ... account values ... */ }
+
+accountErrors, err = client.CreateAccounts([]tb_types.Account{account2, account3, account4})
 if err != nil {
 	log.Printf("Error creating accounts: %s", err)
 	return
 }
-
-for _, err := range res {
+for _, err := range accountErrors {
 	log.Printf("Error creating account %d: %s", err.Index, err.Result)
 	return
 }
 ```
-
-The example above shows that the account in index 1 failed
-with error 1. This error here means that `account1` and
-`account3` were created successfully. But `account2` was not
-created.
 
 To handle errors you can either 1) exactly match error codes returned
 from `client.createAccounts` with enum values in the
@@ -197,8 +216,6 @@ that account. So the order of accounts in the response is
 not necessarily the same as the order of IDs in the
 request. You can refer to the ID field in the response to
 distinguish accounts.
-
-In this example, account `137` exists while account `138` does not.
 
 ```go
 accounts, err := client.LookupAccounts([]tb_types.Uint128{uint128("137"), uint128("138")})
@@ -265,7 +282,7 @@ you. So, for example, you *can* insert 1 million transfers
 one at a time like so:
 
 ```go
-for (let i = 0; i < len(transfers); i++) {
+for i := 0; i < len(transfers); i++ {
 	errors := client.CreateTransfers(transfers[i]);
 	// error handling omitted
 }
@@ -372,8 +389,6 @@ transfer. So the order of transfers in the response is not necessarily
 the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
-In this example, transfer `1` exists while transfer `2` does not.
-
 ```go
 transfers, err := client.LookupTransfers([]tb_types.Uint128{uint128("1"), uint128("2")})
 if err != nil {
@@ -420,7 +435,7 @@ batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... */ })
 
 // A chain of 2 transfers (the first transfer fails the chain):
 batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... */ Flags: linkedFlag })
-batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ Flags: linkedFlag })
+batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ })
 
 // A chain of 2 transfers (successful):
 batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ Flags: linkedFlag })
@@ -434,27 +449,29 @@ log.Println(transfersRes, err)
 
 ### On Linux and macOS
 
+In a POSIX shell run:
+
 ```console
-$ rm -rf tigerbeetle
 $ git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
 $ cd tigerbeetle
-$ git checkout $GIT_SHA # Optional
+$ git checkout $GIT_SHA
 $ ./scripts/install_zig.sh
 $ ./zig/zig build go_client -Drelease-safe
 $ cd src/clients/go
-$ ./zgo.sh test
+$ [ "$TEST" = "true" ] && ./zgo.sh test || echo "Skipping client unit tests"
 ```
 
 ### On Windows
 
+In PowerShell run:
+
 ```console
-$ rd -r tigerbeetle
 $ git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
 $ cd tigerbeetle
-$ git checkout $GIT_SHA # Optional
+$ git checkout $GIT_SHA
 $ ./scripts/install_zig.bat
 $ ./zig/zig build go_client -Drelease-safe
 $ cd tigerbeetle/src/clients/go
-$ ./zgo.bat test
+$ [ "$TEST" = "true" ] && ./zgo.bat test || echo "Skipping client unit tests"
 ```
 
