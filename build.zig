@@ -218,6 +218,14 @@ pub fn build(b: *std.build.Builder) void {
             options,
             tracer_backend,
         );
+        c_client_sample(
+            b,
+            mode,
+            target,
+            &.{ &install_step.step, &tb_client_header_generate.step },
+            options,
+            tracer_backend,
+        );
     }
 
     {
@@ -699,4 +707,47 @@ fn c_client(
             build_step.dependOn(&lib.step);
         }
     }
+}
+
+fn c_client_sample(
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+    dependencies: []const *std.build.Step,
+    options: *std.build.OptionsStep,
+    tracer_backend: config.TracerBackend,
+) void {
+    const c_sample_build = b.step("c_sample", "Build the C client sample");
+    for (dependencies) |dependency| {
+        c_sample_build.dependOn(dependency);
+    }
+
+    const static_lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+    static_lib.setMainPkgPath("src");
+    static_lib.linkage = .static;
+    static_lib.linkLibC();
+    static_lib.setBuildMode(mode);
+    static_lib.setTarget(target);
+    static_lib.pie = true;
+    static_lib.bundle_compiler_rt = true;
+    static_lib.addOptions("vsr_options", options);
+    link_tracer_backend(static_lib, tracer_backend, target);
+    c_sample_build.dependOn(&static_lib.step);
+
+    const sample = b.addExecutable("c_sample", "src/clients/c/samples/main.c");
+    sample.setBuildMode(mode);
+    sample.setTarget(target);
+    sample.linkLibrary(static_lib);
+    sample.linkLibC();
+
+    if (target.isWindows()) {
+        static_lib.linkSystemLibrary("ws2_32");
+        static_lib.linkSystemLibrary("advapi32");
+
+        // TODO: Illegal instruction on Windows:
+        sample.disable_sanitize_c = true;
+    }
+
+    const install_step = b.addInstallArtifact(sample);
+    c_sample_build.dependOn(&install_step.step);
 }

@@ -9,3 +9,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/benchmark.bat --transfer-count 4000
+
+  c_sample:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: .\scripts\install_zig.bat
+      - run: zig\zig.exe build c_sample -Drelease-safe
