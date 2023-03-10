@@ -1183,9 +1183,15 @@ const ViewChangeHeadersArray = struct {
         return ViewChangeHeadersArray.init(array);
     }
 
-    pub fn from_slice(slice: []const Header) ViewChangeHeadersArray {
+    pub fn init_from_slice(slice: []const Header) ViewChangeHeadersArray {
         Headers.ViewChangeSlice.verify(slice);
         return .{ .array = Headers.Array.fromSlice(slice) catch unreachable };
+    }
+
+    pub fn replace(headers: *ViewChangeHeadersArray, slice: []const Header) void {
+        Headers.ViewChangeSlice.verify(slice);
+        headers.array.len = 0;
+        for (slice) |*header| headers.array.appendAssumeCapacity(header.*);
     }
 
     fn init(array: Headers.Array) ViewChangeHeadersArray {
