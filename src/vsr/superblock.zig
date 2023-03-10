@@ -246,7 +246,7 @@ pub const SuperBlockHeader = extern struct {
 
         const ignore_size = checksum_size + copy_size;
 
-        return vsr.checksum(std.mem.asBytes(superblock)[ignore_size..]);
+        return vsr.checksum_runtime(std.mem.asBytes(superblock)[ignore_size..]);
     }
 
     pub fn set_checksum(superblock: *SuperBlockHeader) void {
@@ -882,7 +882,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const target = superblock.manifest_buffer;
 
             staging.manifest_size = @intCast(u32, superblock.manifest.encode(target));
-            staging.manifest_checksum = vsr.checksum(target[0..staging.manifest_size]);
+            staging.manifest_checksum = vsr.checksum_runtime(target[0..staging.manifest_size]);
         }
 
         fn write_staging_encode_free_set(superblock: *SuperBlock) void {
@@ -912,7 +912,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else {
                 staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
             }
-            staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
+            staging.free_set_checksum = vsr.checksum_runtime(target[0..staging.free_set_size]);
         }
 
         fn write_staging_encode_client_table(superblock: *SuperBlock) void {
@@ -920,7 +920,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const target = superblock.client_table_buffer;
 
             staging.client_table_size = @intCast(u32, superblock.client_table.encode(target));
-            staging.client_table_checksum = vsr.checksum(target[0..staging.client_table_size]);
+            staging.client_table_checksum = vsr.checksum_runtime(target[0..staging.client_table_size]);
         }
 
         fn write_manifest(superblock: *SuperBlock, context: *Context) void {
@@ -934,7 +934,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             mem.set(u8, buffer[superblock.staging.manifest_size..], 0); // Zero sector padding.
 
-            assert(superblock.staging.manifest_checksum == vsr.checksum(
+            assert(superblock.staging.manifest_checksum == vsr.checksum_runtime(
                 superblock.manifest_buffer[0..superblock.staging.manifest_size],
             ));
 
@@ -977,7 +977,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             mem.set(u8, buffer[superblock.staging.free_set_size..], 0); // Zero sector padding.
 
-            assert(superblock.staging.free_set_checksum == vsr.checksum(
+            assert(superblock.staging.free_set_checksum == vsr.checksum_runtime(
                 superblock.free_set_buffer[0..superblock.staging.free_set_size],
             ));
 
@@ -1020,7 +1020,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             mem.set(u8, buffer[superblock.staging.client_table_size..], 0); // Zero sector padding.
 
-            assert(superblock.staging.client_table_checksum == vsr.checksum(
+            assert(superblock.staging.client_table_checksum == vsr.checksum_runtime(
                 superblock.client_table_buffer[0..superblock.staging.client_table_size],
             ));
 
@@ -1328,7 +1328,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.manifest.count == 0);
 
             const slice = superblock.manifest_buffer[0..superblock.working.manifest_size];
-            if (vsr.checksum(slice) == superblock.working.manifest_checksum) {
+            if (vsr.checksum_runtime(slice) == superblock.working.manifest_checksum) {
                 superblock.manifest.decode(slice);
 
                 log.debug("open: read_manifest: manifest blocks: {}/{}", .{
@@ -1397,7 +1397,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.free_set.count_acquired() == 0);
 
             const slice = superblock.free_set_buffer[0..superblock.working.free_set_size];
-            if (vsr.checksum(slice) == superblock.working.free_set_checksum) {
+            if (vsr.checksum_runtime(slice) == superblock.working.free_set_checksum) {
                 superblock.free_set.decode(slice);
 
                 log.debug("open: read_free_set: acquired blocks: {}/{}/{}", .{
@@ -1471,7 +1471,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.client_table.count() == 0);
 
             const slice = superblock.client_table_buffer[0..superblock.working.client_table_size];
-            if (vsr.checksum(slice) == superblock.working.client_table_checksum) {
+            if (vsr.checksum_runtime(slice) == superblock.working.client_table_checksum) {
                 superblock.client_table.decode(slice);
 
                 log.debug("open: read_client_table: client requests: {}/{}", .{

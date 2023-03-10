@@ -138,7 +138,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 var copy: u8 = 0;
                 while (copy < constants.superblock_copies) : (copy += 1) {
                     @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer.field)) |=
-                        vsr.checksum(storage.memory[trailer_area.offset(copy)..][0..trailer_size]);
+                        vsr.checksum_runtime(storage.memory[trailer_area.offset(copy)..][0..trailer_size]);
                 }
             }
 
@@ -182,7 +182,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
 
                 // Only checksum the actual message header+body. Any leftover space is nondeterministic,
                 // because the current prepare may have overwritten a longer message.
-                checksum ^= vsr.checksum(std.mem.asBytes(prepare)[0..prepare.header.size]);
+                checksum ^= vsr.checksum_runtime(std.mem.asBytes(prepare)[0..prepare.header.size]);
             }
             return checksum;
         }
@@ -194,7 +194,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             while (acquired.next()) |address_index| {
                 const block = storage.grid_block(address_index + 1);
                 const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                checksum ^= vsr.checksum(block[0..block_header.size]);
+                checksum ^= vsr.checksum_runtime(block[0..block_header.size]);
             }
             return checksum;
         }

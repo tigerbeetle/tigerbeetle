@@ -408,5 +408,5 @@ fn checksum_free_set(superblock: *const SuperBlock) u128 {
     const mask_bits = @bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt);
     const count_bits = superblock.free_set.blocks.bit_length;
     const count_words = stdx.div_ceil(count_bits, mask_bits);
-    return vsr.checksum(std.mem.sliceAsBytes(superblock.free_set.blocks.masks[0..count_words]));
+    return vsr.checksum_runtime(std.mem.sliceAsBytes(superblock.free_set.blocks.masks[0..count_words]));
 }
