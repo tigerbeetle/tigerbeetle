@@ -7,8 +7,8 @@
 
 #if IS_POSIX
 #include <pthread.h>
-#include <sys/time.h>
-#else
+#include <time.h>
+#elif _WIN32
 #include <windows.h>
 #endif
 
@@ -27,7 +27,7 @@ typedef struct completion_context {
     #if IS_POSIX
     pthread_mutex_t lock;
     pthread_cond_t cv;
-    #else
+    #elif _WIN32
     CRITICAL_SECTION lock;
     CONDITION_VARIABLE cv;
     #endif
@@ -128,6 +128,9 @@ int main(int argc, char **argv) {
         exit(-1);
     }
 
+    // Releasing the packet, so it can be used in a next request.
+    release_packet(&packets_pool, packet);    
+
     if (ctx.size != 0) {
         // Checking for errors creating the accounts:
         tb_create_accounts_result_t *results = (tb_create_accounts_result_t*)ctx.reply;
@@ -139,9 +142,6 @@ int main(int argc, char **argv) {
         exit(-1);
     }
 
-    // Releasing the packet, so it can be used in a next request.
-    release_packet(&packets_pool, packet);
-
     printf("Accounts created successfully\n");
     
     ////////////////////////////////////////////////////////////
@@ -151,12 +151,14 @@ int main(int argc, char **argv) {
     printf("Creating transfers...\n");
     #define MAX_BATCHES 100
     #define TRANSFERS_PER_BATCH ((MAX_MESSAGE_SIZE) / sizeof(tb_transfer_t))
+    #define TRANSFERS_SIZE (sizeof(tb_transfer_t) * TRANSFERS_PER_BATCH)
     long max_latency_ms = 0;
     long total_time_ms = 0;
     for (int i=0; i< MAX_BATCHES;i++) {
         tb_transfer_t transfers[TRANSFERS_PER_BATCH];
+        
         // Zeroing the memory, so we don't have to initialize every field.
-        memset(transfers, 0, MAX_MESSAGE_SIZE);
+        memset(transfers, 0, TRANSFERS_SIZE);
         
         for (int j=0; j<TRANSFERS_PER_BATCH; j++) {
             transfers[j].id = j + 1 + (i * TRANSFERS_PER_BATCH);
@@ -180,16 +182,19 @@ int main(int argc, char **argv) {
         packet_list.head = packet;
         packet_list.tail = packet;
         send_request(client, &packet_list, &ctx);
-  
+
         long elapsed_ms = get_time_ms() - now;
         if (elapsed_ms > max_latency_ms) max_latency_ms = elapsed_ms;
         total_time_ms += elapsed_ms;
-        
+
         if (packet->status != TB_PACKET_OK) {
             // Checking if the request failed:
             printf("Error calling create_transfers (ret=%d)\n", packet->status);
             exit(-1);
         }
+
+        // Releasing the packet, so it can be used in a next request.
+        release_packet(&packets_pool, packet);        
 
         if (ctx.size != 0) {
             // Checking for errors creating the accounts:
@@ -201,9 +206,6 @@ int main(int argc, char **argv) {
             }
             exit(-1);
         }
-
-        // Releasing the packet, so it can be used in a next request.
-        release_packet(&packets_pool, packet);
     }
 
     printf("Transfers created successfully\n");
@@ -239,6 +241,9 @@ int main(int argc, char **argv) {
         exit(-1);
     }
 
+    // Releasing the packet, so it can be used in a next request.
+    release_packet(&packets_pool, packet);    
+
     if (ctx.size == 0) {
         printf("No accounts found");
         exit(-1);
@@ -257,16 +262,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    // Releasing the packet, so it can be used in a next request.
-    release_packet(&packets_pool, packet);
-
-    // Cleanup
+    // Cleanup:
     completion_context_destroy(&ctx);
     tb_client_deinit(client);
 }
 
 tb_packet_t* acquire_packet(tb_packet_list_t *packet_list) {
-    
     // This sample is single-threaded,
     // In real use, this function should be thread-safe.
     tb_packet_t *packet = packet_list->head;
@@ -368,15 +369,15 @@ void completion_context_destroy(completion_context_t *ctx) {
 }
 
 long long get_time_ms(void) {
-    struct timeval tv;
-    if (gettimeofday(&tv,NULL) != 0) {
-        printf("Failed to get time of day\n");
+    struct timespec  ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        printf("Failed to call clock_gettime\n");
         exit(-1);
     }
-    return (((long long)tv.tv_sec)*1000)+(tv.tv_usec/1000);
+    return (ts.tv_sec*1000)+(ts.tv_nsec/1000000);
 }
 
-#else
+#elif _WIN32
 
 void on_completion(
     uintptr_t context, 
@@ -429,7 +430,7 @@ void completion_context_destroy(completion_context_t *ctx) {
 }
 
 long long get_time_ms(void) {
-    return GetTickCount();
+    return GetTickCount64();
 }
 
 #endif
