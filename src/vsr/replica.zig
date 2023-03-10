@@ -221,8 +221,8 @@ pub fn ReplicaType(
         //  since they are regenerated for every request_start_view).
         ///
         /// Invariants:
-        /// - view_change_headers.len     > 0
-        /// - view_change_headers[0].view ≤ self.log_view
+        /// - view_headers.len     > 0
+        /// - view_headers[0].view ≤ self.log_view
         view_headers: vsr.Headers.ViewChangeArray,
 
         /// In some cases, a replica may send a message to itself. We do not submit these messages
@@ -450,7 +450,13 @@ pub fn ReplicaType(
                 }
             }
 
-            var op_head = vsr_headers.slice[0].op;
+            // If we were a lagging backup that installed an SV but didn't finish fast-forwarding,
+            // the vsr_headers head op may be part of the checkpoint after this one.
+            maybe(vsr_headers.slice[0].op > self.op_checkpoint_trigger());
+
+            var op_head = for (vsr_headers.slice) |*header| {
+                if (header.op <= self.op_checkpoint_trigger()) break header.op;
+            } else unreachable;
             assert(op_head <= self.op_checkpoint_trigger());
 
             for (self.journal.headers) |*header| {
@@ -1410,23 +1416,16 @@ pub fn ReplicaType(
                 // 2. Optimization: The cluster does not need to wait for a lagging replicas before
                 //    prepares/commits can resume.
                 // 3. Simplify repair: A new primary never needs to fast-forward to a new checkpoint.
-                // As a further optimization, skip ahead to a view where the most up-to-date replica
-                // will be primary, rather than simply cycling.
-                assert(dvc_latest.header.replica != self.replica);
 
-                var view_next = self.view;
-                while (self.primary_index(view_next) != dvc_latest.header.replica) view_next += 1;
-                assert(self.primary_index(view_next) != self.replica);
-
-                log.debug("{}: on_do_view_change: lagging primary; abdicating " ++
+                log.debug("{}: on_do_view_change: lagging primary; forfeiting " ++
                     "(view={}..{} op={}..{})", .{
                     self.replica,
                     self.view,
-                    view_next,
+                    self.view + 1,
                     self.op,
                     dvc_latest.header.op,
                 });
-                self.transition_to_view_change_status(view_next);
+                self.transition_to_view_change_status(self.view + 1);
                 return;
             }
 
@@ -1497,13 +1496,11 @@ pub fn ReplicaType(
             assert(self.status == .view_change or self.log_view == self.view);
             assert(message.header.view == self.view);
 
-            self.view_headers = vsr.Headers.ViewChangeArray.from_slice(message_body_as_headers_chain_disjoint(message));
-            assert(self.view_headers.array.get(0).view <= self.view);
-            assert(self.view_headers.array.get(0).op == message.header.op);
+            const view_headers = message_body_as_headers_chain_disjoint(message);
+            vsr.Headers.ViewChangeSlice.verify(view_headers);
 
             {
-                const primary_repair_min =
-                    self.view_headers.array.get(self.view_headers.array.len - 1).op;
+                const primary_repair_min = view_headers[view_headers.len - 1].op;
                 var op = self.commit_min + 1;
 
                 // Use "op ≤ primary_repair_min" instead of "=" to force the logs to intersect.
@@ -1526,7 +1523,7 @@ pub fn ReplicaType(
                 }
             }
 
-            for (self.view_headers.array.constSlice()) |*header| {
+            for (view_headers) |*header| {
                 if (header.op <= self.op_checkpoint_trigger()) {
                     if (self.log_view < self.view or
                         (self.log_view == self.view and header.op >= self.op))
@@ -1545,7 +1542,13 @@ pub fn ReplicaType(
                 stdx.unimplemented("state transfer");
             }
 
-            for (self.view_headers.array.constSlice()) |*header| {
+            self.view_headers = vsr.Headers.ViewChangeArray.from_slice(view_headers);
+            assert(self.view_headers.array.get(0).view <= self.view);
+            assert(self.view_headers.array.get(0).op == message.header.op);
+            maybe(self.view_headers.array.get(0).op > self.op_checkpoint_trigger());
+            vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
+
+            for (view_headers) |*header| {
                 if (header.op <= self.op_checkpoint_trigger()) {
                     self.replace_header(header);
                 }
@@ -3050,7 +3053,7 @@ pub fn ReplicaType(
                 // The DVC headers are already up to date, either via:
                 // - transition_to_view_change_status(), or
                 // - superblock's vsr_headers (after recovery).
-                .do_view_change => {},
+                .do_view_change => assert(self.view_headers.array.get(0).op >= self.op),
                 .start_view => {
                     self.view_headers.array.len = 0;
 
@@ -3093,7 +3096,6 @@ pub fn ReplicaType(
                 else => unreachable,
             }
             vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
-            assert(self.view_headers.array.get(0).op == self.op);
 
             message.header.* = .{
                 .size = @intCast(u32, @sizeOf(Header) * (1 + self.view_headers.array.len)),
@@ -3106,7 +3108,9 @@ pub fn ReplicaType(
                 // how recent a view change the replica participated in, which may be much higher.
                 // We use the `timestamp` field to send this in addition to the current view number:
                 .timestamp = if (command == .do_view_change) self.log_view else 0,
-                .op = self.op,
+                // This is usually the head op, but for DVCs it may be farther ahead if we are
+                // lagging behind a checkpoint. (In which case the op is inherited from the SV).
+                .op = self.view_headers.array.get(0).op,
                 // See the comment in `on_do_view_change()` for why `commit_min` is crucial:
                 .commit = self.commit_min,
             };
@@ -5003,7 +5007,7 @@ pub fn ReplicaType(
             assert(message.references == 1);
             assert(message.header.command == .do_view_change);
             assert(message.header.view == self.view);
-            assert(message.header.op == self.op);
+            assert(message.header.op >= self.op);
             assert(message.header.op == message_body_as_headers(message)[0].op);
             // Each replica must advertise its own commit number, so that the new primary can know
             // which headers must be replaced in its log. Otherwise, a gap in the log may prevent
@@ -5153,7 +5157,8 @@ pub fn ReplicaType(
                     assert(!self.do_view_change_quorum);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
-                    assert(message.header.op == self.op);
+                    maybe(message.header.op == self.op);
+                    assert(message.header.op >= self.op);
                     assert(message.header.commit == self.commit_min);
                     assert(message.header.timestamp == self.log_view);
                 },
@@ -5369,7 +5374,6 @@ pub fn ReplicaType(
                 self.status == .normal or self.status == .recovering);
             assert(self.view_headers.array.len > 0);
             assert(self.view_headers.array.get(0).view <= self.log_view);
-            assert(self.view_headers.array.get(0).op == self.op or self.log_view == self.view);
 
             if (self.view_durable_updating()) return;
 
@@ -5897,14 +5901,27 @@ pub fn ReplicaType(
             const status_before = self.status;
             self.status = .view_change;
 
-            // Either:
-            // - Transition from normal status.
-            // - Recovering from normal status.
-            // - Retired primary that didn't finish repair.
-            if (status_before == .normal or
+            if (status_before == .normal and self.view_headers.array.get(0).op > self.op) {
+                // Transition from normal status, but the SV headers were part of the next wrap,
+                // so we didn't install them to our journal, and we didn't catch up.
+                // We will reuse the SV headers as our DVC headers to ensure that participating in
+                // another view-change won't allow the op to backtrack.
+                assert(self.log_view == self.view);
+
+                log.debug("{}: transition_to_view_change_status: " ++
+                    "(op_head={} view_headers_head={})", .{
+                    self.replica,
+                    self.op,
+                    self.view_headers.array.get(0).op,
+                });
+            } else if (status_before == .normal or
                 (status_before == .recovering and self.log_view == self.view) or
                 (status_before == .view_change and self.log_view == self.view))
             {
+                // Either:
+                // - Transition from normal status.
+                // - Recovering from normal status.
+                // - Retired primary that didn't finish repair.
                 assert(self.log_view == self.view);
 
                 self.view_headers.array.len = 0;
@@ -6365,7 +6382,6 @@ const DVCQuorum = struct {
     fn verify_message(message: *const Message) void {
         assert(message.header.command == .do_view_change);
         assert(message.header.op >= message.header.commit);
-        assert(message.header.op - message.header.commit <= constants.journal_slot_count);
 
         // The log_view:
         // * may be higher than the view in any of the prepare headers.
