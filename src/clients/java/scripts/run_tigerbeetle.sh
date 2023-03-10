@@ -12,7 +12,7 @@ if [ -f "$FILE" ]; then
     rm "$FILE"
 fi
 
-../../../tigerbeetle format --cluster=0 --replica=0 "$FILE"
+../../../tigerbeetle format --cluster=0 --replica=0 --replica-count=1 "$FILE"
 
 echo "Starting tigerbeetle ..."
 FILE="./0_0.tigerbeetle.examples"
