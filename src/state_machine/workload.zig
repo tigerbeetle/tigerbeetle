@@ -429,7 +429,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             // Checksum transfers only after the whole batch is ready.
             // The opportunistic linking backtracks to modify transfers.
             for (transfers[0..transfers_count]) |*transfer| {
-                transfer.user_data = vsr.checksum(std.mem.asBytes(transfer));
+                transfer.user_data = vsr.checksum_runtime(std.mem.asBytes(transfer));
             }
             assert(transfers_count == i);
             assert(transfers_count <= transfers.len);
@@ -710,7 +710,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     var check = transfer.*;
                     check.user_data = 0;
                     check.timestamp = 0;
-                    const checksum_expect = vsr.checksum(std.mem.asBytes(&check));
+                    const checksum_expect = vsr.checksum_runtime(std.mem.asBytes(&check));
                     assert(checksum_expect == checksum_actual);
                 }
 

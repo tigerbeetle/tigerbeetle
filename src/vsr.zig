@@ -162,7 +162,7 @@ pub const Operation = enum(u8) {
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
-    const checksum_body_empty = checksum(&.{});
+    const checksum_body_empty = checksum_comptime(&.{});
 
     comptime {
         assert(@sizeOf(Header) == 128);
@@ -280,7 +280,7 @@ pub const Header = extern struct {
     pub fn calculate_checksum(self: *const Header) u128 {
         const checksum_size = @sizeOf(@TypeOf(self.checksum));
         assert(checksum_size == 16);
-        const checksum_value = checksum(std.mem.asBytes(self)[checksum_size..]);
+        const checksum_value = checksum_runtime(std.mem.asBytes(self)[checksum_size..]);
         assert(@TypeOf(checksum_value) == @TypeOf(self.checksum));
         return checksum_value;
     }
@@ -289,7 +289,7 @@ pub const Header = extern struct {
         assert(self.size == @sizeOf(Header) + body.len);
         const checksum_size = @sizeOf(@TypeOf(self.checksum_body));
         assert(checksum_size == 16);
-        const checksum_value = checksum(body);
+        const checksum_value = checksum_runtime(body);
         assert(@TypeOf(checksum_value) == @TypeOf(self.checksum_body));
         return checksum_value;
     }
@@ -1027,7 +1027,11 @@ pub fn sector_ceil(offset: u64) u64 {
     return sectors * constants.sector_size;
 }
 
-pub fn checksum(source: []const u8) u128 {
+pub fn checksum_runtime(source: []const u8) u128 {
+    return @import("blake3.zig").hash(source);
+}
+
+pub fn checksum_comptime(source: []const u8) u128 {
     @setEvalBranchQuota(4000);
 
     var target: [32]u8 = undefined;

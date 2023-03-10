@@ -54,6 +54,7 @@ pub fn build(b: *std.build.Builder) void {
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.omit_frame_pointer = false;
     tigerbeetle.addOptions("vsr_options", options);
+    link_blake3(tigerbeetle);
     link_tracer_backend(tigerbeetle, tracer_backend, target);
 
     {
@@ -80,6 +81,7 @@ pub fn build(b: *std.build.Builder) void {
         benchmark.addPackage(vsr_package);
         benchmark.install();
         benchmark.addOptions("vsr_options", options);
+        link_blake3(benchmark);
         link_tracer_backend(benchmark, tracer_backend, target);
 
         const run_cmd = benchmark.run();
@@ -152,6 +154,7 @@ pub fn build(b: *std.build.Builder) void {
             "test-filter",
             "Skip tests that do not match filter",
         ));
+        link_blake3(unit_tests);
         link_tracer_backend(unit_tests, tracer_backend, target);
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
@@ -246,6 +249,7 @@ pub fn build(b: *std.build.Builder) void {
         simulator.setTarget(target);
         simulator.addOptions("vsr_options", options);
         simulator.addOptions("vsr_simulator_options", simulator_options);
+        link_blake3(simulator);
         link_tracer_backend(simulator, tracer_backend, target);
 
         const run_cmd = simulator.run();
@@ -271,6 +275,7 @@ pub fn build(b: *std.build.Builder) void {
         // Ensure that we get stack traces even in release builds.
         vopr.omit_frame_pointer = false;
         vopr.addOptions("vsr_options", options);
+        link_blake3(vopr);
         link_tracer_backend(vopr, tracer_backend, target);
 
         const run_cmd = vopr.run();
@@ -339,6 +344,7 @@ pub fn build(b: *std.build.Builder) void {
         exe.setBuildMode(mode);
         exe.omit_frame_pointer = false;
         exe.addOptions("vsr_options", options);
+        link_blake3(exe);
         link_tracer_backend(exe, tracer_backend, target);
         const install_step = b.addInstallArtifact(exe);
         const build_step = b.step("build_" ++ fuzzer.name, fuzzer.description);
@@ -373,6 +379,7 @@ pub fn build(b: *std.build.Builder) void {
         exe.setBuildMode(.ReleaseSafe);
         exe.setMainPkgPath("src");
         exe.addOptions("vsr_options", options);
+        link_blake3(exe);
         link_tracer_backend(exe, tracer_backend, target);
 
         const build_step = b.step("build_" ++ benchmark.name, "Build " ++ benchmark.description ++ " benchmark");
@@ -399,6 +406,22 @@ fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
     var output: [40]u8 = undefined;
     std.mem.copy(u8, &output, exec_result.stdout[0..40]);
     return output;
+}
+
+fn link_blake3(
+    exe: *std.build.LibExeObjStep,
+) void {
+    exe.addIncludeDir("./deps/blake3/c/");
+    exe.addCSourceFiles(&.{
+        "deps/blake3/c/blake3.c",
+        "deps/blake3/c/blake3_dispatch.c",
+        "deps/blake3/c/blake3_portable.c",
+        "deps/blake3/c/blake3_sse2_x86-64_unix.S",
+        "deps/blake3/c/blake3_sse41_x86-64_unix.S",
+        "deps/blake3/c/blake3_avx2_x86-64_unix.S",
+        "deps/blake3/c/blake3_avx512_x86-64_unix.S",
+    }, &.{});
+    exe.linkLibC();
 }
 
 fn link_tracer_backend(
@@ -487,6 +510,7 @@ fn go_client(
         lib.setOutputDir("src/clients/go/pkg/native/" ++ platform);
 
         lib.addOptions("vsr_options", options);
+        link_blake3(lib);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         lib.step.dependOn(&install_header.step);
@@ -541,6 +565,7 @@ fn java_client(
         }
 
         lib.addOptions("vsr_options", options);
+        link_blake3(lib);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);
@@ -593,6 +618,7 @@ fn dotnet_client(
         }
 
         lib.addOptions("vsr_options", options);
+        link_blake3(lib);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);
@@ -645,6 +671,7 @@ fn node_client(
         }
 
         lib.addOptions("vsr_options", options);
+        link_blake3(lib);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
         build_step.dependOn(&lib.step);
@@ -702,6 +729,7 @@ fn c_client(
             }
 
             lib.addOptions("vsr_options", options);
+            link_blake3(lib);
             link_tracer_backend(lib, tracer_backend, cross_target);
 
             build_step.dependOn(&lib.step);
@@ -731,6 +759,7 @@ fn c_client_sample(
     static_lib.pie = true;
     static_lib.bundle_compiler_rt = true;
     static_lib.addOptions("vsr_options", options);
+    link_blake3(static_lib);
     link_tracer_backend(static_lib, tracer_backend, target);
     c_sample_build.dependOn(&static_lib.step);
 

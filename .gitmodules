@@ -4,3 +4,6 @@
 [submodule "tools/tracy"]
 	path = tools/tracy
 	url = https://github.com/wolfpld/tracy.git
+[submodule "deps/blake3"]
+	path = deps/blake3
+	url = git@github.com:BLAKE3-team/BLAKE3.git
