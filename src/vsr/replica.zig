@@ -1234,6 +1234,7 @@ pub fn ReplicaType(
                 }
             }
 
+            self.commit_max = std.math.max(self.commit_max, message.header.commit);
             self.commit_journal(message.header.commit);
         }
 
@@ -1503,30 +1504,6 @@ pub fn ReplicaType(
             const view_headers = message_body_as_headers_chain_disjoint(message);
             vsr.Headers.ViewChangeSlice.verify(view_headers);
 
-            {
-                const primary_repair_min = view_headers[view_headers.len - 1].op;
-                var op = self.commit_min + 1;
-
-                // Use "op ≤ primary_repair_min" instead of "=" to force the logs to intersect.
-                // This will cause a state transfer in the case where:
-                // - the repairing replica has a pristine log up to its op_checkpoint_trigger=X
-                // - the SV headers begin at op X+1
-                // But in exchange it avoids a special-case to update the commit_max and verify
-                // X's header.
-                const repairable = while (op <= primary_repair_min) : (op += 1) {
-                    const slot = self.journal.slot_with_op(op) orelse break false;
-                    if (self.journal.dirty.bit(slot)) break false;
-                } else true;
-
-                if (!repairable) {
-                    // This replica is too far behind, i.e. the new `self.op` is too far ahead of
-                    // the last checkpoint. If we wrap now, we overwrite un-checkpointed transfers
-                    // in the WAL, precluding recovery.
-                    // TODO State transfer.
-                    @panic("unimplemented (state transfer)");
-                }
-            }
-
             for (view_headers) |*header| {
                 if (header.op <= self.op_checkpoint_trigger()) {
                     if (self.log_view < self.view or
@@ -1539,9 +1516,9 @@ pub fn ReplicaType(
                     }
                 }
             } else {
-                // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
-                // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
-                // precluding recovery.
+                // This replica is too far behind, i.e. the new `self.op` is too far ahead of
+                // the last checkpoint. If we wrap now, we overwrite un-checkpointed transfers
+                // in the WAL, precluding recovery.
                 // TODO State transfer.
                 stdx.unimplemented("state transfer");
             }
@@ -4025,16 +4002,17 @@ pub fn ReplicaType(
 
         /// Repair. Each step happens in sequence — step n+1 executes when step n is done.
         ///
-        /// 1. Advance the head op to `op_repair_max = min(op_checkpoint_trigger, commit_max)`.
+        /// 1. If we are a backup and have fallen too far behind the primary, initiate state transfer.
+        /// 2. Advance the head op to `op_repair_max = min(op_checkpoint_trigger, commit_max)`.
         ///    To advance the head op we request+await a SV. Either:
         ///    - the SV's "hook" headers include op_checkpoint_trigger (if we are ≤1 wrap behind), or
         ///    - the SV is too far ahead, so we will fall back from WAL repair to state transfer.
-        /// 2. Acquire missing or disconnected headers in reverse chronological order, backwards from
+        /// 3. Acquire missing or disconnected headers in reverse chronological order, backwards from
         ///    op_repair_max.
         ///    A header is disconnected if it breaks the chain with its newer neighbor to the right.
-        /// 3. Repair missing or corrupt prepares in chronological order.
+        /// 4. Repair missing or corrupt prepares in chronological order.
         ///    If we are the primary, this may result in nack/truncation before we start the view.
-        /// 4. Commit up to op_repair_max. If committing triggers a checkpoint, op_repair_max
+        /// 5. Commit up to op_repair_max. If committing triggers a checkpoint, op_repair_max
         ///    increases, so go to step 1 and repeat.
         fn repair(self: *Self) void {
             if (!self.repair_timeout.ticking) {
@@ -4052,6 +4030,31 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
             assert(self.journal.header_with_op(self.op) != null);
+
+            if (self.status == .normal and self.backup()) {
+                const primary_repair_min = (self.commit_max +
+                    constants.pipeline_prepare_queue_max) -|
+                    (constants.journal_slot_count - 1);
+                const backup_repair_next = op: {
+                    if (self.commit_min == self.op) break :op null;
+
+                    if (self.journal.find_latest_headers_break_between(
+                        self.commit_min + 1,
+                        self.op,
+                    )) |range| {
+                        break :op range.op_min;
+                    }
+
+                    break :op self.journal.find_earliest_dirty_header_between(
+                        self.commit_min + 1,
+                        self.op,
+                    );
+                };
+
+                if (backup_repair_next != null and backup_repair_next.? < primary_repair_min) {
+                    @panic("unimplemented (state transfer)");
+                }
+            }
 
             // Request outstanding committed prepares to advance our op number:
             // This handles the case of an idle cluster, where a backup will not otherwise advance.
