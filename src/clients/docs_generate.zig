@@ -4,18 +4,26 @@ const std = @import("std");
 const Docs = @import("./docs_types.zig").Docs;
 const go = @import("./go/docs.zig").GoDocs;
 const node = @import("./node/docs.zig").NodeDocs;
+const java = @import("./java/docs.zig").JavaDocs;
 
-const languages = [_]Docs{ go, node };
+const languages = [_]Docs{ go, node, java };
 
 const MarkdownWriter = struct {
     buf: *std.ArrayList(u8),
     writer: std.ArrayList(u8).Writer,
 
     fn init(buf: *std.ArrayList(u8)) MarkdownWriter {
-        return MarkdownWriter{ .buf = buf, .writer = buf.writer() };
+        return MarkdownWriter{
+            .buf = buf,
+            .writer = buf.writer(),
+        };
     }
 
-    fn header(mw: *MarkdownWriter, comptime n: i8, content: []const u8) void {
+    fn header(
+        mw: *MarkdownWriter,
+        comptime n: i8,
+        content: []const u8,
+    ) void {
         mw.print(("#" ** n) ++ " {s}\n\n", .{content});
     }
 
@@ -27,7 +35,11 @@ const MarkdownWriter = struct {
         mw.print("{s}\n\n", .{content});
     }
 
-    fn code(mw: *MarkdownWriter, language: []const u8, content: []const u8) void {
+    fn code(
+        mw: *MarkdownWriter,
+        language: []const u8,
+        content: []const u8,
+    ) void {
         // Don't print empty lines.
         if (content.len == 0) {
             return;
@@ -45,7 +57,11 @@ const MarkdownWriter = struct {
         mw.print("```\n\n", .{});
     }
 
-    fn print(mw: *MarkdownWriter, comptime fmt: []const u8, args: anytype) void {
+    fn print(
+        mw: *MarkdownWriter,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) void {
         mw.writer.print(fmt, args) catch unreachable;
     }
 
@@ -54,7 +70,10 @@ const MarkdownWriter = struct {
     }
 
     fn diffOnDisk(mw: *MarkdownWriter, filename: []const u8) !bool {
-        const file = try std.fs.cwd().createFile(filename, .{ .read = true, .truncate = false });
+        const file = try std.fs.cwd().createFile(
+            filename,
+            .{ .read = true, .truncate = false },
+        );
         const fSize = (try file.stat()).size;
         if (fSize != mw.buf.items.len) {
             return true;
@@ -64,8 +83,14 @@ const MarkdownWriter = struct {
         var cursor: usize = 0;
         while (cursor < fSize) {
             var maxCanRead = if (fSize - cursor > 4096) 4096 else fSize - cursor;
-            _ = try file.read(buf[0..maxCanRead]);
-            if (std.mem.eql(u8, buf[0..], mw.buf.items[cursor..maxCanRead])) {
+            // Phil: Sometimes this infinite loops and returns `0` but
+            // I don't know why. Allowing it to just overwrite solves the problem.
+            var n = try file.read(buf[0..maxCanRead]);
+            if (n == 0 and maxCanRead != n) {
+                return true;
+            }
+
+            if (std.mem.eql(u8, buf[0..], mw.buf.items[cursor..n])) {
                 return false;
             }
         }
@@ -82,7 +107,10 @@ const MarkdownWriter = struct {
             return;
         }
 
-        const file = try std.fs.cwd().openFile(filename, .{ .write = true });
+        const file = try std.fs.cwd().openFile(
+            filename,
+            .{ .write = true },
+        );
         defer file.close();
 
         try file.setEndPos(0);
@@ -93,6 +121,7 @@ const MarkdownWriter = struct {
 const Generator = struct {
     allocator: std.mem.Allocator,
     language: Docs,
+    test_file_name: []const u8,
 
     const DockerCommand = struct {
         cmds: []const u8,
@@ -100,13 +129,69 @@ const Generator = struct {
         env: ?[][]const u8,
     };
 
-    fn run(self: Generator, cmd: [][]const u8) !void {
+    const docker_mount_path = "/tmp/wrk";
+
+    fn init(
+        allocator: std.mem.Allocator,
+        language: Docs,
+    ) !Generator {
+        var test_file_name = language.test_file_name;
+        if (test_file_name.len == 0) {
+            test_file_name = "test";
+        }
+
+        return Generator{
+            .allocator = allocator,
+            .language = language,
+            .test_file_name = test_file_name,
+        };
+    }
+
+    const TmpDir = struct {
+        dir: std.testing.TmpDir,
+        path: []const u8,
+
+        fn init(allocator: std.mem.Allocator) !TmpDir {
+            var tmp_dir = std.testing.tmpDir(.{});
+            return TmpDir{
+                .dir = tmp_dir,
+                .path = try tmp_dir.dir.realpathAlloc(allocator, "."),
+            };
+        }
+
+        fn cleanup(self: *TmpDir) void {
+            self.dir.cleanup();
+        }
+    };
+
+    fn exec(
+        self: Generator,
+        cmd: []const []const u8,
+    ) !std.ChildProcess.ExecResult {
+        var res = try std.ChildProcess.exec(.{
+            .allocator = self.allocator,
+            .argv = cmd,
+        });
+        switch (res.term) {
+            .Exited => |code| {
+                if (code != 0) {
+                    std.os.exit(1);
+                }
+            },
+
+            else => unreachable,
+        }
+
+        return res;
+    }
+
+    fn run(self: Generator, cmd: []const []const u8) !void {
         var cp = try std.ChildProcess.init(cmd, self.allocator);
         var res = try cp.spawnAndWait();
         switch (res) {
             .Exited => |code| {
                 if (code != 0) {
-                    std.process.exit(1);
+                    std.os.exit(1);
                 }
             },
 
@@ -115,9 +200,14 @@ const Generator = struct {
     }
 
     fn run_in_docker(self: Generator, cmd: DockerCommand) !void {
-        self.print(try std.fmt.allocPrint(self.allocator, "Running command in Docker: {s}", .{cmd.cmds}));
+        self.printf(
+            "Running command in Docker: {s}",
+            .{cmd.cmds},
+        );
 
         var full_cmd = std.ArrayList([]const u8).init(self.allocator);
+        defer full_cmd.deinit();
+
         try full_cmd.appendSlice(&[_][]const u8{
             "docker",
             "run",
@@ -138,55 +228,89 @@ const Generator = struct {
 
         try full_cmd.appendSlice(&[_][]const u8{
             self.language.test_linux_docker_image,
-            "bash",
+            "sh",
             "-c",
             cmd.cmds,
         });
 
-        self.print(try std.fmt.allocPrint(self.allocator, "[Debug] Command: {s}\n", .{full_cmd.items}));
+        self.printf(
+            "[Debug] Command: {s}\n",
+            .{full_cmd.items},
+        );
         try self.run(full_cmd.items);
     }
 
-    fn run_with_file_in_docker(self: Generator, file: []const u8, fileName: ?[]const u8, cmd: DockerCommand) !void {
-        // Delete the directory if it already exists.
-        std.fs.cwd().deleteTree("/tmp/wrk") catch {};
-        std.fs.cwd().makeDir("/tmp/wrk") catch {};
-
-        var tmp_file_name = try std.fmt.allocPrint(
-            self.allocator,
-            "/tmp/wrk/test.{s}",
-            .{self.language.extension},
+    fn ensure_path(self: Generator, path: []const u8) !void {
+        self.printf(
+            "[Debug] Ensuring path: {s}",
+            .{path},
         );
-        if (fileName) |name| {
-            tmp_file_name = try std.fmt.allocPrint(
-                self.allocator,
-                "/tmp/wrk/{s}",
-                .{name},
+        var dir = try std.fs.openDirAbsolute("/", .{});
+        defer dir.close();
+        try dir.makePath(path);
+    }
+
+    fn run_with_file_in_docker(
+        self: Generator,
+        tmp_dir: TmpDir,
+        file: []const u8,
+        file_name: ?[]const u8,
+        cmd: DockerCommand,
+    ) !void {
+        var tmp_file_name = self.sprintf(
+            "{s}/{s}{s}.{s}",
+            .{
+                tmp_dir.path,
+                self.language.test_source_path,
+                self.test_file_name,
+                self.language.extension,
+            },
+        );
+        if (file_name) |name| {
+            tmp_file_name = self.sprintf(
+                "{s}/{s}",
+                .{ tmp_dir.path, name },
             );
         }
-        self.print(try std.fmt.allocPrint(self.allocator, "Mounting in file:\n```{s}\n```", .{file}));
+
+        try self.ensure_path(std.fs.path.dirname(tmp_file_name).?);
+
+        self.printf(
+            "Mounting in file ({s}):\n```\n{s}\n```",
+            .{ tmp_file_name, file },
+        );
+
         var tmp_file = try std.fs.cwd().createFile(tmp_file_name, .{
             .truncate = true,
         });
+        defer tmp_file.close();
         _ = try tmp_file.write(file);
 
         var full_cmd = std.ArrayList(u8).init(self.allocator);
         defer full_cmd.deinit();
 
-        try full_cmd.writer().print("cd /tmp/wrk", .{});
-
-        var install_lines = std.mem.split(u8, self.language.install_commands, "\n");
-        while (install_lines.next()) |line| {
-            try full_cmd.writer().print(" && {s}", .{line});
+        try full_cmd.writer().print(
+            "cd {s} && apk add -U build-base git xz",
+            .{docker_mount_path},
+        );
+        if (self.language.install_prereqs.len > 0) {
+            try full_cmd.writer().print(
+                " && {s}",
+                .{self.language.install_prereqs},
+            );
         }
 
         try full_cmd.writer().print(" && {s}", .{cmd.cmds});
 
         var mount = std.ArrayList([]const u8).init(self.allocator);
+        defer mount.deinit();
         if (cmd.mount) |m| {
             try mount.appendSlice(m);
         }
-        try mount.append("/tmp/wrk:/tmp/wrk");
+        try mount.append(self.sprintf(
+            "{s}:{s}",
+            .{ tmp_dir.path, docker_mount_path },
+        ));
 
         try self.run_in_docker(
             .{
@@ -195,48 +319,21 @@ const Generator = struct {
                 .env = cmd.env,
             },
         );
-
-        tmp_file.close();
-
-        // Don't delete the temp file so the parent calling this can
-        // use it if it wants. Cleanup always only happens in the
-        // beginning of the function.
     }
 
-    fn build_file_in_docker(self: Generator, file: []const u8) !void {
-        try self.run_with_file_in_docker(
-            file,
-            null,
-            .{
-                .cmds = self.language.install_sample_file_build_commands,
-                .mount = null,
-                .env = null,
-            },
-        );
-    }
-
-    fn print(self: Generator, msg: []const u8) void {
-        std.debug.print("[{s}] {s}\n", .{ self.language.markdown_name, msg });
-    }
-
-    fn validate(self: Generator) !void {
-        // Test the sample file
-        self.print("Building minimal sample file");
-        try self.build_file_in_docker(self.language.install_sample_file);
-
-        // Test major parts of sample code
-        var sample = try self.make_aggregate_sample();
-        self.print("Building aggregate sample file");
-        try self.build_file_in_docker(sample);
-
+    fn get_current_commit_and_repo_env(self: Generator) !std.ArrayList([]const u8) {
         var env = std.ArrayList([]const u8).init(self.allocator);
+
         for (&[_][]const u8{
             "GIT_SHA",
+            // TODO: this won't run correctly on forks that are testing
+            // *locally*. But it will run correctly for forks being tested in
+            // Github Actions.
+            // Could fix it by parsing `git remote -v` or something.
             "GITHUB_REPOSITORY",
         }) |env_var_name| {
             if (std.os.getenv(env_var_name)) |value| {
-                try env.append(try std.fmt.allocPrint(
-                    self.allocator,
+                try env.append(self.sprintf(
                     "{s}={s}",
                     .{
                         env_var_name,
@@ -246,18 +343,151 @@ const Generator = struct {
             }
         }
 
+        // GIT_SHA is correct in CI but locally it won't exist. So
+        // if we're local (GIT_SHA isn't set) then grab the current
+        // commit. The current commit isn't correct in CI because CI
+        // is run against pseudo/temporary branches.
+        if (env.items.len == 0 or !std.mem.startsWith(u8, env.items[0], "GIT_SHA=")) {
+            var cp = try self.exec(&[_][]const u8{ "git", "rev-parse", "HEAD" });
+            try env.append(self.sprintf(
+                "GIT_SHA={s}",
+                .{cp.stdout},
+            ));
+        }
+
+        return env;
+    }
+
+    fn write_shell_newlines_into_single_line(into: *std.ArrayList(u8), from: []const u8) !void {
+        if (from.len == 0) {
+            return;
+        }
+
+        var lines = std.mem.split(u8, from, "\n");
+        while (lines.next()) |line| {
+            try into.writer().print("{s} && ", .{line});
+        }
+    }
+
+    fn build_file_in_docker(self: Generator, tmp_dir: TmpDir, file: []const u8, run_setup_tests: bool) !void {
+        // Some languages (Java) have an additional project file
+        // (pom.xml) they need to have available.
+        if (self.language.project_file.len > 0) {
+            const project_file = try std.fs.cwd().createFile(
+                self.sprintf(
+                    "{s}/{s}",
+                    .{ tmp_dir.path, self.language.project_file_name },
+                ),
+                .{ .truncate = true },
+            );
+            defer project_file.close();
+
+            _ = try project_file.write(self.language.project_file);
+        }
+
+        var env = try self.get_current_commit_and_repo_env();
+        defer env.deinit();
+
+        var cmd = std.ArrayList(u8).init(self.allocator);
+        defer cmd.deinit();
+
+        // Build against current commit and set up project to use current build.
+        if (run_setup_tests) {
+            try cmd.appendSlice("export TEST=true && set -x && ");
+        }
+
+        // Join together various setup commands that are shown to the
+        // user (and not) into a single command we can run in Docker.
+        try cmd.appendSlice(" ( ");
+        try write_shell_newlines_into_single_line(
+            &cmd,
+            self.language.developer_setup_sh_commands,
+        );
+        try write_shell_newlines_into_single_line(
+            &cmd,
+            self.language.current_commit_pre_install_commands,
+        );
+        // The above commands all end with ` && `
+        try cmd.appendSlice("echo ok ) && "); // Setup commands within parens ( ) so that cwd doesn't change outside
+
+        try write_shell_newlines_into_single_line(
+            &cmd,
+            self.language.install_commands,
+        );
+        try write_shell_newlines_into_single_line(
+            &cmd,
+            self.language.current_commit_post_install_commands,
+        );
+
+        try write_shell_newlines_into_single_line(
+            &cmd,
+            self.language.install_sample_file_build_commands,
+        );
+
+        // The above commands all end with ` && `
+        try cmd.appendSlice("echo ok");
+
         try self.run_with_file_in_docker(
-            self.language.developer_setup_bash_commands,
-            "setup.sh",
+            tmp_dir,
+            file,
+            null,
             .{
-                // Important to `bash -e` here since setup.sh won't
-                // necessarily have `set -e` inside.
-                .cmds = "apt-get update -y && apt-get install -y xz-utils && bash -e setup.sh",
-                .env = env.items,
+                .cmds = cmd.items,
                 .mount = null,
+                .env = env.items,
             },
         );
     }
+
+    fn print(self: Generator, msg: []const u8) void {
+        std.debug.print("[{s}] {s}\n", .{
+            self.language.markdown_name,
+            msg,
+        });
+    }
+
+    fn printf(self: Generator, comptime msg: []const u8, obj: anytype) void {
+        self.print(self.sprintf(msg, obj));
+    }
+
+    fn sprintf(self: Generator, comptime msg: []const u8, obj: anytype) []const u8 {
+        return std.fmt.allocPrint(
+            self.allocator,
+            msg,
+            obj,
+        ) catch unreachable;
+    }
+
+    fn validateMinimal(self: Generator) !void {
+        // Test the sample file
+        self.print("Building minimal sample file");
+        var tmp_dir = try TmpDir.init(self.allocator);
+        defer tmp_dir.cleanup();
+        try self.build_file_in_docker(tmp_dir, self.language.install_sample_file, true);
+    }
+
+    fn validateAggregate(self: Generator) !void {
+        // Test major parts of sample code
+        var sample = try self.make_aggregate_sample();
+        self.print("Building aggregate sample file");
+        var tmp_dir = try TmpDir.init(self.allocator);
+        defer tmp_dir.cleanup();
+        try self.build_file_in_docker(tmp_dir, sample, false);
+    }
+
+    const tests = [_]struct {
+        name: []const u8,
+        validate: fn (Generator) anyerror!void,
+    }{
+        .{
+            .name = "minimal",
+            .validate = validateMinimal,
+        },
+        .{
+            .name = "aggregate",
+            .validate = validateAggregate,
+        },
+    };
 
     // This will not include every snippet but it includes as much as //
     // reasonable. Both so we can type-check as much as possible and also so
@@ -268,6 +498,7 @@ const Generator = struct {
             self.language.client_object_example,
             self.language.create_accounts_example,
             self.language.account_flags_example,
+            self.language.create_accounts_errors_example,
             self.language.lookup_accounts_example,
             self.language.create_transfers_example,
             self.language.create_transfers_errors_example,
@@ -285,39 +516,6 @@ const Generator = struct {
         return aggregate.items;
     }
 
-    fn make_and_format_aggregate_sample(self: Generator) ![]const u8 {
-        var sample = try self.make_aggregate_sample();
-        try self.run_with_file_in_docker(
-            sample,
-            null,
-            .{
-                .cmds = self.language.code_format_commands,
-                .env = null,
-                .mount = null,
-            },
-        );
-
-        // This is the place where run_with_file_in_docker places the file.
-        var formatted_file_name = try std.fmt.allocPrint(
-            self.allocator,
-            "/tmp/wrk/test.{s}",
-            .{self.language.extension},
-        );
-        var formatted_file = try std.fs.cwd().openFile(formatted_file_name, .{
-            .read = true,
-        });
-
-        const file_size = try formatted_file.getEndPos();
-        var formatted = try self.allocator.alloc(u8, file_size);
-        _ = try formatted_file.read(formatted);
-
-        // Temp file cleanup
-
-        try std.fs.cwd().deleteFile(formatted_file_name);
-
-        return formatted;
-    }
-
     fn generate(self: Generator, mw: *MarkdownWriter) !void {
         var language = self.language;
 
@@ -330,15 +528,39 @@ const Generator = struct {
         mw.paragraph(language.description);
 
         mw.header(3, "Prerequisites");
+        mw.paragraph(
+            \\Linux >= 5.6 is the only production environment we
+            \\support. But for ease of development we support macOS and
+            \\Windows unless otherwise noted.
+        );
         mw.paragraph(language.prerequisites);
 
         mw.header(2, "Setup");
 
+        if (language.project_file.len > 0) {
+            mw.print(
+                "First, create `{s}` and copy this into it:\n\n",
+                .{language.project_file_name},
+            );
+            mw.code(language.markdown_name, language.project_file);
+        }
+
+        mw.paragraph("Run:");
         mw.commands(language.install_commands);
-        mw.print("Create `test.{s}` and copy this into it:\n\n", .{language.extension});
+        mw.print("Now, create `{s}{s}.{s}` and copy this into it:\n\n", .{
+            self.language.test_source_path,
+            self.test_file_name,
+            language.extension,
+        });
         mw.code(language.markdown_name, language.install_sample_file);
-        mw.paragraph("And run:");
+        mw.paragraph("Finally, build and run:");
         mw.commands(language.install_sample_file_test_commands);
+
+        mw.paragraph(
+            \\Now that all prerequisites and depencies are correctly set
+            \\up, let's dig into using TigerBeetle.
+            ,
+        );
 
         mw.paragraph(language.install_documentation);
 
@@ -353,6 +575,13 @@ const Generator = struct {
             \\addresses for all replicas in the cluster. The cluster
             \\ID and replica addresses are both chosen by the system that
             \\starts the TigerBeetle cluster.
+            \\
+            \\Clients are thread-safe. But for better
+            \\performance, a single instance should be shared between
+            \\multiple concurrent tasks.
+            \\
+            \\Multiple clients are useful when connecting to more than
+            \\one TigerBeetle cluster.
             \\
             \\In this example the cluster ID is `0` and there are
             \\three replicas running on ports `3001`, `3002`, and
@@ -385,7 +614,7 @@ const Generator = struct {
         mw.paragraph(language.account_flags_documentation);
 
         mw.paragraph(
-            \\For example, to link `account0` and `account1`, where `account0`
+            \\For example, to link two accounts where the first account
             \\additionally has the `debits_must_not_exceed_credits` constraint:
         );
         mw.code(language.markdown_name, language.account_flags_example);
@@ -404,12 +633,7 @@ const Generator = struct {
         );
 
         mw.code(language.markdown_name, language.create_accounts_errors_example);
-        mw.paragraph(
-            \\The example above shows that the account in index 1 failed
-            \\with error 1. This error here means that `account1` and
-            \\`account3` were created successfully. But `account2` was not
-            \\created.
-        );
+
         mw.paragraph(language.create_accounts_errors_documentation);
 
         mw.header(2, "Account Lookup");
@@ -422,8 +646,6 @@ const Generator = struct {
             \\not necessarily the same as the order of IDs in the
             \\request. You can refer to the ID field in the response to
             \\distinguish accounts.
-            \\
-            \\In this example, account `137` exists while account `138` does not.
         );
         mw.code(language.markdown_name, language.lookup_accounts_example);
 
@@ -519,8 +741,6 @@ const Generator = struct {
             \\transfer. So the order of transfers in the response is not necessarily
             \\the same as the order of `id`s in the request. You can refer to the
             \\`id` field in the response to distinguish transfers.
-            \\
-            \\In this example, transfer `1` exists while transfer `2` does not.
         );
         mw.code(language.markdown_name, language.lookup_transfers_example);
 
@@ -545,14 +765,16 @@ const Generator = struct {
         mw.code(language.markdown_name, language.linked_events_example);
 
         mw.header(2, "Development Setup");
-        // Bash setup
+        // Shell setup
         mw.header(3, "On Linux and macOS");
-        mw.commands(language.developer_setup_bash_commands);
+        mw.paragraph("In a POSIX shell run:");
+        mw.commands(language.developer_setup_sh_commands);
 
         // Windows setup
         mw.header(3, "On Windows");
-        if (language.developer_setup_windows_commands.len > 0) {
-            mw.commands(language.developer_setup_windows_commands);
+        if (language.developer_setup_pwsh_commands.len > 0) {
+            mw.paragraph("In PowerShell run:");
+            mw.commands(language.developer_setup_pwsh_commands);
         } else {
             mw.paragraph("Unsupported.");
         }
@@ -566,15 +788,21 @@ pub fn main() !void {
     var skipLanguage = [_]bool{false} ** languages.len;
     var validate = true;
     var generate = true;
+    var validateOnly: []const u8 = "";
+
     while (args.nextPosix()) |arg| {
-        if (std.mem.eql(u8, arg, "--only")) {
+        if (std.mem.eql(u8, arg, "--language")) {
             var filter = args.nextPosix().?;
             skipLanguage = [_]bool{true} ** languages.len;
             for (languages) |language, i| {
-                if (std.mem.indexOf(u8, filter, language.markdown_name)) |_| {
+                if (std.mem.eql(u8, filter, language.markdown_name)) {
                     skipLanguage[i] = false;
                 }
             }
+        }
+
+        if (std.mem.eql(u8, arg, "--validate")) {
+            validateOnly = args.nextPosix().?;
         }
 
         if (std.mem.eql(u8, arg, "--no-validate")) {
@@ -598,10 +826,32 @@ pub fn main() !void {
         var buf = std.ArrayList(u8).init(allocator);
         var mw = MarkdownWriter.init(&buf);
 
-        var generator = Generator{ .allocator = allocator, .language = language };
+        var generator = try Generator.init(allocator, language);
         if (validate) {
             generator.print("Validating");
-            try generator.validate();
+
+            for (Generator.tests) |t| {
+                var found = false;
+                if (validateOnly.len > 0) {
+                    var parts = std.mem.split(u8, validateOnly, ",");
+                    while (parts.next()) |name| {
+                        if (std.mem.eql(u8, name, t.name)) {
+                            found = true;
+                            break;
+                        }
+                    }
+
+                    if (!found) {
+                        generator.printf(
+                            "Skipping test [{s}]",
+                            .{t.name},
+                        );
+                        continue;
+                    }
+                }
+
+                try t.validate(generator);
+            }
         }
 
         if (generate) {
