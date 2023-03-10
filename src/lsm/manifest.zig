@@ -238,6 +238,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             const manifest_level_a = &manifest.levels[level_a];
             const manifest_level_b = &manifest.levels[level_b];
+
             if (constants.verify) {
                 assert(manifest_level_a.contains(table));
                 assert(!manifest_level_b.contains(table));
@@ -254,6 +255,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // level B instead of the old one in level A.
             manifest_level_b.insert_table(manifest.node_pool, table);
             manifest.manifest_log.insert(@intCast(u7, level_b), table);
+
+            if (constants.verify) {
+                assert(!manifest_level_a.contains(table));
+                assert(manifest_level_b.contains(table));
+            }
         }
 
         pub fn remove_invisible_tables(
