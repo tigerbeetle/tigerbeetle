@@ -654,7 +654,7 @@ pub fn ReplicaType(
                 .commit_min = self.superblock.working.vsr_state.commit_min,
                 .commit_max = self.superblock.working.vsr_state.commit_max,
                 .pipeline = .{ .cache = .{} },
-                .view_headers = vsr.Headers.ViewChangeArray.from_slice(
+                .view_headers = vsr.Headers.ViewChangeArray.init_from_slice(
                     self.superblock.working.vsr_headers().slice,
                 ),
                 .ping_timeout = Timeout{
@@ -1465,9 +1465,13 @@ pub fn ReplicaType(
 
             self.view_jump(message.header);
 
-            assert(self.status == .view_change or self.status == .normal);
-            assert(self.status == .view_change or self.backup());
-            assert(self.status == .view_change or self.log_view == self.view);
+            if (self.status == .view_change) {
+                assert(self.log_view <= self.view);
+            } else {
+                assert(self.status == .normal);
+                assert(self.backup());
+                assert(self.log_view == self.view);
+            }
             assert(message.header.view == self.view);
 
             const view_headers = message_body_as_headers_chain_disjoint(message);
@@ -1523,7 +1527,7 @@ pub fn ReplicaType(
                 unreachable;
             }
 
-            self.view_headers = vsr.Headers.ViewChangeArray.from_slice(view_headers);
+            self.view_headers.replace(view_headers);
             assert(self.view_headers.array.get(0).view <= self.view);
             assert(self.view_headers.array.get(0).op == message.header.op);
             maybe(self.view_headers.array.get(0).op > self.op_checkpoint_trigger());
