@@ -1149,7 +1149,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///    So if step 1 loaded slot 8's prepare header into `journal.headers`, slot 8's
         ///    redundant header would be updated at the same time (in the same write) as slot 9.
         /// 7! Immediately after step 6's write finishes, suppose the replica crashes (e.g. due to
-        ///    power failure.
+        ///    power failure).
         /// 8! Journal recovery again — but now slot 8 is loaded *without* being marked faulty.
         ///    So we may incorrectly nack slot 8's message.
         ///
@@ -1528,10 +1528,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const callback = journal.status.recovering;
             journal.status = .recovered;
 
-            // Abort if all slots are faulty, since something is very wrong.
-            if (journal.faulty.count == slot_count) @panic("WAL is completely corrupt");
-            if (journal.faulty.count > 0 and replica.solo()) @panic("WAL is corrupt");
-
             if (journal.headers[0].op == 0 and journal.headers[0].command == .prepare) {
                 assert(journal.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
                 assert(!journal.faulty.bit(Slot{ .index = 0 }));
@@ -1551,8 +1547,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(!journal.faulty.bit(Slot{ .index = index }));
                 }
             }
-
-            // From here it's over to the Recovery protocol from VRR 2012.
             callback(journal);
         }
 

@@ -418,6 +418,9 @@ pub fn ReplicaType(
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
 
+            // Abort if all slots are faulty, since something is very wrong.
+            if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
+
             const vsr_headers = self.superblock.working.vsr_headers();
             for (vsr_headers.slice) |*header| {
                 const slot = .{ .index = header.op % constants.journal_slot_count };
@@ -482,9 +485,7 @@ pub fn ReplicaType(
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
             if (self.solo()) {
-                if (self.journal.faulty.count > 0) {
-                    @panic("journal is corrupt");
-                }
+                if (self.journal.faulty.count > 0) return error.WALCorrupt;
                 assert(self.op_head_certain());
 
                 // Solo replicas must increment their view after recovery.
