@@ -312,6 +312,8 @@ pub const journal_iops_read_max = config.process.journal_iops_read_max;
 /// Ideally this is at least as high as pipeline_prepare_queue_max, but it is safe to be lower.
 pub const journal_iops_write_max = config.process.journal_iops_write_max;
 
+/// The number of bytes allocated for the grid cache.
+pub const grid_cache_size = config.process.grid_cache_size;
 /// The maximum number of concurrent grid read I/O operations to allow at once.
 pub const grid_iops_read_max = config.process.grid_iops_read_max;
 /// The maximum number of concurrent grid write I/O operations to allow at once.
