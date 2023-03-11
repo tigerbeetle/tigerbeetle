@@ -162,9 +162,7 @@ pub fn GridType(comptime Storage: type) type {
         read_resolving: bool = false,
 
         pub fn init(allocator: mem.Allocator, superblock: *SuperBlock) !Grid {
-            // TODO Determine this at runtime based on runtime configured maximum
-            // memory usage of tigerbeetle.
-            const cache_blocks_count = 2048;
+            const cache_blocks_count = @divExact(constants.grid_cache_size, constants.block_size);
 
             const cache_blocks = try allocator.alloc(BlockPtr, cache_blocks_count);
             errdefer allocator.free(cache_blocks);

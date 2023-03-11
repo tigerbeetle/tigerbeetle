@@ -67,6 +67,7 @@ const ConfigProcess = struct {
     clock_epoch_max_ms: u64 = 60000,
     clock_synchronization_window_min_ms: u64 = 2000,
     clock_synchronization_window_max_ms: u64 = 20000,
+    grid_cache_size: u64,
     grid_iops_read_max: u64 = 16,
     grid_iops_write_max: u64 = 16,
 };
@@ -145,6 +146,7 @@ pub const configs = struct {
             .cache_transfers_max = 0,
             .cache_transfers_posted_max = 256 * 1024,
             .verify = false,
+            .grid_cache_size = 16 * 1024 * 1024 * 1024,
         },
         .cluster = .{
             .clients_max = 32,
@@ -162,6 +164,7 @@ pub const configs = struct {
             .cache_transfers_max = 0,
             .cache_transfers_posted_max = 256 * 1024,
             .verify = true,
+            .grid_cache_size = 128 * 1024 * 1024,
         },
         .cluster = default_production.cluster,
     };
@@ -176,6 +179,7 @@ pub const configs = struct {
             .cache_transfers_max = 0,
             .cache_transfers_posted_max = 2048,
             .verify = true,
+            .grid_cache_size = 128 * 1024 * 1024,
         },
         .cluster = .{
             .clients_max = 4 + 3,
