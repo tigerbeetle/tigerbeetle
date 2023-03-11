@@ -372,7 +372,7 @@ test "Quorums.working" {
     var prng = std.rand.DefaultPrng.init(123);
 
     // Don't print warnings from the Quorums.
-    var level = std.log.Level.err;
+    var level = std.testing.log_level;
     std.testing.log_level = std.log.Level.err;
     defer std.testing.log_level = level;
 
@@ -383,7 +383,7 @@ test "Quorum.repairs" {
     var prng = std.rand.DefaultPrng.init(123);
 
     // Don't print warnings from the Quorums.
-    var level = std.log.Level.err;
+    var level = std.testing.log_level;
     std.testing.log_level = std.log.Level.err;
     defer std.testing.log_level = level;
 

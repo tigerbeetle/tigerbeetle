@@ -974,7 +974,7 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
             const realtime = self.clock.realtime_synchronized() orelse {
-                log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+                log.warn("{}: on_request: dropping (clock not synchronized)", .{self.replica});
                 return;
             };
 
@@ -3416,7 +3416,10 @@ pub fn ReplicaType(
                         return true;
                     }
                 } else {
-                    log.err("{}: on_request: ignoring newer request (client bug)", .{self.replica});
+                    // Caused by one of the following:
+                    // - client bug, or
+                    // - this primary is no longer the actual primary
+                    log.warn("{}: on_request: ignoring newer request (client|network bug)", .{self.replica});
                     return true;
                 }
             } else if (message.header.operation == .register) {
