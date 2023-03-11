@@ -162,8 +162,9 @@ pub fn ReplicaType(
         /// The op number assigned to the most recently prepared operation.
         /// This op is sometimes referred to as the replica's "head" or "head op".
         ///
-        /// Invariants (not applicable during status=recovering):
+        /// Invariants (not applicable during status=recovering|recovering_head):
         /// * `replica.op` exists in the Journal.
+        /// * `replica.op ≥ replica.op_checkpoint`.
         /// * `replica.op ≥ replica.commit_min`.
         /// * `replica.op - replica.commit_min    ≤ journal_slot_count`
         /// * `replica.op - replica.op_checkpoint ≤ journal_slot_count`
@@ -3713,10 +3714,21 @@ pub fn ReplicaType(
         ///              (`replica.op_checkpoint` == `replica.op`).
         fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
-            assert(self.op_checkpoint() <= self.op);
+
+            // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt.
+            if (self.op < self.op_checkpoint()) return false;
 
             const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint());
             const slot_op_head = self.journal.slot_with_op(self.op).?;
+            if (slot_op_head.index == slot_op_checkpoint.index) {
+                return self.journal.faulty.count == 0;
+            }
+
+            // For the op-head to be faulty, this must be a header that was restored from the
+            // superblock VSR headers atop a corrupt slot. We can't trust the head: that corrupt
+            // slot may have originally been op that is a wrap ahead.
+            if (self.journal.faulty.bit(slot_op_head)) return false;
+
             const slot_known_range = vsr.SlotRange{
                 .head = slot_op_checkpoint,
                 .tail = slot_op_head,
@@ -3724,11 +3736,7 @@ pub fn ReplicaType(
 
             var iterator = self.journal.faulty.bits.iterator(.{ .kind = .set });
             while (iterator.next()) |slot| {
-                if (slot_op_checkpoint.index == slot_op_head.index or
-                    !slot_known_range.contains(.{ .index = slot }))
-                {
-                    return false;
-                }
+                if (!slot_known_range.contains(.{ .index = slot })) return false;
             }
             return true;
         }
@@ -5693,13 +5701,12 @@ pub fn ReplicaType(
         }
 
         fn transition_to_recovering_head(self: *Self) void {
+            assert(!self.solo());
             assert(self.status == .recovering);
             assert(self.view == self.log_view);
-            assert(self.op >= self.commit_min);
             assert(!self.committing);
-            assert(!self.solo());
-            assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
+            assert(self.journal.header_with_op(self.op) != null);
 
             self.status = .recovering_head;
 
