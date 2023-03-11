@@ -490,7 +490,7 @@ fn test_codec(manifest: *Manifest) !void {
     );
 }
 
-test {
+test "SuperBlockManifest" {
     const testing = std.testing;
     const expectEqual = testing.expectEqual;
     const BlockReference = Manifest.BlockReference;
