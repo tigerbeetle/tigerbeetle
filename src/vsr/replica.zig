@@ -1491,16 +1491,17 @@ pub fn ReplicaType(
                 return;
             }
 
-            self.view_jump(message.header);
-
-            if (self.status == .view_change) {
-                assert(self.log_view <= self.view);
+            if (self.status == .recovering_head) {
+                self.view = message.header.view;
             } else {
-                assert(self.status == .normal);
-                assert(self.backup());
-                assert(self.log_view == self.view);
+                self.view_jump(message.header);
+                assert(self.view == message.header.view);
+
+                if (self.status == .normal) {
+                    assert(self.backup());
+                    assert(self.view == self.log_view);
+                }
             }
-            assert(message.header.view == self.view);
 
             const view_headers = message_body_as_headers_chain_disjoint(message);
             vsr.Headers.ViewChangeSlice.verify(view_headers);
@@ -1536,13 +1537,22 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.status == .view_change) {
-                self.transition_to_normal_from_view_change_status(message.header.view);
-                self.send_prepare_oks_after_view_change();
-                self.commit_journal(self.commit_max);
+            switch (self.status) {
+                .view_change => {
+                    self.transition_to_normal_from_view_change_status(message.header.view);
+                    self.send_prepare_oks_after_view_change();
+                    self.commit_journal(self.commit_max);
+                },
+                .recovering_head => {
+                    self.transition_to_normal_from_recovering_head_status(message.header.view);
+                    self.commit_journal(self.commit_max);
+                },
+                .normal => {},
+                .recovering => unreachable,
             }
 
             assert(self.status == .normal);
+            assert(message.header.view == self.log_view);
             assert(message.header.view == self.view);
             assert(self.backup());
 
@@ -3795,7 +3805,8 @@ pub fn ReplicaType(
         ///
         fn op_checkpoint_next(self: *const Self) u64 {
             assert(self.op_checkpoint() <= self.commit_min);
-            assert(self.op_checkpoint() <= self.op or self.status == .recovering);
+            assert(self.op_checkpoint() <= self.op or
+                self.status == .recovering or self.status == .recovering_head);
             assert(self.op_checkpoint() == 0 or
                 (self.op_checkpoint() + 1) % constants.lsm_batch_multiple == 0);
 
@@ -3840,7 +3851,8 @@ pub fn ReplicaType(
         ///   - primaries do repair checkpointed ops — as many as are guaranteed to exist anywhere in
         ///     the cluster, so that they can help lagging backups catch up.
         fn op_repair_min(self: *const Self) u64 {
-            assert(self.status == .normal or self.status == .view_change);
+            assert(self.status == .normal or self.status == .view_change or
+                self.status == .recovering_head);
             assert(self.op >= self.op_checkpoint());
             assert(self.op <= self.op_checkpoint_trigger());
 
@@ -4761,7 +4773,8 @@ pub fn ReplicaType(
         /// Replaces the header if the header is different and at least op_repair_min.
         /// The caller must ensure that the header is trustworthy (part of the current view's log).
         fn replace_header(self: *Self, header: *const Header) void {
-            assert(self.status == .normal or self.status == .view_change);
+            assert(self.status == .normal or self.status == .view_change or
+                self.status == .recovering_head);
             assert(self.op_checkpoint() <= self.commit_min);
 
             assert(header.command == .prepare);
@@ -5467,7 +5480,8 @@ pub fn ReplicaType(
         }
 
         fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
-            assert(self.status == .view_change or self.status == .normal);
+            assert(self.status == .view_change or self.status == .normal or
+                self.status == .recovering_head);
 
             // Uncommitted ops may not survive a view change so we must assert `op` against
             // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:
@@ -5801,6 +5815,48 @@ pub fn ReplicaType(
             }
         }
 
+        fn transition_to_normal_from_recovering_head_status(self: *Self, view_new: u32) void {
+            assert(!self.solo());
+            assert(self.status == .recovering_head);
+            assert(self.view >= self.log_view);
+            assert(self.view <= view_new);
+            assert(!self.committing);
+            assert(self.journal.header_with_op(self.op) != null);
+            assert(self.pipeline == .cache);
+
+            log.debug(
+                "{}: transition_to_normal_from_recovering_head_status: view={}..{} backup",
+                .{
+                    self.replica,
+                    self.view,
+                    view_new,
+                },
+            );
+
+            self.status = .normal;
+            if (self.log_view == view_new and self.view == view_new) {
+                // Recovering to the same view we lost the head in.
+            } else {
+                self.view = view_new;
+                self.log_view = view_new;
+                self.view_durable_update();
+            }
+
+            assert(!self.prepare_timeout.ticking);
+            assert(!self.primary_abdicate_timeout.ticking);
+            assert(!self.normal_heartbeat_timeout.ticking);
+            assert(!self.start_view_change_window_timeout.ticking);
+            assert(!self.commit_message_timeout.ticking);
+            assert(!self.view_change_status_timeout.ticking);
+            assert(!self.do_view_change_message_timeout.ticking);
+            assert(!self.request_start_view_message_timeout.ticking);
+
+            self.ping_timeout.start();
+            self.normal_heartbeat_timeout.start();
+            self.start_view_change_message_timeout.start();
+            self.repair_timeout.start();
+        }
+
         fn transition_to_normal_from_view_change_status(self: *Self, view_new: u32) void {
             // In the VRR paper it's possible to transition from normal to normal for the same view.
             // For example, this could happen after a state transfer triggered by an op jump.
@@ -5896,13 +5952,11 @@ pub fn ReplicaType(
         fn transition_to_view_change_status(self: *Self, view_new: u32) void {
             assert(self.status == .normal or
                 self.status == .view_change or
-                self.status == .recovering or
-                self.status == .recovering_head);
+                self.status == .recovering);
             assert(view_new >= self.log_view);
             assert(view_new >= self.view);
-            assert(view_new > self.view or
-                self.status == .recovering or self.status == .recovering_head);
-            assert(view_new > self.log_view or self.status == .recovering_head);
+            assert(view_new > self.view or self.status == .recovering);
+            assert(view_new > self.log_view);
 
             log.debug("{}: transition_to_view_change_status: view={}..{} status={}..{}", .{
                 self.replica,
@@ -5967,25 +6021,15 @@ pub fn ReplicaType(
                 // However, that can make view-change bugs harder to trigger.
             }
 
-            if (status_before == .recovering_head) {
-                // This function was called by a view_jump() via on_start_view(), so we are about to
-                // transition to normal status.
-                // - Updating view_durable would just delay the view_durable update (to the log
-                //   view) that will immediately follow.
-                // - Poison the view_headers — we are joining a running view.
-                self.view = view_new;
-                self.view_headers.array.len = 0;
-            } else {
-                vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
-                assert(self.view_headers.array.get(self.view_headers.array.len - 1).op <=
-                    std.math.max(self.commit_max, self.op -| constants.pipeline_prepare_queue_max) + 1);
+            vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
+            assert(self.view_headers.array.get(self.view_headers.array.len - 1).op <=
+                std.math.max(self.commit_max, self.op -| constants.pipeline_prepare_queue_max) + 1);
 
-                if (self.view == view_new) {
-                    assert(status_before == .recovering);
-                } else {
-                    self.view = view_new;
-                    self.view_durable_update();
-                }
+            if (self.view == view_new) {
+                assert(status_before == .recovering);
+            } else {
+                self.view = view_new;
+                self.view_durable_update();
             }
 
             if (self.pipeline == .queue) {
@@ -6025,12 +6069,7 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum == false);
             assert(self.nack_prepare_op == null);
 
-            if (status_before == .recovering_head) {
-                // We don't trust our op-head yet, so we cannot participate in the view-change.
-                // And we just received a SV, so we don't need to.
-            } else {
-                self.send_do_view_change();
-            }
+            self.send_do_view_change();
         }
 
         fn update_client_table_entry(self: *Self, reply: *Message) void {
@@ -6210,10 +6249,8 @@ pub fn ReplicaType(
                     });
                 },
                 .view_change => {
-                    assert(self.status == .recovering_head or header.view > self.view);
-                    assert(self.status != .recovering_head or header.command == .start_view);
-                    assert(self.status == .recovering_head or self.status == .view_change or
-                        self.status == .normal);
+                    assert(self.status == .normal or self.status == .view_change);
+                    assert(self.view < header.view);
 
                     if (header.view == self.view + 1) {
                         log.debug("{}: view_jump: jumping to view change", .{self.replica});
