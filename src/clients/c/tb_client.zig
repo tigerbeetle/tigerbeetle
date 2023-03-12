@@ -99,7 +99,8 @@ pub fn tb_client_init_echo(
     on_completion_fn: tb_completion_t,
 ) callconv(.C) tb_status_t {
     return init(
-        TestingContext,
+        //PENDING: Adjust EchoClient:
+        DefaultContext,
         out_client,
         out_packets,
         cluster_id,

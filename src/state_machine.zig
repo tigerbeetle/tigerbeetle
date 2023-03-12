@@ -48,15 +48,93 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                     assert(lookup_accounts > 0);
                     assert(lookup_transfers > 0);
                 }
+            };
 
-                fn operation_batch_max(comptime operation: Operation) usize {
-                    return @divFloor(message_body_size_max, std.math.max(
-                        @sizeOf(Event(operation)),
-                        @sizeOf(Result(operation)),
-                    ));
+            /// Operations that allow multiple logical batches in a single request.
+            pub fn operation_batch_logical_allowed(comptime operation: Operation) bool {
+                return switch (operation) {
+                    .create_accounts => true,
+                    .create_transfers => true,
+                    .lookup_accounts => false,
+                    .lookup_transfers => false,
+                    else => unreachable,
+                };
+            }
+
+            pub fn operation_batch_max(comptime operation: Operation) usize {
+                return @divFloor(message_body_size_max, std.math.max(
+                    @sizeOf(Event(operation)),
+                    @sizeOf(Result(operation)),
+                ));
+            }
+
+            pub fn operation_batch_min(comptime operation: Operation) usize {
+                return switch (operation) {
+                    .create_accounts,
+                    .create_transfers,
+                    .lookup_accounts,
+                    .lookup_transfers,
+                    => 1,
+                    else => unreachable,
+                };
+            }
+        };
+
+        pub fn DemuxerType(comptime operation: Operation) type {
+            comptime assert(constants.operation_batch_logical_allowed(operation));
+            return struct {
+                const Self = @This();
+
+                results: []Result(operation),
+                index: u32,
+
+                pub fn init(reply: []align(16) u8) Self {
+                    return .{
+                        .results = std.mem.bytesAsSlice(Result(operation), reply),
+                        .index = 0,
+                    };
+                }
+
+                /// Decodes the state machine reply into multiple logical batches.
+                /// Example for create_accounts and create_transfers:
+                ///
+                /// Reply (index,result):
+                /// (0,x),(1,x),(3,x),(5,x),(20,x)
+                ///
+                /// Demux process:
+                /// Offset | Size | Reply       | Demuxed reply
+                /// -------|------|-------------|---------------
+                ///  0     | 2    | (0,x),(1,x) | (0,x),(1,x)
+                ///  2     | 10   | (3,x),(5,x) | (1,x),(3,x)
+                ///  12    | 8    | ()          | ()
+                ///  20    | 1    | (20,x)      | (0,x)
+                pub fn decode(self: *Self, demux_offset: u32, demux_size: u32) []const u8 {
+
+                    // There is no more results to process,
+                    // therefore this is an empty result (all success).
+                    if (self.index >= self.results.len) {
+                        return &[_]u8{};
+                    } else {
+                        const demux_index_start = @divExact(demux_offset, @sizeOf(Event(operation)));
+                        const demux_index_end = demux_index_start + @divExact(demux_size, @sizeOf(Event(operation)));
+
+                        const index_start = self.index;
+                        for (self.results[index_start..]) |*result| {
+                            // If this result is related to a next logical batch
+                            // breaks the loop, returning the range processed so far.
+                            if (result.index >= demux_index_end) break;
+
+                            // Adjusts the index relative to the logical batch's offset:
+                            assert(result.index >= demux_index_start);
+                            result.index -= demux_index_start;
+                            self.index += 1;
+                        }
+
+                        return std.mem.sliceAsBytes(self.results[index_start..self.index]);
+                    }
                 }
             };
-        };
+        }
 
         pub const AccountImmutable = extern struct {
             id: u128,

@@ -56,7 +56,7 @@ pub fn ContextType(
             assert(@sizeOf(UserData) == @sizeOf(u128));
         }
 
-        fn operation_event_size(op: u8) ?usize {
+        fn operation_cast(op: u8) ?Client.StateMachine.Operation {
             const allowed_operations = [_]Client.StateMachine.Operation{
                 .create_accounts,
                 .create_transfers,
@@ -66,17 +66,13 @@ pub fn ContextType(
 
             inline for (allowed_operations) |operation| {
                 if (op == @enumToInt(operation)) {
-                    return @sizeOf(Client.StateMachine.Event(operation));
+                    return operation;
                 }
-            }
-
-            return null;
+            } else return null;
         }
 
         const PacketError = Client.Error || error{
-            TooMuchData,
-            InvalidOperation,
-            InvalidDataSize,
+            OperationInvalid,
         };
 
         allocator: std.mem.Allocator,
@@ -86,7 +82,7 @@ pub fn ContextType(
         addresses: []const std.net.Address,
         io: IO,
         message_pool: MessagePool,
-        messages_available: usize,
+        messages_available: bool,
         client: Client,
 
         on_completion_ctx: usize,
@@ -157,6 +153,7 @@ pub fn ContextType(
                 context.client_id,
                 cluster_id,
                 @intCast(u8, context.addresses.len),
+                packets_count_max,
                 &context.message_pool,
                 .{
                     .configuration = context.addresses,
@@ -165,7 +162,7 @@ pub fn ContextType(
             );
             errdefer context.client.deinit(context.allocator);
 
-            context.messages_available = constants.client_request_queue_max;
+            context.messages_available = true;
             context.on_completion_ctx = on_completion_ctx;
             context.on_completion_fn = on_completion_fn;
             context.implementation = .{
@@ -210,48 +207,45 @@ pub fn ContextType(
         }
 
         pub fn request(self: *Context, packet: *Packet) void {
-            const message = self.message_pool.get_message();
-            defer self.message_pool.unref(message);
-            self.messages_available -= 1;
-
-            // Get the size of each request structure in the packet.data:
-            const event_size: usize = operation_event_size(packet.operation) orelse {
-                return self.on_complete(packet, error.InvalidOperation);
+            // Check if it's a valid operation.
+            const operation = operation_cast(packet.operation) orelse {
+                return self.on_complete(packet, PacketError.OperationInvalid);
             };
 
-            // Make sure the packet.data size is correct:
-            const readable = @ptrCast([*]const u8, packet.data)[0..packet.data_size];
-            if (readable.len == 0 or readable.len % event_size != 0) {
-                return self.on_complete(packet, error.InvalidDataSize);
-            }
-
-            // Make sure the packet.data wouldn't overflow a message:
-            const writable = message.buffer[@sizeOf(Header)..][0..constants.message_body_size_max];
-            if (readable.len > writable.len) {
-                return self.on_complete(packet, error.TooMuchData);
-            }
+            var batch_logical = self.client.get_batch(
+                operation,
+                packet.data_size,
+            ) catch |err| {
+                switch (err) {
+                    error.BatchTooManyOutstanding => {
+                        // If there's too many requests, (re)try submitting the packet later.
+                        self.messages_available = false;
+                        self.thread.retry.push(Packet.List.from(packet));
+                    },
+                    else => self.on_complete(packet, err),
+                }
+                return;
+            };
 
             // Write the packet data to the message:
-            stdx.copy_disjoint(.inexact, u8, writable, readable);
-            const wrote = readable.len;
+            const data = @ptrCast([*]const u8, packet.data)[0..packet.data_size];
+            stdx.copy_disjoint(.exact, u8, batch_logical.slice(), data);
 
             // Submit the message for processing:
-            self.client.request(
+            self.client.submit_batch(
                 @bitCast(u128, UserData{
                     .self = self,
                     .packet = packet,
                 }),
                 Context.on_result,
-                @intToEnum(Client.StateMachine.Operation, packet.operation),
-                message,
-                wrote,
+                batch_logical,
             );
         }
 
         fn on_result(
             raw_user_data: u128,
             op: Client.StateMachine.Operation,
-            results: Client.Error![]const u8,
+            results: []const u8,
         ) void {
             const user_data = @bitCast(UserData, raw_user_data);
             const self = user_data.self;
@@ -266,22 +260,19 @@ pub fn ContextType(
             packet: *Packet,
             result: PacketError![]const u8,
         ) void {
-            self.messages_available += 1;
-            assert(self.messages_available <= constants.client_request_queue_max);
-
             // Signal to resume sending requests that was waiting for available messages.
-            if (self.messages_available == 1) self.thread.signal.notify();
+            if (!self.messages_available) {
+                self.messages_available = true;
+                self.thread.signal.notify();
+            }
 
             const tb_client = api.context_to_client(&self.implementation);
             const bytes = result catch |err| {
                 packet.status = switch (err) {
-                    // If there's too many requests, (re)try submitting the packet later.
-                    error.TooManyOutstandingRequests => {
-                        return self.thread.retry.push(Packet.List.from(packet));
-                    },
-                    error.TooMuchData => .too_much_data,
-                    error.InvalidOperation => .invalid_operation,
-                    error.InvalidDataSize => .invalid_data_size,
+                    PacketError.BatchBodySizeInvalid => .invalid_data_size,
+                    PacketError.BatchBodySizeExceeded => .too_much_data,
+                    PacketError.OperationInvalid => .invalid_operation,
+                    PacketError.BatchTooManyOutstanding => unreachable,
                 };
                 return (self.on_completion_fn)(self.on_completion_ctx, tb_client, packet, null, 0);
             };

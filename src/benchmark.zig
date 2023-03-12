@@ -80,6 +80,8 @@ pub fn main() !void {
         client_id,
         cluster_id,
         @intCast(u8, address.len),
+        // PENDING: Figure out a better way to default "batch_logical_max"
+        constants.client_request_queue_max,
         &message_pool,
         .{
             .configuration = address[0..],
