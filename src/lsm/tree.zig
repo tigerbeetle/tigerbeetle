@@ -145,6 +145,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
         compaction_io_pending: usize,
         compaction_callback: ?fn (*Tree) void,
+        compaction_next_tick: Grid.NextTick = undefined,
 
         checkpoint_callback: ?fn (*Tree) void,
         open_callback: ?fn (*Tree) void,
@@ -544,7 +545,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     tree.compact_mutable_table_into_immutable();
                 }
 
-                callback(tree);
+                tree.compaction_callback = callback;
+                tree.grid.on_next_tick(compact_ready_next_tick, &tree.compaction_next_tick);
                 return;
             }
 
@@ -562,14 +564,23 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     tree.compact_mutable_table_into_immutable();
                 }
 
-                // TODO Defer this callback until tick() to avoid stack growth.
-                callback(tree);
+                tree.compaction_callback = callback;
+                tree.grid.on_next_tick(compact_ready_next_tick, &tree.compaction_next_tick);
                 return;
             }
             assert(op == tree.lookup_snapshot_max);
 
             tree.compact_start(callback);
             tree.compact_drive();
+        }
+
+        fn compact_ready_next_tick(next_tick: *Grid.NextTick) void {
+            const tree = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
+            assert(tree.compaction_io_pending == 0);
+            
+            const callback = tree.compaction_callback.?;
+            tree.compaction_callback = null;
+            callback(tree);
         }
 
         fn compact_start(tree: *Tree, callback: fn (*Tree) void) void {
