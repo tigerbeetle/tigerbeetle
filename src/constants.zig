@@ -205,9 +205,7 @@ comptime {
 ///   - These help a lagging replica catch up when its `op < commit_max`.
 ///   - There are at most two of these in the journal.
 ///     (There are 2 immediately after we checkpoint, until we prepare enough to overwrite one).
-/// - +1: We must provide the header corresponding to the oldest op the primary guarantees is
-///   repairable.
-pub const view_change_headers_max = view_change_headers_suffix_max + 2 + 1;
+pub const view_change_headers_max = view_change_headers_suffix_max + 2;
 
 /// Maximum number of headers from the WAL suffix to include in an SV message.
 /// Must at least cover the full pipeline.
@@ -219,7 +217,7 @@ comptime {
     assert(view_change_headers_suffix_max >= pipeline_prepare_queue_max);
 
     assert(view_change_headers_max > 0);
-    assert(view_change_headers_max >= pipeline_prepare_queue_max + 3);
+    assert(view_change_headers_max >= pipeline_prepare_queue_max + 2);
     assert(view_change_headers_max <= journal_slot_count);
     assert(view_change_headers_max <= @divFloor(message_body_size_max, @sizeOf(vsr.Header)));
     assert(view_change_headers_max > view_change_headers_suffix_max);
