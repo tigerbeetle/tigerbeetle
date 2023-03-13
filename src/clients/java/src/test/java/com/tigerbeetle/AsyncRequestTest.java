@@ -156,7 +156,7 @@ public class AsyncRequestTest {
         }
     }
 
-    @Test(expected = AssertionError.class)
+    @Test
     public void testEndRequestWithNullBuffer() throws Throwable {
 
         var client = NativeClient.initEcho(0, "3000", 1);
@@ -171,13 +171,8 @@ public class AsyncRequestTest {
         callback.start();
         assertFalse(future.isDone());
 
-        try {
-            future.get();
-            assert false;
-        } catch (ExecutionException e) {
-            assertNotNull(e.getCause());
-            throw e.getCause();
-        }
+        var result = future.get();
+        assertEquals(0, result.getLength());
     }
 
     @Test(expected = AssertionError.class)
@@ -526,12 +521,9 @@ public class AsyncRequestTest {
         var batch = new IdBatch(1);
         batch.add();
 
-        // A dummy ByteBuffer simulating some simple reply
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(0);
-
         var callback =
                 new CallbackSimulator<TransferBatch>(AsyncRequest.lookupTransfers(client, batch),
-                        Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
+                        Request.Operations.LOOKUP_TRANSFERS.value, null, 1,
                         PacketStatus.TooMuchData.value, 250);
 
         Future<TransferBatch> future = callback.request.getFuture();
@@ -557,12 +549,9 @@ public class AsyncRequestTest {
         var batch = new IdBatch(1);
         batch.add();
 
-        // A dummy ByteBuffer simulating some simple reply
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(0);
-
         var callback =
                 new CallbackSimulator<AccountBatch>(AsyncRequest.lookupAccounts(client, batch),
-                        Request.Operations.LOOKUP_ACCOUNTS.value, dummyReplyBuffer.position(0), 1,
+                        Request.Operations.LOOKUP_ACCOUNTS.value, null, 1,
                         PacketStatus.InvalidDataSize.value, 100);
 
         Future<AccountBatch> future = callback.request.getFuture();
