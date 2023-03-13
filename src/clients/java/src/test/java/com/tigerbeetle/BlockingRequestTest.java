@@ -138,7 +138,7 @@ public class BlockingRequestTest {
         assert false;
     }
 
-    @Test(expected = AssertionError.class)
+    @Test
     public void testEndRequestWithNullBuffer() throws RequestException {
 
         var client = NativeClient.initEcho(0, "3000", 1);
@@ -154,8 +154,8 @@ public class BlockingRequestTest {
 
         assertTrue(request.isDone());
 
-        request.waitForResult();
-        assert false;
+        var result = request.waitForResult();
+        assertEquals(0, result.getLength());
     }
 
     @Test(expected = AssertionError.class)
@@ -466,12 +466,9 @@ public class BlockingRequestTest {
         var batch = new IdBatch(1);
         batch.add();
 
-        // A dummy ByteBuffer simulating some simple reply
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(0);
-
         var callback =
                 new CallbackSimulator<TransferBatch>(BlockingRequest.lookupTransfers(client, batch),
-                        Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
+                        Request.Operations.LOOKUP_TRANSFERS.value, null, 1,
                         PacketStatus.TooMuchData.value, 250);
 
         callback.start();

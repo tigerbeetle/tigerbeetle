@@ -390,7 +390,7 @@ const NativeClient = struct {
         var request_obj = @ptrCast(jui.jobject, packet.user_data);
         defer env.deleteReference(.global, request_obj);
 
-        var result: ?[]const u8 = switch (packet.status) {
+        var result: ?[]const u8 = if (result_len == 0) null else switch (packet.status) {
             .ok => if (result_ptr) |ptr| ptr[0..@intCast(usize, result_len)] else null,
             else => null,
         };
