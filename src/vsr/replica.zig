@@ -3030,7 +3030,7 @@ pub fn ReplicaType(
                         op -= 1;
                         self.view_headers.array.appendAssumeCapacity(self.journal.header_with_op(op).?.*);
                     }
-                    assert(self.view_headers.array.len + 2 + 1 <= constants.view_change_headers_max);
+                    assert(self.view_headers.array.len + 2 <= constants.view_change_headers_max);
 
                     // Determine the consecutive extent of the log that we can help recover.
                     // This may precede op_repair_min if we haven't had a view-change recently.
@@ -3040,16 +3040,13 @@ pub fn ReplicaType(
                     assert(op_min <= op);
                     assert(op_min <= self.op_repair_min());
 
-                    // The SV includes headers corresponding to:
-                    // - the triggers for preceding checkpoints (as many as we have and can help
-                    //   repair, which is at most 2), and
-                    // - the oldest op that we can help repair.
+                    // The SV includes headers corresponding to the triggers for preceding
+                    // checkpoints (as many as we have and can help repair, which is at most 2).
                     for ([_]u64{
                         self.op_checkpoint_trigger() -|
                             (constants.journal_slot_count - constants.lsm_batch_multiple),
                         self.op_checkpoint_trigger() -|
                             (constants.journal_slot_count - constants.lsm_batch_multiple) * 2,
-                        op_min,
                     }) |op_hook| {
                         if (op > op_hook and op_hook >= op_min) {
                             op = op_hook;
