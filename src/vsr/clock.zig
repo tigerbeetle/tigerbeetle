@@ -582,7 +582,7 @@ const ClockUnitTestContainer = struct {
 
 test "ideal clocks get clamped to cluster time" {
     // Silence all clock logs.
-    var level = std.log.Level.err;
+    const level = std.testing.log_level;
     std.testing.log_level = std.log.Level.err;
     defer std.testing.log_level = level;
 
@@ -787,7 +787,7 @@ const ClockSimulator = struct {
 
 test "clock: fuzz test" {
     // Silence all clock logs.
-    var level = std.log.Level.err;
+    const level = std.testing.log_level;
     std.testing.log_level = std.log.Level.err;
     defer std.testing.log_level = level;
 
