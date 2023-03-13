@@ -102,35 +102,31 @@ abstract class Request<TResponse extends Batch> {
 
                 exception = new RequestException(status);
 
-            } else if (buffer == null) {
-
-                exception = new AssertionError("Unexpected callback buffer: buffer=null");
-
             } else {
 
                 switch (operation) {
                     case CREATE_ACCOUNTS: {
-                        result = buffer.capacity() == 0 ? CreateAccountResultBatch.EMPTY
+                        result = buffer == null ? CreateAccountResultBatch.EMPTY
                                 : new CreateAccountResultBatch(memcpy(buffer));
                         break;
                     }
 
                     case CREATE_TRANSFERS: {
-                        result = buffer.capacity() == 0 ? CreateTransferResultBatch.EMPTY
+                        result = buffer == null ? CreateTransferResultBatch.EMPTY
                                 : new CreateTransferResultBatch(memcpy(buffer));
                         break;
                     }
 
                     case ECHO_ACCOUNTS:
                     case LOOKUP_ACCOUNTS: {
-                        result = buffer.capacity() == 0 ? AccountBatch.EMPTY
+                        result = buffer == null ? AccountBatch.EMPTY
                                 : new AccountBatch(memcpy(buffer));
                         break;
                     }
 
                     case ECHO_TRANSFERS:
                     case LOOKUP_TRANSFERS: {
-                        result = buffer.capacity() == 0 ? TransferBatch.EMPTY
+                        result = buffer == null ? TransferBatch.EMPTY
                                 : new TransferBatch(memcpy(buffer));
                         break;
                     }
