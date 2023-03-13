@@ -1058,6 +1058,22 @@ pub fn ReplicaType(
                 return;
             }
 
+            assert(self.status == .normal);
+            assert(message.header.view == self.view);
+            assert(self.primary() or self.backup());
+            assert(message.header.replica == self.primary_index(message.header.view));
+            assert(message.header.op > self.op_checkpoint());
+            assert(message.header.op > self.op);
+            assert(message.header.op > self.commit_min);
+
+            defer {
+                if (self.backup()) {
+                    // A prepare may already be committed if requested by repair() so take the max:
+                    self.commit_journal(std.math.max(message.header.commit, self.commit_max));
+                    assert(self.commit_max >= message.header.commit);
+                }
+            }
+
             // Verify that the new request will fit in the WAL.
             if (message.header.op > self.op_checkpoint_trigger()) {
                 log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})", .{
@@ -1069,15 +1085,6 @@ pub fn ReplicaType(
                 assert(self.backup());
                 return;
             }
-
-            assert(self.status == .normal);
-            assert(message.header.view == self.view);
-            assert(self.primary() or self.backup());
-            assert(message.header.replica == self.primary_index(message.header.view));
-            assert(message.header.op > self.op_checkpoint());
-            assert(message.header.op > self.op);
-            assert(message.header.op > self.commit_min);
-            assert(message.header.op <= self.op_checkpoint_trigger());
 
             if (message.header.op > self.op + 1) {
                 log.debug("{}: on_prepare: newer op", .{self.replica});
@@ -1102,17 +1109,12 @@ pub fn ReplicaType(
                 message.header.checksum,
             });
             assert(message.header.op == self.op + 1);
+            assert(message.header.op <= self.op_checkpoint_trigger());
             self.op = message.header.op;
             self.journal.set_header_as_dirty(message.header);
 
             self.replicate(message);
             self.append(message);
-
-            if (self.backup()) {
-                // A prepare may already be committed if requested by repair() so take the max:
-                self.commit_journal(std.math.max(message.header.commit, self.commit_max));
-                assert(self.commit_max >= message.header.commit);
-            }
         }
 
         fn on_prepare_ok(self: *Self, message: *Message) void {
@@ -1235,7 +1237,6 @@ pub fn ReplicaType(
                 }
             }
 
-            self.commit_max = std.math.max(self.commit_max, message.header.commit);
             self.commit_journal(message.header.commit);
         }
 
@@ -2300,6 +2301,7 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(message.header.view == self.view);
             assert(message.header.op == self.op);
+            assert(message.header.op <= self.op_checkpoint_trigger());
 
             if (self.solo() and self.pipeline.queue.prepare_queue.count > 1) {
                 // In a cluster-of-one, the prepares must always be written to the WAL sequentially
