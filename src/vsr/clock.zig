@@ -1,7 +1,20 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
-const log = std.log.scoped(.clock);
 const fmt = std.fmt;
+
+const log = if (builtin.is_test)
+    // Downgrade `err` to `warn` for tests.
+    // Zig fails any test that does `log.err`, but we want to test those code paths here.
+    struct {
+        const base = std.log.scoped(.clock);
+        const err = warn;
+        const warn = base.warn;
+        const info = base.info;
+        const debug = base.debug;
+    }
+else
+    std.log.scoped(.clock);
 
 const constants = @import("../constants.zig");
 
@@ -568,7 +581,11 @@ const ClockUnitTestContainer = struct {
 };
 
 test "ideal clocks get clamped to cluster time" {
-    std.testing.log_level = .err;
+    // Silence all clock logs.
+    var level = std.log.Level.err;
+    std.testing.log_level = std.log.Level.err;
+    defer std.testing.log_level = level;
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -769,7 +786,10 @@ const ClockSimulator = struct {
 };
 
 test "clock: fuzz test" {
-    std.testing.log_level = .err; // silence all clock logs
+    // Silence all clock logs.
+    var level = std.log.Level.err;
+    std.testing.log_level = std.log.Level.err;
+    defer std.testing.log_level = level;
 
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
@@ -787,7 +807,7 @@ test "clock: fuzz test" {
     var min_clock_offset: u64 = 1_000_000_000;
     var simulator = try ClockSimulator.init(std.testing.allocator, .{
         .network_options = .{
-            .replica_count = 3,
+            .node_count = 3,
             .client_count = 0,
             .seed = seed,
 
@@ -838,18 +858,18 @@ test "clock: fuzz test" {
         }
     }
 
-    std.debug.print("seed={}, max ticks={}, clock count={}\n", .{
+    log.info("seed={}, max ticks={}, clock count={}\n", .{
         seed,
         ticks_max,
         clock_count,
     });
-    std.debug.print("absolute clock offsets with respect to test time:\n", .{});
-    std.debug.print("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_clock_offset))});
-    std.debug.print("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_clock_offset))});
-    std.debug.print("\nabsolute synchronization errors between clocks:\n", .{});
-    std.debug.print("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_sync_error))});
-    std.debug.print("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_sync_error))});
-    std.debug.print("clock ticks without synchronization={d}\n", .{
+    log.info("absolute clock offsets with respect to test time:\n", .{});
+    log.info("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_clock_offset))});
+    log.info("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_clock_offset))});
+    log.info("\nabsolute synchronization errors between clocks:\n", .{});
+    log.info("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_sync_error))});
+    log.info("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_sync_error))});
+    log.info("clock ticks without synchronization={d}\n", .{
         clock_ticks_without_synchronization,
     });
 }
