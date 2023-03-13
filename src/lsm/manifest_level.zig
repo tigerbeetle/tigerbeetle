@@ -68,7 +68,7 @@ pub fn ManifestLevelType(
             level.tables.deinit(allocator, node_pool);
         }
 
-        /// Inserts an ordered batch of tables into the level, then rebuilds the indexes.
+        /// Inserts the given table into the ManifestLevel.
         pub fn insert_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
             assert(level.keys.len() == level.tables.len());
 
@@ -117,16 +117,34 @@ pub fn ManifestLevelType(
             level.table_count_visible -= 1;
         }
 
+        /// Remove the given table from the level assuming it's visible to `lsm.snapshot_latest`.
+        /// Returns the same, unmodified table passed in to differentiate itself from 
+        /// remove_table_invisible and guard against using the wrong function.
+        pub fn remove_table_visible(
+            level: *Self,
+            node_pool: *NodePool,
+            table: *const TableInfo,
+        ) *const TableInfo {
+            assert(table.visible(lsm.snapshot_latest));
+            level.remove_table(node_pool, table);
+            level.table_count_visible -= 1;
+            return table;
+        }
+
         /// Remove the given table from the ManifestLevel, asserting that it is not visible
         /// by any snapshot in `snapshots` or by `lsm.snapshot_latest`.
-        pub fn remove_table(
+        pub fn remove_table_invisible(
             level: *Self,
             node_pool: *NodePool,
             snapshots: []const u64,
             table: *const TableInfo,
         ) void {
+            assert(table.invisible(snapshots));
+            level.remove_table(node_pool, table);
+        }
+
+        fn remove_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
             assert(level.keys.len() == level.tables.len());
-            // The batch may contain a single table, with a single key, i.e. key_min == key_max:
             assert(compare_keys(table.key_min, table.key_max) != .gt);
 
             // Use `key_min` for both ends of the iterator; we are looking for a single table.
@@ -135,18 +153,15 @@ pub fn ManifestLevelType(
 
             var it = level.tables.iterator_from_index(absolute_index, .ascending);
             while (it.next()) |level_table| : (absolute_index += 1) {
-                if (level_table.invisible(snapshots)) {
-                    assert(level_table.equal(table));
-
+                if (level_table.equal(table)) {
                     level.keys.remove_elements(node_pool, absolute_index, 1);
                     level.tables.remove_elements(node_pool, absolute_index, 1);
-                    break;
+                    assert(level.keys.len() == level.tables.len());
+                    return;
                 }
-            } else {
-                unreachable;
             }
 
-            assert(level.keys.len() == level.tables.len());
+            @panic("remove() called with a table that was never inserted");
         }
 
         pub const Visibility = enum {
@@ -640,7 +655,7 @@ pub fn TestContext(
 
             if (tables.items.len > 0) {
                 for (tables.items) |*table| {
-                    context.level.remove_table(&context.pool, snapshots, table);
+                    context.level.remove_table_invisible(&context.pool, snapshots, table);
                 }
             }
         }
@@ -701,7 +716,7 @@ pub fn TestContext(
 
                 if (to_remove.items.len > 0) {
                     for (to_remove.items) |*table| {
-                        context.level.remove_table(
+                        context.level.remove_table_invisible(
                             &context.pool,
                             context.snapshots.slice(),
                             table,

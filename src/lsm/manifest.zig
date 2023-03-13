@@ -199,7 +199,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest_level = &manifest.levels[level];
             manifest_level.insert_table(manifest.node_pool, table);
 
-            // Append insert changes to the manifest log
+            // Append insert changes to the manifest log.
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
 
@@ -222,9 +222,44 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest_level.set_snapshot_max(snapshot, table);
             assert(table.snapshot_max == snapshot);
 
-            // Append update changes to the manifest log
+            // Append update changes to the manifest log.
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
+        }
+
+        pub fn move_table(
+            manifest: *Manifest,
+            level_a: u8,
+            level_b: u8,
+            table: *const TableInfo,
+        ) void {
+            assert(level_b == level_a + 1);
+            assert(level_b < constants.lsm_levels);
+
+            const manifest_level_a = &manifest.levels[level_a];
+            const manifest_level_b = &manifest.levels[level_b];
+
+            if (constants.verify) {
+                assert(manifest_level_a.contains(table));
+                assert(!manifest_level_b.contains(table));
+            }
+
+            // First, remove the table from level A without appending changes to the manifest log.
+            const removed = manifest_level_a.remove_table_visible(manifest.node_pool, table);
+            assert(table.equal(removed));
+
+            // Then, insert the table into level B and append these changes to the manifest log.
+            // To move a table w.r.t manifest log, a "remove" change should NOT be appended for
+            // the previous level A; When replaying the log from open(), inserts are processed in
+            // LIFO order and duplicates are ignored. This means the table will only be replayed in
+            // level B instead of the old one in level A.
+            manifest_level_b.insert_table(manifest.node_pool, table);
+            manifest.manifest_log.insert(@intCast(u7, level_b), table);
+
+            if (constants.verify) {
+                assert(!manifest_level_a.contains(table));
+                assert(manifest_level_b.contains(table));
+            }
         }
 
         pub fn remove_invisible_tables(
@@ -255,10 +290,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(compare_keys(key_min, table.key_max) != .gt);
                 assert(compare_keys(key_max, table.key_min) != .lt);
 
-                // Append remove changes to the manifest log.
-                const log_level = @intCast(u7, level);
-                manifest.manifest_log.remove(log_level, table);
-                manifest_level.remove_table(manifest.node_pool, &snapshots, table);
+                // Append remove changes to the manifest log and purge from memory (ManifestLevel):
+                manifest.manifest_log.remove(@intCast(u7, level), table);
+                manifest_level.remove_table_invisible(manifest.node_pool, &snapshots, table);
             }
 
             if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
