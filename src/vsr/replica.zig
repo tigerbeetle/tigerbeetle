@@ -6560,6 +6560,7 @@ const DVCQuorum = struct {
             commit_max_ = std.math.max(commit_max_, dvc_commit_max_connected);
             commit_max_ = std.math.max(commit_max_, dvc_commit_max_pipeline);
             commit_max_ = std.math.max(commit_max_, dvc.header.commit);
+            commit_max_ = std.math.max(commit_max_, dvc_headers[0].commit);
         }
         return commit_max_;
     }
