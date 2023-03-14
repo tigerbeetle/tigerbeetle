@@ -1544,16 +1544,19 @@ pub fn ReplicaType(
                 stdx.unimplemented("state transfer");
             }
 
-            self.view_headers.replace(view_headers);
-            assert(self.view_headers.array.get(0).view <= self.view);
-            assert(self.view_headers.array.get(0).op == message.header.op);
-            maybe(self.view_headers.array.get(0).op > self.op_checkpoint_trigger());
-            vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
-
             for (view_headers) |*header| {
                 if (header.op <= self.op_checkpoint_trigger()) {
                     self.replace_header(header);
                 }
+            }
+
+            if (self.status != .normal) {
+                self.view_headers.replace(view_headers);
+                assert(self.view_headers.array.get(0).view <= self.view);
+                assert(self.view_headers.array.get(0).op == message.header.op);
+                maybe(self.view_headers.array.get(0).op > self.op_checkpoint_trigger());
+                assert(self.view_headers.array.get(self.view_headers.array.len - 1).op <=
+                    self.op_checkpoint_trigger());
             }
 
             switch (self.status) {
@@ -5503,11 +5506,14 @@ pub fn ReplicaType(
             assert(self.status == .view_change or self.status == .normal or
                 self.status == .recovering_head);
 
-            // Uncommitted ops may not survive a view change so we must assert `op` against
-            // `commit_max` and not `self.op`. However, committed ops (`commit_max`) must survive:
             assert(op <= self.op_checkpoint_trigger());
             maybe(op >= self.commit_max);
             maybe(op >= commit_max);
+
+            if (op < self.op) {
+                // Uncommitted ops may not survive a view change, but never truncate committed ops.
+                assert(op >= std.math.max(commit_max, self.commit_max));
+            }
 
             // We expect that our commit numbers may also be greater even than `commit_max` because
             // we may be the old primary joining towards the end of the view change and we may have
@@ -6015,7 +6021,8 @@ pub fn ReplicaType(
                 // - Transition from normal status.
                 // - Recovering from normal status.
                 // - Retired primary that didn't finish repair.
-                assert(self.log_view == self.view);
+                assert(self.view == self.log_view);
+                assert(self.view < view_new);
 
                 self.view_headers.array.len = 0;
 
