@@ -1494,15 +1494,18 @@ pub fn ReplicaType(
 
             if (self.status == .recovering_head) {
                 self.view = message.header.view;
+                maybe(self.view == self.log_view);
             } else {
-                self.view_jump(message.header);
-                assert(self.view == message.header.view);
+                if (self.view < message.header.view) {
+                    self.transition_to_view_change_status(message.header.view);
+                }
 
                 if (self.status == .normal) {
                     assert(self.backup());
                     assert(self.view == self.log_view);
                 }
             }
+            assert(self.view == message.header.view);
 
             const view_headers = message_body_as_headers_chain_disjoint(message);
             vsr.Headers.ViewChangeSlice.verify(view_headers);
@@ -6189,7 +6192,7 @@ pub fn ReplicaType(
         fn view_jump(self: *Self, header: *const Header) void {
             const to: Status = switch (header.command) {
                 .prepare, .commit => .normal,
-                .do_view_change, .start_view => .view_change,
+                .do_view_change => .view_change,
                 // When we are recovering_head we can't participate in a view-change anyway.
                 // But there is a chance that the primary is still running, despite the SVC.
                 .start_view_change => if (self.status == .recovering_head) Status.normal else .view_change,
