@@ -21,7 +21,7 @@ const usage = fmt.comptimePrint(
     \\
     \\  tigerbeetle format --cluster=<integer> --replica=<index> --replica-count=<integer> <path>
     \\
-    \\  tigerbeetle start --addresses=<addresses> [--standby-count=<integer>] <path>
+    \\  tigerbeetle start --addresses=<addresses> <path>
     \\
     \\  tigerbeetle version [--version]
     \\
@@ -64,9 +64,9 @@ const usage = fmt.comptimePrint(
     \\
     \\Examples:
     \\
-    \\  tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
-    \\  tigerbeetle format --cluster=0 --replica=1 0_1.tigerbeetle
-    \\  tigerbeetle format --cluster=0 --replica=2 0_2.tigerbeetle
+    \\  tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
+    \\  tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
+    \\  tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
     \\
     \\  tigerbeetle start --addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 0_0.tigerbeetle
     \\  tigerbeetle start --addresses=3003,3001,3002 0_1.tigerbeetle
