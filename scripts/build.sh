@@ -8,6 +8,22 @@ else
     ZIG_OS="macos"
 fi
 
+target_set="false"
+case "$*" in
+    *-Dtarget*)
+	target_set="true"
+	;;
+esac
+
+if [ "$target_set" = "false" ]; then
+    # Default to specifying "native-macos" if the target is not provided.
+    # See https://github.com/ziglang/zig/issues/10478 (and note there's not a backport to 0.9.2).
+    if [ "$(./zig/zig targets | grep '"os": "' | cut -d ":" -f 2 | cut -d '"' -f 2)" = "macos" ]; then
+	# Add target to args
+	set -- "$@" "-Dtarget=native-macos"
+    fi
+fi
+   
 ZIG_EXE="./zig/zig"
 BUILD_ROOT="./"
 CACHE_ROOT="./zig-cache"
