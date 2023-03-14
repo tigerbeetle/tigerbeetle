@@ -28,8 +28,7 @@ test {
     _ = @import("tigerbeetle/cli.zig");
 
     _ = @import("vsr.zig");
-    // TODO: clean up logging of clock test and enable it here.
-    //_ = @import("vsr/clock.zig");
+    _ = @import("vsr/clock.zig");
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
     _ = @import("vsr/replica_format.zig");
