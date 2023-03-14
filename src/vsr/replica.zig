@@ -1035,7 +1035,7 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(message.header.replica < self.replica_count);
 
-            self.view_jump(message.header);
+            self.view_jump_to_normal(message.header);
 
             if (self.is_repair(message)) {
                 log.debug("{}: on_prepare: ignoring (repair)", .{self.replica});
@@ -1189,7 +1189,7 @@ pub fn ReplicaType(
             assert(message.header.command == .commit);
             assert(message.header.replica < self.replica_count);
 
-            self.view_jump(message.header);
+            self.view_jump_to_normal(message.header);
 
             if (self.status != .normal) {
                 log.debug("{}: on_commit: ignoring ({})", .{ self.replica, self.status });
@@ -1309,7 +1309,13 @@ pub fn ReplicaType(
 
         fn on_start_view_change(self: *Self, message: *Message) void {
             assert(message.header.command == .start_view_change);
-            self.view_jump(message.header);
+
+            if (self.status == .recovering_head) {
+                self.view_jump_to_normal(message.header);
+            } else {
+                self.view_jump_to_view_change(message.header);
+            }
+
             if (self.ignore_start_view_change_message(message)) return;
 
             assert(!self.solo());
@@ -1372,7 +1378,7 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert(message.header.view >= self.view);
 
-            self.view_jump(message.header);
+            self.view_jump_to_view_change(message.header);
 
             assert(self.status == .view_change);
             assert(message.header.view == self.view);
@@ -6189,80 +6195,71 @@ pub fn ReplicaType(
             return true;
         }
 
-        fn view_jump(self: *Self, header: *const Header) void {
-            const to: Status = switch (header.command) {
-                .prepare, .commit => .normal,
-                .do_view_change => .view_change,
+        fn view_jump_to_normal(self: *Self, header: *const Header) void {
+            assert(header.command == .prepare or header.command == .commit or
+                header.command == .start_view_change);
+
+            if (header.command == .start_view_change) {
                 // When we are recovering_head we can't participate in a view-change anyway.
-                // But there is a chance that the primary is still running, despite the SVC.
-                .start_view_change => if (self.status == .recovering_head) Status.normal else .view_change,
-                else => unreachable,
-            };
+                // But there is a chance that the primary is still running and reachable,
+                // despite the SVC.
+                assert(self.status == .recovering_head);
+            }
 
             if (header.view < self.view) return;
 
-            // Compare status transitions and decide whether to view jump or ignore:
+            // We need a start_view from any other replica — don't request it from ourselves.
+            if (self.primary_index(header.view) == self.replica) return;
+
             switch (self.status) {
-                .normal => switch (to) {
-                    // If the transition is to `.normal`, then ignore if for the same view:
-                    .normal => if (header.view == self.view) return,
-                    // If the transition is to `.view_change`, then ignore if the view has started:
-                    .view_change => if (header.view == self.view) return,
-                    else => unreachable,
-                },
-                .view_change => switch (to) {
-                    // This is an interesting special case:
-                    // If the transition is to `.normal` in the same view, then we missed the
-                    // `start_view` message and we must also consider this a view jump:
-                    // If we don't handle this below then our `view_change_status_timeout` will fire
-                    // and we will disrupt the cluster with another view change for a newer view.
-                    .normal => {},
-                    // If the transition is to `.view_change`, then ignore if for the same view:
-                    .view_change => if (header.view == self.view) return,
-                    else => unreachable,
-                },
-                // We need a start_view from any other replica — don't request it from ourselves.
-                .recovering_head => if (self.primary_index(header.view) == self.replica) return,
+                // If the transition is to `.normal`, then ignore if for the same view:
+                .normal => if (header.view == self.view) return,
+                // This is an interesting special case:
+                // If the transition is to `.normal` in the same view, then we missed the
+                // `start_view` message and we must also consider this a view jump:
+                .view_change => {},
+                .recovering_head => {},
                 .recovering => return,
             }
 
-            switch (to) {
-                .normal => {
-                    if (header.view == self.view) {
-                        assert(self.status == .view_change or self.status == .recovering_head);
+            if (header.view == self.view) {
+                assert(self.status == .view_change or self.status == .recovering_head);
 
-                        log.debug("{}: view_jump: waiting to exit view change", .{self.replica});
-                    } else {
-                        assert(header.view > self.view);
-                        assert(self.status == .view_change or self.status == .recovering_head or
-                            self.status == .normal);
+                log.debug("{}: view_jump: waiting to exit view change", .{self.replica});
+            } else {
+                assert(header.view > self.view);
+                assert(self.status == .view_change or self.status == .recovering_head or
+                    self.status == .normal);
 
-                        log.debug("{}: view_jump: waiting to jump to newer view", .{self.replica});
-                    }
-
-                    // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
-                    // (Using request_start_view_message_timeout).
-                    log.debug("{}: view_jump: requesting start_view message", .{self.replica});
-                    self.send_header_to_replica(self.primary_index(header.view), .{
-                        .command = .request_start_view,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        .view = header.view,
-                    });
-                },
-                .view_change => {
-                    assert(self.status == .normal or self.status == .view_change);
-                    assert(self.view < header.view);
-
-                    if (header.view == self.view + 1) {
-                        log.debug("{}: view_jump: jumping to view change", .{self.replica});
-                    } else {
-                        log.debug("{}: view_jump: jumping to next view change", .{self.replica});
-                    }
-                    self.transition_to_view_change_status(header.view);
-                },
-                else => unreachable,
+                log.debug("{}: view_jump: waiting to jump to newer view", .{self.replica});
             }
+
+            // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
+            // (Using request_start_view_message_timeout).
+            log.debug("{}: view_jump: requesting start_view message", .{self.replica});
+            self.send_header_to_replica(self.primary_index(header.view), .{
+                .command = .request_start_view,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = header.view,
+            });
+        }
+
+        fn view_jump_to_view_change(self: *Self, header: *const Header) void {
+            assert(self.status == .normal or self.status == .view_change);
+            // status=recovering_head cannot transition to view-change — without a head, it cannot
+            // safely persist its log suffix headers.
+            assert(self.status != .recovering_head);
+            assert(header.command == .do_view_change or header.command == .start_view_change);
+
+            if (header.view <= self.view) return;
+
+            if (header.view == self.view + 1) {
+                log.debug("{}: view_jump: jumping to view change", .{self.replica});
+            } else {
+                log.debug("{}: view_jump: jumping to next view change", .{self.replica});
+            }
+            self.transition_to_view_change_status(header.view);
         }
 
         fn write_prepare(self: *Self, message: *Message, trigger: Journal.Write.Trigger) void {
