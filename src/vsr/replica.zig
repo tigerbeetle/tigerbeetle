@@ -189,8 +189,11 @@ pub fn ReplicaType(
         ///
         /// Invariants:
         /// * `replica.commit_max ≥ replica.commit_min`.
-        /// * `replica.commit_max = replica.commit_min` for status=normal primary.
+        /// * `replica.commit_max ≥ replica.op -| constants.pipeline_prepare_queue_max`.
         /// * never decreases.
+        /// Invariants (status=normal primary):
+        /// * `replica.commit_max = replica.commit_min`.
+        /// * `replica.commit_max = replica.op - pipeline.queue.prepare_queue.count`.
         commit_max: u64,
 
         /// Guards against concurrent commits.
@@ -478,6 +481,10 @@ pub fn ReplicaType(
                 }
             }
             self.op = op_head;
+            self.commit_max = std.math.max(
+                self.commit_max,
+                self.op -| constants.pipeline_prepare_queue_max,
+            );
 
             const header_head = self.journal.header_with_op(self.op).?;
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
@@ -1517,6 +1524,8 @@ pub fn ReplicaType(
             vsr.Headers.ViewChangeSlice.verify(view_headers);
 
             for (view_headers) |*header| {
+                assert(header.commit <= message.header.commit);
+
                 if (header.op <= self.op_checkpoint_trigger()) {
                     if (self.log_view < self.view or
                         (self.log_view == self.view and header.op >= self.op))
@@ -3906,6 +3915,7 @@ pub fn ReplicaType(
             assert(self.status != .recovering_head);
             assert(self.op >= self.op_checkpoint());
             assert(self.op <= self.op_checkpoint_trigger());
+            assert(self.op <= self.commit_max + constants.pipeline_prepare_queue_max);
 
             return std.math.min(self.commit_max, self.op_checkpoint_trigger());
         }
@@ -4057,6 +4067,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.commit_min <= self.op);
             assert(self.commit_min <= self.commit_max);
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             assert(self.journal.header_with_op(self.op) != null);
 
             if (self.status == .normal and self.backup()) {
@@ -4381,12 +4392,12 @@ pub fn ReplicaType(
             assert(self.primary_index(self.view) == self.replica);
             assert(self.commit_max == self.commit_min);
             assert(self.commit_max <= self.op);
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             assert(self.journal.dirty.count == 0);
             assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
             assert(self.pipeline == .cache);
             assert(!self.pipeline_repairing);
             assert(self.primary_repair_pipeline() == .done);
-            assert(self.commit_max + constants.pipeline_prepare_queue_max >= self.op);
 
             var pipeline_queue = PipelineQueue{};
             var op = self.commit_max + 1;
@@ -5410,6 +5421,7 @@ pub fn ReplicaType(
                 self.status == .normal or self.status == .recovering);
             assert(self.view_headers.array.len > 0);
             assert(self.view_headers.array.get(0).view <= self.log_view);
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             if (self.view_durable_updating()) return;
 
@@ -5528,6 +5540,7 @@ pub fn ReplicaType(
             // `commit_min` represents what we have already applied to our state machine:
             self.commit_max = std.math.max(self.commit_max, commit_max);
             assert(self.commit_max >= self.commit_min);
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             log.debug("{}: {s}: view={} op={}..{} commit={}..{}", .{
                 self.replica,
@@ -5766,6 +5779,7 @@ pub fn ReplicaType(
         fn transition_to_normal_from_recovering_status(self: *Self) void {
             assert(self.status == .recovering);
             assert(self.view == self.log_view);
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             assert(!self.committing);
             assert(!self.solo() or self.commit_min == self.op);
             assert(self.journal.header_with_op(self.op) != null);
@@ -5828,6 +5842,7 @@ pub fn ReplicaType(
             assert(self.status == .recovering_head);
             assert(self.view >= self.log_view);
             assert(self.view <= view_new);
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             assert(!self.committing);
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
@@ -5869,6 +5884,7 @@ pub fn ReplicaType(
             // In the VRR paper it's possible to transition from normal to normal for the same view.
             // For example, this could happen after a state transfer triggered by an op jump.
             assert(self.status == .view_change);
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             assert(view_new >= self.view);
             assert(self.journal.header_with_op(self.op) != null);
             assert(!self.primary_abdicating);
@@ -5965,6 +5981,7 @@ pub fn ReplicaType(
             assert(view_new >= self.view);
             assert(view_new > self.view or self.status == .recovering);
             assert(view_new > self.log_view);
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             log.debug("{}: transition_to_view_change_status: view={}..{} status={}..{}", .{
                 self.replica,
@@ -6002,8 +6019,6 @@ pub fn ReplicaType(
 
                 self.view_headers.array.len = 0;
 
-                const commit_max =
-                    std.math.max(self.commit_max, self.op -| constants.pipeline_prepare_queue_max);
                 var op = self.op + 1;
                 while (op > 0) {
                     op -= 1;
@@ -6018,7 +6033,7 @@ pub fn ReplicaType(
                         //   completed any repair.
                         // - Similarly, we might have receive a catch-up SV message and only
                         //   installed a single (checkpoint trigger) hook header.
-                        if (op <= commit_max + 1) break;
+                        if (op <= self.commit_max + 1) break;
                     } else {
                         // Skip over the gap.
                     }
@@ -6031,7 +6046,7 @@ pub fn ReplicaType(
 
             vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
             assert(self.view_headers.array.get(self.view_headers.array.len - 1).op <=
-                std.math.max(self.commit_max, self.op -| constants.pipeline_prepare_queue_max) + 1);
+                self.commit_max + 1);
 
             if (self.view == view_new) {
                 assert(status_before == .recovering);
