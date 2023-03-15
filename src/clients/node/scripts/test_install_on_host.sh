@@ -5,10 +5,9 @@ if [ -z ${SKIP_NODE_BUILD+x} ]; then
 	./scripts/build.sh
 fi
 
-npm install -g npm@latest
 npm install
 
 dir=$(pwd)
-mkdir /tmp/test && cd /tmp/test
+rm -rf /tmp/test-node-on-host && mkdir /tmp/test-node-on-host && cd /tmp/test-node-on-host
 npm install "$dir"/tigerbeetle-node-*.tgz
 node -e 'require("tigerbeetle-node"); console.log("SUCCESS!")'
