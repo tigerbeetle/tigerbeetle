@@ -219,9 +219,9 @@ pub fn main() !void {
         cluster_options.storage.write_latency_mean,
         cluster_options.storage.read_fault_probability,
         cluster_options.storage.write_fault_probability,
-        simulator_options.replica_crash_probability * 100,
+        simulator_options.replica_crash_probability,
         simulator_options.replica_crash_stability,
-        simulator_options.replica_restart_probability * 100,
+        simulator_options.replica_restart_probability,
         simulator_options.replica_restart_stability,
     });
 
