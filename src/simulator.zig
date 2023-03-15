@@ -78,13 +78,13 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
-    const standby_count = random.uintAtMost(u8, constants.standbys_max);
+    const replica_count = 6;
+    const standby_count = 0;
     const node_count = replica_count + standby_count;
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
     const quorums = vsr.quorums(replica_count);
-    const replicas_dead_max = random.uintAtMost(u8, replica_count - quorums.view_change);
+    const replicas_dead_max = 1 + random.uintAtMost(u8, 1);
     // A cluster-of-2 is special-cased to mirror the special case in replica.zig.
     // See repair_prepare()/on_nack_prepare().
     const storage_faults_max =
@@ -159,7 +159,7 @@ pub fn main() !void {
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
         .replica_crash_probability = 0.00002,
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
-        .replica_death_probability = 10.0,
+        .replica_death_probability = 90.0,
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .replicas_dead_max = replicas_dead_max,
@@ -242,18 +242,28 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
 
-    const ticks_max = 50_000_000;
+    const ticks_max = 5_000_000;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         simulator.tick();
         if (simulator.done()) break;
     } else {
+        for (simulator.cluster.replicas) |replica| {
+            output.err("{}: status={} view={} op={} commit_min={} dead={}", .{
+                replica.replica,
+                replica.status,
+                replica.view,
+                replica.op,
+                replica.commit_min,
+                simulator.replica_stability[replica.replica] == Simulator.death_stability,
+            });
+        }
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
     assert(simulator.done());
 
-    output.info("\n          PASSED ({} ticks)", .{tick});
+    output.info("\n          PASSED ({} ticks {} dead)", .{ tick, simulator.replicas_dead });
 }
 
 pub const Simulator = struct {

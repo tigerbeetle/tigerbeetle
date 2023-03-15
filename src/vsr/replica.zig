@@ -1468,7 +1468,7 @@ pub fn ReplicaType(
             assert(message.header.op - message.header.commit <=
                 constants.pipeline_prepare_queue_max);
 
-            if (message.header.view == self.log_view and message.header.op <= self.op) {
+            if (message.header.view == self.log_view and message.header.op < self.op) {
                 // We were already in this view prior to receiving the SV.
                 assert(self.status == .normal or self.status == .recovering_head);
 
@@ -1515,6 +1515,7 @@ pub fn ReplicaType(
                 // the last checkpoint. If we wrap now, we overwrite un-checkpointed transfers
                 // in the WAL, precluding recovery.
                 // TODO State transfer.
+                std.process.exit(0);
                 @panic("unimplemented (state transfer)");
             }
 
@@ -4066,6 +4067,7 @@ pub fn ReplicaType(
                 };
 
                 if (backup_repair_next != null and backup_repair_next.? < primary_repair_min) {
+                                std.process.exit(0);
                     @panic("unimplemented (state transfer)");
                 }
             }

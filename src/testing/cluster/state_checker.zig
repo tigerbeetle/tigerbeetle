@@ -95,13 +95,13 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 // restarting after a crash and replaying the log. The more important invariant is that
                 // the cluster as a whole may not transition to the same state more than once, and once
                 // transitioned may not regress.
-                log.info("{d:0>4}/{d:0>4} {x:0>32} > {x:0>32} {}", .{
-                    replica.commit_min,
-                    state_checker.requests_committed,
-                    checksum_a,
-                    checksum_b,
-                    replica_index,
-                });
+                // log.info("{d:0>4}/{d:0>4} {x:0>32} > {x:0>32} {}", .{
+                //     replica.commit_min,
+                //     state_checker.requests_committed,
+                //     checksum_a,
+                //     checksum_b,
+                //     replica_index,
+                // });
                 return;
             }
 
@@ -134,12 +134,12 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             state_checker.requests_committed += 1;
             assert(state_checker.requests_committed == header_b.?.op);
 
-            log.info("     {d:0>4} {x:0>32} > {x:0>32} {}", .{
-                state_checker.requests_committed,
-                checksum_a,
-                checksum_b,
-                replica_index,
-            });
+            // log.info("     {d:0>4} {x:0>32} > {x:0>32} {}", .{
+            //     state_checker.requests_committed,
+            //     checksum_a,
+            //     checksum_b,
+            //     replica_index,
+            // });
 
             assert(state_checker.commits.items.len == header_b.?.op);
             state_checker.commits.append(.{ .header = header_b.?.* }) catch unreachable;
