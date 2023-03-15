@@ -83,6 +83,13 @@ pub fn main() !void {
     const node_count = replica_count + standby_count;
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
+    const quorums = vsr.quorums(replica_count);
+    const replicas_dead_max = random.uintAtMost(u8, replica_count - quorums.view_change);
+    // A cluster-of-2 is special-cased to mirror the special case in replica.zig.
+    // See repair_prepare()/on_nack_prepare().
+    const storage_faults_max =
+        (if (replica_count == 2) 1 else replica_count - quorums.replication) -| replicas_dead_max;
+
     const cluster_options = Cluster.Options{
         .cluster_id = cluster_id,
         .replica_count = replica_count,
@@ -123,6 +130,7 @@ pub fn main() !void {
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
         },
         .storage_fault_atlas = .{
+            .faults_max = storage_faults_max,
             .faulty_superblock = true,
             .faulty_wal_headers = replica_count > 1,
             .faulty_wal_prepares = replica_count > 1,
@@ -151,8 +159,10 @@ pub fn main() !void {
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
         .replica_crash_probability = 0.00002,
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
+        .replica_death_probability = 10.0,
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
+        .replicas_dead_max = replicas_dead_max,
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
@@ -192,6 +202,8 @@ pub fn main() !void {
         \\          crash_stability={} ticks
         \\          restart_probability={d}%
         \\          restart_stability={} ticks
+        \\          death_probability={d}%
+        \\          deaths_max={}
     , .{
         seed,
         cluster_options.replica_count,
@@ -223,6 +235,8 @@ pub fn main() !void {
         simulator_options.replica_crash_stability,
         simulator_options.replica_restart_probability * 100,
         simulator_options.replica_restart_stability,
+        simulator_options.replica_death_probability,
+        simulator_options.replicas_dead_max,
     });
 
     var simulator = try Simulator.init(allocator, random, simulator_options);
@@ -255,6 +269,10 @@ pub const Simulator = struct {
         replica_restart_probability: f64,
         /// Minimum time a replica is up until it is crashed again.
         replica_restart_stability: u32,
+        /// Probability that, given that a crash occured, the replica remains permanently unavailable.
+        replica_death_probability: f64,
+        /// Maximum number of permanent crashes allowed.
+        replicas_dead_max: u8,
 
         /// The total number of requests to send. Does not count `register` messages.
         requests_max: usize,
@@ -270,6 +288,8 @@ pub const Simulator = struct {
 
     /// Protect a replica from fast successive crash/restarts.
     replica_stability: []usize,
+    /// How many non-standby replicas crashed permanently.
+    replicas_dead: u8 = 0,
     reply_sequence: ReplySequence,
 
     /// Total number of requests sent, including those that have not been delivered.
@@ -277,11 +297,16 @@ pub const Simulator = struct {
     requests_sent: usize = 0,
     requests_idle: bool = false,
 
+    /// Dead (unrestartable) replicas are indicated by a flag value in stability.
+    const death_stability = std.math.maxInt(usize);
+
     pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Simulator {
         assert(options.replica_crash_probability < 100.0);
         assert(options.replica_crash_probability >= 0.0);
         assert(options.replica_restart_probability < 100.0);
         assert(options.replica_restart_probability >= 0.0);
+        assert(options.replica_death_probability < 100.0);
+        assert(options.replica_death_probability >= 0.0);
         assert(options.requests_max > 0);
         assert(options.request_probability > 0);
         assert(options.request_probability <= 100);
@@ -322,11 +347,20 @@ pub const Simulator = struct {
     pub fn done(simulator: *Simulator) bool {
         assert(simulator.requests_sent <= simulator.options.requests_max);
 
-        for (simulator.cluster.replica_health) |health| {
-            if (health == .down) return false;
+        for (simulator.cluster.replicas) |*replica| {
+            const down = simulator.cluster.replica_health[replica.replica] == .down;
+            const dead = simulator.replica_stability[replica.replica] == death_stability;
+            if (down and !dead) return false;
+
+            if (!dead) {
+                if (!simulator.cluster.state_checker.replica_convergence(replica.replica)) {
+                    return false;
+                }
+            }
         }
 
-        if (!simulator.cluster.state_checker.convergence()) return false;
+        simulator.cluster.state_checker.assert_cluster_convergence();
+
         if (!simulator.reply_sequence.empty()) return false;
         if (simulator.requests_sent < simulator.options.requests_max) return false;
 
@@ -463,6 +497,8 @@ pub const Simulator = struct {
         }
 
         for (simulator.cluster.replicas) |*replica| {
+            if (simulator.replica_stability[replica.replica] == death_stability) continue;
+
             simulator.replica_stability[replica.replica] -|= 1;
             const stability = simulator.replica_stability[replica.replica];
             if (stability > 0) continue;
@@ -483,6 +519,15 @@ pub const Simulator = struct {
 
                     simulator.replica_stability[replica.replica] =
                         simulator.options.replica_crash_stability;
+
+                    if (replica.standby() or simulator.replicas_dead < simulator.options.replicas_dead_max) {
+                        const death_probability = simulator.options.replica_death_probability;
+                        if (chance_f64(simulator.random, death_probability)) {
+                            log_simulator.debug("{}: kill replica", .{replica.replica});
+                            simulator.replicas_dead += @boolToInt(!replica.standby());
+                            simulator.replica_stability[replica.replica] = death_stability;
+                        }
+                    }
                 },
                 .down => {
                     if (!chance_f64(

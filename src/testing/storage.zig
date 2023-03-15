@@ -576,6 +576,7 @@ const SectorRange = struct {
 // TODO Support total superblock corruption, forcing a full state transfer.
 pub const ClusterFaultAtlas = struct {
     pub const Options = struct {
+        faults_max: u8,
         faulty_superblock: bool,
         faulty_wal_headers: bool,
         faulty_wal_prepares: bool,
@@ -622,6 +623,7 @@ pub const ClusterFaultAtlas = struct {
         // If there is only one replica in the cluster, WAL/Grid faults are not recoverable.
         assert(replica_count > 1 or options.faulty_wal_headers == false);
         assert(replica_count > 1 or options.faulty_wal_prepares == false);
+        assert(options.faults_max < replica_count);
 
         var atlas = ClusterFaultAtlas{ .options = options };
 
@@ -641,16 +643,9 @@ pub const ClusterFaultAtlas = struct {
             }
         }
 
-        // A cluster-of-2 is special-cased to mirror the special case in replica.zig.
-        // See repair_prepare()/on_nack_prepare().
-        const quorums = vsr.quorums(replica_count);
-        const faults_max = if (replica_count == 2) 1 else replica_count - quorums.replication;
-        assert(faults_max < replica_count);
-        assert(faults_max > 0 or replica_count == 1);
-
         var wal_header_sectors = [_]ReplicaSet{ReplicaSet.initEmpty()} ** header_sectors;
         for (wal_header_sectors) |*wal_header_sector, sector| {
-            while (wal_header_sector.count() < faults_max) {
+            while (wal_header_sector.count() < options.faults_max) {
                 const replica_index = random.uintLessThan(u8, replica_count);
                 wal_header_sector.set(replica_index);
                 atlas.faulty_wal_header_sectors[replica_index].set(sector);
