@@ -146,16 +146,16 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             state_checker.commits.items[header_b.?.op].replicas.set(replica_index);
         }
 
-        pub fn convergence(state_checker: *Self) bool {
+        pub fn replica_convergence(state_checker: *Self, replica_index: u8) bool {
             const a = state_checker.commits.items.len - 1;
-            for (state_checker.commit_mins[0..state_checker.replica_count]) |b| {
-                if (b != a) {
-                    return false;
-                }
-            }
+            const b = state_checker.commit_mins[replica_index];
+            return a == b;
+        }
 
+        pub fn assert_cluster_convergence(state_checker: *Self) void {
+            const quorum_replication = vsr.quorums(state_checker.replica_count).replication;
             for (state_checker.commits.items) |commit, i| {
-                assert(commit.replicas.count() == state_checker.replica_count);
+                assert(commit.replicas.count() >= quorum_replication);
                 assert(commit.header.command == .prepare);
                 assert(commit.header.op == i);
                 if (i > 0) {
@@ -164,7 +164,6 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     assert(commit.header.view >= previous.view);
                 }
             }
-            return true;
         }
     };
 }
