@@ -26,12 +26,16 @@ jobs:
           path: src/clients/node/tigerbeetle-node-*.tgz
 
   test_install:
+    # We use self hosted runners for M1 here. See macos.yml for an explaination
+    permissions:
+      contents: read
+
     needs: build
     strategy:
       matrix:
-        distro: [alpine, debian, ubuntu, fedora, rhelubi, amazonlinux, mac]
+        distro: [alpine, debian, ubuntu, fedora, rhelubi, amazonlinux, mac, mac-m1-12.6, mac-m1-13.2]
 
-    runs-on: ${{ matrix.distro == 'mac' && 'macos-latest' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.distro == 'mac' && 'macos-latest' || matrix.distro == 'mac-m1-12.6' && 'macos-12.6' || matrix.distro == 'mac-m1-13.2' && 'macos-13.2' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -41,7 +45,7 @@ jobs:
           name: node-binaries
           path: src/clients/node
 
-      - run: ./scripts/test_install_on_${{ matrix.distro == 'mac' && 'host' || matrix.distro }}.sh
+      - run: ./scripts/test_install_on_${{ matrix.distro == 'mac' && 'host' || matrix.distro == 'mac-m1-12.6' && 'host' || matrix.distro == 'mac-m1-13.2' && 'host' || matrix.distro }}.sh
         env:
           SKIP_NODE_BUILD: true
 

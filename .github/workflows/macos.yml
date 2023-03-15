@@ -3,27 +3,43 @@ name: macOS
 on:
   workflow_call:
 
+# Our M1 runners are self hosted, and not ephemeral like standard GitHub action runners.
+# Limit the token permissions to be read - so even if they were compromised, no damage
+# could be done.
+permissions:
+  contents: read
+
+# Currently test / c_sample are still broken on Ventura, even with build.sh
 jobs:
   test:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [macos-latest] #, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+    runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build test
+      - run: ./scripts/build.sh test
       - run: ./scripts/install.sh
 
   benchmark:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+    runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/benchmark.sh --transfer-count 4000
 
   c_sample:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [macos-latest] #, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+    runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build c_sample -Drelease-safe
+      - run: ./scripts/build.sh c_sample -Drelease-safe
 
   # TODO(Phil): This never worked, get it working.
   # Validation only. The linux / docs step validates and checks the diff.
