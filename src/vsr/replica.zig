@@ -1421,6 +1421,41 @@ pub fn ReplicaType(
                 self.view,
             });
 
+            const dvcs_all = DVCQuorum.dvcs_all(self.do_view_change_from_all_replicas);
+            assert(dvcs_all.len == self.quorum_view_change);
+
+            for (dvcs_all.constSlice()) |dvc| {
+                log.debug(
+                    "{}: on_do_view_change: dvc: " ++
+                        "replica={} log_view={} op={} commit_min={} checkpoint={}",
+                    .{
+                        self.replica,
+                        dvc.header.replica,
+                        dvc.header.request, // The `log_view` of the replica.
+                        dvc.header.op,
+                        dvc.header.commit, // The `commit_min` of the replica.
+                        dvc.header.timestamp, // The `op_checkpoint` of the replica.
+                    },
+                );
+            }
+
+            const dvcs_canonical = DVCQuorum.dvcs_canonical(self.do_view_change_from_all_replicas);
+            assert(dvcs_canonical.len > 0);
+
+            for (dvcs_canonical.constSlice()) |dvc| {
+                for (message_body_as_headers_chain_disjoint(dvc)) |*header| {
+                    log.debug(
+                        "{}: on_do_view_change: canonical: replica={} op={} checksum={}",
+                        .{
+                            self.replica,
+                            dvc.header.replica,
+                            header.op,
+                            header.checksum,
+                        },
+                    );
+                }
+            }
+
             const op_canonical_max =
                 DVCQuorum.op_canonical_max(self.do_view_change_from_all_replicas);
             const op_checkpoint_max =
@@ -5662,39 +5697,9 @@ pub fn ReplicaType(
             const dvcs_all = DVCQuorum.dvcs_all(self.do_view_change_from_all_replicas);
             assert(dvcs_all.len == self.quorum_view_change);
 
-            const dvcs_canonical = DVCQuorum.dvcs_canonical(self.do_view_change_from_all_replicas);
-            assert(dvcs_canonical.len > 0);
-
             for (dvcs_all.constSlice()) |message| {
                 assert(message.header.op <=
                     self.op_checkpoint_trigger() + constants.pipeline_prepare_queue_max);
-
-                log.debug(
-                    "{}: on_do_view_change: dvc: " ++
-                        "replica={} log_view={} op={} commit_min={} checkpoint={}",
-                    .{
-                        self.replica,
-                        message.header.replica,
-                        message.header.request, // The `log_view` of the replica.
-                        message.header.op,
-                        message.header.commit, // The `commit_min` of the replica.
-                        message.header.timestamp, // The `op_checkpoint` of the replica.
-                    },
-                );
-            }
-
-            for (dvcs_canonical.constSlice()) |message| {
-                for (message_body_as_headers_chain_disjoint(message)) |*header| {
-                    log.debug(
-                        "{}: on_do_view_change: canonical: replica={} op={} checksum={}",
-                        .{
-                            self.replica,
-                            message.header.replica,
-                            header.op,
-                            header.checksum,
-                        },
-                    );
-                }
             }
 
             // The `prepare_timestamp` prevents a primary's own clock from running backwards.
@@ -5708,7 +5713,6 @@ pub fn ReplicaType(
             }
 
             var headers_canonical = DVCQuorum.headers_canonical(self.do_view_change_from_all_replicas);
-
             const header_head = while (headers_canonical.next()) |header| {
                 if (header.op > self.op_checkpoint_trigger()) {
                     // Any ops in the next checkpoint are definitely uncommitted — otherwise,
