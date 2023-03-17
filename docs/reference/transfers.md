@@ -375,7 +375,7 @@ such that `debit_account.debits_pending + debit_account.debits_posted ≤ debit_
 If `amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
 
 If the highest amount transferable is `0`, returns
-[`already_balanced_debit_account`](./operations/create_transfers.md#already_balanced_debit_account).
+[`exceeds_credits`](./operations/create_transfers.md#exceeds_credits).
 
 Retrying a balancing transfer will return
 [`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
@@ -400,7 +400,7 @@ such that `credit_account.credits_pending + credit_account.credits_posted ≤ cr
 If `amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
 
 If the highest amount transferable is `0`, returns
-[`already_balanced_credit_account`](./operations/create_transfers.md#already_balanced_credit_account).
+[`exceeds_debits`](./operations/create_transfers.md#exceeds_debits).
 
 Retrying a balancing transfer will return
 [`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)

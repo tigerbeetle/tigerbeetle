@@ -189,9 +189,6 @@ pub const CreateTransferResult = enum(u32) {
     exists_with_different_amount,
     exists,
 
-    already_balanced_debit_account,
-    already_balanced_credit_account,
-
     overflows_debits_pending,
     overflows_credits_pending,
     overflows_debits_posted,
