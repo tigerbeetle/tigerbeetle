@@ -367,35 +367,52 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
             var update_amount = amount;
             assert(amount > 0);
 
-            // TODO: use level.iterator() + binary_search(env.tables) instead.
-            // Iterate tables in a random order (until enough tables have been updated):
-            // https://lemire.me/blog/2017/09/18/visiting-all-values-in-an-array-exactly-once-in-random-order/
-            const iter_range = @intCast(u32, env.tables.items.len);
-            var iter_count = iter_range;
-            var index = env.random.uintLessThanBiased(u32, iter_range);
-            while (iter_count > 0) : (iter_count -= 1) {
-                assert(index < iter_range);
-                defer {
-                    index += iter_range - 1;
-                    if (index >= iter_range) index -= iter_range;
-                }
+            // Only update the snapshot_max of those visible to snapshot_latest.
+            // Those visible to env.snapshot would include tables with updated snapshot_max.
+            const snapshots = @as(*const [1]u64, &lsm.snapshot_latest);
 
-                // Update the snapshot_max of tables which are visible to snapshot_latest:
-                const table = &env.tables.items[index];
-                if (table.visible(lsm.snapshot_latest)) {
-                    assert(table.visible(env.snapshot));
+            var it = env.level.iterator(.visible, snapshots, .descending, null);
+            while (it.next()) |level_table| {
+                assert(level_table.visible(env.snapshot));
+                assert(level_table.visible(lsm.snapshot_latest));
 
-                    const snapshot_max = env.snapshot;
-                    env.level.set_snapshot_max(snapshot_max, table);
-                    assert(table.snapshot_max == snapshot_max);
-                    assert(!table.visible(lsm.snapshot_latest));
+                const env_table = env.find_exact(level_table);
+                assert(level_table.equal(env_table));
 
-                    update_amount -= 1;
-                    if (update_amount == 0) break;
-                }
+                env.level.set_snapshot_max(env.snapshot, env_table);
+                assert(env_table.snapshot_max == env.snapshot);
+                assert(!env_table.visible(lsm.snapshot_latest));
+                assert(env_table.visible(env.snapshot));
+
+                update_amount -= 1;
+                if (update_amount == 0) break;
             }
 
             assert(update_amount == 0);
+        }
+
+        fn find_exact(env: *Environment, level_table: *const TableInfo) *TableInfo {
+            const index = binary_search.binary_search_values_raw(
+                Key,
+                TableInfo,
+                key_min_from_table,
+                compare_keys,
+                env.tables.items,
+                level_table.key_min,
+                .{},
+            );
+
+            assert(index < env.tables.items.len);
+            const tables = env.tables.items[index..];
+
+            assert(compare_keys(tables[0].key_min, level_table.key_min) == .eq);
+            for (tables) |*env_table| {
+                if (compare_keys(env_table.key_max, level_table.key_max) == .eq) {
+                    return env_table;
+                }
+            }
+
+            std.debug.panic("table not found in fuzzer reference model: {any}", .{level_table.*});
         }
 
         fn take_snapshot(env: *Environment) !void {
@@ -469,6 +486,8 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
         /// TODO: This clears removed tables in O(n). Use a better way.
         fn purge_removed_tables(env: *Environment) !void {
             assert(env.buffer.items.len == 0);
+            try env.buffer.ensureTotalCapacity(env.tables.items.len);
+
             for (env.tables.items) |*table| {
                 if (table.address == 0) continue;
                 try env.buffer.append(table.*);
