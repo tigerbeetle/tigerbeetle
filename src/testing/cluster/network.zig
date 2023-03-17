@@ -115,7 +115,11 @@ pub const Network = struct {
 
     pub fn link(network: *Network, process: Process, message_bus: *MessageBus) void {
         const raw_process = switch (process) {
-            .replica => |replica| replica,
+            .replica => |replica| blk: {
+                // PacketSimulator assumes that replicas go first.
+                assert(network.processes.items.len < network.options.node_count);
+                break :blk replica;
+            },
             .client => |client| blk: {
                 assert(client >= constants.nodes_max);
                 break :blk client;
@@ -172,7 +176,13 @@ pub const Network = struct {
 
     fn process_to_address(network: *const Network, process: Process) u8 {
         for (network.processes.items) |p, i| {
-            if (std.meta.eql(raw_process_to_process(p), process)) return @intCast(u8, i);
+            if (std.meta.eql(raw_process_to_process(p), process)) {
+                switch (process) {
+                    .replica => assert(i < network.options.node_count),
+                    .client => assert(i >= network.options.node_count),
+                }
+                return @intCast(u8, i);
+            }
         }
         log.err("no such process: {} (have {any})", .{ process, network.processes.items });
         unreachable;
