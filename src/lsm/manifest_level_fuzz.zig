@@ -309,7 +309,7 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
                     .{},
                 );
 
-                // Can't be equal as the tables may not overlap
+                // Can't be equal as the tables may not overlap.
                 if (index < env.tables.items.len) {
                     assert(env.tables.items[index].key_min > table.key_max);
                 }
@@ -351,7 +351,7 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
 
             return .{
                 .checksum = env.random.int(u128),
-                // zero addresses are used to indicate the table being removed.
+                // Zero addresses are used to indicate the table being removed.
                 .address = env.random.intRangeAtMostBiased(u64, 1, std.math.maxInt(u64)),
                 .snapshot_min = env.snapshot,
                 .key_min = new_key_min,
