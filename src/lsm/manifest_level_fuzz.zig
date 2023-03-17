@@ -86,7 +86,7 @@ pub fn main() !void {
 
     const fuzz_ops = try generate_fuzz_ops(random, table_count_max, fuzz_op_count);
     defer allocator.free(fuzz_ops);
-    
+
     try EnvironmentType(table_count_max, node_size).run_fuzz_ops(random, fuzz_ops);
 }
 
@@ -148,7 +148,7 @@ const GenerateContext = struct {
                     if (ctx.invisible > 0) return ctx.next(.remove_invisible);
                     return ctx.next(.remove_visible);
                 }
-                
+
                 var amount = ctx.random.intRangeAtMostBiased(usize, 1, insertable);
                 ctx.inserted += amount;
                 assert(ctx.invisible <= ctx.inserted);
@@ -408,7 +408,7 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
             assert(amount > 0);
 
             // Remove tables not visible to the current snapshot.
-            const snapshots = [_]u64{ env.snapshot };
+            const snapshots = [_]u64{env.snapshot};
 
             // Remove invisible tables from ManifestLevel and mark them as removed in env.tables:
             var it = env.level.iterator(.invisible, &snapshots, .descending, null);
