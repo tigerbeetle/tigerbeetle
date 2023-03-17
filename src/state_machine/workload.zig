@@ -99,6 +99,8 @@ const TransferBatch = struct {
 
 /// Indexes: [valid:bool][limit:bool][method]
 const transfer_templates = table: {
+    @setEvalBranchQuota(2000);
+
     const SNGL = @enumToInt(TransferPlan.Method.single_phase);
     const PEND = @enumToInt(TransferPlan.Method.pending);
     const POST = @enumToInt(TransferPlan.Method.post_pending);

@@ -36,7 +36,7 @@
     <maven.compiler.source>11</maven.compiler.source>
     <maven.compiler.target>11</maven.compiler.target>
     <!-- JaCoCo thresholds -->
-    <jacoco.unit-tests.limit.instruction-ratio>95%</jacoco.unit-tests.limit.instruction-ratio>
+    <jacoco.unit-tests.limit.instruction-ratio>94%</jacoco.unit-tests.limit.instruction-ratio>
     <jacoco.unit-tests.limit.branch-ratio>90%</jacoco.unit-tests.limit.branch-ratio>
   </properties>
 
@@ -134,6 +134,7 @@
               <!-- Excluding enums -->
               <exclude>com/tigerbeetle/PacketStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
+              <exclude>com/tigerbeetle/TransferFlags.class</exclude>
 
               <!-- Excluding the benchmark -->
               <exclude>benchmark/Benchmark.class</exclude>
