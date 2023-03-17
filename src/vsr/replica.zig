@@ -5706,7 +5706,8 @@ pub fn ReplicaType(
                 self.state_machine.prepare_timestamp = timestamp_max;
             }
 
-            var headers_canonical = DVCQuorum.headers_canonical(self.do_view_change_from_all_replicas);
+            var headers_canonical =
+                DVCQuorum.headers_canonical(self.do_view_change_from_all_replicas);
             const header_head = while (headers_canonical.next()) |header| {
                 if (header.op > self.op_checkpoint_trigger()) {
                     // Any ops in the next checkpoint are definitely uncommitted — otherwise,
@@ -6134,6 +6135,15 @@ pub fn ReplicaType(
                 assert(self.view_headers.array.len <= constants.pipeline_prepare_queue_max);
                 // We could safely include any additional chained headers.
                 // However, that can make view-change bugs harder to trigger.
+
+                // If we only recently checkpointed, it is possible that all of the ops in the new
+                // WAL wrap are uncommitted. If so, and the new primary can discern this, it may
+                // start the view despite itself being one checkpoint behind us, by truncating all
+                // of these next-wrap ops.
+                //
+                // The primary's new head would match its op_checkpoint_trigger.
+                // But we need not explicitly include this header in our DVC — it is automatically
+                // included if necessary thanks to the "DVC connects to commit_max" invariant.
             }
 
             vsr.Headers.ViewChangeSlice.verify(self.view_headers.array.constSlice());
