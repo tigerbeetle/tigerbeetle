@@ -84,13 +84,18 @@ pub const TransferFlags = packed struct {
     pending: bool = false,
     post_pending_transfer: bool = false,
     void_pending_transfer: bool = false,
-    padding: u12 = 0,
+    balancing_debit: bool = false,
+    balancing_credit: bool = false,
+    padding: u10 = 0,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
     }
 };
 
+/// Error codes are ordered by descending precedence.
+/// When errors do not have an obvious/natural precedence (e.g. "*_must_be_zero"),
+/// the ordering matches struct field order.
 pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
@@ -102,14 +107,15 @@ pub const CreateAccountResult = enum(u32) {
 
     id_must_not_be_zero,
     id_must_not_be_int_max,
+
+    flags_are_mutually_exclusive,
+
     ledger_must_not_be_zero,
     code_must_not_be_zero,
     debits_pending_must_be_zero,
     debits_posted_must_be_zero,
     credits_pending_must_be_zero,
     credits_posted_must_be_zero,
-
-    mutually_exclusive_flags,
 
     exists_with_different_flags,
     exists_with_different_user_data,
@@ -118,6 +124,9 @@ pub const CreateAccountResult = enum(u32) {
     exists,
 };
 
+/// Error codes are ordered by descending precedence.
+/// When errors do not have an obvious/natural precedence (e.g. "*_must_not_be_zero"),
+/// the ordering matches struct field order.
 pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
@@ -129,6 +138,9 @@ pub const CreateTransferResult = enum(u32) {
 
     id_must_not_be_zero,
     id_must_not_be_int_max,
+
+    flags_are_mutually_exclusive,
+
     debit_account_id_must_not_be_zero,
     debit_account_id_must_not_be_int_max,
     credit_account_id_must_not_be_zero,
@@ -136,6 +148,10 @@ pub const CreateTransferResult = enum(u32) {
     accounts_must_be_different,
 
     pending_id_must_be_zero,
+    pending_id_must_not_be_zero,
+    pending_id_must_not_be_int_max,
+    pending_id_must_be_different,
+    timeout_reserved_for_pending_transfer,
 
     ledger_must_not_be_zero,
     code_must_not_be_zero,
@@ -146,35 +162,6 @@ pub const CreateTransferResult = enum(u32) {
 
     accounts_must_have_the_same_ledger,
     transfer_must_have_the_same_ledger_as_accounts,
-
-    exists_with_different_flags,
-    exists_with_different_debit_account_id,
-    exists_with_different_credit_account_id,
-    exists_with_different_user_data,
-    exists_with_different_pending_id,
-    exists_with_different_timeout,
-    exists_with_different_code,
-    exists_with_different_amount,
-    exists,
-
-    overflows_debits_pending,
-    overflows_credits_pending,
-    overflows_debits_posted,
-    overflows_credits_posted,
-    overflows_debits,
-    overflows_credits,
-    overflows_timeout,
-
-    exceeds_credits,
-    exceeds_debits,
-
-    cannot_post_and_void_pending_transfer,
-    pending_transfer_cannot_post_or_void_another,
-    timeout_reserved_for_pending_transfer,
-
-    pending_id_must_not_be_zero,
-    pending_id_must_not_be_int_max,
-    pending_id_must_be_different,
 
     pending_transfer_not_found,
     pending_transfer_not_pending,
@@ -191,6 +178,27 @@ pub const CreateTransferResult = enum(u32) {
     pending_transfer_already_voided,
 
     pending_transfer_expired,
+
+    exists_with_different_flags,
+    exists_with_different_debit_account_id,
+    exists_with_different_credit_account_id,
+    exists_with_different_pending_id,
+    exists_with_different_user_data,
+    exists_with_different_timeout,
+    exists_with_different_code,
+    exists_with_different_amount,
+    exists,
+
+    overflows_debits_pending,
+    overflows_credits_pending,
+    overflows_debits_posted,
+    overflows_credits_posted,
+    overflows_debits,
+    overflows_credits,
+    overflows_timeout,
+
+    exceeds_credits,
+    exceeds_debits,
 };
 
 pub const CreateAccountsResult = extern struct {

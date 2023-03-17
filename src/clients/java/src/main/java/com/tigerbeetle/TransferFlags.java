@@ -28,6 +28,16 @@ public interface TransferFlags {
      */
     int VOID_PENDING_TRANSFER = (int) (1 << 3);
 
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsbalancing_debit">balancing_debit</a>
+     */
+    int BALANCING_DEBIT = (int) (1 << 4);
+
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers#flagsbalancing_credit">balancing_credit</a>
+     */
+    int BALANCING_CREDIT = (int) (1 << 5);
+
     static boolean hasLinked(final int flags) {
         return (flags & LINKED) == LINKED;
     }
@@ -42,6 +52,14 @@ public interface TransferFlags {
 
     static boolean hasVoidPendingTransfer(final int flags) {
         return (flags & VOID_PENDING_TRANSFER) == VOID_PENDING_TRANSFER;
+    }
+
+    static boolean hasBalancingDebit(final int flags) {
+        return (flags & BALANCING_DEBIT) == BALANCING_DEBIT;
+    }
+
+    static boolean hasBalancingCredit(final int flags) {
+        return (flags & BALANCING_CREDIT) == BALANCING_CREDIT;
     }
 
 }

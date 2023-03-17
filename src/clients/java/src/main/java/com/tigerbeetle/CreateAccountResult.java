@@ -48,39 +48,39 @@ public enum CreateAccountResult {
     IdMustNotBeIntMax((int) 7),
 
     /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#flags_are_mutually_exclusive">flags_are_mutually_exclusive</a>
+     */
+    FlagsAreMutuallyExclusive((int) 8),
+
+    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#ledger_must_not_be_zero">ledger_must_not_be_zero</a>
      */
-    LedgerMustNotBeZero((int) 8),
+    LedgerMustNotBeZero((int) 9),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#code_must_not_be_zero">code_must_not_be_zero</a>
      */
-    CodeMustNotBeZero((int) 9),
+    CodeMustNotBeZero((int) 10),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_pending_must_be_zero">debits_pending_must_be_zero</a>
      */
-    DebitsPendingMustBeZero((int) 10),
+    DebitsPendingMustBeZero((int) 11),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_posted_must_be_zero">debits_posted_must_be_zero</a>
      */
-    DebitsPostedMustBeZero((int) 11),
+    DebitsPostedMustBeZero((int) 12),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_pending_must_be_zero">credits_pending_must_be_zero</a>
      */
-    CreditsPendingMustBeZero((int) 12),
+    CreditsPendingMustBeZero((int) 13),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_posted_must_be_zero">credits_posted_must_be_zero</a>
      */
-    CreditsPostedMustBeZero((int) 13),
-
-    /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#mutually_exclusive_flags">mutually_exclusive_flags</a>
-     */
-    MutuallyExclusiveFlags((int) 14),
+    CreditsPostedMustBeZero((int) 14),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_flags">exists_with_different_flags</a>

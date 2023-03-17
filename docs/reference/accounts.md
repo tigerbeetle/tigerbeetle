@@ -90,6 +90,8 @@ A bitfield that toggles additional behavior.
 Constraints:
 
 * Type is 16-bit unsigned integer (2 bytes)
+* Some flags are mutually exclusive; see
+  [`flags_are_mutually_exclusive`](./operations/create_accounts.md#flags_are_mutually_exclusive).
 
 #### `flags.linked`
 
