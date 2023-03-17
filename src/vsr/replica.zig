@@ -1421,13 +1421,24 @@ pub fn ReplicaType(
                 self.view,
             });
 
-            assert(!self.do_view_change_quorum);
-            self.do_view_change_quorum = true;
-
-            const dvc_latest = DVCQuorum.dvc_latest(self.do_view_change_from_all_replicas);
-            if (dvc_latest.header.op > self.op_checkpoint_trigger()) {
-                // When the cluster is at a checkpoint ahead of the local checkpoint, abdicate
-                // as primary.
+            const op_canonical_max =
+                DVCQuorum.op_canonical_max(self.do_view_change_from_all_replicas);
+            const op_checkpoint_max =
+                DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
+            if (op_checkpoint_max > self.op_checkpoint() and
+                op_canonical_max > self.op_checkpoint_trigger())
+            {
+                // When:
+                // 1. the cluster is at a checkpoint ahead of the local checkpoint,
+                // 2. AND the canonical head op is part of a future checkpoint,
+                //    abdicate as primary, jumping to a new view.
+                //
+                // - If 1 and ¬2, then the ops in the next checkpoint are uncommitted and our
+                //   current checkpoint is sufficient.
+                // - If 2 and ¬1, then the ops past the checkpoint-trigger must be uncommitted
+                //   because no replica in the DVC quorum even prepared them.
+                //   (They are present anyway because the origin of the DVC is reusing its SV
+                //   headers as a DVC since it has not completed repair.)
                 //
                 // This serves a few purposes:
                 // 1. Availability: We pick a primary to minimize the number of WAL repairs, to
@@ -1436,34 +1447,59 @@ pub fn ReplicaType(
                 //    prepares/commits can resume.
                 // 3. Simplify repair: A new primary never needs to fast-forward to a new checkpoint.
 
+                // As an optimization, jump directly to a view where the primary will have the
+                // cluster's latest checkpoint.
+                var v: u32 = 1;
+                const next_view = while (v < self.replica_count) : (v += 1) {
+                    const next_view = self.view + v;
+                    const next_primary = self.primary_index(next_view);
+                    assert(next_primary != self.replica);
+
+                    if (self.do_view_change_from_all_replicas[next_primary]) |dvc| {
+                        assert(dvc.header.replica == next_primary);
+
+                        const dvc_checkpoint = dvc.header.timestamp;
+                        if (dvc_checkpoint == op_checkpoint_max) break next_view;
+                    }
+                } else unreachable;
+
                 log.debug("{}: on_do_view_change: lagging primary; forfeiting " ++
-                    "(view={}..{} op={}..{})", .{
+                    "(view={}..{} checkpoint={}..{})", .{
                     self.replica,
                     self.view,
-                    self.view + 1,
-                    self.op,
-                    dvc_latest.header.op,
+                    next_view,
+                    self.op_checkpoint(),
+                    op_checkpoint_max,
                 });
-                self.transition_to_view_change_status(self.view + 1);
-                return;
+                self.transition_to_view_change_status(next_view);
+            } else {
+                assert(!self.do_view_change_quorum);
+                self.do_view_change_quorum = true;
+
+                self.primary_set_log_from_do_view_change_messages();
+                // We aren't status=normal yet, but our headers from our prior log_view may have
+                // been replaced. If we participate in another DVC (before reaching status=normal,
+                // which would update our log_view), we must disambiguate our (new) headers from the
+                // headers of any other replica with the same log_view so that the next primary can
+                // identify an unambiguous set of canonical headers.
+                self.log_view = self.view;
+
+                if (op_canonical_max > self.op_checkpoint_trigger()) {
+                    assert(self.op == self.commit_max);
+                    assert(self.op == self.op_checkpoint_trigger());
+                    assert(op_canonical_max - op_checkpoint_max <=
+                        constants.pipeline_prepare_queue_max);
+                }
+
+                assert(self.op >= self.commit_max);
+                assert(self.state_machine.prepare_timestamp >=
+                    self.journal.header_with_op(self.op).?.timestamp);
+
+                // Start repairs according to the CTRL protocol:
+                assert(!self.repair_timeout.ticking);
+                self.repair_timeout.start();
+                self.repair();
             }
-
-            self.primary_set_log_from_do_view_change_messages();
-            // We aren't status=normal yet, but our headers from our prior log_view may have been
-            // replaced. If we participate in another DVC (before reaching status=normal, which
-            // would update our log_view), we must disambiguate our (new) headers from the
-            // headers of any other replica with the same log_view so that the next primary can
-            // identify an unambiguous set of canonical headers.
-            self.log_view = self.view;
-
-            assert(self.op >= self.commit_max);
-            assert(self.state_machine.prepare_timestamp >=
-                self.journal.header_with_op(self.op).?.timestamp);
-
-            // Start repairs according to the CTRL protocol:
-            assert(!self.repair_timeout.ticking);
-            self.repair_timeout.start();
-            self.repair();
         }
 
         /// When other replicas receive the start_view message, they replace their log with the one
@@ -5618,6 +5654,7 @@ pub fn ReplicaType(
             assert(self.view > self.log_view);
             assert(self.primary_index(self.view) == self.replica);
             assert(!self.solo());
+            assert(self.commit_max <= self.op_checkpoint_trigger());
             assert(self.do_view_change_quorum);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
@@ -5629,7 +5666,8 @@ pub fn ReplicaType(
             assert(dvcs_canonical.len > 0);
 
             for (dvcs_all.constSlice()) |message| {
-                assert(message.header.op <= self.op_checkpoint_trigger());
+                assert(message.header.op <=
+                    self.op_checkpoint_trigger() + constants.pipeline_prepare_queue_max);
 
                 log.debug(
                     "{}: on_do_view_change: dvc: " ++
@@ -5670,7 +5708,21 @@ pub fn ReplicaType(
             }
 
             var headers_canonical = DVCQuorum.headers_canonical(self.do_view_change_from_all_replicas);
-            const header_head = headers_canonical.next().?;
+
+            const header_head = while (headers_canonical.next()) |header| {
+                if (header.op > self.op_checkpoint_trigger()) {
+                    // Any ops in the next checkpoint are definitely uncommitted — otherwise,
+                    // we would have forfeited to favor a different primary.
+                    for (dvcs_all.constSlice()) |dvc| {
+                        assert(dvc.header.timestamp <= self.op_checkpoint());
+                    }
+                } else {
+                    break header;
+                }
+            } else {
+                @panic("primary_set_log_from_do_view_change_messages: missing checkpoint trigger");
+            };
+
             assert(header_head.op >= self.op_checkpoint());
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
@@ -5694,6 +5746,8 @@ pub fn ReplicaType(
                 self.do_view_change_from_all_replicas[self.replica].?.header.commit);
 
             self.set_op_and_commit_max(header_head.op, commit_max, "on_do_view_change");
+            assert(self.commit_max <= self.op_checkpoint_trigger());
+
             // "`replica.op` exists" invariant may be broken briefly between set_op_and_commit_max()
             // and replace_header().
             self.replace_header(&header_head);
@@ -6545,23 +6599,20 @@ const DVCQuorum = struct {
         return array;
     }
 
-    /// Returns the DVC with the highest head op.
-    ///
-    /// Note that the DVC in question is not necessarily canonical. If only canonical DVCs were
-    /// considered, it would be possible for now-truncated prepares to have overwritten some
-    /// prepares from the prior WAL wrap, which would then be unavailable to catch the lagging
-    /// replica up to the current checkpoint.
-    fn dvc_latest(dvc_quorum: QuorumMessages) *const Message {
-        const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
-        assert(dvcs.len > 0);
-
-        var message: ?*const Message = null;
+    fn op_checkpoint_max(dvc_quorum: QuorumMessages) u64 {
+        var checkpoint_max: ?u64 = null;
+        const dvcs = dvcs_all(dvc_quorum);
         for (dvcs.constSlice()) |dvc| {
-            if (message == null or message.?.header.op < dvc.header.op) {
-                message = dvc;
+            const dvc_checkpoint = dvc.header.timestamp;
+            if (checkpoint_max == null or checkpoint_max.? < dvc_checkpoint) {
+                checkpoint_max = dvc_checkpoint;
             }
         }
-        return message.?;
+        return checkpoint_max.?;
+    }
+
+    fn op_canonical_max(dvc_quorum: QuorumMessages) u64 {
+        return DVCQuorum.headers_canonical(dvc_quorum).next().?.op;
     }
 
     /// Returns the highest `log_view` of any DVC.
