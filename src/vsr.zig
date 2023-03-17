@@ -200,7 +200,7 @@ pub const Header = extern struct {
     /// detecting whether a session has been evicted is solved by the session number.
     client: u128 = 0,
 
-    /// The checksum of the message to which this message refers, or a unique recovery nonce.
+    /// The checksum of the message to which this message refers.
     ///
     /// We use this cryptographic context in various ways, for example:
     ///
@@ -210,7 +210,6 @@ pub const Header = extern struct {
     /// * A `commit` sets this to the checksum of the latest committed prepare.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `nack_prepare` sets this to the checksum of the prepare being nacked.
-    /// * A `recovery` and `recovery_response` sets this to the nonce.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
