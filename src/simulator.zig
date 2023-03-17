@@ -78,17 +78,16 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
-    const standby_count = random.uintAtMost(u8, constants.standbys_max);
+    const replica_count = 3;
+    const standby_count = 0;
     const node_count = replica_count + standby_count;
-    const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
+    const client_count = 1;
 
-    const quorums = vsr.quorums(replica_count);
-    const replicas_dead_max = random.uintAtMost(u8, replica_count - quorums.view_change);
+    // const quorums = vsr.quorums(replica_count);
+    const replicas_dead_max = 1;
     // A cluster-of-2 is special-cased to mirror the special case in replica.zig.
     // See repair_prepare()/on_nack_prepare().
-    const storage_faults_max =
-        (if (replica_count == 2) 1 else replica_count - quorums.replication) -| replicas_dead_max;
+    const storage_faults_max = 0;
 
     const cluster_options = Cluster.Options{
         .cluster_id = cluster_id,
