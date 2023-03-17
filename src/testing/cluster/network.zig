@@ -146,6 +146,7 @@ pub const Network = struct {
 
     pub fn process_disable(network: *Network, process: Process) void {
         assert(network.buses_enabled.items[network.process_to_address(process)]);
+
         network.buses_enabled.items[network.process_to_address(process)] = false;
     }
 
@@ -161,6 +162,8 @@ pub const Network = struct {
 
         stdx.copy_disjoint(.exact, u8, network_message.buffer, message.buffer);
 
+        const source_addr = network.process_to_address(path.source);
+
         network.packet_simulator.submit_packet(
             .{
                 .message = network_message.ref(),
@@ -168,7 +171,7 @@ pub const Network = struct {
             },
             deliver_message,
             .{
-                .source = network.process_to_address(path.source),
+                .source = source_addr,
                 .target = network.process_to_address(path.target),
             },
         );

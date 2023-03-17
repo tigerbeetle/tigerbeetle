@@ -1025,6 +1025,9 @@ pub fn ReplicaType(
         fn on_prepare(self: *Self, message: *Message) void {
             assert(message.header.command == .prepare);
             assert(message.header.replica < self.replica_count);
+            if (self.replica == 1 and message.header.op == 62) {
+                log.err("lol: {}", .{message.header});
+            }
 
             self.view_jump_to_normal(message.header);
 
@@ -1417,7 +1420,7 @@ pub fn ReplicaType(
                 //    prepares/commits can resume.
                 // 3. Simplify repair: A new primary never needs to fast-forward to a new checkpoint.
 
-                log.debug("{}: on_do_view_change: lagging primary; forfeiting " ++
+                log.err("{}: on_do_view_change: lagging primary; forfeiting " ++
                     "(view={}..{} op={}..{})", .{
                     self.replica,
                     self.view,
@@ -1456,6 +1459,11 @@ pub fn ReplicaType(
         /// advance their commit number, and update the information in their client table.
         fn on_start_view(self: *Self, message: *const Message) void {
             assert(message.header.command == .start_view);
+            // const ll = &@import("root").log_level_dyn;
+            // const old_ll = ll.*;
+            // ll.* = .debug;
+            // defer ll.* = old_ll;
+
             if (self.ignore_view_change_message(message)) return;
 
             assert(self.status == .view_change or
@@ -3653,7 +3661,7 @@ pub fn ReplicaType(
 
         /// Returns whether the replica is the primary for the current view.
         /// This may be used only when the replica status is normal.
-        fn primary(self: *const Self) bool {
+        pub fn primary(self: *const Self) bool {
             assert(self.status == .normal);
             return self.primary_index(self.view) == self.replica;
         }
@@ -3824,7 +3832,7 @@ pub fn ReplicaType(
         /// checkpointed.
         ///
         /// See `op_checkpoint_next` for more detail.
-        fn op_checkpoint_trigger(self: *const Self) u64 {
+        pub fn op_checkpoint_trigger(self: *const Self) u64 {
             return self.op_checkpoint_next() + constants.lsm_batch_multiple;
         }
 
@@ -4067,7 +4075,7 @@ pub fn ReplicaType(
                 };
 
                 if (backup_repair_next != null and backup_repair_next.? < primary_repair_min) {
-                                std.process.exit(0);
+                    std.process.exit(0);
                     @panic("unimplemented (state transfer)");
                 }
             }

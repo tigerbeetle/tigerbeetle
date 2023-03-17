@@ -15,7 +15,7 @@ const StateMachineType = switch (state_machine) {
 };
 
 const Client = @import("testing/cluster.zig").Client;
-const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
+pub const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
 const Replica = @import("testing/cluster.zig").Replica;
 const StateMachine = Cluster.StateMachine;
 const Failure = @import("testing/cluster.zig").Failure;
@@ -30,14 +30,15 @@ const output = std.log.scoped(.state_checker);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
-const log_state_transitions_only = builtin.mode != .Debug;
+const log_state_transitions_only = false;
 
 const log_simulator = std.log.scoped(.simulator);
 
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 /// You can fine tune your log levels even further (debug/info/warn/err):
-pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
+pub const log_level: std.log.Level = .debug;
+pub var log_level_dyn: std.log.Level = .err;
 
 const cluster_id = 0;
 
@@ -78,17 +79,12 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 6;
+    const replica_count = 3;
     const standby_count = 0;
     const node_count = replica_count + standby_count;
-    const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
+    const client_count = 1;
 
-    const quorums = vsr.quorums(replica_count);
-    const replicas_dead_max = 1 + random.uintAtMost(u8, 1);
-    // A cluster-of-2 is special-cased to mirror the special case in replica.zig.
-    // See repair_prepare()/on_nack_prepare().
-    const storage_faults_max =
-        (if (replica_count == 2) 1 else replica_count - quorums.replication) -| replicas_dead_max;
+    const replicas_dead_max = 1;
 
     const cluster_options = Cluster.Options{
         .cluster_id = cluster_id,
@@ -104,36 +100,36 @@ pub fn main() !void {
             .client_count = client_count,
 
             .seed = random.int(u64),
-            .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
-            .one_way_delay_min = random.uintLessThan(u16, 3),
-            .packet_loss_probability = random.uintLessThan(u8, 30),
-            .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
-            .path_clog_duration_mean = random.uintLessThan(u16, 500),
-            .path_clog_probability = random.uintLessThan(u8, 2),
-            .packet_replay_probability = random.uintLessThan(u8, 50),
+            .one_way_delay_mean = 3,
+            .one_way_delay_min = 3,
+            .packet_loss_probability = 0,
+            .path_maximum_capacity = 10,
+            .path_clog_duration_mean = 100,
+            .path_clog_probability = 0,
+            .packet_replay_probability = 0,
 
             .partition_mode = random_partition_mode(random),
             .partition_symmetry = random_partition_symmetry(random),
-            .partition_probability = random.uintLessThan(u8, 3),
-            .unpartition_probability = 1 + random.uintLessThan(u8, 10),
-            .partition_stability = 100 + random.uintLessThan(u32, 100),
-            .unpartition_stability = random.uintLessThan(u32, 20),
+            .partition_probability = 0,
+            .unpartition_probability = 0,
+            .partition_stability = 0,
+            .unpartition_stability = 0,
         },
         .storage = .{
             .seed = random.int(u64),
-            .read_latency_min = random.uintLessThan(u16, 3),
-            .read_latency_mean = 3 + random.uintLessThan(u16, 10),
-            .write_latency_min = random.uintLessThan(u16, 3),
-            .write_latency_mean = 3 + random.uintLessThan(u16, 100),
-            .read_fault_probability = random.uintLessThan(u8, 10),
-            .write_fault_probability = random.uintLessThan(u8, 10),
-            .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
+            .read_latency_min = 3,
+            .read_latency_mean = 3,
+            .write_latency_min = 3,
+            .write_latency_mean = 3,
+            .read_fault_probability = 0,
+            .write_fault_probability = 0,
+            .crash_fault_probability = 0,
         },
         .storage_fault_atlas = .{
-            .faults_max = storage_faults_max,
-            .faulty_superblock = true,
-            .faulty_wal_headers = replica_count > 1,
-            .faulty_wal_prepares = replica_count > 1,
+            .faults_max = 0,
+            .faulty_superblock = false,
+            .faulty_wal_headers = false,
+            .faulty_wal_prepares = false,
         },
         .state_machine = switch (state_machine) {
             .testing => .{},
@@ -163,7 +159,7 @@ pub fn main() !void {
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .replicas_dead_max = replicas_dead_max,
-        .requests_max = constants.journal_slot_count * 3,
+        .requests_max = constants.journal_slot_count * 2,
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
         .request_idle_off_probability = 10 + random.uintLessThan(u8, 10),
@@ -242,28 +238,48 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
 
-    const ticks_max = 5_000_000;
+    const ticks_max = 8000;
     var tick: u64 = 0;
+    simulator.options.requests_max = 70;
     while (tick < ticks_max) : (tick += 1) {
         simulator.tick();
-        if (simulator.done()) break;
-    } else {
-        for (simulator.cluster.replicas) |replica| {
-            output.err("{}: status={} view={} op={} commit_min={} dead={}", .{
-                replica.replica,
-                replica.status,
-                replica.view,
-                replica.op,
-                replica.commit_min,
-                simulator.replica_stability[replica.replica] == Simulator.death_stability,
-            });
+        const replica0 = &simulator.cluster.replicas[0];
+        const replica1 = &simulator.cluster.replicas[1];
+        const replica2 = &simulator.cluster.replicas[2];
+        if (phase == 0 and replica1.op == 64 and replica1.commit_min == 63) phase = 1;
+        if (phase == 2 and replica0.view == 4 and replica0.status == .normal and replica2.view == 4 and replica2.status == .normal) {
+            output.err("start phase 3", .{});
+            dump(&simulator);
+            phase = 3;
         }
-        output.err("you can reproduce this failure with seed={}", .{seed});
-        fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
+        if (phase == 3 and replica0.status == .view_change and replica2.status == .view_change) {
+            output.err("start phase 4", .{});
+            dump(&simulator);
+            phase = 4;
+            // log_level_dyn = .debug;
+        }
+        // if (simulator.done()) break;
     }
-    assert(simulator.done());
+    dump(&simulator);
+    output.err("\n          PASSED ({} ticks {} dead)", .{ tick, simulator.replicas_dead });
+}
 
-    output.info("\n          PASSED ({} ticks {} dead)", .{ tick, simulator.replicas_dead });
+pub var phase: u8 = 0;
+
+fn dump(simulator: *const Simulator) void {
+    output.err("dump:\n", .{});
+    for (simulator.cluster.replicas) |replica| {
+        output.err("{}: view={} op={} commit_min={} chck={:3} trgr={:3} status={} view_headers_op={}", .{
+            replica.replica,
+            replica.view,
+            replica.op,
+            replica.commit_min,
+            replica.op_checkpoint(),
+            replica.op_checkpoint_trigger(),
+            replica.status,
+            replica.view_headers.array.get(0).op,
+        });
+    }
 }
 
 pub const Simulator = struct {
@@ -531,11 +547,13 @@ pub const Simulator = struct {
                         simulator.options.replica_crash_stability;
 
                     if (replica.standby() or simulator.replicas_dead < simulator.options.replicas_dead_max) {
-                        const death_probability = simulator.options.replica_death_probability;
-                        if (chance_f64(simulator.random, death_probability)) {
-                            log_simulator.debug("{}: kill replica", .{replica.replica});
-                            simulator.replicas_dead += @boolToInt(!replica.standby());
-                            simulator.replica_stability[replica.replica] = death_stability;
+                        if (replica.status == .normal and replica.primary()) {
+                            const death_probability = simulator.options.replica_death_probability;
+                            if (chance_f64(simulator.random, death_probability)) {
+                                log_simulator.debug("{}: kill replica", .{replica.replica});
+                                simulator.replicas_dead += @boolToInt(!replica.standby());
+                                simulator.replica_stability[replica.replica] = death_stability;
+                            }
                         }
                     }
                 },
@@ -636,6 +654,7 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    if (@enumToInt(level) > @enumToInt(log_level_dyn)) return;
     if (log_state_transitions_only and scope != .state_checker) return;
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";

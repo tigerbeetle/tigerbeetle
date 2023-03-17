@@ -170,8 +170,48 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return @as(usize, path.source) * self.process_count() + path.target;
         }
 
-        fn should_drop(self: *Self) bool {
-            return self.prng.random().uintAtMost(u8, 100) < self.options.packet_loss_probability;
+        fn should_drop(self: *Self, packet: *const Packet, from: u8, to: u8) bool {
+            _ = self;
+            const phase = &@import("root").phase;
+            const message = packet.message;
+            if (phase.* < 4) {
+                if (message.header.command == .prepare) {
+                    if (message.header.op == 62 and to == 0) return true;
+                    if (message.header.op == 63 and to == 2) return true;
+                    if (message.header.op == 64) return true;
+                }
+            }
+            switch (phase.*) {
+                0 => {
+                    if (message.header.command == .prepare) {
+                        if (message.header.op == 62 and to == 0) return true;
+                        if (message.header.op == 63 and to == 2) return true;
+                        if (message.header.op == 64) return true;
+                    }
+                    if (message.header.command == .commit) {
+                        if (message.header.replica == 1 and message.header.commit == 63) return true;
+                    }
+                },
+                1 => {
+                    if (message.header.view == 3 and message.header.command == .start_view_change) {
+                        log.err("start phase 2", .{});
+                        phase.* = 2;
+                        return false;
+                    }
+                    if (message.header.command == .do_view_change) {
+                        return true;
+                    }
+                    if (from == 1 or to == 1) return true;
+                },
+                2 => return false,
+                3 => {
+                    if (from == 1 or to == 1) return true;
+                    if (message.header.command == .prepare) return true;
+                },
+                4 => if (from == 1 or to == 1) return true,
+                else => unreachable,
+            }
+            return false;
         }
 
         fn is_clogged(self: *Self, path: Path) bool {
@@ -313,7 +353,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                             continue;
                         }
 
-                        if (self.should_drop()) {
+                        if (self.should_drop(&link_packet.packet, from, to)) {
                             log.warn("dropped packet from={} to={}", .{ from, to });
                             link_packet.packet.deinit();
                             continue;
@@ -326,7 +366,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
                             link_packet.callback(link_packet.packet, path);
                         } else {
-                            log.debug("delivering packet from={} to={}", .{ from, to });
+                            // log.err("delivering packet from={} to={} command={}", .{ from, to, link_packet.packet.message.header.command });
                             link_packet.callback(link_packet.packet, path);
                             link_packet.packet.deinit();
                         }
