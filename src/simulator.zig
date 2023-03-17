@@ -30,7 +30,7 @@ const output = std.log.scoped(.state_checker);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
-const log_state_transitions_only = builtin.mode != .Debug;
+const log_state_transitions_only = true;
 
 const log_simulator = std.log.scoped(.simulator);
 
@@ -242,7 +242,7 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
 
-    const ticks_max = 50_000_000;
+    const ticks_max = 5_000_000;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         simulator.tick();

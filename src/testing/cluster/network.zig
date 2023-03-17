@@ -115,11 +115,7 @@ pub const Network = struct {
 
     pub fn link(network: *Network, process: Process, message_bus: *MessageBus) void {
         const raw_process = switch (process) {
-            .replica => |replica| blk: {
-                // PacketSimulator assumes that replicas go first.
-                assert(network.processes.items.len < network.options.node_count);
-                break :blk replica;
-            },
+            .replica => |replica| replica,
             .client => |client| blk: {
                 assert(client >= constants.nodes_max);
                 break :blk client;
@@ -132,6 +128,10 @@ pub const Network = struct {
                 break;
             }
         } else {
+            switch (process) {
+                .replica => assert(network.processes.items.len < network.options.node_count),
+                .client => assert(network.processes.items.len >= network.options.node_count),
+            }
             network.processes.appendAssumeCapacity(raw_process);
             network.buses.appendAssumeCapacity(message_bus);
             network.buses_enabled.appendAssumeCapacity(true);
