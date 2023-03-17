@@ -1617,8 +1617,8 @@ pub fn ReplicaType(
             if (self.ignore_repair_message(message)) return;
 
             assert(self.node_count > 1);
-            assert(self.status == .normal or self.status == .view_change);
-            assert(message.header.view == self.view);
+            maybe(self.status == .recovering_head);
+            maybe(message.header.view != self.view);
             assert(message.header.replica != self.replica);
 
             const op = message.header.op;
@@ -1742,8 +1742,8 @@ pub fn ReplicaType(
             assert(message.header.command == .request_headers);
             if (self.ignore_repair_message(message)) return;
 
-            assert(self.status == .normal or self.status == .view_change);
-            assert(message.header.view == self.view);
+            maybe(self.status == .recovering_head);
+            maybe(message.header.view == self.view);
             assert(message.header.replica != self.replica);
 
             const response = self.message_bus.get_message();
@@ -1884,7 +1884,7 @@ pub fn ReplicaType(
             if (self.ignore_repair_message(message)) return;
 
             assert(self.status == .normal or self.status == .view_change);
-            assert(message.header.view == self.view);
+            maybe(message.header.view == self.view);
             assert(message.header.replica != self.replica);
 
             // We expect at least one header in the body, or otherwise no response to our request.
@@ -3290,19 +3290,33 @@ pub fn ReplicaType(
 
             const command: []const u8 = @tagName(message.header.command);
 
-            if (self.status != .normal and self.status != .view_change) {
-                log.debug("{}: on_{s}: ignoring ({})", .{ self.replica, command, self.status });
-                return true;
+            if (message.header.command == .request_headers or
+                message.header.command == .request_prepare)
+            {
+                // A recovering_head replica can still assist others with WAL-repair,
+                // but does not itself install headers, since its head is unknown.
+            } else {
+                if (self.status != .normal and self.status != .view_change) {
+                    log.debug("{}: on_{s}: ignoring ({})", .{ self.replica, command, self.status });
+                    return true;
+                }
             }
 
-            if (message.header.view < self.view) {
-                log.debug("{}: on_{s}: ignoring (older view)", .{ self.replica, command });
-                return true;
-            }
+            if (message.header.command == .request_headers or
+                message.header.command == .request_prepare or
+                message.header.command == .headers)
+            {
+                // A replica in a different view can assist WAL repair.
+            } else {
+                if (message.header.view < self.view) {
+                    log.debug("{}: on_{s}: ignoring (older view)", .{ self.replica, command });
+                    return true;
+                }
 
-            if (message.header.view > self.view) {
-                log.debug("{}: on_{s}: ignoring (newer view)", .{ self.replica, command });
-                return true;
+                if (message.header.view > self.view) {
+                    log.debug("{}: on_{s}: ignoring (newer view)", .{ self.replica, command });
+                    return true;
+                }
             }
 
             if (self.ignore_repair_message_during_view_change(message)) return true;
@@ -3339,9 +3353,6 @@ pub fn ReplicaType(
                 log.debug("{}: on_{s}: ignoring (view started)", .{ self.replica, command });
                 return true;
             }
-
-            // Only allow repairs for same view as defense-in-depth:
-            assert(message.header.view == self.view);
             return false;
         }
 
@@ -4030,8 +4041,6 @@ pub fn ReplicaType(
         }
 
         fn pipeline_prepare_by_op_and_checksum(self: *Self, op: u64, checksum: u128) ?*Message {
-            assert(self.status == .normal or self.status == .view_change);
-
             return switch (self.pipeline) {
                 .cache => |*cache| cache.prepare_by_op_and_checksum(op, checksum),
                 .queue => |*queue| if (queue.prepare_by_op_and_checksum(op, checksum)) |prepare|
@@ -4098,7 +4107,7 @@ pub fn ReplicaType(
                 }
             }
 
-            // Request outstanding committed prepares to advance our op number:
+            // Request outstanding committed headers to advance our op number:
             // This handles the case of an idle cluster, where a backup will not otherwise advance.
             // This is not required for correctness, but for durability.
             if (self.op < self.op_repair_max()) {
@@ -4219,14 +4228,19 @@ pub fn ReplicaType(
         ///   previous wrap. In other words, don't repair checkpointed ops.
         ///
         fn repair_header(self: *Self, header: *const Header) bool {
+            assert(self.status == .normal or self.status == .view_change);
             assert(header.valid_checksum());
             assert(header.invalid() == null);
             assert(header.command == .prepare);
 
-            switch (self.status) {
-                .normal => assert(header.view <= self.view),
-                .view_change => assert(header.view <= self.view),
-                else => unreachable,
+            if (header.view > self.view) {
+                log.debug("{}: repair_header: op={} checksum={} view={} (newer view)", .{
+                    self.replica,
+                    header.op,
+                    header.checksum,
+                    header.view,
+                });
+                return false;
             }
 
             if (header.op > self.op) {
@@ -5179,7 +5193,8 @@ pub fn ReplicaType(
                     switch (self.status) {
                         .normal => assert(message.header.view <= self.view),
                         .view_change => assert(message.header.view < self.view),
-                        else => unreachable,
+                        // These are replies to a request_prepare:
+                        else => assert(message.header.view <= self.view),
                     }
                 },
                 .prepare_ok => {
@@ -5224,7 +5239,6 @@ pub fn ReplicaType(
                 },
                 .headers => {
                     assert(!self.standby());
-                    assert(self.status == .normal or self.status == .view_change);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
