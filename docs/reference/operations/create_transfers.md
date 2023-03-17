@@ -293,22 +293,6 @@ To correctly recover from application crashes
 [many applications](../../usage/integration.md#conistency-with-foreign-databases) should handle
 `exists` exactly as [`ok`](#ok).
 
-### `already_balanced_debit_account`
-The transfer was not created.
-
-[`flags.balancing_debit`](../transfers.md#flagsbalancing_debit) is set,
-but the debit account is already balanced.  That is,
-`debit_account.debits_pending + debit_account.debits_posted` equals
-`debit_account.credits_posted`.
-
-### `already_balanced_credit_account`
-The transfer was not created.
-
-[`flags.balancing_credit`](../transfers.md#flagsbalancing_credit) is set,
-but the credit account is already balanced.  That is,
-`credit_account.credits_pending + credit_account.credits_posted` equals
-`credit_account.debits_posted`.
-
 ### `overflows_debits_pending`
 The transfer was not created.
 `debit_account.debits_pending + transfer.amount` would overflow a 64-bit unsigned integer.
@@ -345,7 +329,11 @@ replica, not the `0` value sent by the client.
 ### `exceeds_credits`
 The transfer was not created.
 
-The [debit account](../transfers.md#debit_account_id) has
+If [`flags.balancing_debit`](../transfers.md#flagsbalancing_debit) is set, then
+`debit_account.debits_pending + debit_account.debits_posted + 1` would exceed
+`debit_account.credits_posted`.
+
+Otherwise, the [debit account](../transfers.md#debit_account_id) has
 [`flags.debits_must_not_exceed_credits`](../transfers.md#flagsdebits_must_not_exceed_credits)
 set, but `debit_account.debits_pending + debit_account.debits_posted + transfer.amount`
 would exceed `debit_account.credits_posted`.
@@ -353,7 +341,12 @@ would exceed `debit_account.credits_posted`.
 ### `exceeds_debits`
 The transfer was not created.
 
-The [credit account](../transfers.md#credit_account_id) has
+If [`flags.balancing_credit`](../transfers.md#flagsbalancing_credit) is set, then
+`credit_account.credits_pending + credit_account.credits_posted + 1` would exceed
+`credit_account.debits_posted`.
+
+Otherwise, the [credit account](../transfers.md#credit_account_id) has
 [`flags.credits_must_not_exceed_debits`](../transfers.md#flagscredits_must_not_exceed_debits)
 set, but `credit_account.credits_pending + credit_account.credits_posted + transfer.amount`
 would exceed `credit_account.debits_posted`.
+

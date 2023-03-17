@@ -921,13 +921,13 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 if (t.flags.balancing_debit) {
                     const dr_balance = dr_mut.debits_posted + dr_mut.debits_pending;
                     amount = std.math.min(amount, dr_mut.credits_posted -| dr_balance);
-                    if (amount == 0) return .already_balanced_debit_account;
+                    if (amount == 0) return .exceeds_credits;
                 }
 
                 if (t.flags.balancing_credit) {
                     const cr_balance = cr_mut.credits_posted + cr_mut.credits_pending;
                     amount = std.math.min(amount, cr_mut.debits_posted -| cr_balance);
-                    if (amount == 0) return .already_balanced_credit_account;
+                    if (amount == 0) return .exceeds_debits;
                 }
                 break :amount amount;
             };
@@ -2104,10 +2104,10 @@ test "create_transfers: balancing_debit | balancing_credit (*_must_not_exceed_*)
         \\ transfer T2 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 13 _ ok
         \\ transfer T3 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  3 _ ok
         \\ transfer T4 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 13 _ ok
-        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  1 _ already_balanced_debit_account
-        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ already_balanced_debit_account
-        \\ transfer T5 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  1 _ already_balanced_credit_account
-        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ already_balanced_debit_account
+        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  1 _ exceeds_credits
+        \\ transfer T5 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
+        \\ transfer T5 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _  1 _ exceeds_debits
+        \\ transfer T5 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
 
         // "exists" requires that the amount matches exactly, even when BDR/BCR is set.
         \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _  2 _ exists_with_different_amount
@@ -2142,13 +2142,13 @@ test "create_transfers: balancing_debit | balancing_credit (¬*_must_not_exceed_
         \\ setup A1 1  0 0 10
         \\ setup A2 0 10 2  0
         \\
-        \\ transfer T1 A3 A1  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 99 _ already_balanced_debit_account
-        \\ transfer T1 A3 A1  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 99 _ already_balanced_debit_account
-        \\ transfer T1 A2 A3  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 99 _ already_balanced_credit_account
+        \\ transfer T1 A3 A1  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 99 _ exceeds_credits
+        \\ transfer T1 A3 A1  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 99 _ exceeds_credits
+        \\ transfer T1 A2 A3  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 99 _ exceeds_debits
         \\ transfer T1 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 99 _ ok
-        \\ transfer T2 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 99 _ already_balanced_debit_account
+        \\ transfer T2 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR   _ _ 99 _ exceeds_credits
         \\ transfer T3 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 99 _ ok
-        \\ transfer T4 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 99 _ already_balanced_credit_account
+        \\ transfer T4 A3 A2  _ _   _ _ L1 C1 _ _ _ _   _ BCR _ 99 _ exceeds_debits
         \\ commit create_transfers
         \\
         \\ lookup_account A1 1  9 0 10
@@ -2207,9 +2207,9 @@ test "create_transfers: balancing_debit & balancing_credit" {
         \\
         \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ ok
         \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 12 _ ok
-        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ already_balanced_credit_account
+        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_debits
         \\ transfer T3 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _ 12 _ ok
-        \\ transfer T4 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ already_balanced_debit_account
+        \\ transfer T4 A1 A3  _ _   _ _ L1 C1 _ _ _ _ BDR BCR _  1 _ exceeds_credits
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 20 0 20
@@ -2236,7 +2236,7 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
         \\
         \\ transfer T1 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  3 _ ok
         \\ transfer T2 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _ 13 _ ok
-        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  1 _ already_balanced_debit_account
+        \\ transfer T3 A1 A2  _ _   _ _ L1 C1 _ PEN   _   _ BDR   _ _  1 _ exceeds_credits
         \\ commit create_transfers
         \\
         \\ lookup_account A1 10  0  0 10
