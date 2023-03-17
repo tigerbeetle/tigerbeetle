@@ -319,7 +319,7 @@ pub const Simulator = struct {
         simulator.cluster.deinit();
     }
 
-    pub fn done(simulator: *Simulator) bool {
+    pub fn done(simulator: *const Simulator) bool {
         assert(simulator.requests_sent <= simulator.options.requests_max);
 
         for (simulator.cluster.replica_health) |health| {
