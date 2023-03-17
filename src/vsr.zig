@@ -219,6 +219,8 @@ pub const Header = extern struct {
     /// than earlier ones. The request number is used by the replicas to avoid running requests more
     /// than once; it is also used by the client to discard duplicate responses to its requests.
     /// A client is allowed to have at most one request inflight at a time.
+    ///
+    /// * A `do_view_change` sets this to its latest log_view number.
     request: u32 = 0,
 
     /// The cluster number binds intention into the header, so that a client or replica can indicate
@@ -253,9 +255,9 @@ pub const Header = extern struct {
     ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
     /// * A `reply` sets this to the corresponding `prepare`'s timestamp.
     ///   This allows the test workload to verify transfer timeouts.
-    /// * A `do_view_change` sets this to its latest log_view number.
     /// * A `pong` sets this to the sender's wall clock value.
     /// * A `commit` message sets this to the replica's monotonic timestamp.
+    /// * A `do_view_change` and `start_view` set this to the replica's `op_checkpoint`.
     timestamp: u64 = 0,
 
     /// The size of the Header structure (always), plus any associated body.
@@ -562,7 +564,6 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -573,7 +574,6 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }

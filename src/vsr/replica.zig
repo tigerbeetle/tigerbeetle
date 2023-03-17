@@ -1384,6 +1384,7 @@ pub fn ReplicaType(
 
             assert(self.status == .normal or self.status == .view_change);
             assert(message.header.view >= self.view);
+            DVCQuorum.verify_message(message);
 
             self.view_jump_to_view_change(message.header);
 
@@ -1412,6 +1413,8 @@ pub fn ReplicaType(
 
             assert(count == threshold);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
+            assert(self.do_view_change_from_all_replicas[self.replica].?.header.timestamp <=
+                self.op_checkpoint());
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
             log.debug("{}: on_do_view_change: view={} quorum received", .{
                 self.replica,
@@ -1490,6 +1493,9 @@ pub fn ReplicaType(
             assert(message.header.view >= self.view);
             assert(message.header.replica != self.replica);
             assert(message.header.replica == self.primary_index(message.header.view));
+            assert(message.header.commit >= message.header.timestamp);
+            assert(message.header.commit - message.header.timestamp <=
+                constants.journal_slot_count);
             assert(message.header.op >= message.header.commit);
             assert(message.header.op - message.header.commit <=
                 constants.pipeline_prepare_queue_max);
@@ -2181,21 +2187,30 @@ pub fn ReplicaType(
                 if (message.header.command == .do_view_change) {
                     // Replicas don't resend `do_view_change` messages to themselves.
                     assert(message.header.replica != self.replica);
-                    // A replica may resend a `do_view_change` with a different commit if it was
-                    // committing originally. Keep the one with the highest commit.
+                    // A replica may resend a `do_view_change` with a different checkpoint or commit
+                    // if it was checkpointing/committing originally.
+                    // Keep the one with the highest checkpoint, then commit.
                     // This is *not* necessary for correctness.
-                    if (m.header.commit < message.header.commit) {
-                        log.debug("{}: on_{s}: replacing (newer message replica={} commit={}..{})", .{
+                    if (m.header.timestamp < message.header.timestamp or
+                        (m.header.timestamp == message.header.timestamp and
+                        m.header.commit < message.header.commit))
+                    {
+                        log.debug("{}: on_{s}: replacing " ++
+                            "(newer message replica={} checkpoint={}..{} commit={}..{})", .{
                             self.replica,
                             command,
                             message.header.replica,
+                            m.header.timestamp,
+                            message.header.timestamp,
                             m.header.commit,
                             message.header.commit,
                         });
                         // TODO(Buggify): skip updating the DVC, since it isn't required for correctness.
                         self.message_bus.unref(m);
                         messages[message.header.replica] = message.ref();
-                    } else if (m.header.commit > message.header.commit) {
+                    } else if (m.header.timestamp != message.header.timestamp or
+                        m.header.commit != message.header.commit)
+                    {
                         log.debug("{}: on_{s}: ignoring (older message replica={})", .{
                             self.replica,
                             command,
@@ -3118,8 +3133,9 @@ pub fn ReplicaType(
                 // The latest normal view (as specified in the 2012 paper) is different to the view
                 // number contained in the prepare headers we include in the body. The former shows
                 // how recent a view change the replica participated in, which may be much higher.
-                // We use the `timestamp` field to send this in addition to the current view number:
-                .timestamp = if (command == .do_view_change) self.log_view else 0,
+                // We use the `request` field to send this in addition to the current view number:
+                .request = if (command == .do_view_change) self.log_view else 0,
+                .timestamp = self.op_checkpoint(),
                 // This is usually the head op, but for DVCs it may be farther ahead if we are
                 // lagging behind a checkpoint. (In which case the op is inherited from the SV).
                 .op = self.view_headers.array.get(0).op,
@@ -5225,7 +5241,8 @@ pub fn ReplicaType(
                     maybe(message.header.op == self.op);
                     assert(message.header.op >= self.op);
                     assert(message.header.commit == self.commit_min);
-                    assert(message.header.timestamp == self.log_view);
+                    assert(message.header.timestamp == self.op_checkpoint());
+                    assert(message.header.request == self.log_view);
                 },
                 .start_view => {
                     assert(!self.standby());
@@ -5236,6 +5253,7 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                     assert(message.header.commit == self.commit_min);
                     assert(message.header.commit == self.commit_max);
+                    assert(message.header.timestamp == self.op_checkpoint());
                 },
                 .headers => {
                     assert(!self.standby());
@@ -5615,13 +5633,14 @@ pub fn ReplicaType(
 
                 log.debug(
                     "{}: on_do_view_change: dvc: " ++
-                        "replica={} log_view={} op={} commit_min={}",
+                        "replica={} log_view={} op={} commit_min={} checkpoint={}",
                     .{
                         self.replica,
                         message.header.replica,
-                        @intCast(u32, message.header.timestamp),
+                        message.header.request, // The `log_view` of the replica.
                         message.header.op,
                         message.header.commit, // The `commit_min` of the replica.
+                        message.header.timestamp, // The `op_checkpoint` of the replica.
                     },
                 );
             }
@@ -6451,7 +6470,7 @@ const DVCQuorum = struct {
 
         var log_views_all = std.BoundedArray(u32, constants.replicas_max){ .buffer = undefined };
         for (dvcs.constSlice()) |message| {
-            const log_view = @intCast(u32, message.header.timestamp);
+            const log_view = message.header.request;
             if (std.mem.count(u32, log_views_all.constSlice(), &.{log_view}) == 0) {
                 log_views_all.appendAssumeCapacity(log_view);
             }
@@ -6467,12 +6486,15 @@ const DVCQuorum = struct {
 
     fn verify_message(message: *const Message) void {
         assert(message.header.command == .do_view_change);
-        assert(message.header.op >= message.header.commit);
+        assert(message.header.commit <= message.header.op);
+
+        const checkpoint = message.header.timestamp;
+        assert(checkpoint <= message.header.commit);
 
         // The log_view:
         // * may be higher than the view in any of the prepare headers.
         // * must be lower than the view of this view change.
-        const log_view = @intCast(u32, message.header.timestamp);
+        const log_view = message.header.request;
         assert(log_view < message.header.view);
 
         // Ignore the headers, but perform the validation.
@@ -6500,7 +6522,7 @@ const DVCQuorum = struct {
         var array = DVCArray{ .buffer = undefined };
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
         for (dvcs.constSlice()) |message| {
-            const message_log_view = @intCast(u32, message.header.timestamp);
+            const message_log_view = message.header.request;
             if (message_log_view == log_view) {
                 array.appendAssumeCapacity(message);
             }
@@ -6513,7 +6535,7 @@ const DVCQuorum = struct {
         var array = DVCArray{ .buffer = undefined };
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
         for (dvcs.constSlice()) |message| {
-            const log_view = @intCast(u32, message.header.timestamp);
+            const log_view = message.header.request;
             assert(log_view <= log_view_max_);
 
             if (log_view < log_view_max_) {
@@ -6553,7 +6575,7 @@ const DVCQuorum = struct {
             // The view when this replica was last in normal status, which:
             // * may be higher than the view in any of the prepare headers.
             // * must be lower than the view of this view change.
-            const log_view = @intCast(u32, message.header.timestamp);
+            const log_view = message.header.request;
             assert(log_view < message.header.view);
 
             if (log_view_max_ == null or log_view_max_.? < log_view) {
@@ -6666,7 +6688,7 @@ const DVCQuorum = struct {
 
             var dvcs_log_view: ?u32 = null;
             for (dvcs.constSlice()) |message| {
-                const log_view = @intCast(u32, message.header.timestamp);
+                const log_view = message.header.request;
                 if (dvcs_log_view) |view| {
                     assert(view == log_view);
                 } else {
