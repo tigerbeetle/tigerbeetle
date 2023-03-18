@@ -20,7 +20,7 @@ const Command = vsr.Command;
 const Version = vsr.Version;
 const VSRState = vsr.VSRState;
 
-const log = std.log.scoped(.replica);
+const log = stdx.log.scoped(.replica);
 const tracer = @import("../tracer.zig");
 
 pub const Status = enum {
@@ -3510,7 +3510,10 @@ pub fn ReplicaType(
                         return true;
                     }
                 } else {
-                    log.err("{}: on_request: ignoring newer request (client bug)", .{self.replica});
+                    // Caused by one of the following:
+                    // - client bug, or
+                    // - this primary is no longer the actual primary
+                    log.err("{}: on_request: ignoring newer request (client|network bug)", .{self.replica});
                     return true;
                 }
             } else if (message.header.operation == .register) {

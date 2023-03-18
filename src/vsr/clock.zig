@@ -1,21 +1,8 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const fmt = std.fmt;
 
-const log = if (builtin.is_test)
-    // Downgrade `err` to `warn` for tests.
-    // Zig fails any test that does `log.err`, but we want to test those code paths here.
-    struct {
-        const base = std.log.scoped(.clock);
-        const err = warn;
-        const warn = base.warn;
-        const info = base.info;
-        const debug = base.debug;
-    }
-else
-    std.log.scoped(.clock);
-
+const log = @import("../stdx.zig").log.scoped(.clock);
 const constants = @import("../constants.zig");
 
 const clock_offset_tolerance_max: u64 = constants.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
