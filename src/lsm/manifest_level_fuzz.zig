@@ -78,7 +78,7 @@ pub fn main() !void {
 
     const fuzz_op_count = std.math.min(
         args.events_max orelse @as(usize, 2e5),
-        fuzz.random_int_exponential(random, usize, 1e4),
+        fuzz.random_int_exponential(random, usize, 1e5),
     );
 
     const table_count_max = 1024;
@@ -470,20 +470,17 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
         /// Mark the matching table as removed in env.tables.
         /// It will be removed from env.tables from a later call to env.purge_removed_tables().
         fn mark_removed_table(env: *Environment, level_table: *const TableInfo) void {
-            // TODO: use i = binary_search(tables, key_min); binary_search(tables[i..], key_max)
-            const env_table = for (env.tables.items) |*env_table| {
-                if (level_table.equal(env_table)) break env_table;
-            } else unreachable;
+            const env_table = env.find_exact(level_table);
+            assert(level_table.equal(env_table));
 
             // Zero address means the table is removed.
-            assert(level_table.equal(env_table));
             assert(env_table.address != 0);
             env_table.address = 0;
         }
 
         /// Filter out all env.tables removed with env.mark_removed_table() by copying all
         /// non-removed tables into env.buffer and flipping it with env.tables.
-        /// TODO: This clears removed tables in O(n). Use a better way.
+        /// TODO: This clears removed tables in O(n).
         fn purge_removed_tables(env: *Environment) !void {
             assert(env.buffer.items.len == 0);
             try env.buffer.ensureTotalCapacity(env.tables.items.len);
