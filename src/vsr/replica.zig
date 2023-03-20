@@ -1516,8 +1516,15 @@ pub fn ReplicaType(
                 if (op_canonical_max > self.op_checkpoint_trigger()) {
                     assert(self.op == self.commit_max);
                     assert(self.op == self.op_checkpoint_trigger());
-                    assert(op_canonical_max - op_checkpoint_max <=
+                    assert(op_canonical_max - self.op_checkpoint_trigger() <=
                         constants.pipeline_prepare_queue_max);
+
+                    log.debug("{}: on_do_view_change: discarded uncommitted ops after trigger" ++
+                        " (op={}..{})", .{
+                        self.replica,
+                        self.op_checkpoint_trigger() + 1,
+                        op_canonical_max,
+                    });
                 }
 
                 assert(self.op >= self.commit_max);
@@ -5719,7 +5726,7 @@ pub fn ReplicaType(
                     break header;
                 }
             } else {
-                @panic("primary_set_log_from_do_view_change_messages: missing checkpoint trigger");
+                @panic("on_do_view_change: missing checkpoint trigger");
             };
 
             assert(header_head.op >= self.op_checkpoint());
