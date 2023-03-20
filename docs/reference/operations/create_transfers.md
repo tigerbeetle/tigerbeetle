@@ -264,13 +264,13 @@ A transfer with the same `id` already exists, but with a different
 A transfer with the same `id` already exists, but with a different
 [`credit_account_id`](../transfers.md#credit_account_id).
 
-### `exists_with_different_user_data`
-A transfer with the same `id` already exists, but with a different
-[`user_data`](../transfers.md#user_data).
-
 ### `exists_with_different_pending_id`
 A transfer with the same `id` already exists, but with a different
 [`pending_id`](../transfers.md#pending_id).
+
+### `exists_with_different_user_data`
+A transfer with the same `id` already exists, but with a different
+[`user_data`](../transfers.md#user_data).
 
 ### `exists_with_different_timeout`
 A transfer with the same `id` already exists, but with a different
