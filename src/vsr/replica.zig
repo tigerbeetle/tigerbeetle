@@ -6629,6 +6629,8 @@ const DVCQuorum = struct {
         return checkpoint_max.?;
     }
 
+    /// Returns the highest op of any header from any canonical-view DVC.
+    /// Includes ops that will be truncated due to gaps.
     fn op_canonical_max(dvc_quorum: QuorumMessages) u64 {
         return DVCQuorum.headers_canonical(dvc_quorum).next().?.op;
     }
