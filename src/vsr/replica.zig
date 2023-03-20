@@ -878,6 +878,8 @@ pub fn ReplicaType(
                 return;
             }
 
+            self.view_jump(message.header);
+
             assert(message.header.replica < self.node_count);
             switch (message.header.command) {
                 .ping => self.on_ping(message),
@@ -1042,8 +1044,6 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(message.header.replica < self.replica_count);
 
-            self.view_jump(message.header);
-
             if (self.is_repair(message)) {
                 log.debug("{}: on_prepare: ignoring (repair)", .{self.replica});
                 self.on_repair(message);
@@ -1196,8 +1196,6 @@ pub fn ReplicaType(
             assert(message.header.command == .commit);
             assert(message.header.replica < self.replica_count);
 
-            self.view_jump(message.header);
-
             if (self.status != .normal) {
                 log.debug("{}: on_commit: ignoring ({})", .{ self.replica, self.status });
                 return;
@@ -1316,7 +1314,6 @@ pub fn ReplicaType(
 
         fn on_start_view_change(self: *Self, message: *Message) void {
             assert(message.header.command == .start_view_change);
-            self.view_jump(message.header);
             if (self.ignore_start_view_change_message(message)) return;
 
             assert(!self.solo());
@@ -1379,8 +1376,6 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert(message.header.view >= self.view);
             DVCQuorum.verify_message(message);
-
-            self.view_jump(message.header);
 
             assert(self.status == .view_change);
             assert(message.header.view == self.view);
@@ -6322,11 +6317,10 @@ pub fn ReplicaType(
         fn view_jump(self: *Self, header: *const Header) void {
             const to: Status = switch (header.command) {
                 .prepare, .commit => .normal,
-                .do_view_change => .view_change,
                 // When we are recovering_head we can't participate in a view-change anyway.
-                // But there is a chance that the primary is still running, despite the SVC.
-                .start_view_change => if (self.status == .recovering_head) Status.normal else .view_change,
-                else => unreachable,
+                // But there is a chance that the primary is actually running, despite the DVC/SVC.
+                .do_view_change, .start_view_change => if (self.status == .recovering_head) Status.normal else .view_change,
+                else => return,
             };
 
             if (header.view < self.view) return;
