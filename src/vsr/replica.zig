@@ -1416,7 +1416,6 @@ pub fn ReplicaType(
                 // 2. Optimization: The cluster does not need to wait for a lagging replicas before
                 //    prepares/commits can resume.
                 // 3. Simplify repair: A new primary never needs to fast-forward to a new checkpoint.
-
                 log.debug("{}: on_do_view_change: lagging primary; forfeiting " ++
                     "(view={}..{} op={}..{})", .{
                     self.replica,
@@ -1515,6 +1514,7 @@ pub fn ReplicaType(
                 // the last checkpoint. If we wrap now, we overwrite un-checkpointed transfers
                 // in the WAL, precluding recovery.
                 // TODO State transfer.
+                std.process.exit(0);
                 @panic("unimplemented (state transfer)");
             }
 
@@ -3652,7 +3652,7 @@ pub fn ReplicaType(
 
         /// Returns whether the replica is the primary for the current view.
         /// This may be used only when the replica status is normal.
-        fn primary(self: *const Self) bool {
+        pub fn primary(self: *const Self) bool {
             assert(self.status == .normal);
             return self.primary_index(self.view) == self.replica;
         }
@@ -3823,7 +3823,7 @@ pub fn ReplicaType(
         /// checkpointed.
         ///
         /// See `op_checkpoint_next` for more detail.
-        fn op_checkpoint_trigger(self: *const Self) u64 {
+        pub fn op_checkpoint_trigger(self: *const Self) u64 {
             return self.op_checkpoint_next() + constants.lsm_batch_multiple;
         }
 
@@ -4066,6 +4066,7 @@ pub fn ReplicaType(
                 };
 
                 if (backup_repair_next != null and backup_repair_next.? < primary_repair_min) {
+                    std.process.exit(0);
                     @panic("unimplemented (state transfer)");
                 }
             }

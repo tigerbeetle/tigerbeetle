@@ -156,9 +156,9 @@ pub fn main() !void {
         .cluster = cluster_options,
         .workload = workload_options,
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
-        .replica_crash_probability = 0.00002,
+        .replica_crash_probability = 0.0002,
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
-        .replica_death_probability = 10.0,
+        .replica_death_probability = 50.0,
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .replicas_dead_max = replicas_dead_max,
@@ -241,7 +241,7 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
 
-    const ticks_max = 5_000_000;
+    const ticks_max = 200_000_000;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         simulator.tick();
@@ -512,6 +512,8 @@ pub const Simulator = struct {
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
                     if (!chance_f64(simulator.random, crash_probability)) continue;
 
+                    const death_probability = simulator.options.replica_death_probability;
+
                     log_simulator.debug("{}: crash replica", .{replica.replica});
                     simulator.cluster.crash_replica(replica.replica);
 
@@ -522,7 +524,6 @@ pub const Simulator = struct {
                         simulator.options.replica_crash_stability;
 
                     if (replica.standby() or simulator.replicas_dead < simulator.options.replicas_dead_max) {
-                        const death_probability = simulator.options.replica_death_probability;
                         if (chance_f64(simulator.random, death_probability)) {
                             log_simulator.debug("{}: kill replica", .{replica.replica});
                             simulator.replicas_dead += @boolToInt(!replica.standby());
@@ -571,6 +572,23 @@ pub const Simulator = struct {
         }
     }
 };
+
+fn dump(simulator: *const Simulator) void {
+    output.err("dump:\n", .{});
+    for (simulator.cluster.replicas) |replica| {
+        if (simulator.cluster.replica_health[replica.replica] == .down) continue;
+        output.err("{}: view={} op={} commit_min={} chck={:3} trgr={:3} status={} view_headers_op={}", .{
+            replica.replica,
+            replica.view,
+            replica.op,
+            replica.commit_min,
+            replica.op_checkpoint(),
+            replica.op_checkpoint_trigger(),
+            replica.status,
+            replica.view_headers.array.get(0).op,
+        });
+    }
+}
 
 /// Print an error message and then exit with an exit code.
 fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
