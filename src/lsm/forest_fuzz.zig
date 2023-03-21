@@ -406,6 +406,7 @@ const Environment = struct {
                 };
                 env.ticks_remaining = std.math.maxInt(usize);
 
+                env.storage.log_pending_io();
                 env.close();
                 env.deinit();
                 env.storage.reset();
