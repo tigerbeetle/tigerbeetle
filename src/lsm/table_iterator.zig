@@ -6,335 +6,111 @@ const assert = std.debug.assert;
 const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
-/// A TableIterator iterates a table's values in ascending-key order.
-pub fn TableIteratorType(comptime Table: type, comptime Storage: type) type {
+/// A TableIterator iterates a table's data blocks in ascending-key order.
+pub fn TableIteratorType(comptime Storage: type) type {
     return struct {
         const TableIterator = @This();
 
         const Grid = GridType(Storage);
-        const Manifest = ManifestType(Table, Storage);
-        const ValuesRingBuffer = RingBuffer(Table.Value, Table.data.block_value_count_max, .pointer);
+        const BlockPtrConst = Grid.BlockPtrConst;
 
-        const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
-        const IndexBlockCallback = fn (it: *TableIterator, index_block: BlockPtrConst) void;
+        pub const Callback = fn (it: *TableIterator, data_block: ?BlockPtrConst) void;
 
-        grid: *Grid,
-        read_done: fn (*TableIterator) void,
-        read_table_index: bool,
+        pub const Context = struct {
+            grid: *Grid,
+            /// Table data block addresses.
+            addresses: []const u64,
+            /// Table data block checksums.
+            checksums: []const u128,
+        };
 
-        /// We store only the address and checksum of the table's index block to save memory,
-        /// since TableIterator is used in every LevelIterator.
-        address: u64,
-        checksum: u128,
+        context: Context,
 
-        index_block: Grid.BlockPtr,
-        index_block_callback: ?IndexBlockCallback,
-        /// The index of the current block in the table index block.
-        data_block_index: u32,
+        callback: union(enum) {
+            none,
+            read: Callback,
+            next_tick: Callback,
+        },
 
-        /// This ring buffer is used to hold not yet popped values in the case that we run
-        /// out of blocks in the blocks ring buffer but haven't buffered a full block of
-        /// values in memory. In this case, we copy values from the head of blocks to this
-        /// ring buffer to make that block available for reading further values.
-        /// Thus, we guarantee that iterators will always have at least a block's worth
-        /// of values buffered.
-        values: ValuesRingBuffer,
-
-        data_blocks: RingBuffer(Grid.BlockPtr, 2, .array),
-        /// The index of the current value in the head of the blocks ring buffer.
-        value: u32,
-
-        read: Grid.Read = undefined,
-        /// This field is only used for safety checks, it does not affect the behavior.
-        read_pending: bool = false,
-
-        // Used for verifying key order when constants.verify == true.
-        key_prev: ?Table.Key,
+        read: Grid.Read,
+        next_tick: Grid.NextTick,
 
         pub fn init(allocator: mem.Allocator) !TableIterator {
-            const index_block = try allocator.alignedAlloc(
-                u8,
-                constants.sector_size,
-                constants.block_size,
-            );
-            errdefer allocator.free(index_block);
-
-            var values = try ValuesRingBuffer.init(allocator);
-            errdefer values.deinit(allocator);
-
-            const block_a = try allocator.alignedAlloc(
-                u8,
-                constants.sector_size,
-                constants.block_size,
-            );
-            errdefer allocator.free(block_a);
-
-            const block_b = try allocator.alignedAlloc(
-                u8,
-                constants.sector_size,
-                constants.block_size,
-            );
-            errdefer allocator.free(block_b);
-
+            _ = allocator; // TODO(jamii) Will need this soon for pipelining.
             return TableIterator{
-                .grid = undefined,
-                .read_done = undefined,
-                .read_table_index = undefined,
-                // Use 0 so that we can assert(address != 0) in tick().
-                .address = 0,
-                .checksum = undefined,
-                .index_block = index_block[0..constants.block_size],
-                .index_block_callback = null,
-                .data_block_index = undefined,
-                .values = values,
-                .data_blocks = .{
-                    .buffer = .{
-                        block_a[0..constants.block_size],
-                        block_b[0..constants.block_size],
-                    },
+                .context = .{
+                    .grid = undefined,
+                    // The zero-init here is important.
+                    // In other places we assume that we can call `next` on a fresh TableIterator
+                    // and get `null` rather than UB.
+                    .addresses = &.{},
+                    .checksums = &.{},
                 },
-                .value = undefined,
-                .key_prev = null,
+                .callback = .none,
+                .read = undefined,
+                .next_tick = undefined,
             };
         }
 
         pub fn deinit(it: *TableIterator, allocator: mem.Allocator) void {
-            allocator.free(it.index_block);
-            it.values.deinit(allocator);
-            for (it.data_blocks.buffer) |block| allocator.free(block);
+            _ = allocator; // TODO(jamii) Will need this soon for pipelining.
             it.* = undefined;
         }
-
-        pub const Context = struct {
-            grid: *Grid,
-            address: u64, // Table index block address.
-            checksum: u128, // Table index block checksum.
-            index_block_callback: ?IndexBlockCallback = null,
-        };
 
         pub fn start(
             it: *TableIterator,
             context: Context,
-            read_done: fn (*TableIterator) void,
         ) void {
-            assert(!it.read_pending);
-            assert(it.index_block_callback == null);
+            assert(it.callback == .none);
+            assert(context.addresses.len == context.checksums.len);
 
             it.* = .{
-                .grid = context.grid,
-                .read_done = read_done,
-                .read_table_index = true,
-                .address = context.address,
-                .checksum = context.checksum,
-                .index_block = it.index_block,
-                .index_block_callback = context.index_block_callback,
-                .data_block_index = 0,
-                .values = .{ .buffer = it.values.buffer },
-                .data_blocks = .{ .buffer = it.data_blocks.buffer },
-                .value = 0,
-                .key_prev = null,
+                .context = context,
+                .callback = .none,
+                .read = undefined,
+                .next_tick = undefined,
             };
-
-            assert(it.values.empty());
-            assert(it.data_blocks.empty());
-
-            if (constants.verify) {
-                Table.verify(
-                    Storage,
-                    context.grid.superblock.storage,
-                    context.address,
-                    null,
-                    null,
-                );
-            }
         }
 
-        /// Try to buffer at least a full block of values to be peek()'d.
-        /// A full block may not always be buffered if all 3 blocks are partially full
-        /// or if the end of the table is reached.
-        /// Returns true if an IO operation was started. If this returns true,
-        /// then read_done() will be called on completion.
-        pub fn tick(it: *TableIterator) bool {
-            assert(!it.read_pending);
-            assert(it.address != 0);
+        pub fn empty(it: *const TableIterator) bool {
+            return it.context.addresses.len == 0;
+        }
 
-            if (it.read_table_index) {
-                assert(!it.read_pending);
-                it.read_pending = true;
-                it.grid.read_block(
-                    on_read_table_index,
-                    &it.read,
-                    it.address,
-                    it.checksum,
-                    .index,
-                );
-                return true;
-            }
+        pub fn next(it: *TableIterator, callback: Callback) void {
+            assert(it.callback == .none);
 
-            if (it.buffered_enough_values()) {
-                return false;
+            if (it.context.addresses.len > 0) {
+                const address = it.context.addresses[0];
+                const checksum = it.context.checksums[0];
+                it.callback = .{ .read = callback };
+                it.context.grid.read_block(on_read, &it.read, address, checksum, .data);
             } else {
-                it.read_next_data_block();
-                return true;
+                it.callback = .{ .next_tick = callback };
+                it.context.grid.on_next_tick(on_next_tick, &it.next_tick);
             }
-        }
-
-        fn read_next_data_block(it: *TableIterator) void {
-            assert(!it.read_table_index);
-            assert(it.data_block_index < Table.index_data_blocks_used(it.index_block));
-
-            const addresses = Table.index_data_addresses(it.index_block);
-            const checksums = Table.index_data_checksums(it.index_block);
-            const address = addresses[it.data_block_index];
-            const checksum = checksums[it.data_block_index];
-
-            assert(!it.read_pending);
-            it.read_pending = true;
-            it.grid.read_block(on_read, &it.read, address, checksum, .data);
-        }
-
-        fn on_read_table_index(read: *Grid.Read, block: Grid.BlockPtrConst) void {
-            const it = @fieldParentPtr(TableIterator, "read", read);
-            assert(it.read_pending);
-            assert(it.data_block_index == 0);
-            it.read_pending = false;
-
-            assert(it.read_table_index);
-            it.read_table_index = false;
-
-            // Copy the bytes read into a buffer owned by the iterator since the Grid
-            // only guarantees the provided pointer to be valid in this callback.
-            stdx.copy_disjoint(.exact, u8, it.index_block, block);
-
-            if (it.index_block_callback) |callback| {
-                it.index_block_callback = null;
-                callback(it, block);
-            }
-
-            const read_pending = it.tick();
-            // After reading the table index, we always read at least one data block.
-            assert(read_pending);
-            assert(it.read_pending);
         }
 
         fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
             const it = @fieldParentPtr(TableIterator, "read", read);
-            assert(it.read_pending);
-            it.read_pending = false;
+            assert(it.callback == .read);
 
-            assert(!it.read_table_index);
+            const callback = it.callback.read;
+            it.callback = .none;
+            it.context.addresses = it.context.addresses[1..];
+            it.context.checksums = it.context.checksums[1..];
 
-            // If there is not currently a buffer available, copy remaining values to
-            // an overflow ring buffer to make space.
-            if (it.data_blocks.next_tail() == null) {
-                const values = Table.data_block_values_used(it.data_blocks.head().?);
-                const values_remaining = values[it.value..];
-                it.values.push_slice(values_remaining) catch unreachable;
-                it.value = 0;
-                it.data_blocks.advance_head();
-            }
-
-            // Copy the bytes read into a buffer owned by the iterator since the Grid
-            // only guarantees the provided pointer to be valid in this callback.
-            stdx.copy_disjoint(.exact, u8, it.data_blocks.next_tail().?, block);
-
-            it.data_blocks.advance_tail();
-            it.data_block_index += 1;
-
-            if (!it.tick()) {
-                assert(it.buffered_enough_values());
-                it.read_done(it);
-            }
+            callback(it, block);
         }
 
-        /// Return true if all remaining values in the table have been buffered in memory.
-        pub fn buffered_all_values(it: TableIterator) bool {
-            assert(!it.read_pending);
+        fn on_next_tick(next_tick: *Grid.NextTick) void {
+            const it = @fieldParentPtr(TableIterator, "next_tick", next_tick);
+            assert(it.callback == .next_tick);
 
-            const data_blocks_used = Table.index_data_blocks_used(it.index_block);
-            assert(it.data_block_index <= data_blocks_used);
-            return it.data_block_index == data_blocks_used;
-        }
-
-        pub fn buffered_value_count(it: TableIterator) u32 {
-            assert(!it.read_pending);
-
-            var value_count = it.values.count;
-            var blocks_it = it.data_blocks.iterator();
-            while (blocks_it.next()) |block| {
-                value_count += Table.data_block_values_used(block).len;
-            }
-            // We do this subtraction last to avoid underflow.
-            value_count -= it.value;
-
-            return @intCast(u32, value_count);
-        }
-
-        fn buffered_enough_values(it: TableIterator) bool {
-            assert(!it.read_pending);
-
-            return it.buffered_all_values() or
-                it.buffered_value_count() >= Table.data.block_value_count_max;
-        }
-
-        /// Returns either:
-        /// - the next Key, if available.
-        /// - error.Empty when there are no values remaining to iterate.
-        /// - error.Drained when the iterator isn't empty, but some values
-        ///   still need to be buffered into memory via tick().
-        pub fn peek(it: TableIterator) error{ Empty, Drained }!Table.Key {
-            assert(!it.read_pending);
-            assert(!it.read_table_index);
-
-            if (it.values.head_ptr_const()) |value| return Table.key_from_value(value);
-
-            const block = it.data_blocks.head() orelse {
-                // NOTE: Even if there are no values to peek, some may be unbuffered.
-                // We call buffered_all_values() to distinguish between the iterator
-                // being empty and needing to tick() to refill values.
-                if (!it.buffered_all_values()) return error.Drained;
-                return error.Empty;
-            };
-
-            const values = Table.data_block_values_used(block);
-            return Table.key_from_value(&values[it.value]);
-        }
-
-        /// This may only be called after peek() returns a Key (and not Empty or Drained)
-        pub fn pop(it: *TableIterator) Table.Value {
-            const value = it.pop_internal();
-
-            if (constants.verify) {
-                const key = Table.key_from_value(&value);
-                if (it.key_prev) |k| assert(Table.compare_keys(k, key) == .lt);
-                it.key_prev = key;
-            }
-
-            return value;
-        }
-
-        fn pop_internal(it: *TableIterator) Table.Value {
-            assert(!it.read_pending);
-            assert(!it.read_table_index);
-
-            if (it.values.pop()) |value| return value;
-
-            const block = it.data_blocks.head().?;
-
-            const values = Table.data_block_values_used(block);
-            const value = values[it.value];
-
-            it.value += 1;
-            if (it.value == values.len) {
-                it.value = 0;
-                it.data_blocks.advance_head();
-            }
-
-            return value;
+            const callback = it.callback.next_tick;
+            it.callback = .none;
+            callback(it, null);
         }
     };
 }

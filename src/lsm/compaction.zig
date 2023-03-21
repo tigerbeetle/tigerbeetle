@@ -34,616 +34,739 @@ const std = @import("std");
 const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
+const Allocator = std.mem.Allocator;
 
 const log = std.log.scoped(.compaction);
 const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
 
+const stdx = @import("../stdx.zig");
 const GridType = @import("grid.zig").GridType;
+const alloc_block = @import("grid.zig").alloc_block;
+const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
-const MergeIteratorType = @import("merge_iterator.zig").MergeIteratorType;
 const TableIteratorType = @import("table_iterator.zig").TableIteratorType;
 const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
+const RangeIteratorType = @import("range_iterator.zig").RangeIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
+    comptime Tree: type,
     comptime Storage: type,
-    comptime IteratorAType: anytype,
 ) type {
-    const tombstone = Table.tombstone;
-
     return struct {
         const Compaction = @This();
 
         const Grid = GridType(Storage);
         const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
-        const BlockWrite = struct {
-            write: Grid.Write = undefined,
-            block: *BlockPtr = undefined,
-            state: BlockState = .building,
-        };
-        const BlockState = enum {
-            building,
-            writable,
-            writing,
-        };
 
+        const TableInfo = TableInfoType(Table);
         const Manifest = ManifestType(Table, Storage);
-        const TableInfo = Manifest.TableInfo;
+        const CompactionRange = Manifest.CompactionRange;
+        const TableIterator = TableIteratorType(Storage);
+        const RangeIterator = RangeIteratorType(Table, Storage);
 
-        const IteratorA = IteratorAType(Table, Storage);
-        const IteratorB = LevelIteratorType(Table, Storage);
+        const Key = Table.Key;
+        const Value = Table.Value;
+        const compare_keys = Table.compare_keys;
+        const key_from_value = Table.key_from_value;
+        const tombstone = Table.tombstone;
 
-        const MergeIterator = MergeIteratorType(
-            Table,
-            IteratorA,
-            IteratorB,
-        );
-
-        const CompactionStrategy = enum {
-            merge,
-            move,
+        pub const TableInfoA = union(enum) {
+            immutable: []const Value,
+            disk: TableInfo,
         };
 
-        pub const Callback = fn (it: *Compaction) void;
-
-        const Status = enum {
-            idle,
-            processing,
-            done,
+        pub const Context = struct {
+            grid: *Grid,
+            tree: *Tree,
+            /// `op_min` is the first op/beat of this compaction's half-bar.
+            /// `op_min` is used as a snapshot — the compaction's input tables must be visible
+            /// to `op_min`.
+            ///
+            /// After this compaction finishes:
+            /// - `op_min + half_bar_beat_count - 1` will be the input tables' snapshot_max.
+            /// - `op_min + half_bar_beat_count` will be the output tables' snapshot_min.
+            op_min: u64,
+            table_info_a: TableInfoA,
+            level_b: u8,
+            range_b: CompactionRange,
+            callback: fn (*Compaction) void,
         };
 
-        /// Used only for debugging/tracing.
+        const Side = enum(u1) {
+            a = 0,
+            b = 1,
+        };
+
+        // Passed by `init`.
         tree_name: []const u8,
 
-        strategy: CompactionStrategy,
-        grid: *Grid,
-        grid_reservation: ?Grid.Reservation,
-        range: Manifest.CompactionRange,
+        // Allocated during `init`.
+        iterator_a: TableIterator,
+        iterator_b: RangeIterator,
+        index_block_a: BlockPtr,
+        data_blocks: [2]BlockPtr,
+        table_builder: Table.Builder,
+        last_keys_in: [2]?Key = .{ null, null },
 
-        /// `op_min` is the first op/beat of this compaction's half-bar.
-        /// `op_min` is used as a snapshot — the compaction's input tables must be visible
-        /// to `op_min`.
-        ///
-        /// After this compaction finishes:
-        /// - `op_min + half_bar_beat_count - 1` will be the input tables' snapshot_max.
-        /// - `op_min + half_bar_beat_count` will be the output tables' snapshot_min.
-        op_min: u64,
+        // Passed by `start`.
+        context: Context,
+
+        grid_reservation: ?Grid.Reservation,
         drop_tombstones: bool,
 
-        status: Status,
-        callback: ?Callback = null,
-        io_pending: u32 = 0,
+        // These point inside either `data_blocks` or `context.table_info_a.immutable`.
+        values_in: [2][]const Value,
 
-        iterator_a: IteratorA,
-        iterator_b: IteratorB,
+        input_state: enum {
+            remaining,
+            exhausted,
+        },
+        state: union(enum) {
+            idle,
+            compacting,
+            iter_init_a,
+            iter_next: Side,
+            writing: struct {
+                remaining: usize,
+            },
+            next_tick,
+            done,
+        },
 
-        merge_done: bool,
-        merge_iterator: ?MergeIterator,
+        next_tick: Grid.NextTick = undefined,
+        read: Grid.Read = undefined,
+        write_data_block: Grid.Write = undefined,
+        write_filter_block: Grid.Write = undefined,
+        write_index_block: Grid.Write = undefined,
 
-        table_builder: Table.Builder,
-        index: BlockWrite,
-        filter: BlockWrite,
-        data: BlockWrite,
+        tracer_slot: ?tracer.SpanStart,
+        iter_tracer_slot: ?tracer.SpanStart,
 
-        manifest: *Manifest,
-        level_b: u8,
-        level_a_input: ?TableInfo,
-
-        tables_output_count: usize = 0,
-
-        tracer_slot: ?tracer.SpanStart = null,
-
-        pub fn init(allocator: mem.Allocator, tree_name: [:0]const u8) !Compaction {
-            var iterator_a = try IteratorA.init(allocator);
+        pub fn init(allocator: Allocator, tree_name: []const u8) !Compaction {
+            var iterator_a = try TableIterator.init(allocator);
             errdefer iterator_a.deinit(allocator);
 
-            var iterator_b = try IteratorB.init(allocator);
+            var iterator_b = try RangeIterator.init(allocator);
             errdefer iterator_b.deinit(allocator);
 
-            var table_builder = try Table.Builder.init(allocator);
+            const index_block_a = try alloc_block(allocator);
+            errdefer allocator.free(index_block_a);
+
+            var data_blocks: [2]Grid.BlockPtr = undefined;
+
+            data_blocks[0] = try alloc_block(allocator);
+            errdefer allocator.free(data_blocks[0]);
+
+            data_blocks[1] = try alloc_block(allocator);
+            errdefer allocator.free(data_blocks[1]);
+
+            const table_builder = try Table.Builder.init(allocator);
             errdefer table_builder.deinit(allocator);
 
             return Compaction{
                 .tree_name = tree_name,
 
-                // Assigned by start()
-                .strategy = undefined,
-                .grid = undefined,
-                .grid_reservation = undefined,
-                .range = undefined,
-                .op_min = undefined,
-                .drop_tombstones = undefined,
-
-                .status = .idle,
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
-
-                .merge_done = false,
-                .merge_iterator = null,
-
+                .index_block_a = index_block_a,
+                .data_blocks = data_blocks,
                 .table_builder = table_builder,
-                .index = .{},
-                .filter = .{},
-                .data = .{},
 
-                // Assigned by start()
-                .manifest = undefined,
-                .level_b = undefined,
-                .level_a_input = null,
+                .context = undefined,
+                .grid_reservation = null,
+                .drop_tombstones = undefined,
+
+                .values_in = .{ &.{}, &.{} },
+
+                .input_state = .remaining,
+                .state = .idle,
+
+                .tracer_slot = null,
+                .iter_tracer_slot = null,
             };
         }
 
-        pub fn deinit(compaction: *Compaction, allocator: mem.Allocator) void {
+        pub fn deinit(compaction: *Compaction, allocator: Allocator) void {
             compaction.table_builder.deinit(allocator);
-
+            for (compaction.data_blocks) |data_block| allocator.free(data_block);
+            allocator.free(compaction.index_block_a);
             compaction.iterator_b.deinit(allocator);
             compaction.iterator_a.deinit(allocator);
         }
 
+        pub fn reset(compaction: *Compaction) void {
+            assert(compaction.state == .done);
+            compaction.state = .idle;
+            if (compaction.grid_reservation) |grid_reservation| {
+                compaction.context.grid.forfeit(grid_reservation);
+            }
+        }
+
         /// The compaction's input tables are:
-        /// * table_a (which is null when level B is 0), and
-        /// * any level-B tables visible to `op_min` within `range`.
+        /// * `context.table_a_info` (which is `.immutable` when `context_level_b` is 0), and
+        /// * Any level_b tables visible to `context.op_min` within `context.range_b`.
         pub fn start(
             compaction: *Compaction,
-            grid: *Grid,
-            manifest: *Manifest,
-            op_min: u64,
-            range: Manifest.CompactionRange,
-            table_a: ?*const TableInfo,
-            level_b: u8,
-            iterator_a_context: IteratorA.Context,
+            context: Context,
         ) void {
-            assert(compaction.status == .idle);
-            assert(compaction.callback == null);
-            assert(compaction.io_pending == 0);
-            assert(!compaction.merge_done and compaction.merge_iterator == null);
-            assert(compaction.tracer_slot == null);
+            assert(compaction.state == .idle);
 
-            assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
-            assert(range.table_count > 0);
-            if (table_a) |t| assert(t.visible(op_min));
+            tracer.start(
+                &compaction.tracer_slot,
+                .{ .tree_compaction = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = context.level_b,
+                } },
+                @src(),
+            );
 
-            assert(level_b < constants.lsm_levels);
-            assert((level_b == 0) == (table_a == null));
+            const can_move_table =
+                context.table_info_a == .disk and
+                context.range_b.table_count == 1;
+
+            // Reserve enough blocks to write our output tables in the worst case, where:
+            // - no tombstones are dropped,
+            // - no values are overwritten,
+            // - and all tables are full.
+            //
+            // We must reserve before doing any async work so that the block acquisition order
+            // is deterministic (relative to other concurrent compactions).
+            // TODO The replica must stop accepting requests if it runs out of blocks/capacity,
+            // rather than panicking here.
+            // TODO(Compaction Pacing): Reserve smaller increments, at the start of each beat.
+            // (And likewise release the reservation at the end of each beat, instead of at the
+            // end of each half-bar).
+            const grid_reservation = if (can_move_table)
+                null
+            else
+                context.grid.reserve(
+                    context.range_b.table_count * Table.block_count_max,
+                ).?;
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.
             // This invariant is always true for the last level as it doesn't have any lower ones.
-            const drop_tombstones = manifest.compaction_must_drop_tombstones(level_b, range);
-            assert(drop_tombstones or level_b < constants.lsm_levels - 1);
-
-            const strategy: CompactionStrategy =
-                if (range.table_count == 1 and table_a != null) .move else .merge;
+            const drop_tombstones = context.tree.manifest.compaction_must_drop_tombstones(
+                context.level_b,
+                context.range_b,
+            );
+            assert(drop_tombstones or context.level_b < constants.lsm_levels - 1);
 
             compaction.* = .{
                 .tree_name = compaction.tree_name,
 
-                .strategy = strategy,
-                .grid = grid,
-                // Reserve enough blocks to write our output tables in the worst case, where:
-                // - no tombstones are dropped,
-                // - no values are overwritten,
-                // - and all tables are full.
-                //
-                // We must reserve before doing any async work so that the block acquisition order
-                // is deterministic (relative to other concurrent compactions).
-                // TODO The replica must stop accepting requests if it runs out of blocks/capacity,
-                // rather than panicking here.
-                // TODO(Compaction Pacing): Reserve smaller increments, at the start of each beat.
-                // (And likewise release the reservation at the end of each beat, instead of at the
-                // end of each half-bar).
-                .grid_reservation = switch (strategy) {
-                    .merge => grid.reserve(range.table_count * Table.block_count_max).?,
-                    // Don't reserve these when we just move the table to the next level.
-                    .move => null,
-                },
-                .range = range,
-                .op_min = op_min,
-                .drop_tombstones = drop_tombstones,
-
-                .status = .processing,
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
-
-                .merge_done = false,
-                .merge_iterator = null,
-
+                .index_block_a = compaction.index_block_a,
+                .data_blocks = compaction.data_blocks,
                 .table_builder = compaction.table_builder,
-                .index = compaction.index,
-                .filter = compaction.filter,
-                .data = compaction.data,
 
-                .manifest = manifest,
-                .level_b = level_b,
-                .level_a_input = if (table_a) |table| table.* else null,
+                .context = context,
+
+                .values_in = .{ &.{}, &.{} },
+
+                .grid_reservation = grid_reservation,
+                .drop_tombstones = drop_tombstones,
+                .input_state = .remaining,
+                .state = .compacting,
+
+                .tracer_slot = compaction.tracer_slot,
+                .iter_tracer_slot = compaction.iter_tracer_slot,
             };
 
-            assert(compaction.index.state == .building);
-            assert(compaction.filter.state == .building);
-            assert(compaction.data.state == .building);
+            if (can_move_table) {
+                // If we can just move the table, don't bother with compaction.
 
-            switch (compaction.strategy) {
-                // Start the compaction iterators if we need to merge tables between levels.
-                .merge => {
-                    const iterator_b_context = .{
-                        .grid = grid,
-                        .manifest = manifest,
-                        .level = level_b,
-                        .snapshot = op_min,
-                        .key_min = range.key_min,
-                        .key_max = range.key_max,
-                        .direction = .ascending,
-                        .table_info_callback = iterator_b_table_info_callback,
-                    };
+                const snapshot_max = snapshot_max_for_table_input(context.op_min);
+                const level_b = context.level_b;
+                const level_a = level_b - 1;
 
-                    compaction.iterator_a.start(iterator_a_context, iterator_a_io_callback);
-                    compaction.iterator_b.start(iterator_b_context, iterator_b_io_callback);
-                },
-                // Nothing else to start when only moving table_a between levels.
-                .move => {},
+                const table_a = &context.table_info_a.disk;
+                assert(table_a.snapshot_max >= snapshot_max);
+
+                context.tree.manifest.move_table(level_a, level_b, table_a);
+
+                compaction.state = .next_tick;
+                compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
+            } else {
+                // Otherwise, start compaction.
+
+                compaction.iterator_b.start(.{
+                    .grid = context.grid,
+                    .manifest = &context.tree.manifest,
+                    .level = context.level_b,
+                    .snapshot = context.op_min,
+                    .key_min = context.range_b.key_min,
+                    .key_max = context.range_b.key_max,
+                });
+
+                switch (context.table_info_a) {
+                    .immutable => |values| {
+                        compaction.values_in[0] = values;
+                        compaction.loop_start();
+                    },
+                    .disk => |table_info| {
+                        compaction.state = .iter_init_a;
+                        compaction.context.grid.read_block(
+                            on_iter_init_a,
+                            &compaction.read,
+                            table_info.address,
+                            table_info.checksum,
+                            .index,
+                        );
+                    },
+                }
             }
         }
 
-        fn iterator_a_io_callback(iterator_a: *IteratorA) void {
-            const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
-            compaction.io_finish();
+        fn on_iter_init_a(read: *Grid.Read, index_block: BlockPtrConst) void {
+            const compaction = @fieldParentPtr(Compaction, "read", read);
+            assert(compaction.state == .iter_init_a);
+
+            // `index_block` is only valid for this callback, so copy it's contents.
+            // TODO(jamii) This copy can be avoided if we bypass the cache.
+            stdx.copy_disjoint(.exact, u8, compaction.index_block_a, index_block);
+            compaction.iterator_a.start(.{
+                .grid = compaction.context.grid,
+                .addresses = Table.index_data_addresses_used(compaction.index_block_a),
+                .checksums = Table.index_data_checksums_used(compaction.index_block_a),
+            });
+
+            compaction.state = .compacting;
+            compaction.loop_start();
         }
 
-        fn iterator_b_io_callback(iterator_b: *IteratorB) void {
-            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
-            compaction.io_finish();
-        }
+        fn loop_start(compaction: *Compaction) void {
+            assert(compaction.state == .compacting);
 
-        fn iterator_b_table_info_callback(
-            iterator_b: *IteratorB,
-            table: *const TableInfo,
-            index_block: BlockPtrConst,
-        ) void {
-            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
-            assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(!compaction.merge_done);
-            assert(compaction.strategy == .merge);
-            assert(table.visible(compaction.op_min));
-
-            // Tables discovered by iterator_b that are visible at the start of compaction.
-            var table_copy = table.*;
-            compaction.manifest.update_table(
-                compaction.level_b,
-                snapshot_max_for_table_input(compaction.op_min),
-                &table_copy,
+            tracer.start(
+                &compaction.iter_tracer_slot,
+                .{ .tree_compaction_iter = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.context.level_b,
+                } },
+                @src(),
             );
 
-            // Release the table's block addresses in the Grid as it will be made invisible.
-            // This is safe; iterator_b makes a copy of the block before calling us.
-            const grid = compaction.grid;
-            for (Table.index_data_addresses_used(index_block)) |address| {
-                grid.release(address);
-            }
-            for (Table.index_filter_addresses_used(index_block)) |address| {
-                grid.release(address);
-            }
-            grid.release(Table.index_block_address(index_block));
+            compaction.iter_check(.a);
         }
 
-        pub fn compact_tick(compaction: *Compaction, callback: Callback) void {
-            assert(compaction.status == .processing);
-            assert(compaction.callback == null);
-            assert(compaction.io_pending == 0);
-            assert(!compaction.merge_done);
+        /// If `values_in[index]` is empty and more values are available, read them.
+        fn iter_check(compaction: *Compaction, side: Side) void {
+            assert(compaction.state == .compacting);
 
-            switch (compaction.strategy) {
-                .merge => {
-                    compaction.callback = callback;
-
-                    tracer.start(
-                        &compaction.tracer_slot,
-                        .{ .tree_compaction_tick = .{
-                            .tree_name = compaction.tree_name,
-                            .level_b = compaction.level_b,
-                        } },
-                        @src(),
-                    );
-
-                    // Generate fake IO to make sure io_pending doesn't reach zero multiple times
-                    // from IO being completed inline down below. The fake IO is immediately
-                    // resolved and triggers the cpu_merge_start if all IO completes inline or if no
-                    // IO was started.
-                    compaction.io_start();
-                    defer compaction.io_finish();
-
-                    // Start reading blocks from the iterators to merge them.
-                    if (compaction.iterator_a.tick()) compaction.io_start();
-                    if (compaction.iterator_b.tick()) compaction.io_start();
-
-                    // Start writing blocks made by merge_iterator from a previous compact_tick().
-                    compaction.io_write_start(.data);
-                    compaction.io_write_start(.filter);
-                    compaction.io_write_start(.index);
-                },
-                .move => {
-                    const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
-                    const level_b = compaction.level_b;
-                    const level_a = level_b - 1;
-
-                    const table_a = &compaction.level_a_input.?;
-                    assert(table_a.snapshot_max >= snapshot_max);
-                    assert(compaction.range.table_count == 1);
-                    assert(compaction.grid_reservation == null);
-
-                    compaction.manifest.move_table(level_a, level_b, table_a);
-
-                    compaction.merge_done = true;
-                    compaction.status = .done;
-                    callback(compaction);
-                },
-            }
-        }
-
-        const BlockWriteField = enum { data, filter, index };
-
-        fn io_write_start(compaction: *Compaction, comptime field: BlockWriteField) void {
-            const write_callback = struct {
-                fn callback(write: *Grid.Write) void {
-                    const block_write = @fieldParentPtr(BlockWrite, "write", write);
-
-                    assert(block_write.state == .writing);
-                    block_write.state = .building;
-
-                    if (constants.verify) {
-                        // We've finished writing so the block should now be zeroed.
-                        assert(mem.allEqual(u8, block_write.block.*, 0));
-                    }
-                    block_write.block = undefined;
-
-                    const _compaction = @fieldParentPtr(Compaction, @tagName(field), block_write);
-                    _compaction.io_finish();
+            if (compaction.values_in[@enumToInt(side)].len > 0) {
+                // Still have values on this side, no need to refill.
+                compaction.iter_check_finish(side);
+            } else if (side == .a and compaction.context.table_info_a == .immutable) {
+                // No iterator to call next on.
+                compaction.iter_check_finish(side);
+            } else {
+                compaction.state = .{ .iter_next = side };
+                switch (side) {
+                    .a => compaction.iterator_a.next(iter_next_a),
+                    .b => compaction.iterator_b.next(.{
+                        .on_index = on_index_block,
+                        .on_data = iter_next_b,
+                    }),
                 }
-            }.callback;
-
-            const block_write: *BlockWrite = &@field(compaction, @tagName(field));
-            if (block_write.state == .writable) {
-                block_write.state = .writing;
-
-                compaction.io_start();
-                compaction.grid.write_block(
-                    write_callback,
-                    &block_write.write,
-                    block_write.block,
-                    Table.block_address(block_write.block.*),
-                );
             }
         }
 
-        fn io_start(compaction: *Compaction) void {
-            assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(!compaction.merge_done);
+        fn on_index_block(
+            iterator_b: *RangeIterator,
+            table_info: ?TableInfo,
+            index_block: ?BlockPtrConst,
+        ) void {
+            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
+            assert(std.meta.eql(compaction.state, .{ .iter_next = .b }));
 
-            compaction.io_pending += 1;
+            if (table_info) |table| {
+                // Tables that we've compacted should become invisible at the end of this half-bar.
+                var table_copy = table;
+                compaction.context.tree.manifest.update_table(
+                    compaction.context.level_b,
+                    snapshot_max_for_table_input(compaction.context.op_min),
+                    &table_copy,
+                );
+
+                // Release the table's block addresses in the Grid as it will be made invisible.
+                // This is safe; iterator_b makes a copy of the block before calling us.
+                const grid = compaction.context.grid;
+                for (Table.index_data_addresses_used(index_block.?)) |address| {
+                    grid.release(address);
+                }
+                for (Table.index_filter_addresses_used(index_block.?)) |address| {
+                    grid.release(address);
+                }
+                grid.release(Table.index_block_address(index_block.?));
+            }
         }
 
-        fn io_finish(compaction: *Compaction) void {
-            assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(compaction.io_pending > 0);
-            assert(!compaction.merge_done);
-
-            compaction.io_pending -= 1;
-            if (compaction.io_pending == 0) compaction.cpu_merge_start();
+        fn iter_next_a(iterator_a: *TableIterator, data_block: ?BlockPtrConst) void {
+            const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
+            compaction.iter_next(data_block);
         }
 
-        fn cpu_merge_start(compaction: *Compaction) void {
-            assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(compaction.io_pending == 0);
-            assert(!compaction.merge_done);
-            assert(compaction.strategy == .merge);
+        fn iter_next_b(iterator_b: *RangeIterator, data_block: ?BlockPtrConst) void {
+            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
+            compaction.iter_next(data_block);
+        }
+
+        fn iter_next(compaction: *Compaction, data_block: ?BlockPtrConst) void {
+            assert(compaction.state == .iter_next);
+            const side = compaction.state.iter_next;
+            const index = @enumToInt(side);
+
+            if (data_block) |block| {
+                // `data_block` is only valid for this callback, so copy it's contents.
+                // TODO(jamii) This copy can be avoided if we bypass the cache.
+                stdx.copy_disjoint(.exact, u8, compaction.data_blocks[index], block);
+                compaction.values_in[index] =
+                    Table.data_block_values_used(compaction.data_blocks[index]);
+
+                // Assert that we're reading data blocks in key order.
+                const values_in = compaction.values_in[index];
+                if (values_in.len > 0) {
+                    const first_key = key_from_value(&values_in[0]);
+                    const last_key = key_from_value(&values_in[values_in.len - 1]);
+                    if (compaction.last_keys_in[index]) |last_key_prev| {
+                        assert(compare_keys(last_key_prev, first_key) == .lt);
+                    }
+                    if (values_in.len > 1) {
+                        assert(compare_keys(first_key, last_key) == .lt);
+                    }
+                    compaction.last_keys_in[index] = last_key;
+                }
+            } else {
+                // If no more data blocks available, just leave `values_in[index]` empty.
+            }
+
+            compaction.state = .compacting;
+            compaction.iter_check_finish(side);
+        }
+
+        fn iter_check_finish(compaction: *Compaction, side: Side) void {
+            switch (side) {
+                .a => compaction.iter_check(.b),
+                .b => compaction.compact(),
+            }
+        }
+
+        fn compact(compaction: *Compaction) void {
+            assert(compaction.state == .compacting);
+            const values_in = compaction.values_in;
 
             var tracer_slot: ?tracer.SpanStart = null;
             tracer.start(
                 &tracer_slot,
                 .{ .tree_compaction_merge = .{
                     .tree_name = compaction.tree_name,
-                    .level_b = compaction.level_b,
+                    .level_b = compaction.context.level_b,
                 } },
                 @src(),
             );
 
-            // Create the merge iterator only when we can peek() from the read iterators.
-            // This happens after IO for the first reads complete.
-            if (compaction.merge_iterator == null) {
-                compaction.merge_iterator = MergeIterator.init(
-                    &compaction.iterator_a,
-                    &compaction.iterator_b,
-                );
-                assert(!compaction.merge_iterator.?.empty());
-            }
-
-            assert(compaction.data.state == .building);
-            assert(compaction.filter.state == .building);
-            assert(compaction.index.state == .building);
-
-            if (!compaction.merge_iterator.?.empty()) {
-                compaction.cpu_merge();
+            if (values_in[0].len == 0 and values_in[1].len == 0) {
+                compaction.input_state = .exhausted;
+            } else if (values_in[0].len == 0) {
+                compaction.copy(.b);
+            } else if (values_in[1].len == 0) {
+                if (compaction.drop_tombstones) {
+                    compaction.copy_drop_tombstones();
+                } else {
+                    compaction.copy(.a);
+                }
             } else {
-                compaction.cpu_merge_finish();
+                compaction.merge();
             }
 
             tracer.end(
                 &tracer_slot,
                 .{ .tree_compaction_merge = .{
                     .tree_name = compaction.tree_name,
-                    .level_b = compaction.level_b,
-                } },
-            );
-            tracer.end(
-                &compaction.tracer_slot,
-                .{ .tree_compaction_tick = .{
-                    .tree_name = compaction.tree_name,
-                    .level_b = compaction.level_b,
+                    .level_b = compaction.context.level_b,
                 } },
             );
 
-            // TODO Implement pacing here by deciding if we should do another compact_tick()
-            // instead of invoking the callback, using compaction.range.table_count as the heuristic.
-
-            const callback = compaction.callback.?;
-            compaction.callback = null;
-            callback(compaction);
+            compaction.write_blocks();
         }
 
-        fn cpu_merge(compaction: *Compaction) void {
-            // Ensure this is the result of a compact_tick() call that finished processing IO.
-            assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(compaction.io_pending == 0);
-            assert(!compaction.merge_done);
-            assert(compaction.strategy == .merge);
+        fn copy(compaction: *Compaction, side: Side) void {
+            const values_in = compaction.values_in[@enumToInt(side)];
+            const values_out = compaction.table_builder.data_block_values();
+            var values_out_index = compaction.table_builder.value_count;
 
-            // Ensure there are values to merge and that is it safe to do so.
-            const merge_iterator = &compaction.merge_iterator.?;
-            assert(!merge_iterator.empty());
-            assert(compaction.data.state == .building);
-            assert(compaction.filter.state == .building);
-            assert(compaction.index.state == .building);
+            const len = @minimum(values_in.len, values_out.len - values_out_index);
+            stdx.copy_disjoint(
+                .exact,
+                Value,
+                values_out[values_out_index .. values_out_index + len],
+                values_in[0..len],
+            );
 
-            // Build up a data block with values merged from the read iterators.
-            // This skips tombstone values if compaction was started with the intent to drop them.
-            while (!compaction.table_builder.data_block_full()) {
-                const value = merge_iterator.pop() orelse break;
-                if (compaction.drop_tombstones and tombstone(&value)) continue;
-                compaction.table_builder.data_block_append(&value);
-            }
-
-            // Finalize the data block if it's full or if it contains pending values when there's
-            // no more left to merge.
-            if (compaction.table_builder.data_block_full() or
-                compaction.table_builder.filter_block_full() or
-                compaction.table_builder.index_block_full() or
-                (merge_iterator.empty() and !compaction.table_builder.data_block_empty()))
-            {
-                compaction.table_builder.data_block_finish(.{
-                    .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
-                });
-
-                // Mark the finished data block as writable for the next compact_tick() call.
-                compaction.data.block = &compaction.table_builder.data_block;
-                assert(compaction.data.state == .building);
-                compaction.data.state = .writable;
-            }
-
-            // Finalize the filter block if it's full or if it contains pending data blocks
-            // when there's no more merged values to fill them.
-            if (compaction.table_builder.filter_block_full() or
-                compaction.table_builder.index_block_full() or
-                (merge_iterator.empty() and !compaction.table_builder.filter_block_empty()))
-            {
-                compaction.table_builder.filter_block_finish(.{
-                    .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
-                });
-
-                // Mark the finished filter block as writable for the next compact_tick() call.
-                compaction.filter.block = &compaction.table_builder.filter_block;
-                assert(compaction.filter.state == .building);
-                compaction.filter.state = .writable;
-            }
-
-            // Finalize the index block if it's full or if it contains pending data blocks
-            // when there's no more merged values to fill them.
-            if (compaction.table_builder.index_block_full() or
-                (merge_iterator.empty() and !compaction.table_builder.index_block_empty()))
-            {
-                const table = compaction.table_builder.index_block_finish(.{
-                    .cluster = compaction.grid.superblock.working.cluster,
-                    .address = compaction.grid.acquire(compaction.grid_reservation.?),
-                    .snapshot_min = snapshot_min_for_table_output(compaction.op_min),
-                    // TODO(Persistent Snapshots) set snapshot_max to the minimum snapshot_max of
-                    // all the (original) input tables.
-                });
-                compaction.manifest.insert_table(compaction.level_b, &table);
-
-                // Mark the finished index block as writable for the next compact_tick() call.
-                compaction.index.block = &compaction.table_builder.index_block;
-                assert(compaction.index.state == .building);
-                compaction.index.state = .writable;
-
-                compaction.tables_output_count += 1;
-                assert(compaction.tables_output_count <= compaction.range.table_count);
-            }
+            compaction.values_in[@enumToInt(side)] = values_in[len..];
+            compaction.table_builder.value_count += @intCast(u32, len);
         }
 
-        fn cpu_merge_finish(compaction: *Compaction) void {
-            // Ensure this is the result of a compact_tick() call that finished processing IO.
-            assert(compaction.status == .processing);
-            assert(compaction.callback != null);
-            assert(compaction.io_pending == 0);
-            assert(!compaction.merge_done);
-            assert(compaction.strategy == .merge);
+        fn copy_drop_tombstones(compaction: *Compaction) void {
+            // Copy variables locally to ensure a tight loop.
+            var values_in_a = compaction.values_in[0];
+            const values_out = compaction.table_builder.data_block_values();
+            var values_in_a_index: usize = 0;
+            var values_out_index = compaction.table_builder.value_count;
 
-            // Ensure merging is truly finished.
-            assert(compaction.merge_iterator.?.empty());
-            assert(compaction.data.state == .building);
-            assert(compaction.filter.state == .building);
-            assert(compaction.index.state == .building);
-
-            // Double check the iterators are finished as well.
-            const stream_empty = struct {
-                fn empty(it: anytype) bool {
-                    _ = it.peek() catch |err| switch (err) {
-                        error.Drained => {},
-                        error.Empty => {
-                            assert(it.buffered_all_values());
-                            return true;
-                        },
-                    };
-                    return false;
+            // Merge as many values as possible.
+            while (values_in_a_index < values_in_a.len and
+                values_out_index < values_out.len)
+            {
+                const value_a = &values_in_a[values_in_a_index];
+                values_in_a_index += 1;
+                if (tombstone(value_a)) {
+                    continue;
                 }
-            }.empty;
-            assert(stream_empty(&compaction.iterator_a));
-            assert(stream_empty(&compaction.iterator_b));
-
-            // Mark the level_a table as invisible if it was provided;
-            // it has been merged into level_b.
-            // TODO: Release the grid blocks associated with level_a as well
-            if (compaction.level_a_input) |*level_a_table| {
-                const level_a = compaction.level_b - 1;
-                const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
-                compaction.manifest.update_table(level_a, snapshot_max, level_a_table);
-                assert(level_a_table.snapshot_max == snapshot_max);
-            } else {
-                assert(compaction.level_b == 0);
+                values_out[values_out_index] = value_a.*;
+                values_out_index += 1;
             }
 
-            // Finally, mark Compaction as officially complete and ready to be reset().
-            compaction.merge_iterator = null;
-            compaction.merge_done = true;
-            compaction.status = .done;
+            // Copy variables back out.
+            compaction.values_in[0] = values_in_a[values_in_a_index..];
+            compaction.table_builder.value_count = values_out_index;
         }
 
-        pub fn reset(compaction: *Compaction) void {
-            assert(compaction.status == .done);
-            assert(compaction.callback == null);
-            assert(compaction.io_pending == 0);
-            assert(compaction.merge_done);
-            assert(compaction.tracer_slot == null);
+        fn merge(compaction: *Compaction) void {
+            // Copy variables locally to ensure a tight loop.
+            var values_in_a = compaction.values_in[0];
+            var values_in_b = compaction.values_in[1];
+            const values_out = compaction.table_builder.data_block_values();
+            var values_in_a_index: usize = 0;
+            var values_in_b_index: usize = 0;
+            var values_out_index = compaction.table_builder.value_count;
 
-            // TODO(Beat Pacing) This should really be where the compaction callback is invoked,
-            // but currently that can occur multiple times per beat.
-            switch (compaction.strategy) {
-                .move => assert(compaction.grid_reservation == null),
-                .merge => {
-                    compaction.grid.forfeit(compaction.grid_reservation.?);
-                    compaction.grid_reservation = null;
+            // Merge as many values as possible.
+            while (values_in_a_index < values_in_a.len and
+                values_in_b_index < values_in_b.len and
+                values_out_index < values_out.len)
+            {
+                const value_a = &values_in_a[values_in_a_index];
+                const value_b = &values_in_b[values_in_b_index];
+                switch (compare_keys(key_from_value(value_a), key_from_value(value_b))) {
+                    .lt => {
+                        values_in_a_index += 1;
+                        if (compaction.drop_tombstones and
+                            tombstone(value_a))
+                        {
+                            continue;
+                        }
+                        values_out[values_out_index] = value_a.*;
+                        values_out_index += 1;
+                    },
+                    .gt => {
+                        values_in_b_index += 1;
+                        values_out[values_out_index] = value_b.*;
+                        values_out_index += 1;
+                    },
+                    .eq => {
+                        values_in_a_index += 1;
+                        values_in_b_index += 1;
+                        if (Table.usage == .secondary_index) {
+                            if (tombstone(value_a)) {
+                                assert(!tombstone(value_b));
+                                continue;
+                            }
+                            if (tombstone(value_b)) {
+                                assert(!tombstone(value_a));
+                                continue;
+                            }
+                        } else if (compaction.drop_tombstones) {
+                            if (tombstone(value_a)) {
+                                continue;
+                            }
+                        }
+                        values_out[values_out_index] = value_a.*;
+                        values_out_index += 1;
+                    },
+                }
+            }
+
+            // Copy variables back out.
+            compaction.values_in[0] = values_in_a[values_in_a_index..];
+            compaction.values_in[1] = values_in_b[values_in_b_index..];
+            compaction.table_builder.value_count = values_out_index;
+        }
+
+        fn write_blocks(compaction: *Compaction) void {
+            assert(compaction.state == .compacting);
+            const input_exhausted = compaction.input_state == .exhausted;
+            const table_builder = &compaction.table_builder;
+
+            compaction.state = .{ .writing = .{ .remaining = 0 } };
+
+            // Flush the data block if needed.
+            if (table_builder.data_block_full() or
+                // If the filter or index blocks need to be flushed,
+                // the data block has to be flushed first.
+                table_builder.filter_block_full() or
+                table_builder.index_block_full() or
+                // If the input is exhausted then we need to flush all blocks before finishing.
+                (input_exhausted and !table_builder.data_block_empty()))
+            {
+                table_builder.data_block_finish(.{
+                    .cluster = compaction.context.grid.superblock.working.cluster,
+                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                });
+                WriteBlock(.data).write_block(compaction);
+            }
+
+            // Flush the filter block if needed.
+            if (table_builder.filter_block_full() or
+                // If the index block need to be flushed,
+                // the filter block has to be flushed first.
+                table_builder.index_block_full() or
+                // If the input is exhausted then we need to flush all blocks before finishing.
+                (input_exhausted and !table_builder.filter_block_empty()))
+            {
+                table_builder.filter_block_finish(.{
+                    .cluster = compaction.context.grid.superblock.working.cluster,
+                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                });
+                WriteBlock(.filter).write_block(compaction);
+            }
+
+            // Flush the index block if needed.
+            if (table_builder.index_block_full() or
+                // If the input is exhausted then we need to flush all blocks before finishing.
+                (input_exhausted and !table_builder.index_block_empty()))
+            {
+                const table = table_builder.index_block_finish(.{
+                    .cluster = compaction.context.grid.superblock.working.cluster,
+                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
+                });
+                // Make this table visible at the end of this half-bar.
+                compaction.context.tree.manifest.insert_table(compaction.context.level_b, &table);
+                WriteBlock(.index).write_block(compaction);
+            }
+
+            if (compaction.state.writing.remaining == 0) {
+                compaction.write_finish();
+            }
+        }
+
+        const WriteBlockField = enum { data, filter, index };
+        fn WriteBlock(comptime write_block_field: WriteBlockField) type {
+            return struct {
+                fn write_block(compaction: *Compaction) void {
+                    assert(compaction.state == .writing);
+
+                    const write = switch (write_block_field) {
+                        .data => &compaction.write_data_block,
+                        .filter => &compaction.write_filter_block,
+                        .index => &compaction.write_index_block,
+                    };
+                    const block = switch (write_block_field) {
+                        .data => &compaction.table_builder.data_block,
+                        .filter => &compaction.table_builder.filter_block,
+                        .index => &compaction.table_builder.index_block,
+                    };
+                    compaction.state.writing.remaining += 1;
+                    compaction.context.grid.write_block(
+                        on_write,
+                        write,
+                        block,
+                        Table.block_address(block.*),
+                    );
+                }
+
+                fn on_write(write: *Grid.Write) void {
+                    const compaction = @fieldParentPtr(
+                        Compaction,
+                        switch (write_block_field) {
+                            .data => "write_data_block",
+                            .filter => "write_filter_block",
+                            .index => "write_index_block",
+                        },
+                        write,
+                    );
+                    assert(compaction.state == .writing);
+                    compaction.state.writing.remaining -= 1;
+                    if (compaction.state.writing.remaining == 0) {
+                        compaction.write_finish();
+                    }
+                }
+            };
+        }
+
+        fn write_finish(compaction: *Compaction) void {
+            assert(compaction.state == .writing);
+
+            tracer.end(
+                &compaction.iter_tracer_slot,
+                .{ .tree_compaction_iter = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.context.level_b,
+                } },
+            );
+
+            switch (compaction.input_state) {
+                .remaining => {
+                    compaction.state = .next_tick;
+                    compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick);
+                },
+                .exhausted => {
+                    // Mark the level_a table as invisible if it was provided;
+                    // it has been merged into level_b.
+                    // TODO: Release the grid blocks associated with level_a as well
+                    switch (compaction.context.table_info_a) {
+                        .immutable => {},
+                        .disk => |table| {
+                            const level_a = compaction.context.level_b - 1;
+                            const snapshot_max = snapshot_max_for_table_input(
+                                compaction.context.op_min,
+                            );
+                            var table_copy = table;
+                            compaction.context.tree.manifest.update_table(
+                                level_a,
+                                snapshot_max,
+                                &table_copy,
+                            );
+                            assert(table_copy.snapshot_max == snapshot_max);
+                        },
+                    }
+
+                    compaction.state = .next_tick;
+                    compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
                 },
             }
+        }
 
-            compaction.status = .idle;
-            compaction.merge_done = false;
+        fn loop_on_next_tick(next_tick: *Grid.NextTick) void {
+            const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
+            assert(compaction.state == .next_tick);
+
+            compaction.state = .compacting;
+            compaction.loop_start();
+        }
+
+        fn done_on_next_tick(next_tick: *Grid.NextTick) void {
+            const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
+            assert(compaction.state == .next_tick);
+
+            compaction.state = .done;
+
+            tracer.end(
+                &compaction.tracer_slot,
+                .{ .tree_compaction = .{
+                    .tree_name = compaction.tree_name,
+                    .level_b = compaction.context.level_b,
+                } },
+            );
+
+            const callback = compaction.context.callback;
+            callback(compaction);
         }
     };
 }
