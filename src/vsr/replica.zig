@@ -1544,16 +1544,6 @@ pub fn ReplicaType(
             assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message)) return;
 
-            if (message.header.op > self.op_checkpoint_trigger()) {
-                // This replica is too far behind, i.e. the new `self.op` is too far ahead of the
-                // last checkpoint. If we wrap now, we overwrite un-checkpointed transfers in the WAL,
-                // precluding recovery.
-                //
-                // TODO State transfer. Currently this is unreachable because the
-                // primary won't checkpoint until all replicas are caught up.
-                stdx.unimplemented("state transfer");
-            }
-
             assert(self.status == .view_change or
                 self.status == .normal or
                 self.status == .recovering_head);
@@ -4186,7 +4176,7 @@ pub fn ReplicaType(
                 };
 
                 if (backup_repair_next != null and backup_repair_next.? < primary_repair_min) {
-                    @panic("unimplemented (state transfer)");
+                    stdx.unimplemented("state transfer");
                 }
             }
 
