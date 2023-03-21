@@ -6306,15 +6306,19 @@ pub fn ReplicaType(
         }
 
         fn view_jump(self: *Self, header: *const Header) void {
+            if (header.view < self.view) return;
+            if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
+
             const to: Status = switch (header.command) {
                 .prepare, .commit => .normal,
                 // When we are recovering_head we can't participate in a view-change anyway.
                 // But there is a chance that the primary is actually running, despite the DVC/SVC.
                 .do_view_change, .start_view_change => if (self.status == .recovering_head) Status.normal else .view_change,
+                // on_start_view() handles the (possible) transition to view-change manually, before
+                // transitioning to normal.
+                .start_view => return,
                 else => return,
             };
-
-            if (header.view < self.view) return;
 
             // Compare status transitions and decide whether to view jump or ignore:
             switch (self.status) {
