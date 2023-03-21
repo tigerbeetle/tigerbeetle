@@ -5748,6 +5748,7 @@ pub fn ReplicaType(
 
             self.set_op_and_commit_max(header_head.op, commit_max, "on_do_view_change");
             assert(self.commit_max <= self.op_checkpoint_trigger());
+            assert(self.commit_max <= self.op);
 
             // "`replica.op` exists" invariant may be broken briefly between set_op_and_commit_max()
             // and replace_header().
