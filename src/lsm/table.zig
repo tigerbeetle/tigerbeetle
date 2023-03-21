@@ -456,7 +456,7 @@ pub fn TableType(
             data_block: BlockPtr,
 
             data_block_count: u32 = 0,
-            value: u32 = 0,
+            value_count: u32 = 0,
 
             filter_block_count: u32 = 0,
             data_blocks_in_filter: u32 = 0,
@@ -486,43 +486,18 @@ pub fn TableType(
                 builder.* = undefined;
             }
 
-            pub fn data_block_append(builder: *Builder, value: *const Value) void {
-                const values_max = data_block_values(builder.data_block);
-                assert(values_max.len == data.block_value_count_max);
-
-                values_max[builder.value] = value.*;
-                builder.value += 1;
-
-                const key = key_from_value(value);
-                const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
-                bloom_filter.add(fingerprint, filter_block_filter(builder.filter_block));
+            pub fn data_block_values(builder: *Builder) []Value {
+                return Table.data_block_values(builder.data_block);
             }
 
-            pub fn data_block_append_slice(builder: *Builder, values: []const Value) void {
-                assert(values.len > 0);
-                assert(builder.value + values.len <= data.block_value_count_max);
-
-                const values_max = data_block_values(builder.data_block);
-                assert(values_max.len == data.block_value_count_max);
-
-                stdx.copy_disjoint(.inexact, Value, values_max[builder.value..], values);
-                builder.value += @intCast(u32, values.len);
-
-                for (values) |*value| {
-                    const key = key_from_value(value);
-                    const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
-                    bloom_filter.add(fingerprint, filter_block_filter(builder.filter_block));
-                }
+            pub fn data_block_empty(builder: *const Builder) bool {
+                assert(builder.value_count <= data.block_value_count_max);
+                return builder.value_count == 0;
             }
 
-            pub fn data_block_empty(builder: Builder) bool {
-                assert(builder.value <= data.block_value_count_max);
-                return builder.value == 0;
-            }
-
-            pub fn data_block_full(builder: Builder) bool {
-                assert(builder.value <= data.block_value_count_max);
-                return builder.value == data.block_value_count_max;
+            pub fn data_block_full(builder: *const Builder) bool {
+                assert(builder.value_count <= data.block_value_count_max);
+                return builder.value_count == data.block_value_count_max;
             }
 
             const DataFinishOptions = struct {
@@ -535,13 +510,21 @@ pub fn TableType(
                 // complete the block header, and add the block's max key to the table index.
 
                 assert(options.address > 0);
-                assert(builder.value > 0);
+                assert(builder.value_count > 0);
 
                 const block = builder.data_block;
-                const values_max = data_block_values(block);
+                const values_max = Table.data_block_values(block);
                 assert(values_max.len == data.block_value_count_max);
 
-                const values = values_max[0..builder.value];
+                const values = values_max[0..builder.value_count];
+
+                const filter_bytes = filter_block_filter(builder.filter_block);
+                for (values) |*value| {
+                    const key = key_from_value(value);
+                    const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
+                    bloom_filter.add(fingerprint, filter_bytes);
+                }
+
                 const key_max = key_from_value(&values[values.len - 1]);
 
                 if (constants.verify) {
@@ -572,7 +555,7 @@ pub fn TableType(
                     );
                 }
 
-                const values_padding = mem.sliceAsBytes(values_max[builder.value..]);
+                const values_padding = mem.sliceAsBytes(values_max[builder.value_count..]);
                 const block_padding = block[data.padding_offset..][0..data.padding_size];
                 assert(compare_keys(key_from_value(&values[values.len - 1]), key_max) == .eq);
 
@@ -611,17 +594,17 @@ pub fn TableType(
                 }
 
                 builder.data_block_count += 1;
-                builder.value = 0;
+                builder.value_count = 0;
 
                 builder.data_blocks_in_filter += 1;
             }
 
-            pub fn filter_block_empty(builder: Builder) bool {
+            pub fn filter_block_empty(builder: *const Builder) bool {
                 assert(builder.data_blocks_in_filter <= filter.data_block_count_max);
                 return builder.data_blocks_in_filter == 0;
             }
 
-            pub fn filter_block_full(builder: Builder) bool {
+            pub fn filter_block_full(builder: *const Builder) bool {
                 assert(builder.data_blocks_in_filter <= filter.data_block_count_max);
                 return builder.data_blocks_in_filter == filter.data_block_count_max;
             }
@@ -658,12 +641,12 @@ pub fn TableType(
                 builder.data_blocks_in_filter = 0;
             }
 
-            pub fn index_block_empty(builder: Builder) bool {
+            pub fn index_block_empty(builder: *const Builder) bool {
                 assert(builder.data_block_count <= data_block_count_max);
                 return builder.data_block_count == 0;
             }
 
-            pub fn index_block_full(builder: Builder) bool {
+            pub fn index_block_full(builder: *const Builder) bool {
                 assert(builder.data_block_count <= data_block_count_max);
                 return builder.data_block_count == data_block_count_max;
             }
@@ -679,7 +662,7 @@ pub fn TableType(
                 assert(builder.filter_block_empty());
                 assert(builder.data_block_empty());
                 assert(builder.data_block_count > 0);
-                assert(builder.value == 0);
+                assert(builder.value_count == 0);
                 assert(builder.data_blocks_in_filter == 0);
                 assert(builder.filter_block_count == div_ceil(
                     builder.data_block_count,
@@ -867,7 +850,7 @@ pub fn TableType(
             };
         }
 
-        inline fn data_block_values(data_block: BlockPtr) []Value {
+        pub inline fn data_block_values(data_block: BlockPtr) []Value {
             return mem.bytesAsSlice(
                 Value,
                 data_block[data.values_offset..][0..data.values_size],
