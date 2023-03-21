@@ -26,7 +26,7 @@ const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
-const output = std.log.scoped(.state_checker);
+pub const output = std.log.scoped(.state_checker);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
