@@ -96,27 +96,30 @@ pub fn TableIteratorType(comptime Storage: type) type {
                 const address = it.context.addresses[0];
                 const checksum = it.context.checksums[0];
                 it.callback = .{ .read = callback };
-                it.context.grid.read_block(on_read, &it.read, address, checksum, .data);
+                it.context.grid.read_block(
+                    .{ .block = it.data_block },
+                    on_read,
+                    &it.read,
+                    address,
+                    checksum,
+                    .data,
+                );
             } else {
                 it.callback = .{ .next_tick = callback };
                 it.context.grid.on_next_tick(on_next_tick, &it.next_tick);
             }
         }
 
-        fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
+        fn on_read(read: *Grid.Read, data_block: Grid.BlockPtrConst) void {
             const it = @fieldParentPtr(TableIterator, "read", read);
             assert(it.callback == .read);
-
-            // `data_block` is only valid for this callback, so copy it's contents.
-            // TODO(jamii) This copy can be avoided if we bypass the cache.
-            stdx.copy_disjoint(.exact, u8, it.data_block, block);
 
             const callback = it.callback.read;
             it.callback = .none;
             it.context.addresses = it.context.addresses[1..];
             it.context.checksums = it.context.checksums[1..];
 
-            callback(it, it.data_block);
+            callback(it, data_block);
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {

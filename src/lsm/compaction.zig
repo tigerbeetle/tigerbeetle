@@ -304,6 +304,7 @@ pub fn CompactionType(
                     .disk => |table_info| {
                         compaction.state = .iter_init_a;
                         compaction.context.grid.read_block(
+                            .{ .block = compaction.index_block_a },
                             on_iter_init_a,
                             &compaction.read,
                             table_info.address,
@@ -319,13 +320,10 @@ pub fn CompactionType(
             const compaction = @fieldParentPtr(Compaction, "read", read);
             assert(compaction.state == .iter_init_a);
 
-            // `index_block` is only valid for this callback, so copy it's contents.
-            // TODO(jamii) This copy can be avoided if we bypass the cache.
-            stdx.copy_disjoint(.exact, u8, compaction.index_block_a, index_block);
             compaction.iterator_a.start(.{
                 .grid = compaction.context.grid,
-                .addresses = Table.index_data_addresses_used(compaction.index_block_a),
-                .checksums = Table.index_data_checksums_used(compaction.index_block_a),
+                .addresses = Table.index_data_addresses_used(index_block),
+                .checksums = Table.index_data_checksums_used(index_block),
             });
 
             compaction.state = .compacting;

@@ -364,6 +364,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 assert(context.index_block_count <= constants.lsm_levels);
 
                 context.tree.grid.read_block(
+                    .cache,
                     read_index_block_callback,
                     &context.completion,
                     context.index_block_addresses[context.index_block],
@@ -387,6 +388,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 };
 
                 context.tree.grid.read_block(
+                    .cache,
                     read_filter_block_callback,
                     completion,
                     blocks.filter_block_address,
@@ -411,6 +413,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     );
 
                     context.tree.grid.read_block(
+                        .cache,
                         read_data_block_callback,
                         completion,
                         context.data_block.?.address,

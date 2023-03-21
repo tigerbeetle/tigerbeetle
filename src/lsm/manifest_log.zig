@@ -211,6 +211,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(block.address > 0);
 
                 manifest_log.grid.read_block(
+                    .cache,
                     open_read_block_callback,
                     &manifest_log.read,
                     block.address,
@@ -506,6 +507,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 manifest_log.read_block_reference = block;
 
                 manifest_log.grid.read_block(
+                    .cache,
                     compact_read_block_callback,
                     &manifest_log.read,
                     block.address,

@@ -82,7 +82,19 @@ pub fn GridType(comptime Storage: type) type {
             write: *Write,
         };
 
+        pub const ReadTarget = union(enum) {
+            // If the address is not in the cache, read from disk into the cache.
+            // Yields a pointer to a cache block,
+            // which is only valid for the duration of the callback.
+            cache,
+            // If the address is not in the cache, read from disk into this block.
+            // If the address is in the cache, copy into this block.
+            // Yields this block.
+            block: BlockPtr,
+        };
+
         pub const Read = struct {
+            target: ReadTarget,
             callback: fn (*Grid.Read, BlockPtrConst) void,
             address: u64,
             checksum: u128,
@@ -394,6 +406,7 @@ pub fn GridType(comptime Storage: type) type {
         /// block has been recovered.
         pub fn read_block(
             grid: *Grid,
+            target: ReadTarget,
             callback: fn (*Grid.Read, BlockPtrConst) void,
             read: *Grid.Read,
             address: u64,
@@ -408,6 +421,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(!grid.superblock.free_set.is_free(address));
 
             read.* = .{
+                .target = target,
                 .callback = callback,
                 .address = address,
                 .checksum = checksum,
@@ -422,7 +436,10 @@ pub fn GridType(comptime Storage: type) type {
             }) |queue| {
                 var it = queue.peek();
                 while (it) |queued_read| : (it = queued_read.next) {
-                    if (address == queued_read.address) {
+                    if (target == .cache and
+                        queued_read.target == .cache and
+                        address == queued_read.address)
+                    {
                         assert(checksum == queued_read.checksum);
                         assert(block_type == queued_read.block_type);
                         queued_read.resolves.push(&read.pending);
@@ -445,7 +462,13 @@ pub fn GridType(comptime Storage: type) type {
             if (grid.cache.get_index(read.address)) |cache_index| {
                 const cache_block = grid.cache_blocks[cache_index];
                 if (constants.verify) grid.verify_cached_read(read.address, cache_block);
-                grid.read_block_resolve(read, cache_block);
+                switch (read.target) {
+                    .cache => grid.read_block_resolve(read, cache_block),
+                    .block => |block| {
+                        stdx.copy_disjoint(.exact, u8, block, cache_block);
+                        grid.read_block_resolve(read, block);
+                    },
+                }
                 return;
             }
 
@@ -477,7 +500,10 @@ pub fn GridType(comptime Storage: type) type {
                 .completion = undefined,
                 .read = read,
             };
-            const iop_block = grid.read_iop_blocks[grid.read_iops.index(iop)];
+            const iop_block = switch (read.target) {
+                .cache => grid.read_iop_blocks[grid.read_iops.index(iop)],
+                .block => |block| block,
+            };
 
             grid.superblock.storage.read_sectors(
                 read_block_callback,
@@ -492,13 +518,21 @@ pub fn GridType(comptime Storage: type) type {
             const iop = @fieldParentPtr(ReadIOP, "completion", completion);
             const read = iop.read;
             const grid = read.grid;
-            const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
 
-            // Insert the block into the cache, and give the evicted block to `iop`.
-            const cache_index = grid.cache.insert_index(&read.address);
-            const cache_block = &grid.cache_blocks[cache_index];
-            std.mem.swap(BlockPtr, iop_block, cache_block);
-            std.mem.set(u8, iop_block.*, 0);
+            const target_block = switch (read.target) {
+                .cache => target_block: {
+                    const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
+
+                    // Insert the block into the cache, and give the evicted block to `iop`.
+                    const cache_index = grid.cache.insert_index(&read.address);
+                    const cache_block = &grid.cache_blocks[cache_index];
+                    std.mem.swap(BlockPtr, iop_block, cache_block);
+                    std.mem.set(u8, iop_block.*, 0);
+
+                    break :target_block cache_block.*;
+                },
+                .block => |block| block,
+            };
 
             const read_iop_index = grid.read_iops.index(iop);
             tracer.end(
@@ -515,8 +549,8 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // A valid block filled by storage means the reads for the address can be resolved
-            if (read_block_valid(read, cache_block.*)) {
-                grid.read_block_resolve(read, cache_block.*);
+            if (read_block_valid(read, target_block)) {
+                grid.read_block_resolve(read, target_block);
                 return;
             }
 

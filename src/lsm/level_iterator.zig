@@ -117,6 +117,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                     },
                 };
                 it.context.grid.read_block(
+                    .{ .block = it.index_block },
                     on_read,
                     &it.read,
                     table_info.address,
@@ -133,15 +134,11 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             const it = @fieldParentPtr(LevelIterator, "read", read);
             assert(it.callback == .read);
 
-            // `index_block` is only valid for this callback, so copy it's contents.
-            // TODO(jamii) This copy can be avoided if we bypass the cache.
-            stdx.copy_disjoint(.exact, u8, it.index_block, index_block);
-
             const callback = it.callback.read.callback;
             const table_info = it.callback.read.table_info;
             it.callback = .none;
 
-            callback(it, table_info, it.index_block);
+            callback(it, table_info, index_block);
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {
