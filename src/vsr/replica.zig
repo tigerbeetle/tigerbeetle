@@ -571,14 +571,24 @@ pub fn ReplicaType(
             assert(quorum_replication + quorum_view_change > replica_count);
 
             self.time = options.time;
-            // TODO: At the moment, standbys are treated as active replicas for the purpose of
-            // determining cluster time. That's suboptimal: standbys should not affect cluster time,
-            // but they should still track it, so that we know, during reconfig, that standby's
-            // clocks are not broken.
-            self.clock = try Clock.init(
+
+            // The clock is special-cased for standbys. We want to balance two concerns:
+            //   - standby clock should never affect cluster time,
+            //   - standby should have up-to-date clock, such that it can quickly join the cluster
+            //     (or be denied joining if its clock is broken).
+            //
+            // To do this:
+            //   - an active replica clock tracks only other active replicas,
+            //   - a standby clock tracks active replicas and the standby itself.
+            self.clock = try if (replica_index < replica_count) Clock.init(
                 allocator,
-                node_count,
+                replica_count,
                 replica_index,
+                &self.time,
+            ) else Clock.init(
+                allocator,
+                replica_count + 1,
+                replica_count,
                 &self.time,
             );
             errdefer self.clock.deinit(allocator);
@@ -902,7 +912,13 @@ pub fn ReplicaType(
 
         fn on_pong(self: *Self, message: *const Message) void {
             assert(message.header.command == .pong);
-            if (message.header.replica == self.replica) return;
+            if (message.header.replica == self.replica) {
+                log.warn("{}: on_pong: misdirected message (self)", .{self.replica});
+                return;
+            }
+
+            // Ignore clocks of standbys.
+            if (message.header.replica >= self.replica_count) return;
 
             const m0 = message.header.op;
             const t1 = @bitCast(i64, message.header.timestamp);
