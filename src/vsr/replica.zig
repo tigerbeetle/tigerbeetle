@@ -3484,7 +3484,6 @@ pub fn ReplicaType(
         fn ignore_view_change_message(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .do_view_change or
                 message.header.command == .start_view);
-            assert(message.header.view > 0); // The initial view is already zero.
             assert(self.status != .recovering); // Single node clusters don't have view changes.
             assert(message.header.replica < self.replica_count);
 
@@ -3513,6 +3512,8 @@ pub fn ReplicaType(
                     }
                 },
                 .do_view_change => {
+                    assert(message.header.view > 0); // The initial view is already zero.
+
                     if (self.standby()) {
                         log.warn("{}: on_{s}: misdirected message (standby)", .{ self.replica, command });
                         return true;
