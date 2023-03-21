@@ -456,7 +456,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 const range = manifest.compaction_range(level_a + 1, table.key_min, table.key_max);
                 if (optimal == null or range.table_count < optimal.?.range.table_count) {
                     optimal = .{
-                        .table = table,
+                        .table = table.*,
                         .range = range,
                     };
                 }
@@ -471,7 +471,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub const CompactionTableRange = struct {
-            table: *const TableInfo,
+            table: TableInfo,
             range: CompactionRange,
         };
 
