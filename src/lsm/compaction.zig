@@ -661,6 +661,7 @@ pub fn CompactionType(
                     };
                     compaction.state.writing.remaining += 1;
                     compaction.context.grid.write_block(
+                        .disk,
                         on_write,
                         write,
                         block,

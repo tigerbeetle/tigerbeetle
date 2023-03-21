@@ -150,6 +150,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             assert(state_machine.callback == null);
             state_machine.callback = callback;
             state_machine.grid.write_block(
+                .disk,
                 next_tick_callback,
                 &state_machine.grid_write,
                 &state_machine.grid_block,

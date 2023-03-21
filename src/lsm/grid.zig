@@ -67,7 +67,13 @@ pub fn GridType(comptime Storage: type) type {
         // Grid just reuses the Storage's NextTick abstraction for simplicity.
         pub const NextTick = Storage.NextTick;
 
+        pub const WriteTarget = enum {
+            cache_and_disk,
+            disk,
+        };
+
         pub const Write = struct {
+            target: WriteTarget,
             callback: fn (*Grid.Write) void,
             address: u64,
             block: *BlockPtr,
@@ -307,6 +313,7 @@ pub fn GridType(comptime Storage: type) type {
         /// NOTE: This will consume `block` and replace it with a fresh block.
         pub fn write_block(
             grid: *Grid,
+            target: WriteTarget,
             callback: fn (*Grid.Write) void,
             write: *Grid.Write,
             block: *BlockPtr,
@@ -326,6 +333,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(!grid.superblock.free_set.is_free(address));
 
             write.* = .{
+                .target = target,
                 .callback = callback,
                 .address = address,
                 .block = block,
@@ -373,11 +381,16 @@ pub fn GridType(comptime Storage: type) type {
             // We can only update the cache if the Grid is not resolving callbacks with a cache block.
             assert(!grid.read_resolving);
 
-            // Insert the write block into the cache, and give the evicted block to the writer.
-            const cache_index = grid.cache.insert_index(&completed_write.address);
-            const cache_block = &grid.cache_blocks[cache_index];
-            std.mem.swap(BlockPtr, cache_block, completed_write.block);
-            std.mem.set(u8, completed_write.block.*, 0);
+            switch (completed_write.target) {
+                .cache_and_disk => {
+                    // Insert the write block into the cache, and give the evicted block to the writer.
+                    const cache_index = grid.cache.insert_index(&completed_write.address);
+                    const cache_block = &grid.cache_blocks[cache_index];
+                    std.mem.swap(BlockPtr, cache_block, completed_write.block);
+                    std.mem.set(u8, completed_write.block.*, 0);
+                },
+                .disk => {},
+            }
 
             const write_iop_index = grid.write_iops.index(iop);
             tracer.end(

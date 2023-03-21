@@ -427,6 +427,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             });
 
             manifest_log.grid.write_block(
+                .disk,
                 write_block_callback,
                 &manifest_log.write,
                 block,
