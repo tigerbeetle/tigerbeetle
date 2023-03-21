@@ -396,6 +396,7 @@ const Environment = struct {
                 }
             },
             .storage_reset => {
+                env.storage.log_pending_io();
                 env.close();
                 env.deinit();
                 env.storage.reset();
