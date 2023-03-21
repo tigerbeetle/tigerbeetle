@@ -668,7 +668,7 @@ pub fn ReplicaType(
                 .opened = self.opened,
                 .view = self.superblock.working.vsr_state.view,
                 .log_view = self.superblock.working.vsr_state.log_view,
-                .op = 0,
+                .op = undefined,
                 .commit_min = self.superblock.working.vsr_state.commit_min,
                 .commit_max = self.superblock.working.vsr_state.commit_max,
                 .pipeline = .{ .cache = .{} },
