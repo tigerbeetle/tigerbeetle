@@ -1528,6 +1528,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.queue_head = context;
                 log.debug("{s}: started", .{@tagName(context.caller)});
 
+                if (Storage == @import("../testing/storage.zig").Storage) {
+                    // We should have finished all pending io before starting any more.
+                    superblock.storage.assert_no_pending_io(.superblock);
+                    if (context.caller == .checkpoint) {
+                        superblock.storage.assert_no_pending_io(.grid);
+                    }
+                }
+
                 if (context.caller == .open) {
                     superblock.read_working(context, .open);
                 } else {
@@ -1540,6 +1548,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.queue_head == context);
 
             log.debug("{s}: complete", .{@tagName(context.caller)});
+
+            if (Storage == @import("../testing/storage.zig").Storage) {
+                // We should have finished all pending io by now.
+                superblock.storage.assert_no_pending_io(.superblock);
+            }
 
             switch (context.caller) {
                 .format => {},

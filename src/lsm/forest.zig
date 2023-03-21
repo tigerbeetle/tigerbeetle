@@ -194,6 +194,12 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         }
 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
+            if (Storage == @import("../testing/storage.zig").Storage) {
+                // We should have finished all pending io before checkpointing.
+                forest.grid.superblock.storage.assert_no_pending_io(.grid);
+                forest.grid.superblock.storage.assert_no_pending_io(.superblock);
+            }
+
             const Join = JoinType(.checkpoint);
             Join.start(forest, callback);
 
