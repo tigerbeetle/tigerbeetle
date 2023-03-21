@@ -22,6 +22,7 @@
 //!
 const std = @import("std");
 const assert = std.debug.assert;
+const panic = std.debug.panic;
 const math = std.math;
 const mem = std.mem;
 
@@ -95,6 +96,8 @@ pub const Storage = struct {
         offset: u64,
         /// Tick at which this read is considered "completed" and the callback should be called.
         done_at_tick: u64,
+        stack_trace_addresses: [64]usize,
+        stack_trace: std.builtin.StackTrace,
 
         fn less_than(context: void, a: *Read, b: *Read) math.Order {
             _ = context;
@@ -111,6 +114,8 @@ pub const Storage = struct {
         offset: u64,
         /// Tick at which this write is considered "completed" and the callback should be called.
         done_at_tick: u64,
+        stack_trace_addresses: [64]usize,
+        stack_trace: std.builtin.StackTrace,
 
         fn less_than(context: void, a: *Write, b: *Write) math.Order {
             _ = context;
@@ -196,6 +201,7 @@ pub const Storage = struct {
     /// Cancel any currently in-progress reads/writes.
     /// Corrupt the target sectors of any in-progress writes.
     pub fn reset(storage: *Storage) void {
+        log.debug("reset: reads.len = {}, writes.len = {}", .{ storage.reads.len, storage.writes.len });
         while (storage.writes.peek()) |_| {
             const write = storage.writes.remove();
             if (!storage.x_in_100(storage.options.crash_fault_probability)) continue;
@@ -300,7 +306,14 @@ pub const Storage = struct {
             .zone = zone,
             .offset = offset_in_zone,
             .done_at_tick = storage.ticks + storage.read_latency(),
+            .stack_trace_addresses = undefined,
+            .stack_trace = undefined,
         };
+        read.stack_trace = .{
+            .instruction_addresses = &read.stack_trace_addresses,
+            .index = 0,
+        };
+        std.debug.captureStackTrace(null, &read.stack_trace);
 
         // We ensure the capacity is sufficient for constants.iops_read_max in init()
         storage.reads.add(read) catch unreachable;
@@ -363,7 +376,14 @@ pub const Storage = struct {
             .zone = zone,
             .offset = offset_in_zone,
             .done_at_tick = storage.ticks + storage.write_latency(),
+            .stack_trace_addresses = undefined,
+            .stack_trace = undefined,
         };
+        write.stack_trace = .{
+            .instruction_addresses = &write.stack_trace_addresses,
+            .index = 0,
+        };
+        std.debug.captureStackTrace(null, &write.stack_trace);
 
         // We ensure the capacity is sufficient for constants.iops_write_max in init()
         storage.writes.add(write) catch unreachable;
@@ -484,6 +504,30 @@ pub const Storage = struct {
         assert(block_header.size <= constants.block_size);
 
         return storage.memory[block_offset..][0..constants.block_size];
+    }
+
+    pub fn assert_no_pending_io(storage: *const Storage, zone: vsr.Zone) void {
+        var assert_failed = false;
+
+        const reads = storage.reads;
+        for (reads.items[0..reads.len]) |read| {
+            if (read.zone == zone) {
+                log.err("Pending read: {}", .{read});
+                assert_failed = true;
+            }
+        }
+
+        const writes = storage.writes;
+        for (writes.items[0..writes.len]) |write| {
+            if (write.zone == zone) {
+                log.err("Pending write: {}", .{write});
+                assert_failed = true;
+            }
+        }
+
+        if (assert_failed) {
+            panic("Pending io in zone: {}", .{zone});
+        }
     }
 };
 
