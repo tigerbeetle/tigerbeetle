@@ -22,6 +22,7 @@
 //!
 const std = @import("std");
 const assert = std.debug.assert;
+const panic = std.debug.panic;
 const math = std.math;
 const mem = std.mem;
 
@@ -95,6 +96,7 @@ pub const Storage = struct {
         offset: u64,
         /// Tick at which this read is considered "completed" and the callback should be called.
         done_at_tick: u64,
+        stack_trace: StackTrace,
 
         fn less_than(context: void, a: *Read, b: *Read) math.Order {
             _ = context;
@@ -111,6 +113,7 @@ pub const Storage = struct {
         offset: u64,
         /// Tick at which this write is considered "completed" and the callback should be called.
         done_at_tick: u64,
+        stack_trace: StackTrace,
 
         fn less_than(context: void, a: *Write, b: *Write) math.Order {
             _ = context;
@@ -300,6 +303,7 @@ pub const Storage = struct {
             .zone = zone,
             .offset = offset_in_zone,
             .done_at_tick = storage.ticks + storage.read_latency(),
+            .stack_trace = StackTrace.capture(),
         };
 
         // We ensure the capacity is sufficient for constants.iops_read_max in init()
@@ -363,6 +367,7 @@ pub const Storage = struct {
             .zone = zone,
             .offset = offset_in_zone,
             .done_at_tick = storage.ticks + storage.write_latency(),
+            .stack_trace = StackTrace.capture(),
         };
 
         // We ensure the capacity is sufficient for constants.iops_write_max in init()
@@ -484,6 +489,41 @@ pub const Storage = struct {
         assert(block_header.size <= constants.block_size);
 
         return storage.memory[block_offset..][0..constants.block_size];
+    }
+
+    pub fn log_pending_io(storage: *Storage) void {
+        const reads = storage.reads;
+        for (reads.items[0..reads.len]) |read| {
+            log.debug("Pending read: {} {}\n{}", .{ read.offset, read.zone, read.stack_trace });
+        }
+        const writes = storage.writes;
+        for (writes.items[0..writes.len]) |write| {
+            log.debug("Pending write: {} {}\n{}", .{ write.offset, write.zone, write.stack_trace });
+        }
+    }
+
+    pub fn assert_no_pending_io(storage: *const Storage, zone: vsr.Zone) void {
+        var assert_failed = false;
+
+        const reads = storage.reads;
+        for (reads.items[0..reads.len]) |read| {
+            if (read.zone == zone) {
+                log.err("Pending read: {} {}\n{}", .{ read.offset, read.zone, read.stack_trace });
+                assert_failed = true;
+            }
+        }
+
+        const writes = storage.writes;
+        for (writes.items[0..writes.len]) |write| {
+            if (write.zone == zone) {
+                log.err("Pending write: {} {}\n{}", .{ write.offset, write.zone, write.stack_trace });
+                assert_failed = true;
+            }
+        }
+
+        if (assert_failed) {
+            panic("Pending io in zone: {}", .{zone});
+        }
     }
 };
 
@@ -753,5 +793,36 @@ pub const ClusterFaultAtlas = struct {
         } else {
             return null;
         }
+    }
+};
+
+const StackTrace = struct {
+    addresses: [64]usize,
+    index: usize,
+
+    fn capture() StackTrace {
+        var addresses: [64]usize = undefined;
+        var stack_trace = std.builtin.StackTrace{
+            .instruction_addresses = &addresses,
+            .index = 0,
+        };
+        std.debug.captureStackTrace(null, &stack_trace);
+        return StackTrace{ .addresses = addresses, .index = stack_trace.index };
+    }
+
+    pub fn format(
+        self: StackTrace,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        var addresses = self.addresses;
+        const stack_trace = std.builtin.StackTrace{
+            .instruction_addresses = &addresses,
+            .index = self.index,
+        };
+        try writer.print("{}", .{stack_trace});
     }
 };
