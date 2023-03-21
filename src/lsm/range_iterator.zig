@@ -53,9 +53,6 @@ pub fn RangeIteratorType(comptime Table: type, comptime Storage: type) type {
         level_iterator: LevelIterator,
         table_iterator: TableIterator,
 
-        // Local copy of index block, for use in `table_iterator`.
-        index_block: BlockPtr,
-
         callback: union(enum) {
             none,
             level_next: Callback,
@@ -70,7 +67,6 @@ pub fn RangeIteratorType(comptime Table: type, comptime Storage: type) type {
                 .context = undefined,
                 .level_iterator = try LevelIterator.init(allocator),
                 .table_iterator = try TableIterator.init(allocator),
-                .index_block = try alloc_block(allocator),
                 .callback = .none,
             };
         }
@@ -90,7 +86,6 @@ pub fn RangeIteratorType(comptime Table: type, comptime Storage: type) type {
                 .context = context,
                 .level_iterator = it.level_iterator,
                 .table_iterator = it.table_iterator,
-                .index_block = it.index_block,
                 .callback = .none,
             };
             it.level_iterator.start(.{
@@ -138,18 +133,14 @@ pub fn RangeIteratorType(comptime Table: type, comptime Storage: type) type {
             it.callback = .none;
 
             if (index_block) |block| {
-                // `index_block` is only valid for this callback, so copy it's contents.
-                // TODO(jamii) This copy can be avoided if we bypass the cache.
-                stdx.copy_disjoint(.exact, u8, it.index_block, block);
-
                 // TODO(jamii):
                 // For compacion we want all data blocks from these tables.
                 // For range queries, we only want data blocks that might contain the search range.
                 // So filter those out here.
                 it.table_iterator.start(.{
                     .grid = it.context.grid,
-                    .addresses = Table.index_data_addresses_used(it.index_block),
-                    .checksums = Table.index_data_checksums_used(it.index_block),
+                    .addresses = Table.index_data_addresses_used(block),
+                    .checksums = Table.index_data_checksums_used(block),
                 });
 
                 const on_index = callback.on_index;

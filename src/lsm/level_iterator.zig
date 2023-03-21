@@ -5,9 +5,11 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 
+const stdx = @import("../stdx.zig");
 const Direction = @import("direction.zig").Direction;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
+const alloc_block = @import("grid.zig").alloc_block;
 
 /// A LevelIterator iterates the index blocks of every table in a key range.
 pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
@@ -15,6 +17,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         const LevelIterator = @This();
         const Key = Table.Key;
         const Grid = GridType(Storage);
+        const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
         const Manifest = ManifestType(Table, Storage);
         const TableInfo = Manifest.TableInfo;
@@ -34,6 +37,9 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             table_info: ?TableInfo,
             index_block: ?BlockPtrConst,
         ) void;
+
+        /// Allocated during `init`.
+        index_block: BlockPtr,
 
         /// Passed by `start`.
         context: Context,
@@ -55,8 +61,11 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         next_tick: Grid.NextTick = undefined,
 
         pub fn init(allocator: mem.Allocator) !LevelIterator {
-            _ = allocator; // TODO(jamii) Will need this soon for pipelining.
+            const index_block = try alloc_block(allocator);
+            errdefer allocator.free(index_block);
+
             return LevelIterator{
+                .index_block = index_block,
                 .context = undefined,
                 .key_exclusive = null,
                 .callback = .none,
@@ -64,7 +73,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn deinit(it: *LevelIterator, allocator: mem.Allocator) void {
-            _ = allocator; // TODO(jamii) Will need this soon for pipelining.
+            allocator.free(it.index_block);
             it.* = undefined;
         }
 
@@ -75,6 +84,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             }
 
             it.* = .{
+                .index_block = it.index_block,
                 .context = context,
                 .key_exclusive = null,
                 .callback = .none,
@@ -119,15 +129,19 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
-        fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
+        fn on_read(read: *Grid.Read, index_block: Grid.BlockPtrConst) void {
             const it = @fieldParentPtr(LevelIterator, "read", read);
             assert(it.callback == .read);
+
+            // `index_block` is only valid for this callback, so copy it's contents.
+            // TODO(jamii) This copy can be avoided if we bypass the cache.
+            stdx.copy_disjoint(.exact, u8, it.index_block, index_block);
 
             const callback = it.callback.read.callback;
             const table_info = it.callback.read.table_info;
             it.callback = .none;
 
-            callback(it, table_info, block);
+            callback(it, table_info, it.index_block);
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {

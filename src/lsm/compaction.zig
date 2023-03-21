@@ -108,7 +108,6 @@ pub fn CompactionType(
         iterator_a: TableIterator,
         iterator_b: RangeIterator,
         index_block_a: BlockPtr,
-        data_blocks: [2]BlockPtr,
         table_builder: Table.Builder,
         last_keys_in: [2]?Key = .{ null, null },
 
@@ -118,7 +117,12 @@ pub fn CompactionType(
         grid_reservation: ?Grid.Reservation,
         drop_tombstones: bool,
 
-        // These point inside either `data_blocks` or `context.table_info_a.immutable`.
+        // `values_in[0]` points inside either:
+        // `iterator_a.data_block`
+        // `context.table_info_a.immutable`
+        //
+        // `values_in[1]` points inside:
+        // `iterator_b.table_iterator.data_block`
         values_in: [2][]const Value,
 
         input_state: enum {
@@ -156,14 +160,6 @@ pub fn CompactionType(
             const index_block_a = try alloc_block(allocator);
             errdefer allocator.free(index_block_a);
 
-            var data_blocks: [2]Grid.BlockPtr = undefined;
-
-            data_blocks[0] = try alloc_block(allocator);
-            errdefer allocator.free(data_blocks[0]);
-
-            data_blocks[1] = try alloc_block(allocator);
-            errdefer allocator.free(data_blocks[1]);
-
             const table_builder = try Table.Builder.init(allocator);
             errdefer table_builder.deinit(allocator);
 
@@ -173,7 +169,6 @@ pub fn CompactionType(
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
                 .index_block_a = index_block_a,
-                .data_blocks = data_blocks,
                 .table_builder = table_builder,
 
                 .context = undefined,
@@ -192,7 +187,6 @@ pub fn CompactionType(
 
         pub fn deinit(compaction: *Compaction, allocator: Allocator) void {
             compaction.table_builder.deinit(allocator);
-            for (compaction.data_blocks) |data_block| allocator.free(data_block);
             allocator.free(compaction.index_block_a);
             compaction.iterator_b.deinit(allocator);
             compaction.iterator_a.deinit(allocator);
@@ -261,7 +255,6 @@ pub fn CompactionType(
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
                 .index_block_a = compaction.index_block_a,
-                .data_blocks = compaction.data_blocks,
                 .table_builder = compaction.table_builder,
 
                 .context = context,
@@ -422,11 +415,7 @@ pub fn CompactionType(
             const index = @enumToInt(side);
 
             if (data_block) |block| {
-                // `data_block` is only valid for this callback, so copy it's contents.
-                // TODO(jamii) This copy can be avoided if we bypass the cache.
-                stdx.copy_disjoint(.exact, u8, compaction.data_blocks[index], block);
-                compaction.values_in[index] =
-                    Table.data_block_values_used(compaction.data_blocks[index]);
+                compaction.values_in[index] = Table.data_block_values_used(block);
 
                 // Assert that we're reading data blocks in key order.
                 const values_in = compaction.values_in[index];

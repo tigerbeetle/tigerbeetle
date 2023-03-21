@@ -7,6 +7,7 @@ const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
 const GridType = @import("grid.zig").GridType;
+const alloc_block = @import("grid.zig").alloc_block;
 
 /// A TableIterator iterates a table's data blocks in ascending-key order.
 pub fn TableIteratorType(comptime Storage: type) type {
@@ -14,6 +15,7 @@ pub fn TableIteratorType(comptime Storage: type) type {
         const TableIterator = @This();
 
         const Grid = GridType(Storage);
+        const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
 
         pub const Callback = fn (it: *TableIterator, data_block: ?BlockPtrConst) void;
@@ -26,8 +28,13 @@ pub fn TableIteratorType(comptime Storage: type) type {
             checksums: []const u128,
         };
 
+        // Allocated during `init`.
+        data_block: BlockPtr,
+
+        // Passed by `start`.
         context: Context,
 
+        // Internal state.
         callback: union(enum) {
             none,
             read: Callback,
@@ -38,8 +45,11 @@ pub fn TableIteratorType(comptime Storage: type) type {
         next_tick: Grid.NextTick,
 
         pub fn init(allocator: mem.Allocator) !TableIterator {
-            _ = allocator; // TODO(jamii) Will need this soon for pipelining.
+            const data_block = try alloc_block(allocator);
+            errdefer allocator.free(data_block);
+
             return TableIterator{
+                .data_block = data_block,
                 .context = .{
                     .grid = undefined,
                     // The zero-init here is important.
@@ -55,7 +65,7 @@ pub fn TableIteratorType(comptime Storage: type) type {
         }
 
         pub fn deinit(it: *TableIterator, allocator: mem.Allocator) void {
-            _ = allocator; // TODO(jamii) Will need this soon for pipelining.
+            allocator.free(it.data_block);
             it.* = undefined;
         }
 
@@ -67,6 +77,7 @@ pub fn TableIteratorType(comptime Storage: type) type {
             assert(context.addresses.len == context.checksums.len);
 
             it.* = .{
+                .data_block = it.data_block,
                 .context = context,
                 .callback = .none,
                 .read = undefined,
@@ -96,12 +107,16 @@ pub fn TableIteratorType(comptime Storage: type) type {
             const it = @fieldParentPtr(TableIterator, "read", read);
             assert(it.callback == .read);
 
+            // `data_block` is only valid for this callback, so copy it's contents.
+            // TODO(jamii) This copy can be avoided if we bypass the cache.
+            stdx.copy_disjoint(.exact, u8, it.data_block, block);
+
             const callback = it.callback.read;
             it.callback = .none;
             it.context.addresses = it.context.addresses[1..];
             it.context.checksums = it.context.checksums[1..];
 
-            callback(it, block);
+            callback(it, it.data_block);
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {
