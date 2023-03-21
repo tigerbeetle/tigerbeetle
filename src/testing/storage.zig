@@ -196,6 +196,10 @@ pub const Storage = struct {
     /// Cancel any currently in-progress reads/writes.
     /// Corrupt the target sectors of any in-progress writes.
     pub fn reset(storage: *Storage) void {
+        log.debug(
+            "Reset: {} pending reads, {} pending writes, {} pending next_ticks",
+            .{ storage.reads.len, storage.writes.len, storage.next_tick_queue.count },
+        );
         while (storage.writes.peek()) |_| {
             const write = storage.writes.remove();
             if (!storage.x_in_100(storage.options.crash_fault_probability)) continue;
