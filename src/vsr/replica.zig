@@ -6557,6 +6557,7 @@ fn message_body_as_headers_chain_disjoint(message: *const Message) []const Heade
 
         if (child) |child_header| {
             assert(header.view <= child_header.view);
+            assert(header.op < child_header.op);
             assert((header.op + 1 == child_header.op) == (header.checksum == child_header.parent));
             assert(header.timestamp < child_header.timestamp);
         }
