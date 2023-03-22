@@ -1148,8 +1148,7 @@ pub fn ReplicaType(
                 self.pipeline.queue.prepare_queue.count);
             assert(prepare.message.header.op <= self.op);
 
-            // Wait until we have `f + 1` prepare_ok messages (including ourself) for quorum:
-            // const threshold = self.quorum_replication;
+            // Wait until we have a quorum of prepare_ok messages (including ourself):
             const threshold = self.quorum_replication;
 
             if (!prepare.ok_from_all_replicas.isSet(message.header.replica)) {
@@ -1320,7 +1319,7 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert(message.header.view == self.view);
 
-            // Wait until we have `f + 1` messages (possibly including ourself) for quorum.
+            // Wait until we have a view-change quorum of messages (possibly including ourself).
             // This ensures that we do not start a view-change while normal request processing
             // is possible.
             const threshold = self.quorum_view_change;
@@ -1357,7 +1356,7 @@ pub fn ReplicaType(
 
         /// DVC serves two purposes:
         ///
-        /// When the new primary receives f + 1 do_view_change messages from different replicas
+        /// When the new primary receives a quorum of do_view_change messages from different replicas
         /// (including itself), it sets its view number to that in the messages and selects as the
         /// new log the one contained in the message with the largest v′; if several messages have
         /// the same v′ it selects the one among them with the largest n. It sets its op number to
@@ -1390,7 +1389,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            // Wait until we have `f + 1` messages (including ourself) for quorum:
+            // Wait until we have a quorum of messages (including ourself):
             assert(!self.solo());
             const threshold = self.quorum_view_change;
 
