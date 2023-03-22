@@ -110,12 +110,17 @@ DVCs include headers from prepares which are:
 
 These cases are distinguished during [WAL repair](#protocol-repair-wal).
 
-When the primary collects its quorum:
-1. The primary installs the headers to its suffix.
-2. Then the primary repairs its headers. ([Protocol: Repair Journal](#protocol-repair-journal)).
-3. Then the primary repairs its prepares. ([Protocol: Repair WAL](#protocol-repair-wal)) (and potentially truncates uncommitted ops).
-4. Then primary commits all prepares which are not known to be uncommitted.
-5. Then the primary transitions to `status=normal` and broadcasts a `command=start_view`.
+When the primary collects its DVC quorum:
+1. If any DVC in the quorum is ahead of the primary by more than one checkpoint,
+   the new primary "forfeits" (that is, it immediately triggers another view change).
+2. If any DVC in the quorum is ahead of the primary by more than one checkpoint,
+   and any messages in the next checkpoint are possibly committed,
+   the new primary forfeits.
+3. The primary installs the headers to its suffix.
+4. Then the primary repairs its headers. ([Protocol: Repair Journal](#protocol-repair-journal)).
+5. Then the primary repairs its prepares. ([Protocol: Repair WAL](#protocol-repair-wal)) (and potentially truncates uncommitted ops).
+6. Then primary commits all prepares which are not known to be uncommitted.
+7. Then the primary transitions to `status=normal` and broadcasts a `command=start_view`.
 
 ## Protocol: Request/Start View
 
@@ -125,6 +130,7 @@ A backup sends a `command=request_start_view` to the primary of a view when any 
 
   - the backup learns about a newer view via a `command=commit` message, or
   - the backup learns about a newer view via a `command=prepare` message, or
+  - the backup discovers `commit_max` exceeds `min(op_head, op_checkpoint_trigger)` (during repair), or
   - a replica recovers to `status=recovering_head`
 
 ### `start_view`
@@ -133,6 +139,12 @@ When a `status=normal` primary receives `command=request_start_view`, it replies
 `command=start_view` includes the view's current suffix — the headers of the latest messages in the view.
 
 Upon receiving a `start_view` for the new view, the backup installs the suffix, transitions to `status=normal`, and begins repair.
+
+A `start_view` contains the following headers (which may overlap):
+
+  - The suffix: `pipeline_prepare_queue_max` headers from the head op down.
+  - The "hooks": the header of any previous checkpoint triggers within our repairable range.
+    This helps a lagging replica catch up. (There are at most 2).
 
 ## Protocol: Repair Journal
 
