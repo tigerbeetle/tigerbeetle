@@ -1076,7 +1076,7 @@ pub fn ReplicaType(
             defer {
                 if (self.backup()) {
                     // A prepare may already be committed if requested by repair() so take the max:
-                    self.commit_journal(std.math.max(message.header.commit, self.commit_max));
+                    self.commit_journal(message.header.commit);
                     assert(self.commit_max >= message.header.commit);
                 }
             }
