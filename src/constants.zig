@@ -194,19 +194,35 @@ comptime {
     assert(pipeline_request_queue_max >= 0);
 }
 
-/// The number of prepare headers to include in the body of a DVC/SV.
+/// Maximum number of headers from the WAL suffix to include in an SV message.
+/// Must at least cover the full pipeline.
+/// Increasing this reduces likelihood that backups will need to repair their suffix's headers.
 ///
 /// CRITICAL:
-/// We must provide enough headers to cover all uncommitted headers so that the new
-/// primary (if we are in a view change) can decide whether to discard uncommitted headers
-/// that cannot be repaired because they are gaps. See DVCQuorum for more detail.
-pub const view_change_headers_max = config.cluster.view_change_headers_max;
+/// - We must provide enough headers to cover all uncommitted headers so that the new
+///   primary (if we are in a view change) can decide whether to discard uncommitted headers
+///   that cannot be repaired because they are gaps. See DVCQuorum for more detail.
+pub const view_change_headers_suffix_max = config.cluster.view_change_headers_suffix_max;
+
+/// The number of prepare headers to include in the body of a DVC/SV.
+///
+/// - We must include all uncommitted headers.
+/// - +2: We must provide the header corresponding to each checkpoint-trigger in the intact
+///   suffix of our journal.
+///   - These help a lagging replica catch up when its `op < commit_max`.
+///   - There are at most two of these in the journal.
+///     (There are 2 immediately after we checkpoint, until we prepare enough to overwrite one).
+pub const view_change_headers_max = view_change_headers_suffix_max + 2;
 
 comptime {
+    assert(view_change_headers_suffix_max > 0);
+    assert(view_change_headers_suffix_max >= pipeline_prepare_queue_max);
+
     assert(view_change_headers_max > 0);
-    assert(view_change_headers_max >= pipeline_prepare_queue_max);
+    assert(view_change_headers_max >= pipeline_prepare_queue_max + 2);
     assert(view_change_headers_max <= journal_slot_count);
     assert(view_change_headers_max <= @divFloor(message_body_size_max, @sizeOf(vsr.Header)));
+    assert(view_change_headers_max > view_change_headers_suffix_max);
 }
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
