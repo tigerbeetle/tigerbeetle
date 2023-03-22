@@ -6745,14 +6745,10 @@ const DVCQuorum = struct {
         fn init(dvcs: DVCArray, op_head: ?u64) HeaderIterator {
             assert(dvcs.len > 0);
 
-            var dvcs_log_view: ?u32 = null;
+            const dvcs_log_view = dvcs.get(0).header.request;
             for (dvcs.constSlice()) |message| {
-                const log_view = message.header.request;
-                if (dvcs_log_view) |view| {
-                    assert(view == log_view);
-                } else {
-                    dvcs_log_view = log_view;
-                }
+                const message_log_view = message.header.request;
+                assert(message_log_view == dvcs_log_view);
             }
 
             var dvcs_offsets = std.BoundedArray(usize, constants.replicas_max){
