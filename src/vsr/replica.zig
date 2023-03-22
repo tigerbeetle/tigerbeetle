@@ -5737,14 +5737,18 @@ pub fn ReplicaType(
             assert(self.commit_min >=
                 self.do_view_change_from_all_replicas[self.replica].?.header.commit);
 
-            self.set_op_and_commit_max(header_head.op, commit_max, "on_do_view_change");
-            assert(self.commit_max <= self.op_checkpoint_trigger());
-            assert(self.commit_max <= self.op);
+            {
+                // "`replica.op` exists" invariant may be broken briefly between
+                // set_op_and_commit_max() and replace_header().
 
-            // "`replica.op` exists" invariant may be broken briefly between set_op_and_commit_max()
-            // and replace_header().
-            self.replace_header(&header_head);
-            assert(self.journal.header_with_op(self.op) != null);
+                self.set_op_and_commit_max(header_head.op, commit_max, "on_do_view_change");
+                assert(self.commit_max <= self.op_checkpoint_trigger());
+                assert(self.commit_max <= self.op);
+                maybe(self.journal.header_with_op(self.op) == null);
+
+                self.replace_header(&header_head);
+                assert(self.journal.header_with_op(self.op) != null);
+            }
 
             while (headers_canonical.next()) |header| {
                 assert(header.op < header_head.op);
@@ -5928,6 +5932,7 @@ pub fn ReplicaType(
             assert(self.status == .recovering_head);
             assert(self.view >= self.log_view);
             assert(self.view <= view_new);
+            assert(self.replica != self.primary_index(view_new));
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             assert(!self.committing);
             assert(self.journal.header_with_op(self.op) != null);
@@ -5943,14 +5948,16 @@ pub fn ReplicaType(
             );
 
             self.status = .normal;
-            if (self.log_view == view_new and self.view == view_new) {
+            if (self.log_view == view_new) {
                 // Recovering to the same view we lost the head in.
+                assert(self.view == view_new);
             } else {
                 self.view = view_new;
                 self.log_view = view_new;
                 self.view_durable_update();
             }
 
+            assert(self.backup());
             assert(!self.prepare_timeout.ticking);
             assert(!self.primary_abdicate_timeout.ticking);
             assert(!self.normal_heartbeat_timeout.ticking);
