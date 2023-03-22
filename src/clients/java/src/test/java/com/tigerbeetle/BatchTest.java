@@ -498,6 +498,18 @@ public class BatchTest {
         assertFalse(batch.next());
     }
 
+    @Test
+    public void testWriteCreateAccountResults() {
+        var batch = new CreateAccountResultBatch(1);
+        batch.add();
+
+        batch.setIndex(1);
+        assertEquals(1, batch.getIndex());
+
+        batch.setResult(createAccountResult1);
+        assertEquals(createAccountResult1, batch.getResult());
+    }
+
     @Test(expected = AssertionError.class)
     public void testInvalidCreateAccountResultsBuffer() {
 
@@ -527,6 +539,18 @@ public class BatchTest {
         assertEquals(createTransferResult2, batch.getResult());
 
         assertFalse(batch.next());
+    }
+
+    @Test
+    public void testWriteCreateTransferResults() {
+        var batch = new CreateTransferResultBatch(1);
+        batch.add();
+
+        batch.setIndex(1);
+        assertEquals(1, batch.getIndex());
+
+        batch.setResult(createTransferResult1);
+        assertEquals(createTransferResult1, batch.getResult());
     }
 
     @Test(expected = AssertionError.class)
@@ -658,6 +682,14 @@ public class BatchTest {
         batch.add();
         batch.setId(null);
         assert false;
+    }
+
+    @Test
+    public void testLongIds() {
+        var batch = new IdBatch(1);
+        batch.add(100L);
+        assertEquals(100L, batch.getId(UInt128.LeastSignificant));
+        assertEquals(0L, batch.getId(UInt128.MostSignificant));
     }
 
     private static void setAccount(AccountBatch batch, DummyAccountDto account) {
