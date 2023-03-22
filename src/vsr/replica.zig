@@ -3195,7 +3195,9 @@ pub fn ReplicaType(
                 // This is usually the head op, but for DVCs it may be farther ahead if we are
                 // lagging behind a checkpoint. (In which case the op is inherited from the SV).
                 .op = self.view_headers.array.get(0).op,
-                // See the comment in `on_do_view_change()` for why `commit_min` is crucial:
+                // For command=start_view, commit_min=commit_max.
+                // For command=do_view_change, the new primary uses this op to trust extra headers
+                // from non-canonical DVCs.
                 .commit = self.commit_min,
             };
 

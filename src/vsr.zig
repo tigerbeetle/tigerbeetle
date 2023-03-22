@@ -245,7 +245,7 @@ pub const Header = extern struct {
     ///
     /// * A `do_view_change` sets this to `commit_min`, to indicate the sending replica's progress.
     ///   The sending replica may continue to commit after sending the DVC.
-    /// * A `start_view` sets this to `commit_max`.
+    /// * A `start_view` sets this to `commit_min`/`commit_max` (they are the same).
     /// * A `request_headers` sets this to the minimum op requested (inclusive).
     commit: u64 = 0,
 
