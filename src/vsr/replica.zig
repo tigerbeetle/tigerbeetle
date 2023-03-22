@@ -1445,7 +1445,7 @@ pub fn ReplicaType(
             }
 
             const op_canonical_max =
-                DVCQuorum.op_canonical_max(self.do_view_change_from_all_replicas);
+                DVCQuorum.headers_canonical(self.do_view_change_from_all_replicas).next().?.op;
             const op_checkpoint_max =
                 DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
             if (op_checkpoint_max > self.op_checkpoint() and
@@ -6621,12 +6621,6 @@ const DVCQuorum = struct {
             }
         }
         return checkpoint_max.?;
-    }
-
-    /// Returns the highest op of any header from any canonical-view DVC.
-    /// Includes ops that will be truncated due to gaps.
-    fn op_canonical_max(dvc_quorum: QuorumMessages) u64 {
-        return DVCQuorum.headers_canonical(dvc_quorum).next().?.op;
     }
 
     /// Returns the highest `log_view` of any DVC.
