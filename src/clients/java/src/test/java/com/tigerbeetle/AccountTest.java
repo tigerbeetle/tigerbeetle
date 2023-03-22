@@ -35,6 +35,16 @@ public class AccountTest {
     }
 
     @Test
+    public void testIdLong() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        accounts.setId(100);
+        assertEquals(100L, accounts.getId(UInt128.LeastSignificant));
+        assertEquals(0L, accounts.getId(UInt128.MostSignificant));
+    }
+
+    @Test
     public void testIdAsBytes() {
         var accounts = new AccountBatch(1);
         accounts.add();
@@ -62,6 +72,16 @@ public class AccountTest {
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         accounts.setId(id);
         assert false;
+    }
+
+    @Test
+    public void testUserDataLong() {
+        var accounts = new AccountBatch(2);
+        accounts.add();
+
+        accounts.setUserData(100);
+        assertEquals(100L, accounts.getUserData(UInt128.LeastSignificant));
+        assertEquals(0L, accounts.getUserData(UInt128.MostSignificant));
     }
 
     @Test

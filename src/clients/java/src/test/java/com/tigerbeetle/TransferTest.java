@@ -40,6 +40,16 @@ public class TransferTest {
     }
 
     @Test
+    public void testIdLong() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setId(100);
+        assertEquals(100L, transfers.getId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getId(UInt128.MostSignificant));
+    }
+
+    @Test
     public void testIdAsBytes() {
         var transfers = new TransferBatch(1);
         transfers.add();
@@ -78,6 +88,16 @@ public class TransferTest {
         transfers.setDebitAccountId(100, 200);
         assertEquals(100L, transfers.getDebitAccountId(UInt128.LeastSignificant));
         assertEquals(200L, transfers.getDebitAccountId(UInt128.MostSignificant));
+    }
+
+    @Test
+    public void testDebitAccountIdLong() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setDebitAccountId(100);
+        assertEquals(100L, transfers.getDebitAccountId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getDebitAccountId(UInt128.MostSignificant));
     }
 
     @Test
@@ -122,6 +142,16 @@ public class TransferTest {
     }
 
     @Test
+    public void testCreditAccountIdLong() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setCreditAccountId(100);
+        assertEquals(100L, transfers.getCreditAccountId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getCreditAccountId(UInt128.MostSignificant));
+    }
+
+    @Test
     public void testCreditAccountIdAsBytes() {
         var transfers = new TransferBatch(1);
         transfers.add();
@@ -160,6 +190,16 @@ public class TransferTest {
         transfers.setUserData(100, 200);
         assertEquals(100L, transfers.getUserData(UInt128.LeastSignificant));
         assertEquals(200L, transfers.getUserData(UInt128.MostSignificant));
+    }
+
+    @Test
+    public void testUserDataLong() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setUserData(100);
+        assertEquals(100L, transfers.getUserData(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getUserData(UInt128.MostSignificant));
     }
 
     @Test
@@ -204,6 +244,16 @@ public class TransferTest {
     }
 
     @Test
+    public void testReservedLong() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setReserved(100);
+        assertEquals(100L, transfers.getReserved(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getReserved(UInt128.MostSignificant));
+    }
+
+    @Test
     public void testReservedAsBytes() {
         var transfers = new TransferBatch(1);
         transfers.add();
@@ -242,6 +292,16 @@ public class TransferTest {
         transfers.setPendingId(100, 200);
         assertEquals(100L, transfers.getPendingId(UInt128.LeastSignificant));
         assertEquals(200L, transfers.getPendingId(UInt128.MostSignificant));
+    }
+
+    @Test
+    public void testPendingIdLong() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setPendingId(100);
+        assertEquals(100L, transfers.getPendingId(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getPendingId(UInt128.MostSignificant));
     }
 
     @Test
