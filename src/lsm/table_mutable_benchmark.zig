@@ -89,6 +89,7 @@ pub fn main() !void {
     inline for (.{
         .{ "std.HashMap", tm.TableMutableType(Table, "") },
         .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
+        .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
     }) |setup| {
         try bench(setup[1], setup[0], allocator, values, sorted_values, &timer, rng_seed);
     }
@@ -96,7 +97,7 @@ pub fn main() !void {
 
 fn bench(
     comptime TableMutable: type,
-    comptime table_mutable_name: []const u8, 
+    comptime table_mutable_name: []const u8,
     allocator: mem.Allocator,
     values: []const Key.Value,
     sorted_values: []Key.Value,

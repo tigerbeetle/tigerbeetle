@@ -409,7 +409,7 @@ pub fn AATreeType(
                 const new_slot = @intCast(u32, tree.list.addOneAssumeCapacity());
                 const slice = tree.list.slice();
 
-                slice.items(.links)[new_slot] = .{0, 0};
+                slice.items(.links)[new_slot] = .{ 0, 0 };
                 slice.items(.level)[new_slot] = 1;
 
                 entry.value = &slice.items(.value)[new_slot];
@@ -479,6 +479,233 @@ pub fn AATreeType(
                 top = std.math.sub(u32, top, 1) catch break;
                 const slot = slice.items(.stack)[top];
                 current = slice.items(.links)[slot][1];
+
+                const value = &slice.items(.value)[slot];
+                values[index] = value.*;
+                defer index += 1;
+
+                if (std.math.sub(u32, index, 1) catch null) |prev_index| {
+                    const prev_key = key_from_value(&values[prev_index]);
+                    assert(compare_keys(prev_key, key_from_value(value)) != .gt);
+                }
+            }
+
+            assert(index == tree.count());
+            tree.clear();
+            return values[0..index];
+        }
+    };
+}
+
+pub fn RBTreeType(
+    comptime Key: type,
+    comptime Value: type,
+    comptime key_from_value: fn (value: *const Value) callconv(.Inline) Key,
+    comptime compare_keys: fn (key: Key, key: Key) callconv(.Inline) math.Order,
+) type {
+    return struct {
+        const RBTree = @This();
+
+        const Color = enum(u1) { red, black };
+        const Node = struct {
+            parent_color: u32,
+            links: [2]u32,
+
+            inline fn get_parent(node: *const Node) u32 {
+                return node.parent_color >> 1;
+            }
+
+            inline fn get_color(node: *const Node) Color {
+                return @intToEnum(Color, @truncate(u1, node.parent_color));
+            }
+
+            inline fn set_parent(node: *Node, parent: u32) void {
+                node.parent_color = (parent << 1) | (node.parent_color & 1);
+            }
+
+            inline fn set_color(node: *Node, color: Color) void {
+                node.parent_color = (node.parent_color & ~@as(u32, 1)) | @enumToInt(color);
+            }
+        };
+
+        const List = std.MultiArrayList(struct {
+            value: Value,
+            stack: u32,
+            node: Node,
+        });
+
+        list: List,
+        root: u32 = 0,
+
+        pub fn init(allocator: mem.Allocator, max_entries: u32) !RBTree {
+            var list = List{};
+            try list.ensureTotalCapacity(allocator, max_entries);
+            errdefer list.deinit(allocator);
+
+            return RBTree{ .list = list };
+        }
+
+        pub fn deinit(tree: *RBTree, allocator: mem.Allocator) void {
+            tree.list.deinit(allocator);
+        }
+
+        pub fn count(tree: *const RBTree) u32 {
+            return @intCast(u32, tree.list.len);
+        }
+
+        pub fn clear(tree: *RBTree) void {
+            tree.list.shrinkRetainingCapacity(0);
+            tree.root = 0;
+        }
+
+        const Context = struct {
+            right: bool = false,
+            parent: u32 = 0,
+        };
+
+        inline fn lookup(tree: *const RBTree, context: ?*Context, key: Key) ?*Value {
+            var index = tree.root;
+            const slice = tree.list.slice();
+            while (true) {
+                const slot = std.math.sub(u32, index, 1) catch return null;
+                const value = &slice.items(.value)[slot];
+                const cmp = compare_keys(key, key_from_value(value));
+                if (cmp == .eq) return value;
+
+                const right = cmp == .gt;
+                if (context) |ctx| ctx.* = .{ .parent = index, .right = right };
+                index = slice.items(.node)[slot].links[@boolToInt(right)];
+            }
+        }
+
+        pub fn get(tree: *const RBTree, key: Key) ?*const Value {
+            return tree.lookup(null, key);
+        }
+
+        pub const RBEntry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn get_or_put(tree: *RBTree, key: Key) RBEntry {
+            var ctx = Context{};
+            if (tree.lookup(&ctx, key)) |value| {
+                return .{ .value = value, .exists = true };
+            }
+
+            // Reserve a new slot and index for the node.
+            const slot = @intCast(u32, tree.list.addOneAssumeCapacity());
+            var index = slot + 1;
+
+            const slice = tree.list.slice();
+            const nodes = slice.items(.node);
+            const entry = RBEntry{ .value = &slice.items(.value)[slot], .exists = false };
+
+            const node = &nodes[slot];
+            node.set_parent(ctx.parent);
+            node.set_color(.red);
+            node.links = [_]u32{ 0, 0 };
+
+            // Link the node to the parent.
+            const parent_link = blk: {
+                const parent_slot = std.math.sub(u32, ctx.parent, 1) catch break :blk &tree.root;
+                break :blk &nodes[parent_slot].links[@boolToInt(ctx.right)];
+            };
+            assert(parent_link.* == 0);
+            parent_link.* = index;
+
+            // Fixup color property after insert.
+            while (true) {
+                var parent_index = nodes[index - 1].get_parent();
+                var parent = &nodes[std.math.sub(u32, parent_index, 1) catch break];
+                if (parent.get_color() == .black) break;
+
+                var grand_parent_index = parent.get_parent();
+                var grand_parent = &nodes[std.math.sub(u32, grand_parent_index, 1) catch break];
+                const right = parent_index == grand_parent.links[1];
+
+                const uncle_index = grand_parent.links[@boolToInt(!right)];
+                if (std.math.sub(u32, uncle_index, 1) catch null) |uncle_slot| {
+                    const uncle = &nodes[uncle_slot];
+                    if (uncle.get_color() == .black) break;
+
+                    uncle.set_color(.black);
+                    parent.set_color(.black);
+                    grand_parent.set_color(.red);
+                    index = parent_index;
+                    continue;
+                }
+
+                if (index == parent.links[@boolToInt(!right)]) {
+                    index = parent_index;
+                    tree.rotate(nodes, index, right);
+
+                    parent_index = nodes[index - 1].get_parent();
+                    parent = &nodes[parent_index - 1];
+
+                    grand_parent_index = parent.get_parent();
+                    grand_parent = &nodes[grand_parent_index - 1];
+                }
+
+                parent.set_color(.black);
+                grand_parent.set_color(.red);
+                tree.rotate(nodes, grand_parent_index, !right);
+            }
+
+            // Color the root black and return the entry.
+            nodes[tree.root - 1].set_color(.black);
+            return entry;
+        }
+
+        fn rotate(tree: *RBTree, nodes: []Node, index: u32, right: bool) void {
+            const node = &nodes[index - 1];
+
+            const target_link = &node.links[@boolToInt(!right)];
+            const target_index = target_link.*;
+            const target = &nodes[target_index - 1];
+
+            const sibling_link = &target.links[@boolToInt(right)];
+            const sibling_index = sibling_link.*;
+            const maybe_sibling = blk: {
+                const sibling_slot = std.math.sub(u32, sibling_index, 1) catch break :blk null;
+                break :blk &nodes[sibling_slot];
+            };
+
+            const parent_index = node.get_parent();
+            const parent_link = blk: {
+                const parent_slot = std.math.sub(u32, parent_index, 1) catch break :blk &tree.root;
+                const parent = &nodes[parent_slot];
+                break :blk &parent.links[@boolToInt(parent.links[1] == index)];
+            };
+
+            assert(parent_link.* == index);
+            parent_link.* = target_index;
+            target.set_parent(parent_index);
+            node.set_parent(target_index);
+
+            target_link.* = sibling_index;
+            if (maybe_sibling) |sibling| sibling.set_parent(index);
+            sibling_link.* = index;
+        }
+
+        pub fn sort_into_and_clear(tree: *RBTree, values: []Value) []const Value {
+            const slice = tree.list.slice();
+            assert(slice.len <= values.len);
+
+            var top: u32 = 0;
+            var index: u32 = 0;
+            var current = tree.root;
+
+            while (true) {
+                while (std.math.sub(u32, current, 1) catch null) |slot| {
+                    slice.items(.stack)[top] = slot;
+                    top += 1;
+                    current = slice.items(.node)[slot].links[0];
+                }
+
+                top = std.math.sub(u32, top, 1) catch break;
+                const slot = slice.items(.stack)[top];
+                current = slice.items(.node)[slot].links[1];
 
                 const value = &slice.items(.value)[slot];
                 values[index] = value.*;
