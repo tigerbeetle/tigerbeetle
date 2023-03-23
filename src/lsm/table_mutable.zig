@@ -332,10 +332,32 @@ pub fn TableMutableTreeType(
             assert(table.count() <= values_max.len);
             assert(values_max.len == value_count_max);
 
-            const values = table.values_tree.sort_into_and_clear(values_max);
+            var i: u32 = 0;
+            var it = table.values_tree.iterator();
+            while (it.next()) |value| : (i += 1) {
+                values_max[i] = value.*;
+
+                // Double check that it's sorted.
+                if (std.math.sub(u32, i, 1) catch null) |prev_i| {
+                    const prev_key = key_from_value(&values_max[prev_i]);
+                    assert(compare_keys(prev_key, key_from_value(value)) != .gt);
+                }
+
+                if (table.values_cache) |cache| {
+                    if (tombstone(value)) {
+                        cache.remove(key_from_value(value));
+                    } else {
+                        cache.insert(value);
+                    }
+                }
+            }
+
+            const values = values_max[0..i];
+            assert(values.len == table.count());
+
+            table.clear();
             assert(table.count() == 0);
 
-            table.value_count_worst_case = 0;
             return values;
         }
     };
@@ -347,7 +369,7 @@ pub fn AATreeType(
     comptime key_from_value: fn (value: *const Value) callconv(.Inline) Key,
     comptime compare_keys: fn (key: Key, key: Key) callconv(.Inline) math.Order,
 ) type {
-    const AAList = std.MultiArrayList(struct {
+    const List = std.MultiArrayList(struct {
         value: Value,
         links: [2]u32,
         stack: u32,
@@ -355,33 +377,33 @@ pub fn AATreeType(
     });
 
     return struct {
-        const AATree = @This();
+        const Tree = @This();
 
-        list: AAList,
+        list: List,
         root: u32 = 0,
 
-        pub fn init(allocator: mem.Allocator, max_entries: u32) !AATree {
-            var list = AAList{};
+        pub fn init(allocator: mem.Allocator, max_entries: u32) !Tree {
+            var list = List{};
             try list.ensureTotalCapacity(allocator, max_entries);
             errdefer list.deinit(allocator);
 
-            return AATree{ .list = list };
+            return Tree{ .list = list };
         }
 
-        pub fn deinit(tree: *AATree, allocator: mem.Allocator) void {
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
             tree.list.deinit(allocator);
         }
 
-        pub fn count(tree: *const AATree) u32 {
+        pub fn count(tree: *const Tree) u32 {
             return @intCast(u32, tree.list.len);
         }
 
-        pub fn clear(tree: *AATree) void {
+        pub fn clear(tree: *Tree) void {
             tree.list.shrinkRetainingCapacity(0);
             tree.root = 0;
         }
 
-        pub fn get(tree: *const AATree, key: Key) ?*const Value {
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
             var index = tree.root;
             const slice = tree.list.slice();
             while (true) {
@@ -393,18 +415,18 @@ pub fn AATreeType(
             }
         }
 
-        pub const AAEntry = struct {
+        pub const Entry = struct {
             value: *Value,
             exists: bool,
         };
 
-        pub fn get_or_put(tree: *AATree, key: Key) AAEntry {
-            var entry: AAEntry = undefined;
+        pub fn get_or_put(tree: *Tree, key: Key) Entry {
+            var entry: Entry = undefined;
             tree.root = tree.insert(tree.root, &key, &entry);
             return entry;
         }
 
-        fn insert(tree: *AATree, index: u32, key: *const Key, entry: *AAEntry) u32 {
+        fn insert(tree: *Tree, index: u32, key: *const Key, entry: *Entry) u32 {
             const slot = std.math.sub(u32, index, 1) catch {
                 const new_slot = @intCast(u32, tree.list.addOneAssumeCapacity());
                 const slice = tree.list.slice();
@@ -429,7 +451,7 @@ pub fn AATreeType(
             return tree.split(tree.skew(index));
         }
 
-        fn skew(tree: *const AATree, index: u32) u32 {
+        fn skew(tree: *const Tree, index: u32) u32 {
             const slot = std.math.sub(u32, index, 1) catch unreachable;
             const slice = tree.list.slice();
 
@@ -443,7 +465,7 @@ pub fn AATreeType(
             return left_index;
         }
 
-        fn split(tree: *const AATree, index: u32) u32 {
+        fn split(tree: *const Tree, index: u32) u32 {
             const slot = std.math.sub(u32, index, 1) catch unreachable;
             const slice = tree.list.slice();
 
@@ -461,39 +483,28 @@ pub fn AATreeType(
             return right_index;
         }
 
-        pub fn sort_into_and_clear(tree: *AATree, values: []Value) []const Value {
-            const slice = tree.list.slice();
-            assert(slice.len <= values.len);
-
-            var top: u32 = 0;
-            var index: u32 = 0;
-            var current = tree.root;
-
-            while (true) {
-                while (std.math.sub(u32, current, 1) catch null) |slot| {
-                    slice.items(.stack)[top] = slot;
-                    top += 1;
-                    current = slice.items(.links)[slot][0];
-                }
-
-                top = std.math.sub(u32, top, 1) catch break;
-                const slot = slice.items(.stack)[top];
-                current = slice.items(.links)[slot][1];
-
-                const value = &slice.items(.value)[slot];
-                values[index] = value.*;
-                defer index += 1;
-
-                if (std.math.sub(u32, index, 1) catch null) |prev_index| {
-                    const prev_key = key_from_value(&values[prev_index]);
-                    assert(compare_keys(prev_key, key_from_value(value)) != .gt);
-                }
-            }
-
-            assert(index == tree.count());
-            tree.clear();
-            return values[0..index];
+        pub fn iterator(tree: *const Tree) Iterator {
+            return .{ .current = tree.root, .slice = tree.list.slice() };
         }
+
+        pub const Iterator = struct {
+            top: u32 = 0,
+            current: u32,
+            slice: List.Slice,
+
+            pub fn next(it: *Iterator) ?*const Value {
+                while (std.math.sub(u32, it.current, 1) catch null) |slot| {
+                    it.slice.items(.stack)[it.top] = slot;
+                    it.top += 1;
+                    it.current = it.slice.items(.links)[slot][0];
+                }
+
+                it.top = std.math.sub(u32, it.top, 1) catch return null;
+                const slot = it.slice.items(.stack)[it.top];
+                it.current = it.slice.items(.links)[slot][1];
+                return &it.slice.items(.value)[slot];
+            }
+        };
     };
 }
 
@@ -504,7 +515,7 @@ pub fn RBTreeType(
     comptime compare_keys: fn (key: Key, key: Key) callconv(.Inline) math.Order,
 ) type {
     return struct {
-        const RBTree = @This();
+        const Tree = @This();
 
         const Color = enum(u1) { red, black };
         const Node = struct {
@@ -537,23 +548,23 @@ pub fn RBTreeType(
         list: List,
         root: u32 = 0,
 
-        pub fn init(allocator: mem.Allocator, max_entries: u32) !RBTree {
+        pub fn init(allocator: mem.Allocator, max_entries: u32) !Tree {
             var list = List{};
             try list.ensureTotalCapacity(allocator, max_entries);
             errdefer list.deinit(allocator);
 
-            return RBTree{ .list = list };
+            return Tree{ .list = list };
         }
 
-        pub fn deinit(tree: *RBTree, allocator: mem.Allocator) void {
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
             tree.list.deinit(allocator);
         }
 
-        pub fn count(tree: *const RBTree) u32 {
+        pub fn count(tree: *const Tree) u32 {
             return @intCast(u32, tree.list.len);
         }
 
-        pub fn clear(tree: *RBTree) void {
+        pub fn clear(tree: *Tree) void {
             tree.list.shrinkRetainingCapacity(0);
             tree.root = 0;
         }
@@ -563,7 +574,7 @@ pub fn RBTreeType(
             parent: u32 = 0,
         };
 
-        inline fn lookup(tree: *const RBTree, context: ?*Context, key: Key) ?*Value {
+        inline fn lookup(tree: *const Tree, context: ?*Context, key: Key) ?*Value {
             var index = tree.root;
             const slice = tree.list.slice();
             while (true) {
@@ -578,16 +589,16 @@ pub fn RBTreeType(
             }
         }
 
-        pub fn get(tree: *const RBTree, key: Key) ?*const Value {
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
             return tree.lookup(null, key);
         }
 
-        pub const RBEntry = struct {
+        pub const Entry = struct {
             value: *Value,
             exists: bool,
         };
 
-        pub fn get_or_put(tree: *RBTree, key: Key) RBEntry {
+        pub fn get_or_put(tree: *Tree, key: Key) Entry {
             var ctx = Context{};
             if (tree.lookup(&ctx, key)) |value| {
                 return .{ .value = value, .exists = true };
@@ -599,7 +610,7 @@ pub fn RBTreeType(
 
             const slice = tree.list.slice();
             const nodes = slice.items(.node);
-            const entry = RBEntry{ .value = &slice.items(.value)[slot], .exists = false };
+            const entry = Entry{ .value = &slice.items(.value)[slot], .exists = false };
 
             const node = &nodes[slot];
             node.set_parent(ctx.parent);
@@ -657,7 +668,7 @@ pub fn RBTreeType(
             return entry;
         }
 
-        fn rotate(tree: *RBTree, nodes: []Node, index: u32, right: bool) void {
+        fn rotate(tree: *Tree, nodes: []Node, index: u32, right: bool) void {
             const node = &nodes[index - 1];
 
             const target_link = &node.links[@boolToInt(!right)];
@@ -688,38 +699,27 @@ pub fn RBTreeType(
             sibling_link.* = index;
         }
 
-        pub fn sort_into_and_clear(tree: *RBTree, values: []Value) []const Value {
-            const slice = tree.list.slice();
-            assert(slice.len <= values.len);
-
-            var top: u32 = 0;
-            var index: u32 = 0;
-            var current = tree.root;
-
-            while (true) {
-                while (std.math.sub(u32, current, 1) catch null) |slot| {
-                    slice.items(.stack)[top] = slot;
-                    top += 1;
-                    current = slice.items(.node)[slot].links[0];
-                }
-
-                top = std.math.sub(u32, top, 1) catch break;
-                const slot = slice.items(.stack)[top];
-                current = slice.items(.node)[slot].links[1];
-
-                const value = &slice.items(.value)[slot];
-                values[index] = value.*;
-                defer index += 1;
-
-                if (std.math.sub(u32, index, 1) catch null) |prev_index| {
-                    const prev_key = key_from_value(&values[prev_index]);
-                    assert(compare_keys(prev_key, key_from_value(value)) != .gt);
-                }
-            }
-
-            assert(index == tree.count());
-            tree.clear();
-            return values[0..index];
+        pub fn iterator(tree: *const Tree) Iterator {
+            return .{ .current = tree.root, .slice = tree.list.slice() };
         }
+
+        pub const Iterator = struct {
+            top: u32 = 0,
+            current: u32,
+            slice: List.Slice,
+
+            pub fn next(it: *Iterator) ?*const Value {
+                while (std.math.sub(u32, it.current, 1) catch null) |slot| {
+                    it.slice.items(.stack)[it.top] = slot;
+                    it.top += 1;
+                    it.current = it.slice.items(.node)[slot].links[0];
+                }
+
+                it.top = std.math.sub(u32, it.top, 1) catch return null;
+                const slot = it.slice.items(.stack)[it.top];
+                it.current = it.slice.items(.node)[slot].links[1];
+                return &it.slice.items(.value)[slot];
+            }
+        };
     };
 }
