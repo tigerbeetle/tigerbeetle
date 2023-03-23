@@ -577,17 +577,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
             assert(op == tree.lookup_snapshot_max);
 
-            const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
-            const start = (compaction_beat == 0) or
-                (compaction_beat == half_bar_beat_count);
-            const end = (compaction_beat == half_bar_beat_count - 1) or
-                (compaction_beat == constants.lsm_batch_multiple - 1);
-            assert(!(start and end));
-
             const op_min = compaction_op_min(tree.compaction_op);
             assert(op_min < snapshot_latest);
             assert(op_min % half_bar_beat_count == 0);
 
+            const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
             log.debug(tree_name ++ ": compact: op={d} op_min={d} beat={d}/{d}", .{
                 tree.compaction_op,
                 op_min,
@@ -595,38 +589,50 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 constants.lsm_batch_multiple,
             });
 
-            if (start) {
-                if (constants.verify) {
-                    tree.manifest.verify(tree.compaction_op);
-                }
+            const BeatKind = enum { half_bar_start, half_bar_end, other };
+            const beat_kind = if (compaction_beat == 0 or
+                compaction_beat == half_bar_beat_count)
+                BeatKind.half_bar_start
+            else if (compaction_beat == half_bar_beat_count - 1 or
+                compaction_beat == constants.lsm_batch_multiple - 1)
+                BeatKind.half_bar_end
+            else
+                BeatKind.other;
 
-                tree.manifest.reserve();
+            switch (beat_kind) {
+                .half_bar_start => {
+                    if (constants.verify) {
+                        tree.manifest.verify(tree.compaction_op);
+                    }
 
-                // Maybe start compacting the immutable table.
-                const even_levels = compaction_beat < half_bar_beat_count;
-                if (even_levels) {
-                    assert(tree.compaction_table_immutable.state == .idle);
-                } else {
-                    tree.compact_start_table_immutable(op_min);
-                }
+                    tree.manifest.reserve();
 
-                // Maybe start compacting the other levels.
-                var it = CompactionTableIterator{ .tree = tree };
-                while (it.next()) |context| {
-                    tree.compact_start_table(op_min, context);
-                }
-            }
+                    // Maybe start compacting the immutable table.
+                    const even_levels = compaction_beat < half_bar_beat_count;
+                    if (even_levels) {
+                        assert(tree.compaction_table_immutable.state == .idle);
+                    } else {
+                        tree.compact_start_table_immutable(op_min);
+                    }
 
-            if (end) {
-                // At the end of a half-bar, we have to wait for all compactions to finish.
-                tree.compaction_callback = .{ .awaiting = callback };
-                tree.compact_finish_join();
-            } else {
-                tree.lookup_snapshot_max = tree.compaction_op + 1;
+                    // Maybe start compacting the other levels.
+                    var it = CompactionTableIterator{ .tree = tree };
+                    while (it.next()) |context| {
+                        tree.compact_start_table(op_min, context);
+                    }
+                },
+                .other => {
+                    tree.lookup_snapshot_max = tree.compaction_op + 1;
 
-                // At the end of other beats, we'll callback on the next tick.
-                tree.compaction_callback = .{ .next_tick = callback };
-                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
+                    // At the end of other beats, we'll callback on the next tick.
+                    tree.compaction_callback = .{ .next_tick = callback };
+                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
+                },
+                .half_bar_end => {
+                    // At the end of a half-bar, we have to wait for all compactions to finish.
+                    tree.compaction_callback = .{ .awaiting = callback };
+                    tree.compact_finish_join();
+                },
             }
         }
 

@@ -65,12 +65,20 @@ pub fn RangeIteratorType(comptime Table: type, comptime Storage: type) type {
         pub fn init(
             allocator: mem.Allocator,
         ) !RangeIterator {
-            _ = allocator; // TODO(jamii) Will need this soon for pipelining.
+            var level_iterator = try LevelIterator.init(allocator);
+            errdefer level_iterator.deinit(allocator);
+
+            var table_iterator = try TableIterator.init(allocator);
+            errdefer table_iterator.deinit(allocator);
+
+            const index_block = try alloc_block(allocator);
+            errdefer allocator.free(index_block);
+
             return RangeIterator{
                 .context = undefined,
-                .level_iterator = try LevelIterator.init(allocator),
-                .table_iterator = try TableIterator.init(allocator),
-                .index_block = try alloc_block(allocator),
+                .level_iterator = level_iterator,
+                .table_iterator = table_iterator,
+                .index_block = index_block,
                 .callback = .none,
             };
         }

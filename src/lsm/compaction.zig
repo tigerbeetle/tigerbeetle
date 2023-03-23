@@ -131,7 +131,7 @@ pub fn CompactionType(
             iter_init_a,
             iter_next: Side,
             writing: struct {
-                remaining: usize,
+                pending: usize,
             },
             next_tick,
             done,
@@ -613,7 +613,7 @@ pub fn CompactionType(
             const input_exhausted = compaction.input_state == .exhausted;
             const table_builder = &compaction.table_builder;
 
-            compaction.state = .{ .writing = .{ .remaining = 0 } };
+            compaction.state = .{ .writing = .{ .pending = 0 } };
 
             // Flush the data block if needed.
             if (table_builder.data_block_full() or
@@ -661,7 +661,7 @@ pub fn CompactionType(
                 WriteBlock(.index).write_block(compaction);
             }
 
-            if (compaction.state.writing.remaining == 0) {
+            if (compaction.state.writing.pending == 0) {
                 compaction.write_finish();
             }
         }
@@ -682,7 +682,7 @@ pub fn CompactionType(
                         .filter => &compaction.table_builder.filter_block,
                         .index => &compaction.table_builder.index_block,
                     };
-                    compaction.state.writing.remaining += 1;
+                    compaction.state.writing.pending += 1;
                     compaction.context.grid.write_block(
                         on_write,
                         write,
@@ -702,8 +702,8 @@ pub fn CompactionType(
                         write,
                     );
                     assert(compaction.state == .writing);
-                    compaction.state.writing.remaining -= 1;
-                    if (compaction.state.writing.remaining == 0) {
+                    compaction.state.writing.pending -= 1;
+                    if (compaction.state.writing.pending == 0) {
                         compaction.write_finish();
                     }
                 }
@@ -712,6 +712,7 @@ pub fn CompactionType(
 
         fn write_finish(compaction: *Compaction) void {
             assert(compaction.state == .writing);
+            assert(compaction.state.writing.pending == 0);
 
             tracer.end(
                 &compaction.iter_tracer_slot,
@@ -756,6 +757,7 @@ pub fn CompactionType(
         fn loop_on_next_tick(next_tick: *Grid.NextTick) void {
             const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
             assert(compaction.state == .next_tick);
+            assert(compaction.input_state == .remaining);
 
             compaction.state = .compacting;
             compaction.loop_start();

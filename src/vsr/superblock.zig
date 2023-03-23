@@ -1530,6 +1530,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 if (Storage == @import("../testing/storage.zig").Storage) {
                     // We should have finished all pending io before starting any more.
+                    // TODO This may change when grid repair lands.
                     superblock.storage.assert_no_pending_io(.superblock);
                     if (context.caller == .checkpoint) {
                         superblock.storage.assert_no_pending_io(.grid);
@@ -1551,6 +1552,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io by now.
+                // TODO This may change when grid repair lands.
                 superblock.storage.assert_no_pending_io(.superblock);
             }
 

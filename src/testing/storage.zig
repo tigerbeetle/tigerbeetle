@@ -495,7 +495,7 @@ pub const Storage = struct {
         return storage.memory[block_offset..][0..constants.block_size];
     }
 
-    pub fn log_pending_io(storage: *Storage) void {
+    pub fn log_pending_io(storage: *const Storage) void {
         const reads = storage.reads;
         for (reads.items[0..reads.len]) |read| {
             log.debug("Pending read: {} {}\n{}", .{ read.offset, read.zone, read.stack_trace });
