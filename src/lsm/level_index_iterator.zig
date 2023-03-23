@@ -9,10 +9,10 @@ const Direction = @import("direction.zig").Direction;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
-/// A LevelIterator iterates the index blocks of every table in a key range.
-pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
+/// A LevelIndexIterator iterates the index blocks of every table in a key range in ascending key order.
+pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type {
     return struct {
-        const LevelIterator = @This();
+        const LevelIndexIterator = @This();
         const Key = Table.Key;
         const Grid = GridType(Storage);
         const BlockPtrConst = Grid.BlockPtrConst;
@@ -30,7 +30,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         };
 
         pub const Callback = fn (
-            it: *LevelIterator,
+            it: *LevelIndexIterator,
             table_info: ?TableInfo,
             index_block: ?BlockPtrConst,
         ) void;
@@ -54,24 +54,24 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         read: Grid.Read = undefined,
         next_tick: Grid.NextTick = undefined,
 
-        pub fn init(allocator: mem.Allocator) !LevelIterator {
+        pub fn init(allocator: mem.Allocator) !LevelIndexIterator {
             _ = allocator; // TODO(jamii) Will need this soon for pipelining.
-            return LevelIterator{
+            return LevelIndexIterator{
                 .context = undefined,
                 .key_exclusive = null,
                 .callback = .none,
             };
         }
 
-        pub fn deinit(it: *LevelIterator, allocator: mem.Allocator) void {
+        pub fn deinit(it: *LevelIndexIterator, allocator: mem.Allocator) void {
             _ = allocator; // TODO(jamii) Will need this soon for pipelining.
             it.* = undefined;
         }
 
-        pub fn start(it: *LevelIterator, context: Context) void {
+        pub fn start(it: *LevelIndexIterator, context: Context) void {
             assert(it.callback == .none);
             if (context.direction == .descending) {
-                @panic("TODO Implement descending direction for LevelIterator.");
+                @panic("TODO Implement descending direction for LevelIndexIterator.");
             }
 
             it.* = .{
@@ -81,7 +81,9 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             };
         }
 
-        pub fn next(it: *LevelIterator, callback: Callback) void {
+        /// Calls `callback` with either the next index block or null.
+        /// The block is only valid for the duration of the callback.
+        pub fn next(it: *LevelIndexIterator, callback: Callback) void {
             assert(it.callback == .none);
 
             // NOTE We must ensure that between calls to `next`,
@@ -120,7 +122,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         }
 
         fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
-            const it = @fieldParentPtr(LevelIterator, "read", read);
+            const it = @fieldParentPtr(LevelIndexIterator, "read", read);
             assert(it.callback == .read);
 
             const callback = it.callback.read.callback;
@@ -131,7 +133,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {
-            const it = @fieldParentPtr(LevelIterator, "next_tick", next_tick);
+            const it = @fieldParentPtr(LevelIndexIterator, "next_tick", next_tick);
             assert(it.callback == .next_tick);
 
             const callback = it.callback.next_tick;
