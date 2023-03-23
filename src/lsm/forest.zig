@@ -167,6 +167,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                             if (join_op == .checkpoint) {
                                 if (Storage == @import("../testing/storage.zig").Storage) {
                                     // We should have finished all checkpoint io by now.
+                                    // TODO This may change when grid repair lands.
                                     forest.grid.superblock.storage.assert_no_pending_io(.grid);
                                 }
                             }
@@ -203,6 +204,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io before checkpointing.
+                // TODO This may change when grid repair lands.
                 forest.grid.superblock.storage.assert_no_pending_io(.grid);
             }
 
