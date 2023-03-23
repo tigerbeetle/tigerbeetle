@@ -8,15 +8,15 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const GridType = @import("grid.zig").GridType;
 
-/// A TableIterator iterates a table's data blocks in ascending-key order.
-pub fn TableIteratorType(comptime Storage: type) type {
+/// A TableDataIterator iterates a table's data blocks in ascending key order.
+pub fn TableDataIteratorType(comptime Storage: type) type {
     return struct {
-        const TableIterator = @This();
+        const TableDataIterator = @This();
 
         const Grid = GridType(Storage);
         const BlockPtrConst = Grid.BlockPtrConst;
 
-        pub const Callback = fn (it: *TableIterator, data_block: ?BlockPtrConst) void;
+        pub const Callback = fn (it: *TableDataIterator, data_block: ?BlockPtrConst) void;
 
         pub const Context = struct {
             grid: *Grid,
@@ -37,13 +37,13 @@ pub fn TableIteratorType(comptime Storage: type) type {
         read: Grid.Read,
         next_tick: Grid.NextTick,
 
-        pub fn init(allocator: mem.Allocator) !TableIterator {
+        pub fn init(allocator: mem.Allocator) !TableDataIterator {
             _ = allocator; // TODO(jamii) Will need this soon for pipelining.
-            return TableIterator{
+            return TableDataIterator{
                 .context = .{
                     .grid = undefined,
                     // The zero-init here is important.
-                    // In other places we assume that we can call `next` on a fresh TableIterator
+                    // In other places we assume that we can call `next` on a fresh TableDataIterator
                     // and get `null` rather than UB.
                     .addresses = &.{},
                     .checksums = &.{},
@@ -54,13 +54,13 @@ pub fn TableIteratorType(comptime Storage: type) type {
             };
         }
 
-        pub fn deinit(it: *TableIterator, allocator: mem.Allocator) void {
+        pub fn deinit(it: *TableDataIterator, allocator: mem.Allocator) void {
             _ = allocator; // TODO(jamii) Will need this soon for pipelining.
             it.* = undefined;
         }
 
         pub fn start(
-            it: *TableIterator,
+            it: *TableDataIterator,
             context: Context,
         ) void {
             assert(it.callback == .none);
@@ -74,11 +74,14 @@ pub fn TableIteratorType(comptime Storage: type) type {
             };
         }
 
-        pub fn empty(it: *const TableIterator) bool {
+        pub fn empty(it: *const TableDataIterator) bool {
+            assert(it.context.addresses.len == it.context.checksums.len);
             return it.context.addresses.len == 0;
         }
 
-        pub fn next(it: *TableIterator, callback: Callback) void {
+        /// Calls `callback` with either the next data block or null.
+        /// The block is only valid for the duration of the callback.
+        pub fn next(it: *TableDataIterator, callback: Callback) void {
             assert(it.callback == .none);
 
             if (it.context.addresses.len > 0) {
@@ -93,7 +96,7 @@ pub fn TableIteratorType(comptime Storage: type) type {
         }
 
         fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
-            const it = @fieldParentPtr(TableIterator, "read", read);
+            const it = @fieldParentPtr(TableDataIterator, "read", read);
             assert(it.callback == .read);
 
             const callback = it.callback.read;
@@ -105,8 +108,9 @@ pub fn TableIteratorType(comptime Storage: type) type {
         }
 
         fn on_next_tick(next_tick: *Grid.NextTick) void {
-            const it = @fieldParentPtr(TableIterator, "next_tick", next_tick);
+            const it = @fieldParentPtr(TableDataIterator, "next_tick", next_tick);
             assert(it.callback == .next_tick);
+            assert(it.empty());
 
             const callback = it.callback.next_tick;
             it.callback = .none;

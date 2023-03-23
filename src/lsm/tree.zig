@@ -589,7 +589,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 constants.lsm_batch_multiple,
             });
 
-            const BeatKind = enum { half_bar_start, half_bar_end, other };
+            const BeatKind = enum { half_bar_start, half_bar_middle, half_bar_end };
             const beat_kind = if (compaction_beat == 0 or
                 compaction_beat == half_bar_beat_count)
                 BeatKind.half_bar_start
@@ -597,7 +597,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 compaction_beat == constants.lsm_batch_multiple - 1)
                 BeatKind.half_bar_end
             else
-                BeatKind.other;
+                BeatKind.half_bar_middle;
 
             switch (beat_kind) {
                 .half_bar_start => {
@@ -620,16 +620,21 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     while (it.next()) |context| {
                         tree.compact_start_table(op_min, context);
                     }
-                },
-                .other => {
+
                     tree.lookup_snapshot_max = tree.compaction_op + 1;
 
-                    // At the end of other beats, we'll callback on the next tick.
+                    tree.compaction_callback = .{ .next_tick = callback };
+                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
+                },
+                .half_bar_middle => {
+                    tree.lookup_snapshot_max = tree.compaction_op + 1;
+
                     tree.compaction_callback = .{ .next_tick = callback };
                     tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 },
                 .half_bar_end => {
                     // At the end of a half-bar, we have to wait for all compactions to finish.
+                    // (We'll update `tree.lookup_snapshot_max` in `compact_finish_join`.)
                     tree.compaction_callback = .{ .awaiting = callback };
                     tree.compact_finish_join();
                 },
