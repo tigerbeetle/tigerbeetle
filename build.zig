@@ -371,6 +371,11 @@ pub fn build(b: *std.build.Builder) void {
             .file = "src/lsm/segmented_array_benchmark.zig",
             .description = "SegmentedArray search",
         },
+        .{
+            .name = "benchmark_table_mutable",
+            .file = "src/lsm/table_mutable_benchmark.zig",
+            .description = "TableMutable insert, lookup, and sorting",
+        },
     }) |benchmark| {
         const exe = b.addExecutable(benchmark.name, benchmark.file);
         exe.setTarget(target);
