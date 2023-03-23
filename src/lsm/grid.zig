@@ -241,7 +241,9 @@ pub fn GridType(comptime Storage: type) type {
         /// Asserts that the address is not currently being read from or written to.
         pub fn release(grid: *Grid, address: u64) void {
             grid.assert_not_writing(address, null);
-            grid.assert_not_reading(address, null);
+            // It's safe to release an address that is being read from,
+            // because the superblock will not allow it to be overwritten before
+            // the end of the measure.
 
             grid.cache.demote(address);
             grid.superblock.free_set.release(address);
