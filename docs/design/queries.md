@@ -7,8 +7,8 @@ Account statements (optionally filtered by code, user_data, or range of amounts)
 ``` sql
 select *
 from transfer
-where (transfer.debit_accout_id = $1 or transfer.credit_account_id = $1)
-and transfer.timestamp < $2
+where (transfer.debit_accout_id = ?1 or transfer.credit_account_id = ?1)
+and transfer.timestamp < ?2
 order by transfer.timestamp desc
 limit 100
 ```
@@ -19,8 +19,8 @@ We may also want to include historical balances (https://github.com/tigerbeetled
 select transfer.*, historical_balance.*
 from transfer, historical_balance
 where (transfer.timestamp = historical_balance.transfer_timestamp)
-and (transfer.debit_accout_id = $1 or transfer.credit_account_id = $1)
-and transfer.timestamp < $2
+and (transfer.debit_accout_id = ?1 or transfer.credit_account_id = ?1)
+and transfer.timestamp < ?2
 order by transfer.timestamp desc
 limit 100
 ```
@@ -30,7 +30,7 @@ Exporting change data:
 ``` sql
 select * 
 from transfer
-where transfer.timestamp > $2
+where transfer.timestamp > ?2
 order by transfer.timestamp asc
 limit 100
 ```
@@ -38,7 +38,7 @@ limit 100
 ``` sql
 select * 
 from account_mutable
-where account_mutable.timestamp > $2
+where account_mutable.timestamp > ?2
 order by account_mutable.timestamp asc
 limit 100
 ```
@@ -71,6 +71,19 @@ where not exists (
   where transfer2.pending_id = transfer.id
 )
 ```
+
+Get the pending transfer for a transfer, or vice-versa:
+
+``` sql
+select transfer.*
+where transfer.pending_id = ?
+```
+
+``` sql
+select transfer.pending_id
+where transfer.id = ?
+```
+
 
 TODO other uses.
 
@@ -107,7 +120,7 @@ Execution must be deterministic => execution time bounds must be deterministic =
 
 If a single message worth of results is not enough, we need a way to ask for more results. Options:
 * Return an opaque pagination token in the results. This limits us to kinds of queries for which we can automatically paginate using a bounded-size token.
-* Make the user do their own pagination (eg by setting `transfer.timestamp < $2` to the min timestamp from the last query). This may result in some queries not being possible to paginate.
+* Make the user do their own pagination (eg by setting `transfer.timestamp < ?2` to the min timestamp from the last query). This may result in some queries not being possible to paginate.
 
 Either way, for correct pagination we need to allow specifying the snapshot to query against. 
 The replica needs to keep that snapshot alive until the whole query is finished, so we need a way to reserve/lock snapshots and also a way to ensure that they aren't leaked.
