@@ -333,7 +333,7 @@ pub fn TableMutableTreeType(
             assert(values_max.len == value_count_max);
 
             var i: u32 = 0;
-            var it = table.values_tree.iterator();
+            var it = table.values_tree.iterate_then_clear();
             while (it.next()) |value| : (i += 1) {
                 values_max[i] = value.*;
 
@@ -352,13 +352,8 @@ pub fn TableMutableTreeType(
                 }
             }
 
-            const values = values_max[0..i];
-            assert(values.len == table.count());
-
-            table.clear();
             assert(table.count() == 0);
-
-            return values;
+            return values_max[0..i];
         }
     };
 }
@@ -483,26 +478,31 @@ pub fn AATreeType(
             return right_index;
         }
 
-        pub fn iterator(tree: *const Tree) Iterator {
-            return .{ .current = tree.root, .slice = tree.list.slice() };
+        pub fn iterate_then_clear(tree: *Tree) Iterator {
+            return .{ .current = tree.root, .tree = tree };
         }
 
         pub const Iterator = struct {
             top: u32 = 0,
             current: u32,
-            slice: List.Slice,
+            tree: *Tree,
 
             pub fn next(it: *Iterator) ?*const Value {
+                const slice = it.tree.list.slice();
                 while (std.math.sub(u32, it.current, 1) catch null) |slot| {
-                    it.slice.items(.stack)[it.top] = slot;
+                    slice.items(.stack)[it.top] = slot;
                     it.top += 1;
-                    it.current = it.slice.items(.links)[slot][0];
+                    it.current = slice.items(.links)[slot][0];
                 }
 
-                it.top = std.math.sub(u32, it.top, 1) catch return null;
-                const slot = it.slice.items(.stack)[it.top];
-                it.current = it.slice.items(.links)[slot][1];
-                return &it.slice.items(.value)[slot];
+                it.top = std.math.sub(u32, it.top, 1) catch {
+                    it.tree.clear();
+                    return null;
+                };
+
+                const slot = slice.items(.stack)[it.top];
+                it.current = slice.items(.links)[slot][1];
+                return &slice.items(.value)[slot];
             }
         };
     };
@@ -699,26 +699,31 @@ pub fn RBTreeType(
             sibling_link.* = index;
         }
 
-        pub fn iterator(tree: *const Tree) Iterator {
-            return .{ .current = tree.root, .slice = tree.list.slice() };
+        pub fn iterate_then_clear(tree: *Tree) Iterator {
+            return .{ .current = tree.root, .tree = tree };
         }
 
         pub const Iterator = struct {
             top: u32 = 0,
             current: u32,
-            slice: List.Slice,
+            tree: *Tree,
 
             pub fn next(it: *Iterator) ?*const Value {
+                const slice = it.tree.list.slice();
                 while (std.math.sub(u32, it.current, 1) catch null) |slot| {
-                    it.slice.items(.stack)[it.top] = slot;
+                    slice.items(.stack)[it.top] = slot;
                     it.top += 1;
-                    it.current = it.slice.items(.node)[slot].links[0];
+                    it.current = slice.items(.node)[slot].links[0];
                 }
 
-                it.top = std.math.sub(u32, it.top, 1) catch return null;
-                const slot = it.slice.items(.stack)[it.top];
-                it.current = it.slice.items(.node)[slot].links[1];
-                return &it.slice.items(.value)[slot];
+                it.top = std.math.sub(u32, it.top, 1) catch {
+                    it.tree.clear();
+                    return null;
+                };
+
+                const slot = slice.items(.stack)[it.top];
+                it.current = slice.items(.node)[slot].links[1];
+                return &slice.items(.value)[slot];
             }
         };
     };
