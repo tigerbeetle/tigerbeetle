@@ -2,7 +2,7 @@
 
 ## Uses
 
-Account statements:
+Account statements (optionally filtered by code, user_data, or range of amounts):
 
 ``` sql
 select *
@@ -41,6 +41,35 @@ from account_mutable
 where account_mutable.timestamp > $2
 order by account_mutable.timestamp asc
 limit 100
+```
+
+Get all linked transfers from root or intermediate transfers:
+
+``` python
+# This is tricky to express in sql without additional indexes.
+transfers = [transfer]
+for other_transfer range(timestamp_to_transfer, transfer.timestamp, ascending):
+  if (not other_transfer.linked):
+    break
+  transfers.push(other_transfer)
+for other_transfer range(timestamp_to_transfer, transfer.timestamp, descending):
+  transfers.push(other_transfer)
+  if (not other_transfer.linked):
+    break
+return transfers
+```
+
+Get all pending transfers for an account:
+
+``` sql
+select transfer.*
+from transfer
+where transfer.flags.post_pending_transfer = true
+where not exists (
+  select transfer2.*
+  from transfer as transfer2
+  where transfer2.pending_id = transfer.id
+)
 ```
 
 TODO other uses.
@@ -127,6 +156,8 @@ The query execution itself doesn't need to be replicated, but reserving a snapsh
 
 Is it ok to just return transfer/account ids and require the client to issue lookups for those?
 Or will we need to be able to return some computed values (eg `sum(transfer.amount) grouped by ...`)?
+
+How should we express conditions on nested fields like transfer_flags? Maybe treat them as if they weren't nested, like 'flags_post_pending_transfer".
 
 ## Testing
 
