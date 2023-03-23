@@ -246,6 +246,8 @@ pub fn build(b: *std.build.Builder) void {
 
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
+        // Ensure that we get stack traces even in release builds.
+        simulator.omit_frame_pointer = false;
         simulator.addOptions("vsr_options", options);
         simulator.addOptions("vsr_simulator_options", simulator_options);
         link_tracer_backend(simulator, tracer_backend, target);

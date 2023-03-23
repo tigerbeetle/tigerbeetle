@@ -56,7 +56,11 @@ pub const Event = union(enum) {
     tree_compaction_beat: struct {
         tree_name: []const u8,
     },
-    tree_compaction_tick: struct {
+    tree_compaction: struct {
+        tree_name: []const u8,
+        level_b: u8,
+    },
+    tree_compaction_iter: struct {
         tree_name: []const u8,
         level_b: u8,
     },
@@ -96,10 +100,21 @@ pub const Event = union(enum) {
                     args.tree_name,
                 },
             ),
-            .tree_compaction_tick => |args| {
+            .tree_compaction => |args| {
                 const level_a = LevelA{ .level_b = args.level_b };
                 try writer.print(
-                    "tree_compaction_tick({s}, {}->{})",
+                    "tree_compaction({s}, {}->{})",
+                    .{
+                        args.tree_name,
+                        level_a,
+                        args.level_b,
+                    },
+                );
+            },
+            .tree_compaction_iter => |args| {
+                const level_a = LevelA{ .level_b = args.level_b };
+                try writer.print(
+                    "tree_compaction_iter({s}, {}->{})",
                     .{
                         args.tree_name,
                         level_a,
@@ -134,7 +149,11 @@ pub const Event = union(enum) {
             .tree_compaction_beat => |args| .{ .tree = .{
                 .tree_name = args.tree_name,
             } },
-            .tree_compaction_tick => |args| .{ .tree_compaction = .{
+            .tree_compaction => |args| .{ .tree_compaction = .{
+                .tree_name = args.tree_name,
+                .level_b = args.level_b,
+            } },
+            .tree_compaction_iter => |args| .{ .tree_compaction = .{
                 .tree_name = args.tree_name,
                 .level_b = args.level_b,
             } },
