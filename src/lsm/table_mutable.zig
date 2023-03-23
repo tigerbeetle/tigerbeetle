@@ -5,7 +5,26 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const div_ceil = @import("../stdx.zig").div_ceil;
-const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
+
+fn ValuesCacheType(comptime Table: type, comptime tree_name: [:0]const u8) type {
+    return @import("set_associative_cache.zig").SetAssociativeCache(
+        Table.Key,
+        Table.Value,
+        Table.key_from_value,
+        struct {
+            inline fn hash(key: Table.Key) u64 {
+                return std.hash.Wyhash.hash(0, mem.asBytes(&key));
+            }
+        }.hash,
+        struct {
+            inline fn equal(a: Table.Key, b: Table.Key) bool {
+                return Table.compare_keys(a, b) == .eq;
+            }
+        }.equal,
+        .{},
+        tree_name,
+    );
+}
 
 /// Range queries are not supported on the TableMutable, it must first be made immutable.
 pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) type {
@@ -24,23 +43,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         const load_factor = 50;
         const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
 
-        pub const ValuesCache = SetAssociativeCache(
-            Key,
-            Value,
-            Table.key_from_value,
-            struct {
-                inline fn hash(key: Key) u64 {
-                    return std.hash.Wyhash.hash(0, mem.asBytes(&key));
-                }
-            }.hash,
-            struct {
-                inline fn equal(a: Key, b: Key) bool {
-                    return compare_keys(a, b) == .eq;
-                }
-            }.equal,
-            .{},
-            tree_name,
-        );
+        pub const ValuesCache = ValuesCacheType(Table, tree_name);
 
         values: Values = .{},
 
@@ -203,7 +206,11 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
     };
 }
 
-pub fn TableMutableTreeType(comptime Table: type, comptime tree_name: [:0]const u8) type {
+pub fn TableMutableTreeType(
+    comptime Table: type,
+    comptime tree_name: [:0]const u8,
+    comptime TreeType: anytype,
+) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
@@ -215,53 +222,16 @@ pub fn TableMutableTreeType(comptime Table: type, comptime tree_name: [:0]const 
 
     return struct {
         const TableMutable = @This();
-        const AATree = AATreeType(Key, Value, key_from_value, compare_keys);
+        const Tree = TreeType(Key, Value, key_from_value, compare_keys);
 
-        pub const ValuesCache = SetAssociativeCache(
-            Key,
-            Value,
-            Table.key_from_value,
-            struct {
-                inline fn hash(key: Key) u64 {
-                    return std.hash.Wyhash.hash(0, mem.asBytes(&key));
-                }
-            }.hash,
-            struct {
-                inline fn equal(a: Key, b: Key) bool {
-                    return compare_keys(a, b) == .eq;
-                }
-            }.equal,
-            .{},
-            tree_name,
-        );
+        pub const ValuesCache = ValuesCacheType(Table, tree_name);
 
-        /// Rather than using values.count(), we count how many values we could have had if every
-        /// operation had been on a different key. This means that mistakes in calculating
-        /// value_count_max are much easier to catch when fuzzing, rather than requiring very
-        /// specific workloads.
-        /// Invariant: value_count_worst_case <= value_count_max
         value_count_worst_case: u32 = 0,
-
-        /// This is used to accelerate point lookups and is not used for range queries.
-        /// Secondary index trees used only for range queries can therefore set this to null.
-        ///
-        /// The values cache is only used for the latest snapshot for simplicity.
-        /// Earlier snapshots will still be able to utilize the block cache.
-        ///
-        /// The values cache is updated (in bulk) when the mutable table is sorted and frozen,
-        /// rather than updating on every `put()`/`remove()`.
-        /// This amortizes cache inserts for hot keys in the mutable table, and avoids redundantly
-        /// storing duplicate values in both the mutable table and values cache.
-        // TODO Share cache between trees of different grooves:
-        // "A set associative cache of values shared by trees with the same key/value sizes.
-        // The value type will be []u8 and this will be shared by trees with the same value size."
         values_cache: ?*ValuesCache,
-
-        /// Self-balancing binary search tree optimized for searching & inserting only.
-        values_tree: AATree,
+        values_tree: Tree,
 
         pub fn init(allocator: mem.Allocator, values_cache: ?*ValuesCache) !TableMutable {
-            var values_tree = try AATree.init(allocator, @intCast(u32, value_count_max));
+            var values_tree = try Tree.init(allocator, @intCast(u32, value_count_max));
             errdefer values_tree.deinit(allocator);
 
             return TableMutable{
@@ -362,18 +332,16 @@ pub fn TableMutableTreeType(comptime Table: type, comptime tree_name: [:0]const 
             assert(table.count() <= values_max.len);
             assert(values_max.len == value_count_max);
 
-            const values = table.values_tree.sort_into(values_max);
-            assert(values.len == table.count());
-
-            table.clear();
+            const values = table.values_tree.sort_into_and_clear(values_max);
             assert(table.count() == 0);
 
+            table.value_count_worst_case = 0;
             return values;
         }
     };
 }
 
-fn AATreeType(
+pub fn AATreeType(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (value: *const Value) callconv(.Inline) Key,
@@ -493,7 +461,7 @@ fn AATreeType(
             return right_index;
         }
 
-        pub fn sort_into(tree: *const AATree, values: []Value) []const Value {
+        pub fn sort_into_and_clear(tree: *AATree, values: []Value) []const Value {
             const slice = tree.list.slice();
             assert(slice.len <= values.len);
 
@@ -508,11 +476,7 @@ fn AATreeType(
                     current = slice.items(.links)[slot][0];
                 }
 
-                top = std.math.sub(u32, top, 1) catch {
-                    assert(index == tree.count());
-                    return values[0..index];
-                };
-
+                top = std.math.sub(u32, top, 1) catch break;
                 const slot = slice.items(.stack)[top];
                 current = slice.items(.links)[slot][1];
 
@@ -525,6 +489,10 @@ fn AATreeType(
                     assert(compare_keys(prev_key, key_from_value(value)) != .gt);
                 }
             }
+
+            assert(index == tree.count());
+            tree.clear();
+            return values[0..index];
         }
     };
 }

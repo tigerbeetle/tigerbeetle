@@ -85,9 +85,10 @@ pub fn main() !void {
     var timer = try std.time.Timer.start();
     const rng_seed = random.int(u64);
 
+    const tm = @import("table_mutable.zig");
     inline for (.{
-        .{ "std.HashMap", @import("table_mutable.zig").TableMutableType(Table, "") },
-        .{ "AA-Tree", @import("table_mutable.zig").TableMutableTreeType(Table, "") },
+        .{ "std.HashMap", tm.TableMutableType(Table, "") },
+        .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
     }) |setup| {
         try bench(setup[1], setup[0], allocator, values, sorted_values, &timer, rng_seed);
     }
