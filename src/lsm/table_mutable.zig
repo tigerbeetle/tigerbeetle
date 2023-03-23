@@ -66,10 +66,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         // The value type will be []u8 and this will be shared by trees with the same value size."
         values_cache: ?*ValuesCache,
 
-        pub fn init(
-            allocator: mem.Allocator,
-            values_cache: ?*ValuesCache,
-        ) !TableMutable {
+        pub fn init(allocator: mem.Allocator, values_cache: ?*ValuesCache) !TableMutable {
             var values: Values = .{};
             try values.ensureTotalCapacity(allocator, value_count_max);
             errdefer values.deinit(allocator);
