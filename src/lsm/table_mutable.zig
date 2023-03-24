@@ -1,10 +1,9 @@
 const std = @import("std");
 const mem = std.mem;
+const meta = std.meta;
 const math = std.math;
 const assert = std.debug.assert;
-
 const constants = @import("../constants.zig");
-const div_ceil = @import("../stdx.zig").div_ceil;
 
 fn ValuesCacheType(comptime Table: type, comptime tree_name: [:0]const u8) type {
     return @import("set_associative_cache.zig").SetAssociativeCache(
@@ -202,6 +201,257 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
         fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
             return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
+        }
+    };
+}
+
+/// Range queries are not supported on the TableMutable, it must first be made immutable.
+pub fn TableMutableIndexType(comptime Table: type, comptime tree_name: [:0]const u8) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const tombstone_from_key = Table.tombstone_from_key;
+    const tombstone = Table.tombstone;
+    const value_count_max = Table.value_count_max;
+    const usage = Table.usage;
+
+    return struct {
+        const TableMutable = @This();
+
+        pub const ValuesCache = ValuesCacheType(Table, tree_name);
+
+        const Values = std.ArrayListUnmanaged(Value);
+
+        const lookup_slot = @intCast(u32, value_count_max + 1);
+        const SlotMapContext = struct {
+            values: *const Values,
+            lookup: *const Value,
+
+            inline fn value_ptr(context: SlotMapContext, slot: u32) *const Value {
+                if (slot == lookup_slot) return context.lookup;
+                return &context.values.items[slot];
+            }
+
+            pub fn eql(context: SlotMapContext, a_slot: u32, b_slot: u32) bool {
+                const a_value = context.value_ptr(a_slot).*;
+                const b_value = context.value_ptr(b_slot).*;
+                return (Table.HashMapContextValue{}).eql(a_value, b_value);
+            }
+
+            pub fn hash(context: SlotMapContext, hash_slot: u32) u64 {
+                const value = context.value_ptr(hash_slot).*;
+                return (Table.HashMapContextValue{}).hash(value);
+            }
+        };
+
+        const load_factor = 50;
+        const SlotMap = std.HashMapUnmanaged(u32, void, SlotMapContext, load_factor);
+
+        slots: SlotMap,
+        values: Values,
+
+        /// Rather than using values.count(), we count how many values we could have had if every
+        /// operation had been on a different key. This means that mistakes in calculating
+        /// value_count_max are much easier to catch when fuzzing, rather than requiring very
+        /// specific workloads.
+        /// Invariant: value_count_worst_case <= value_count_max
+        value_count_worst_case: u32 = 0,
+
+        /// This is used to accelerate point lookups and is not used for range queries.
+        /// Secondary index trees used only for range queries can therefore set this to null.
+        ///
+        /// The values cache is only used for the latest snapshot for simplicity.
+        /// Earlier snapshots will still be able to utilize the block cache.
+        ///
+        /// The values cache is updated (in bulk) when the mutable table is sorted and frozen,
+        /// rather than updating on every `put()`/`remove()`.
+        /// This amortizes cache inserts for hot keys in the mutable table, and avoids redundantly
+        /// storing duplicate values in both the mutable table and values cache.
+        // TODO Share cache between trees of different grooves:
+        // "A set associative cache of values shared by trees with the same key/value sizes.
+        // The value type will be []u8 and this will be shared by trees with the same value size."
+        values_cache: ?*ValuesCache,
+
+        pub fn init(
+            allocator: mem.Allocator,
+            values_cache: ?*ValuesCache,
+        ) !TableMutable {
+            var slots = SlotMap{};
+            try slots.ensureTotalCapacityContext(allocator, value_count_max, undefined);
+            errdefer slots.deinit(allocator);
+
+            var values = try Values.initCapacity(allocator, value_count_max);
+            errdefer values.deinit(allocator);
+
+            return TableMutable{
+                .slots = slots,
+                .values = values,
+                .values_cache = values_cache,
+            };
+        }
+
+        pub fn deinit(table: *TableMutable, allocator: mem.Allocator) void {
+            table.values.deinit(allocator);
+            table.slots.deinit(allocator);
+        }
+
+        pub fn get(table: *const TableMutable, key: Key) ?*const Value {
+            const lookup = tombstone_from_key(key);
+            const slot_map_context = SlotMapContext{ .values = &table.values, .lookup = &lookup };
+
+            if (table.slots.getKeyAdapted(lookup_slot, slot_map_context)) |slot| {
+                return &table.values.items[slot];
+            }
+
+            if (table.values_cache) |cache| {
+                // Check the cache after the mutable table (see `values_cache` for explanation).
+                if (cache.get(key)) |value| return value;
+            }
+
+            return null;
+        }
+
+        const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        fn upsert(table: *TableMutable, lookup: *const Value) Entry {
+            const slot_map_context = SlotMapContext{ .values = &table.values, .lookup = lookup };
+            const result = table.slots.getOrPutAssumeCapacityContext(lookup_slot, slot_map_context);
+
+            if (result.found_existing) {
+                const value = &table.values.items[result.key_ptr.*];
+                return .{ .value = value, .exists = true };
+            }
+
+            const slot = @intCast(u32, table.values.items.len);
+            result.key_ptr.* = slot;
+
+            const value = table.values.addOneAssumeCapacity();
+            return .{ .value = value, .exists = false };
+        }
+
+        pub fn put(table: *TableMutable, value: *const Value) void {
+            assert(table.value_count_worst_case < value_count_max);
+            table.value_count_worst_case += 1;
+
+            const entry = table.upsert(value);
+            switch (usage) {
+                .secondary_index => {
+                    if (entry.exists) {
+                        // If there was a previous operation on this key, it must have been remove.
+                        // The put and remove cancel out.
+                        assert(tombstone(key_from_value(entry.value)));
+                    } else {
+                        entry.value.* = value.*;
+                    }
+                },
+                .general => {
+                    // Overwrite the existing key and value.
+                    entry.value.* = value.*;
+                },
+            }
+
+            // The slot map's load factor may allow for more capacity because of rounding:
+            assert(table.slots.count() <= value_count_max);
+            assert(table.count() <= value_count_max);
+        }
+
+        pub fn remove(table: *TableMutable, value: *const Value) void {
+            assert(table.value_count_worst_case < value_count_max);
+            table.value_count_worst_case += 1;
+
+            const entry = table.upsert(value);
+            switch (usage) {
+                .secondary_index => {
+                    if (entry.exists) {
+                        // The previous operation on this key must have been a put.
+                        // The put and remove cancel out.
+                        assert(!tombstone(key_from_value(entry.value)));
+                    } else {
+                        // If the put is already on-disk, we need to follow it with a tombstone.
+                        // The put and tombstone may cancel each other out later during compaction.
+                        entry.value.* = tombstone_from_key(key_from_value(value));
+                    }
+                },
+                .general => {
+                    // Overwrite the existing key and value with a tombstone.
+                    entry.value.* = tombstone_from_key(key_from_value(value));
+                },
+            }
+
+            // The slot map's load factor may allow for more capacity because of rounding:
+            assert(table.slots.count() <= value_count_max);
+            assert(table.count() <= value_count_max);
+        }
+
+        pub fn clear(table: *TableMutable) void {
+            assert(table.count() > 0);
+            table.value_count_worst_case = 0;
+
+            table.slots.clearRetainingCapacity();
+            assert(table.slots.count() == 0);
+
+            table.values.clearRetainingCapacity();
+            assert(table.count() == 0);
+        }
+
+        pub fn count(table: *const TableMutable) u32 {
+            const value = @intCast(u32, table.values.items.len);
+            assert(value <= value_count_max);
+            return value;
+        }
+
+        /// The returned slice is invalidated whenever this is called for any tree.
+        pub fn sort_into_values_and_clear(
+            table: *TableMutable,
+            values_max: []Value,
+        ) []const Value {
+            assert(table.count() > 0);
+            assert(table.count() <= value_count_max);
+            assert(table.count() <= values_max.len);
+            assert(values_max.len == value_count_max);
+
+            // Values are allocated in table.values contiguously and table.slots will be cleared.
+            // Reuse table.slots memory as indexes to sort table.values.
+            const slots = table.slots.keyIterator().items[0..table.count()];
+            for (slots) |*s, i| s.* = @intCast(u32, i);
+
+            const SortContext = struct {
+                values: *const Values,
+
+                fn less_than(context: @This(), a_slot: u32, b_slot: u32) bool {
+                    const a_key = key_from_value(&context.values.items[a_slot]);
+                    const b_key = key_from_value(&context.values.items[b_slot]);
+                    return compare_keys(a_key, b_key) == .lt;
+                }
+            };
+
+            const sort_context = SortContext{ .values = &table.values };
+            std.sort.sort(u32, slots, sort_context, SortContext.less_than);
+
+            for (slots) |slot, i| {
+                const value = &table.values.items[slot];
+                values_max[i] = value.*;
+
+                if (table.values_cache) |cache| {
+                    if (tombstone(value)) {
+                        cache.remove(key_from_value(value));
+                    } else {
+                        cache.insert(value);
+                    }
+                }
+            }
+
+            const values = values_max[0..slots.len];
+            assert(values.len == table.count());
+
+            table.clear();
+            assert(table.count() == 0);
+
+            return values;
         }
     };
 }
