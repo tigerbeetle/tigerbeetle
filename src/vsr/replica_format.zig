@@ -18,7 +18,8 @@ pub fn format(
     const ReplicaFormat = ReplicaFormatType(Storage);
     var replica_format = ReplicaFormat{};
 
-    try replica_format.format_wal(allocator, options.cluster, storage);
+    const configuration = vsr.Configuration{ .replica_count = options.replica_count };
+    try replica_format.format_wal(allocator, options.cluster, &configuration, storage);
     assert(!replica_format.formatting);
 
     superblock.format(
@@ -44,6 +45,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             self: *Self,
             allocator: std.mem.Allocator,
             cluster: u32,
+            configuration: *const vsr.Configuration,
             storage: *Storage,
         ) !void {
             const header_zeroes = [_]u8{0} ** @sizeOf(Header);
@@ -65,7 +67,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             // header before the prepare".
             var wal_offset: u64 = 0;
             while (wal_offset < constants.journal_size_prepares) {
-                const size = format_wal_prepares(cluster, wal_offset, wal_buffer);
+                const size = format_wal_prepares(cluster, configuration, wal_offset, wal_buffer);
                 assert(size > 0);
 
                 for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
@@ -96,11 +98,11 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 wal_offset += size;
             }
             // There are no prepares left to write.
-            assert(format_wal_prepares(cluster, wal_offset, wal_buffer) == 0);
+            assert(format_wal_prepares(cluster, configuration, wal_offset, wal_buffer) == 0);
 
             wal_offset = 0;
             while (wal_offset < constants.journal_size_headers) {
-                const size = format_wal_headers(cluster, wal_offset, wal_buffer);
+                const size = format_wal_headers(cluster, configuration, wal_offset, wal_buffer);
                 assert(size > 0);
 
                 for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
@@ -126,7 +128,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 wal_offset += size;
             }
             // There are no headers left to write.
-            assert(format_wal_headers(cluster, wal_offset, wal_buffer) == 0);
+            assert(format_wal_headers(cluster, configuration, wal_offset, wal_buffer) == 0);
         }
 
         fn format_wal_sectors_callback(write: *Storage.Write) void {

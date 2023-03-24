@@ -144,10 +144,11 @@ pub const SuperBlockHeader = extern struct {
         }
 
         pub fn root(options: struct { cluster: u32, replica: u8, replica_count: u8 }) VSRState {
+            const configuration = vsr.Configuration{ .replica_count = options.replica_count };
             return .{
                 .replica = options.replica,
                 .replica_count = options.replica_count,
-                .commit_min_checksum = vsr.Header.root_prepare(options.cluster).checksum,
+                .commit_min_checksum = vsr.Header.root_prepare(options.cluster, &configuration).checksum,
                 .commit_min = 0,
                 .commit_max = 0,
                 .log_view = 0,
@@ -672,6 +673,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.working.set_checksum();
 
+            const configuration = vsr.Configuration{ .replica_count = options.replica_count };
             context.* = .{
                 .superblock = superblock,
                 .callback = callback,
@@ -681,7 +683,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .replica = options.replica,
                     .replica_count = options.replica_count,
                 }),
-                .vsr_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
+                .vsr_headers = vsr.Headers.ViewChangeArray.root(options.cluster, &configuration),
             };
 
             // TODO At a higher layer, we must:
@@ -1208,13 +1210,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 }
 
                 if (context.caller == .format) {
+                    const configuration = vsr.Configuration {
+                        .replica_count = working.vsr_state.replica_count
+                    };
                     assert(working.sequence == 1);
                     assert(working.storage_size == data_file_size_min);
                     assert(working.manifest_size == 0);
                     assert(working.free_set_size == 0);
                     assert(working.client_table_size == 4);
                     assert(working.vsr_state.commit_min_checksum ==
-                        vsr.Header.root_prepare(working.cluster).checksum);
+                        vsr.Header.root_prepare(working.cluster, &configuration).checksum);
                     assert(working.vsr_state.commit_min == 0);
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);

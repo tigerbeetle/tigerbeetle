@@ -194,8 +194,9 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
             errdefer for (clients) |*c| c.deinit(allocator);
 
+            const configuration = vsr.Configuration{ .replica_count = options.replica_count };
             var state_checker =
-                try StateChecker.init(allocator, options.cluster_id, replicas, clients);
+                try StateChecker.init(allocator, options.cluster_id, &configuration, replicas, clients);
             errdefer state_checker.deinit();
 
             var storage_checker = StorageChecker.init(allocator);
