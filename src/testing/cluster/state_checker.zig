@@ -36,10 +36,11 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         pub fn init(
             allocator: mem.Allocator,
             cluster: u32,
+            configuration: *const vsr.Configuration,
             replicas: []const Replica,
             clients: []const Client,
         ) !Self {
-            const root_prepare = vsr.Header.root_prepare(cluster);
+            const root_prepare = vsr.Header.root_prepare(cluster, configuration);
 
             var commits = Commits.init(allocator);
             errdefer commits.deinit();

@@ -1182,9 +1182,9 @@ test "Headers.ViewChangeSlice.view_for_op" {
 const ViewChangeHeadersArray = struct {
     array: Headers.Array,
 
-    pub fn root(cluster: u32) ViewChangeHeadersArray {
+    pub fn root(cluster: u32, configuration: *const Configuration) ViewChangeHeadersArray {
         var array = Headers.Array{ .buffer = undefined };
-        array.appendAssumeCapacity(Header.root_prepare(cluster));
+        array.appendAssumeCapacity(Header.root_prepare(cluster, configuration));
         return ViewChangeHeadersArray.init(array);
     }
 

@@ -1533,7 +1533,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             if (journal.faulty.count > 0 and replica.solo()) @panic("WAL is corrupt");
 
             if (journal.headers[0].op == 0 and journal.headers[0].command == .prepare) {
-                assert(journal.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
+                const configuration = vsr.Configuration{ .replica_count = replica.replica_count };
+                assert(journal.headers[0].checksum == Header.root_prepare(replica.cluster, &configuration).checksum);
                 assert(!journal.faulty.bit(Slot{ .index = 0 }));
             }
 
@@ -2361,7 +2362,7 @@ pub const BitSet = struct {
 ///
 /// `offset_logical` is relative to the beginning of the `wal_headers` zone.
 /// Returns the number of bytes written to `target`.
-pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize {
+pub fn format_wal_headers(cluster: u32, configuration: *const vsr.Configuration, offset_logical: u64, target: []u8) usize {
     assert(offset_logical <= constants.journal_size_headers);
     assert(offset_logical % constants.sector_size == 0);
     assert(target.len > 0);
@@ -2375,7 +2376,7 @@ pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize
     for (headers[0..headers_count]) |*header, i| {
         const slot = @divExact(offset_logical, @sizeOf(Header)) + i;
         if (slot == 0 and i == 0) {
-            header.* = Header.root_prepare(cluster);
+            header.* = Header.root_prepare(cluster, configuration);
             assert(header.op == 0);
             assert(header.command == .prepare);
             assert(header.operation == .root);
@@ -2395,7 +2396,7 @@ test "format_wal_headers" {
 ///
 /// `offset_logical` is relative to the beginning of the `wal_prepares` zone.
 /// Returns the number of bytes written to `target`.
-pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usize {
+pub fn format_wal_prepares(cluster: u32, configuration: *const vsr.Configuration, offset_logical: u64, target: []u8) usize {
     assert(offset_logical <= constants.journal_size_prepares);
     assert(offset_logical % constants.sector_size == 0);
     assert(target.len > 0);
@@ -2422,7 +2423,7 @@ pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usiz
                 // The header goes in the first sector of the message.
                 var sector_header = std.mem.bytesAsValue(Header, sector_data[0..@sizeOf(Header)]);
                 if (message_slot == 0) {
-                    sector_header.* = Header.root_prepare(cluster);
+                    sector_header.* = Header.root_prepare(cluster, configuration);
                 } else {
                     sector_header.* = Header.reserved(cluster, message_slot);
                 }
