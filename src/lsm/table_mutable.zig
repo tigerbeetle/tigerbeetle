@@ -775,7 +775,9 @@ pub fn HeapTreeType(comptime Table: type) type {
         }
 
         pub fn get(tree: *const Tree, key: Key) ?*const Value {
-            return map_find(&tree.list.slice(), key);
+            const slice = tree.list.slice();
+            const entry = map_entry(&slice, key);
+            return map_get(&slice, entry);
         }
 
         pub const Entry = struct {
@@ -785,13 +787,14 @@ pub fn HeapTreeType(comptime Table: type) type {
 
         pub fn get_or_put(tree: *Tree, key: Key) Entry {
             var slice = tree.list.slice();
-            if (map_find(&slice, key)) |value| return .{ .value = value, .exists = true };
+            const entry = map_entry(&slice, key);
+            if (map_get(&slice, entry)) |value| return .{ .value = value, .exists = true };
 
             const slot = @intCast(u32, tree.list.addOneAssumeCapacity());
             slice.len += 1;
 
+            map_set(&slice, entry, slot);
             heap_push(&slice, key, slot);
-            map_insert(&slice, key, slot);
             return .{ .value = &slice.items(.value)[slot], .exists = false };
         }
 
@@ -870,7 +873,7 @@ pub fn HeapTreeType(comptime Table: type) type {
             mem.set(u8, tags, 0);
         }
 
-        fn map_insert(slice: *const List.Slice, key: Key, slot: u32) void {
+        fn map_entry(slice: *const List.Slice, key: Key) u64 {
             const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
             const slots = slice.items(.map).ptr[0..slice.capacity];
             const tags = slice.items(.tag).ptr[0..slice.capacity];
@@ -878,27 +881,25 @@ pub fn HeapTreeType(comptime Table: type) type {
 
             var pos = @intCast(u32, hash % value_count_max);
             while (true) : (pos = (pos + 1) % @intCast(u32, value_count_max)) {
-                if (tags[pos] == 0) {
-                    slots[pos] = slot;
-                    tags[pos] = tag;
-                    return;
-                }
+                const result = (@as(u64, pos) << 8) | tag;
+                if (tags[pos] == 0) return result - 1;
+                if (tags[pos] != tag) continue;
+
+                const value = &slice.items(.value)[slots[pos]];
+                if (compare_keys(key, key_from_value(value)) == .eq) return result;
             }
         }
 
-        fn map_find(slice: *const List.Slice, key: Key) ?*Value {
-            const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
-            const slots = slice.items(.map).ptr[0..slice.capacity];
-            const tags = slice.items(.tag).ptr[0..slice.capacity];
-            const tag = (@truncate(u8, hash) << 1) | 1;
+        fn map_get(slice: *const List.Slice, entry: u64) ?*Value {
+            if (entry & 1 == 0) return null;
+            const slot = slice.items(.map).ptr[0..slice.capacity][entry >> 8];
+            return &slice.items(.value)[slot];
+        }
 
-            var pos = @intCast(u32, hash % value_count_max);
-            while (true) : (pos = (pos + 1) % @intCast(u32, value_count_max)) {
-                if (tags[pos] == 0) return null;
-                if (tags[pos] != tag) continue;
-                const value = &slice.items(.value)[slots[pos]];
-                if (compare_keys(key, key_from_value(value)) == .eq) return value;
-            }
+        fn map_set(slice: *const List.Slice, entry: u64, slot: u32) void {
+            assert(entry & 1 == 0);
+            slice.items(.map).ptr[0..slice.capacity][entry >> 8] = slot;
+            slice.items(.tag).ptr[0..slice.capacity][entry >> 8] = @truncate(u8, entry) | 1;
         }
     };
 }
