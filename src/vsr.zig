@@ -46,6 +46,10 @@ pub const Version: u8 = 0;
 
 pub const ProcessType = enum { replica, client };
 
+pub const Configuration = extern struct {
+    replica_count: u8,
+};
+
 pub const Zone = enum {
     superblock,
     wal_headers,
@@ -693,12 +697,14 @@ pub const Header = extern struct {
         return header;
     }
 
-    pub fn root_prepare(cluster: u32) Header {
+    pub fn root_prepare(cluster: u32, configuration: *const Configuration) Header {
+        const configuration_checksum = checksum(std.mem.asBytes(configuration));
         var header = Header{
             .cluster = cluster,
             .size = @sizeOf(Header),
             .command = .prepare,
             .operation = .root,
+            .context = configuration_checksum,
         };
         header.set_checksum_body(&[0]u8{});
         header.set_checksum();
