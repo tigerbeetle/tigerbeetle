@@ -744,6 +744,7 @@ pub fn HeapTreeType(comptime Table: type) type {
             value: Value,
             heap: u32,
             map: u32,
+            tag: u8,
         });
 
         list: List,
@@ -865,18 +866,21 @@ pub fn HeapTreeType(comptime Table: type) type {
         }
 
         fn map_clear(slice: *const List.Slice) void {
-            const slots = slice.items(.map).ptr[0..slice.capacity];
-            mem.set(u32, slots, 0);
+            const tags = slice.items(.tag).ptr[0..slice.capacity];
+            mem.set(u8, tags, 0);
         }
 
         fn map_insert(slice: *const List.Slice, key: Key, slot: u32) void {
             const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
             const slots = slice.items(.map).ptr[0..slice.capacity];
+            const tags = slice.items(.tag).ptr[0..slice.capacity];
+            const tag = (@truncate(u8, hash) << 1) | 1;
 
             var pos = @intCast(u32, hash % value_count_max);
             while (true) : (pos = (pos + 1) % @intCast(u32, value_count_max)) {
-                if (slots[pos] == 0) {
-                    slots[pos] = slot + 1;
+                if (tags[pos] == 0) {
+                    slots[pos] = slot;
+                    tags[pos] = tag;
                     return;
                 }
             }
@@ -885,11 +889,14 @@ pub fn HeapTreeType(comptime Table: type) type {
         fn map_find(slice: *const List.Slice, key: Key) ?*Value {
             const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
             const slots = slice.items(.map).ptr[0..slice.capacity];
+            const tags = slice.items(.tag).ptr[0..slice.capacity];
+            const tag = (@truncate(u8, hash) << 1) | 1;
 
             var pos = @intCast(u32, hash % value_count_max);
             while (true) : (pos = (pos + 1) % @intCast(u32, value_count_max)) {
-                const slot = std.math.sub(u32, slots[pos], 1) catch return null;
-                const value = &slice.items(.value)[slot];
+                if (tags[pos] == 0) return null;
+                if (tags[pos] != tag) continue;
+                const value = &slice.items(.value)[slots[pos]];
                 if (compare_keys(key, key_from_value(value)) == .eq) return value;
             }
         }
