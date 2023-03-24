@@ -222,7 +222,7 @@ pub fn TableMutableTreeType(
 
     return struct {
         const TableMutable = @This();
-        const Tree = TreeType(Key, Value, key_from_value, compare_keys);
+        const Tree = TreeType(Table);
 
         pub const ValuesCache = ValuesCacheType(Table, tree_name);
 
@@ -353,17 +353,18 @@ pub fn TableMutableTreeType(
             }
 
             assert(table.count() == 0);
+            table.value_count_worst_case = 0;
             return values_max[0..i];
         }
     };
 }
 
-pub fn AATreeType(
-    comptime Key: type,
-    comptime Value: type,
-    comptime key_from_value: fn (value: *const Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (key: Key, key: Key) callconv(.Inline) math.Order,
-) type {
+pub fn AATreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+
     const List = std.MultiArrayList(struct {
         value: Value,
         links: [2]u32,
@@ -508,12 +509,12 @@ pub fn AATreeType(
     };
 }
 
-pub fn RBTreeType(
-    comptime Key: type,
-    comptime Value: type,
-    comptime key_from_value: fn (value: *const Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (key: Key, key: Key) callconv(.Inline) math.Order,
-) type {
+pub fn RBTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+
     return struct {
         const Tree = @This();
 
@@ -726,5 +727,171 @@ pub fn RBTreeType(
                 return &slice.items(.value)[slot];
             }
         };
+    };
+}
+
+pub fn HeapTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const value_count_max = Table.value_count_max;
+    const tombstone_from_key = Table.tombstone_from_key;
+
+    return struct {
+        const Tree = @This();
+        const List = std.MultiArrayList(struct {
+            value: Value,
+            heap: u32,
+            map: u32,
+        });
+
+        list: List,
+
+        pub fn init(allocator: mem.Allocator, max_entries: u32) !Tree {
+            assert(max_entries == value_count_max);
+
+            var list = List{};
+            try list.ensureTotalCapacity(allocator, max_entries);
+            errdefer list.deinit(allocator);
+
+            var tree = Tree{ .list = list };
+            tree.clear();
+            return tree;
+        }
+
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.list.deinit(allocator);
+        }
+
+        pub fn count(tree: *const Tree) u32 {
+            return @intCast(u32, tree.list.len);
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.list.shrinkRetainingCapacity(0);
+            map_clear(&tree.list.slice());
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            return map_find(&tree.list.slice(), key);
+        }
+
+        pub const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn get_or_put(tree: *Tree, key: Key) Entry {
+            var slice = tree.list.slice();
+            if (map_find(&slice, key)) |value| return .{ .value = value, .exists = true };
+
+            const slot = @intCast(u32, tree.list.addOneAssumeCapacity());
+            slice.len += 1;
+
+            heap_push(&slice, key, slot);
+            map_insert(&slice, key, slot);
+            return .{ .value = &slice.items(.value)[slot], .exists = false };
+        }
+
+        pub fn iterate_then_clear(tree: *Tree) Iterator {
+            return .{ .tree = tree, .heap_size = tree.count() };
+        }
+
+        pub const Iterator = struct {
+            tree: *Tree,
+            heap_size: u32,
+
+            pub fn next(it: *Iterator) ?*const Value {
+                const slice = it.tree.list.slice();
+                return heap_pop(&slice, &it.heap_size) orelse {
+                    it.tree.clear();
+                    return null;
+                };
+            }
+        };
+
+        fn heap_push(slice: *const List.Slice, key: Key, slot: u32) void {
+            const heap = slice.items(.heap);
+            const values = slice.items(.value);
+
+            var current = slot;
+            heap[current] = slot;
+            values[current] = tombstone_from_key(key);
+
+            while (true) {
+                const next = std.math.sub(u32, current, 1) catch break;
+                const parent = next >> 1;
+
+                const parent_key = key_from_value(&values[heap[parent]]);
+                const current_key = key_from_value(&values[heap[current]]);
+                if (compare_keys(parent_key, current_key) != .gt) break;
+
+                mem.swap(u32, &heap[current], &heap[parent]);
+                current = parent;
+            }
+        }
+
+        fn heap_pop(slice: *const List.Slice, size: *u32) ?*Value {
+            const end = std.math.sub(u32, size.*, 1) catch return null;
+            size.* = end;
+
+            const heap = slice.items(.heap);
+            const values = slice.items(.value);
+
+            var current: u32 = 0;
+            const value = &values[heap[current]];
+            heap[current] = heap[end];
+
+            while (true) {
+                var smallest = current;
+                const left = (current << 1) + 1;
+                const right = (current << 1) + 2;
+
+                if (left < end and compare_keys(
+                    key_from_value(&values[heap[left]]),
+                    key_from_value(&values[heap[current]]),
+                ) == .lt) smallest = left;
+
+                if (right < end and compare_keys(
+                    key_from_value(&values[heap[right]]),
+                    key_from_value(&values[heap[smallest]]),
+                ) == .lt) smallest = right;
+
+                if (smallest == current) return value;
+                mem.swap(u32, &heap[current], &heap[smallest]);
+                current = smallest;
+            }
+        }
+
+        fn map_clear(slice: *const List.Slice) void {
+            const slots = slice.items(.map).ptr[0..slice.capacity];
+            mem.set(u32, slots, 0);
+        }
+
+        fn map_insert(slice: *const List.Slice, key: Key, slot: u32) void {
+            const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
+            const slots = slice.items(.map).ptr[0..slice.capacity];
+
+            var pos = @intCast(u32, hash % value_count_max);
+            while (true) : (pos = (pos + 1) % @intCast(u32, value_count_max)) {
+                if (slots[pos] == 0) {
+                    slots[pos] = slot + 1;
+                    return;
+                }
+            }
+        }
+
+        fn map_find(slice: *const List.Slice, key: Key) ?*Value {
+            const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
+            const slots = slice.items(.map).ptr[0..slice.capacity];
+
+            var pos = @intCast(u32, hash % value_count_max);
+            while (true) : (pos = (pos + 1) % @intCast(u32, value_count_max)) {
+                const slot = std.math.sub(u32, slots[pos], 1) catch return null;
+                const value = &slice.items(.value)[slot];
+                if (compare_keys(key, key_from_value(value)) == .eq) return value;
+            }
+        }
     };
 }
