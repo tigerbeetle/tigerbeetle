@@ -70,10 +70,11 @@ pub fn main() !void {
     const values = try allocator.alloc(Key.Value, value_count_max);
     defer allocator.free(values);
 
+    // Generate values with .ids in a random order
     var random_id = random.uintLessThanBiased(u64, values.len);
-    for (values) |_| {
+    for (values) |*value| {
         assert(random_id < values.len);
-        values[random_id] = .{
+        value.* = .{
             .id = random_id,
             .value = random.int(u63),
         };
@@ -135,26 +136,22 @@ fn bench(
 
         assert(table_mutable.count() == 0);
         for (values[0..count_max]) |*value, index| {
-            assert(value.id == index);
-
             // Insert the value into TableMutable.
             const put_start = timer.read();
             table_mutable.put(value);
             put_elapsed += timer.read() - put_start;
 
             // Fetch a random, previously inserted, value from TableMutable.
-            const get_index = random.uintAtMostBiased(usize, index);
+            const get_value = &values[random.uintAtMostBiased(usize, index)];
             const get_start = timer.read();
-            const get_result = table_mutable.get(.{ .id = get_index }).?;
+            const get_result = table_mutable.get(.{ .id = get_value.id }).?;
             get_elapsed += timer.read() - get_start;
-            assert(mem.eql(u8, mem.asBytes(get_result), mem.asBytes(&values[get_index])));
+            assert(mem.eql(u8, mem.asBytes(get_result), mem.asBytes(get_value)));
 
             // Fetch a random value that we know will not be in TableMutable.
-            const miss_range = index + 1;
-            if (miss_range >= count_max) continue;
-            const miss_index = random.intRangeLessThanBiased(usize, miss_range, count_max);
+            const miss_id = random.uintAtMostBiased(usize, value_count_max) + value_count_max;
             const miss_start = timer.read();
-            const miss_result = table_mutable.get(.{ .id = miss_index });
+            const miss_result = table_mutable.get(.{ .id = miss_id });
             miss_elapsed += timer.read() - miss_start;
             assert(miss_result == null);
         }
