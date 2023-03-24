@@ -609,6 +609,170 @@ pub fn TableMutableTreeType(
     };
 }
 
+pub fn SkipListTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+
+    return struct {
+        const Tree = @This();
+        const levels_max = 10;
+
+        values: std.ArrayListUnmanaged(Value),
+        slots: std.ArrayListUnmanaged(u32),
+
+        header_ref: u32 = 0,
+        level: u8 = 0,
+        lcg: u32 = 0,
+
+        pub fn init(allocator: mem.Allocator, max_entries: u32) !Tree {
+            var values = try std.ArrayListUnmanaged(Value).initCapacity(allocator, max_entries);
+            errdefer values.deinit(allocator);
+
+            const num_slots = (max_entries + 1) * (1 + levels_max);
+            var slots = try std.ArrayListUnmanaged(u32).initCapacity(allocator, num_slots);
+            errdefer slots.deinit(allocator);
+
+            var tree = Tree{ .values = values, .slots = slots };
+            tree.clear();
+            return tree;
+        }
+
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.slots.deinit(allocator);
+            tree.values.deinit(allocator);
+        }
+
+        fn reserve(tree: *Tree, slot_ref: u32, level: u8) u32 {
+            const node = @intCast(u32, tree.slots.items.len);
+            tree.slots.appendNTimesAssumeCapacity(0, 1 + level + 1);
+            tree.slots.items[node] = slot_ref;
+            return node + 1;
+        }
+
+        fn search(tree: *const Tree, key: Key, update_refs: ?*[levels_max + 1]u32) ?*Value {
+            var level = tree.level;
+            var current_ref = tree.header_ref;
+
+            while (true) {
+                while (true) {
+                    const current = current_ref - 1;
+                    const forward_ref = tree.slots.items[current + 1 + level];
+                    const forward = math.sub(u32, forward_ref, 1) catch break;
+
+                    const slot_ref = tree.slots.items[forward];
+                    const slot = math.sub(u32, slot_ref, 1) catch break;
+
+                    const forward_key = key_from_value(&tree.values.items[slot]);
+                    if (compare_keys(forward_key, key) != .lt) break;
+                    current_ref = forward_ref;
+                }
+
+                if (update_refs) |u| u[level] = current_ref;
+                level = math.sub(u8, level, 1) catch break;
+            }
+
+            const forward_ref = tree.slots.items[(current_ref - 1) + 1];
+            const current = math.sub(u32, forward_ref, 1) catch return null;
+
+            const slot_ref = tree.slots.items[current];
+            const slot = math.sub(u32, slot_ref, 1) catch return null;
+
+            const value = &tree.values.items[slot];
+            if (compare_keys(key, key_from_value(value)) == .eq) return value;
+            return null;
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            return tree.search(key, null);
+        }
+
+        pub const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn get_or_put(tree: *Tree, key: Key) Entry {
+            var update_refs = [_]u32{0} ** (levels_max + 1);
+            if (tree.search(key, &update_refs)) |value| {
+                return .{ .value = value, .exists = true };
+            }
+
+            var rand_level: u8 = 0;
+            while (rand_level < levels_max) : (rand_level += 1) {
+                if (tree.lcg == 0) tree.lcg = 0xdeadbeef; // random seed
+                tree.lcg = (tree.lcg *% 1103515245) +% 12345;
+                if ((tree.lcg >> 31) & 1 == 0) break;
+            }
+
+            if (rand_level > tree.level) {
+                var i: u8 = tree.level + 1;
+                while (i < rand_level + 1) : (i += 1) update_refs[i] = tree.header_ref;
+                tree.level = rand_level;
+            }
+
+            const slot = @intCast(u32, tree.values.items.len);
+            const value = tree.values.addOneAssumeCapacity();
+
+            const slot_ref = slot + 1;
+            const node_ref = tree.reserve(slot_ref, rand_level);
+
+            var i: u8 = 0;
+            while (i <= rand_level) : (i += 1) {
+                const update = update_refs[i] - 1;
+                const forward_link = &tree.slots.items[update + 1 + i];
+
+                const node = node_ref - 1;
+                const node_link = &tree.slots.items[node + 1 + i];
+
+                node_link.* = forward_link.*;
+                forward_link.* = node_ref;
+            }
+
+            return .{ .value = value, .exists = false };
+        }
+
+        pub fn count(tree: *const Tree) u32 {
+            return @intCast(u32, tree.values.items.len);
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.values.clearRetainingCapacity();
+            tree.slots.clearRetainingCapacity();
+
+            tree.level = 0;
+            tree.header_ref = tree.reserve(0, levels_max);
+        }
+
+        pub fn iterate_then_clear(tree: *Tree) Iterator {
+            const header = tree.header_ref - 1;
+            const node_ref = tree.slots.items[header + 1];
+            return .{ .tree = tree, .node_ref = node_ref };
+        }
+
+        pub const Iterator = struct {
+            tree: *Tree,
+            node_ref: u32,
+
+            pub fn next(it: *Iterator) ?*const Value {
+                while (true) {
+                    const node = math.sub(u32, it.node_ref, 1) catch {
+                        it.tree.clear();
+                        return null;
+                    };
+
+                    const forward_ref = it.tree.slots.items[node + 1];
+                    it.node_ref = forward_ref;
+
+                    const slot_ref = it.tree.slots.items[node];
+                    return &it.tree.values.items[slot_ref - 1];
+                }
+            }
+        };
+    };
+}
+
 pub fn AATreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
