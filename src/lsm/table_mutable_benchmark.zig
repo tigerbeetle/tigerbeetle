@@ -88,6 +88,7 @@ pub fn main() !void {
     const tm = @import("table_mutable.zig");
     inline for (.{
         .{ "std.HashMap", tm.TableMutableType(Table, "") },
+        .{ "MinHeap", tm.TableMutableTreeType(Table, "", tm.HeapTreeType) },
         .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
         .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
     }) |setup| {
