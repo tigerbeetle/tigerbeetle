@@ -138,6 +138,7 @@ pub fn build(b: *std.build.Builder) void {
         const tb_client_header = b.addExecutable("tb_client_header", "src/clients/c/tb_client_header.zig");
         tb_client_header.addOptions("vsr_options", options);
         tb_client_header.setMainPkgPath("src");
+        tb_client_header.setTarget(target);
         break :blk tb_client_header.run();
     };
 
@@ -175,6 +176,7 @@ pub fn build(b: *std.build.Builder) void {
         }) |demo| {
             const demo_exe = b.addExecutable(demo, "src/demos/" ++ demo ++ ".zig");
             demo_exe.addPackage(vsr_package);
+            demo_exe.setTarget(target);
             test_step.dependOn(&demo_exe.step);
         }
     }
@@ -244,6 +246,8 @@ pub fn build(b: *std.build.Builder) void {
 
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
+        // Ensure that we get stack traces even in release builds.
+        simulator.omit_frame_pointer = false;
         simulator.addOptions("vsr_options", options);
         simulator.addOptions("vsr_simulator_options", simulator_options);
         link_tracer_backend(simulator, tracer_backend, target);

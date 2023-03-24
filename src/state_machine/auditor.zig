@@ -3,6 +3,7 @@
 //!
 //! The Auditor expects replies in ascending commit order.
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_auditor);
 
@@ -235,9 +236,8 @@ pub const AccountingAuditor = struct {
             assert(!cr.debits_exceed_credits(0));
             assert(!cr.credits_exceed_debits(0));
 
-            // TODO(Timeouts): When timeouts are implemented in the StateMachine, remove this panic.
-            // In the mean time, if the VOPR hits this error, just ignore it.
-            @panic("tick_to_timestamp: timeouts are not implemented in the StateMachine yet");
+            // TODO(Timeouts): When timeouts are implemented in the StateMachine, remove this unimplemented.
+            stdx.unimplemented("timeouts");
         }
 
         self.timestamp = timestamp;

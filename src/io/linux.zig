@@ -22,6 +22,9 @@ pub const IO = struct {
     /// Completions that are ready to have their callbacks run.
     completed: FIFO(Completion) = .{ .name = "io_completed" },
 
+    ios_queued: u64 = 0,
+    ios_in_kernel: u64 = 0,
+
     flush_tracer_slot: ?tracer.SpanStart = null,
     callback_tracer_slot: ?tracer.SpanStart = null,
 
@@ -93,6 +96,15 @@ pub const IO = struct {
             linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
             timeout_sqe.user_data = 0;
             timeouts += 1;
+
+            // We don't really want to count this timeout as an io,
+            // but it's tricky to track separately.
+            self.ios_queued += 1;
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_queued" } },
+                @intToFloat(f64, self.ios_queued),
+            );
+
             // The amount of time this call will block is bounded by the timeout we just submitted:
             try self.flush(1, &timeouts, &etime);
         }
@@ -153,6 +165,8 @@ pub const IO = struct {
             };
             if (completed > wait_remaining) wait_remaining = 0 else wait_remaining -= completed;
             for (cqes[0..completed]) |cqe| {
+                self.ios_in_kernel -= 1;
+
                 if (cqe.user_data == 0) {
                     timeouts.* -= 1;
                     // We are only done if the timeout submitted was completed due to time, not if
@@ -170,13 +184,19 @@ pub const IO = struct {
                 // * confusing stack traces.
                 self.completed.push(completion);
             }
+
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_in_kernel" } },
+                @intToFloat(f64, self.ios_in_kernel),
+            );
+
             if (completed < cqes.len) break;
         }
     }
 
     fn flush_submissions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
         while (true) {
-            _ = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
+            const submitted = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
                 error.SignalInterrupt => continue,
                 // Wait for some completions and then try again:
                 // See https://github.com/axboe/liburing/issues/281 re: error.SystemResources.
@@ -188,6 +208,18 @@ pub const IO = struct {
                 },
                 else => return err,
             };
+
+            self.ios_queued -= submitted;
+            self.ios_in_kernel += submitted;
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_queued" } },
+                @intToFloat(f64, self.ios_queued),
+            );
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_in_kernel" } },
+                @intToFloat(f64, self.ios_in_kernel),
+            );
+
             break;
         }
     }
@@ -200,6 +232,12 @@ pub const IO = struct {
             },
         };
         completion.prep(sqe);
+
+        self.ios_queued += 1;
+        tracer.plot(
+            .{ .queue_count = .{ .queue_name = "io_queued" } },
+            @intToFloat(f64, self.ios_queued),
+        );
     }
 
     /// This struct holds the data needed for a single io_uring operation

@@ -99,6 +99,8 @@ const TransferBatch = struct {
 
 /// Indexes: [valid:bool][limit:bool][method]
 const transfer_templates = table: {
+    @setEvalBranchQuota(2000);
+
     const SNGL = @enumToInt(TransferPlan.Method.single_phase);
     const PEND = @enumToInt(TransferPlan.Method.pending);
     const POST = @enumToInt(TransferPlan.Method.post_pending);
@@ -408,15 +410,20 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     {
                         // Convert the previous transfer to a single-phase no-limit transfer, but
                         // link it to the current transfer — it will still fail.
-                        _ = self.build_transfer(transfers[i - 1].id, .{
+                        const result_set_opt = self.build_transfer(transfers[i - 1].id, .{
                             .valid = true,
                             .limit = false,
                             .method = .single_phase,
                         }, &transfers[i - 1]);
-                        transfers[i - 1].flags.linked = true;
-                        results[i - 1] = accounting_auditor.CreateTransferResultSet.init(.{
-                            .linked_event_failed = true,
-                        });
+                        if (result_set_opt) |result_set| {
+                            assert(result_set.count() == 1);
+                            assert(result_set.contains(.ok));
+
+                            transfers[i - 1].flags.linked = true;
+                            results[i - 1] = accounting_auditor.CreateTransferResultSet.init(.{
+                                .linked_event_failed = true,
+                            });
+                        }
                     }
                 }
                 assert(results[i].count() > 0);

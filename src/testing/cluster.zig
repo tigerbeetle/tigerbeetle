@@ -191,7 +191,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     &client_pools[i],
                     .{ .network = network },
                 );
-                network.link(client.message_bus.process, &client.message_bus);
             }
             errdefer for (clients) |*c| c.deinit(allocator);
 
@@ -261,6 +260,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             for (clients) |*client| {
                 client.on_reply_context = cluster;
                 client.on_reply_callback = client_on_reply;
+                network.link(client.message_bus.process, &client.message_bus);
             }
 
             return cluster;

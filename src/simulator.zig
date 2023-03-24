@@ -26,7 +26,7 @@ const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
 /// The `log` namespace in this root file is required to implement our custom `log` function.
-const output = std.log.scoped(.state_checker);
+pub const output = std.log.scoped(.state_checker);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
@@ -219,9 +219,9 @@ pub fn main() !void {
         cluster_options.storage.write_latency_mean,
         cluster_options.storage.read_fault_probability,
         cluster_options.storage.write_fault_probability,
-        simulator_options.replica_crash_probability * 100,
+        simulator_options.replica_crash_probability,
         simulator_options.replica_crash_stability,
-        simulator_options.replica_restart_probability * 100,
+        simulator_options.replica_restart_probability,
         simulator_options.replica_restart_stability,
     });
 
@@ -319,7 +319,7 @@ pub const Simulator = struct {
         simulator.cluster.deinit();
     }
 
-    pub fn done(simulator: *Simulator) bool {
+    pub fn done(simulator: *const Simulator) bool {
         assert(simulator.requests_sent <= simulator.options.requests_max);
 
         for (simulator.cluster.replica_health) |health| {
@@ -467,17 +467,32 @@ pub const Simulator = struct {
             const stability = simulator.replica_stability[replica.replica];
             if (stability > 0) continue;
 
+            const replica_storage = &simulator.cluster.storages[replica.replica];
             switch (simulator.cluster.replica_health[replica.replica]) {
                 .up => {
-                    const storage = &simulator.cluster.storages[replica.replica];
-                    const replica_writes = storage.writes.count();
+                    const replica_writes = replica_storage.writes.count();
                     const crash_probability = simulator.options.replica_crash_probability *
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
                     if (!chance_f64(simulator.random, crash_probability)) continue;
 
-                    const fault = recoverable_count > recoverable_count_min or replica.standby();
-                    replica.superblock.storage.faulty = fault;
+                    log_simulator.debug("{}: crash replica", .{replica.replica});
+                    simulator.cluster.crash_replica(replica.replica);
 
+                    recoverable_count -=
+                        @boolToInt(replica.status == .recovering_head and !replica.standby());
+
+                    simulator.replica_stability[replica.replica] =
+                        simulator.options.replica_crash_stability;
+                },
+                .down => {
+                    if (!chance_f64(
+                        simulator.random,
+                        simulator.options.replica_restart_probability,
+                    )) {
+                        continue;
+                    }
+
+                    const fault = recoverable_count > recoverable_count_min or replica.standby();
                     if (!fault) {
                         // The journal writes redundant headers of faulty ops as zeroes to ensure
                         // that they remain faulty after a crash/recover. Since that fault cannot
@@ -486,31 +501,25 @@ pub const Simulator = struct {
                         // See recover_slots() for more detail.
                         const offset = vsr.Zone.wal_headers.offset(0);
                         const size = vsr.Zone.wal_headers.size().?;
-                        const headers_bytes = storage.memory[offset..][0..size];
+                        const headers_bytes = replica_storage.memory[offset..][0..size];
                         const headers = mem.bytesAsSlice(vsr.Header, headers_bytes);
                         for (headers) |*h, slot| {
-                            if (h.checksum == 0) h.* = storage.wal_prepares()[slot].header;
+                            if (h.checksum == 0) h.* = replica_storage.wal_prepares()[slot].header;
                         }
                     }
 
-                    log_simulator.debug("{}: crash replica (faults={})", .{ replica.replica, fault });
-                    simulator.cluster.crash_replica(replica.replica);
-                    replica.superblock.storage.faulty = true;
+                    log_simulator.debug("{}: restart replica (faults={})", .{
+                        replica.replica,
+                        fault,
+                    });
 
-                    recoverable_count -=
-                        @boolToInt(replica.status == .recovering_head and !replica.standby());
+                    replica_storage.faulty = fault;
+                    simulator.cluster.restart_replica(replica.replica) catch unreachable;
                     assert(replica.status != .recovering_head or fault);
 
+                    replica_storage.faulty = true;
                     simulator.replica_stability[replica.replica] =
-                        simulator.options.replica_crash_stability;
-                },
-                .down => {
-                    if (chance_f64(simulator.random, simulator.options.replica_restart_probability)) {
-                        simulator.cluster.restart_replica(replica.replica) catch unreachable;
-                        log_simulator.debug("{}: restart replica", .{replica.replica});
-                        simulator.replica_stability[replica.replica] =
-                            simulator.options.replica_restart_stability;
-                    }
+                        simulator.options.replica_restart_stability;
                 },
             }
         }

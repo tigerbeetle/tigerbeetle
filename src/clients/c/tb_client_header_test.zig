@@ -34,7 +34,7 @@ fn to_snakecase(comptime input: []const u8) []const u8 {
 }
 
 test "valid tb_client.h" {
-    @setEvalBranchQuota(10_000);
+    @setEvalBranchQuota(20_000);
 
     inline for (.{
         .{ tb.Account, "tb_account_t" },
