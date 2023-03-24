@@ -123,7 +123,7 @@ First provision TigerBeetle's data directory.
 
 ```bash
 $ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
-    format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+    format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
 ```

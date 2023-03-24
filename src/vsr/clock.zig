@@ -160,13 +160,9 @@ pub fn ClockType(comptime Time: type) type {
         /// * the remote replica's `realtime()` timestamp `t1`, and
         /// * our monotonic timestamp `m2` as captured by our `Replica.on_pong()` handler.
         pub fn learn(self: *Self, replica: u8, m0: u64, t1: i64, m2: u64) void {
-            if (self.synchronization_disabled) return;
+            assert(replica != self.replica);
 
-            // A network routing fault must have replayed one of our outbound messages back against us:
-            if (replica == self.replica) {
-                log.warn("{}: learn: replica == self.replica", .{self.replica});
-                return;
-            }
+            if (self.synchronization_disabled) return;
 
             // Our m0 and m2 readings should always be monotonically increasing if not equal.
             // Crucially, it is possible for a very fast network to have m0 == m2, especially where
