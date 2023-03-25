@@ -283,6 +283,116 @@ pub fn HashMapTreeType(comptime Table: type) type {
     };
 }
 
+pub fn HashMapSlotSortTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const value_count_max = Table.value_count_max;
+    const tombstone_from_key = Table.tombstone_from_key;
+
+    return struct {
+        const Tree = @This();
+
+        const load_factor = 50;
+        const Map = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
+        const Slots = std.ArrayListUnmanaged(u32);
+
+        map: Map,
+        slots: Slots,
+
+        pub fn init(allocator: mem.Allocator) !Tree {
+            var map: Map = .{};
+            try map.ensureTotalCapacity(allocator, value_count_max);
+            errdefer map.deinit(allocator);
+
+            var slots = try Slots.initCapacity(allocator, value_count_max);
+            errdefer slots.deinit(allocator);
+
+            return Tree{ .map = map, .slots = slots };
+        }
+
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.slots.deinit(allocator);
+            tree.map.deinit(allocator);
+        }
+
+        pub fn count(tree: *const Tree) u32 {
+            return tree.map.count();
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.map.clearRetainingCapacity();
+            tree.slots.clearRetainingCapacity();
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            return tree.map.getKeyPtr(tombstone_from_key(key));
+        }
+
+        pub const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn upsert(tree: *Tree, key: Key) Entry {
+            const result = tree.map.getOrPutAssumeCapacity(tombstone_from_key(key));
+
+            if (!result.found_existing) {
+                const slot = tree.slots.addOneAssumeCapacity();
+                const offset = @ptrToInt(result.key_ptr) - @ptrToInt(tree.map.keyIterator().items);
+                slot.* = @intCast(u32, offset / @sizeOf(Value));
+            }
+
+            return .{ .value = result.key_ptr, .exists = result.found_existing };
+        }
+
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+            return .{ .tree = tree, .keys = tree.map.keyIterator(), .values_max = values_max };
+        }
+
+        pub const Iterator = struct {
+            tree: *Tree,
+            keys: Map.KeyIterator,
+            add: u32 = 0,
+            values_max: []Value,
+
+            fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
+                return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
+            }
+
+            pub fn next(it: *Iterator) ?*const Value {
+                if (it.keys.next()) |value| {
+                    it.add += 1;
+                    return value;
+                }
+
+                const SortContext = struct {
+                    values: [*]const Value,
+
+                    fn less_than(context: @This(), a_slot: u32, b_slot: u32) bool {
+                        const a_key = key_from_value(&context.values[a_slot]);
+                        const b_key = key_from_value(&context.values[b_slot]);
+                        return compare_keys(a_key, b_key) == .lt;
+                    }
+                };
+
+                it.keys = it.tree.map.keyIterator();
+                const context = SortContext{ .values = it.keys.items };
+                const slots = it.tree.slots.items;
+                std.sort.sort(u32, slots, context, SortContext.less_than);
+
+                assert(it.add == it.tree.count());
+                it.tree.clear();
+                assert(it.tree.count() == 0);
+
+                return null;
+            }
+        };
+    };
+}
+
 pub fn SlotMapTreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
