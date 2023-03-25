@@ -378,15 +378,16 @@ pub fn HashMapSlotSortTreeType(comptime Table: type) type {
                     }
                 };
 
-                it.keys = it.tree.map.keyIterator();
-                const context = SortContext{ .values = it.keys.items };
-                const slots = it.tree.slots.items;
-                std.sort.sort(u32, slots, context, SortContext.less_than);
-
                 assert(it.add == it.tree.count());
+                it.keys = it.tree.map.keyIterator();
+
+                const slots = it.tree.slots.items;
+                const context = SortContext{ .values = it.keys.items };
+                std.sort.sort(u32, slots, context, SortContext.less_than);
+                for (slots) |slot, i| it.values_max[i] = context.values[slot];
+
                 it.tree.clear();
                 assert(it.tree.count() == 0);
-
                 return null;
             }
         };
