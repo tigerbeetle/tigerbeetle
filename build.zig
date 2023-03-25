@@ -617,6 +617,11 @@ fn node_client(
         build_step.dependOn(dependency);
     }
 
+    const bindings = b.addExecutable("node_bindings", "src/clients/node/node_bindings.zig");
+    bindings.addOptions("vsr_options", options);
+    bindings.setMainPkgPath("src");
+    const bindings_step = bindings.run();
+
     // Zig cross-targets
     const platforms = .{
         "x86_64-linux-gnu",
@@ -651,6 +656,7 @@ fn node_client(
         lib.addOptions("vsr_options", options);
         link_tracer_backend(lib, tracer_backend, cross_target);
 
+        lib.step.dependOn(&bindings_step.step);
         build_step.dependOn(&lib.step);
     }
 }
