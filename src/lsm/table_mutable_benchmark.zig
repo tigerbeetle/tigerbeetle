@@ -89,6 +89,7 @@ pub fn main() !void {
     const tm = @import("table_mutable.zig");
     inline for (.{
         .{ "std.HashMap", tm.TableMutableTreeType(Table, "", tm.HashMapTreeType) },
+        .{ "HashMapSlotSort", tm.TableMutableTreeType(Table, "", tm.HashMapSlotSortTreeType) },
         .{ "SlotMap", tm.TableMutableTreeType(Table, "", tm.SlotMapTreeType) },
         .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
         .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
