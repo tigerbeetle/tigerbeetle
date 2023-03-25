@@ -438,40 +438,36 @@ pub fn RobinHoodTreeType(comptime Table: type) type {
     return struct {
         const Tree = @This();
 
-        const Probe = u8;
-        const Hash = u24;
-        const Tag = packed struct {
-            probe: Probe = 0,
-            hash: Hash = 0,
-        };
+        comptime {
+            assert(value_count_max < std.math.maxInt(u24));
+        }
 
         const Values = std.ArrayListUnmanaged(Value);
-        const List = std.MultiArrayList(struct {
-            slot: u32,
-            tag: Tag,
-        });
+        const Slot = packed struct {
+            probe: u8 align(@alignOf(u32)) = 0,
+            ref: u24 = 0,
+        };
 
         const capacity = @intCast(u32, value_count_max);
-        const slot_capacity = capacity * 2;
+        const slot_capacity = math.ceilPowerOfTwo(u32, capacity * 2) catch unreachable;
 
         values: Values,
-        list: List,
+        slots: []Slot,
 
         pub fn init(allocator: mem.Allocator) !Tree {
             var values = try Values.initCapacity(allocator, value_count_max);
             errdefer values.deinit(allocator);
 
-            var list = List{};
-            try list.ensureTotalCapacity(allocator, slot_capacity);
-            errdefer list.deinit(allocator);
+            const slots = try allocator.alloc(Slot, slot_capacity);
+            errdefer allocator.free(slots);
 
-            var tree = Tree{ .values = values, .list = list };
+            var tree = Tree{ .values = values, .slots = slots };
             tree.clear();
             return tree;
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            tree.list.deinit(allocator);
+            allocator.free(tree.slots);
             tree.values.deinit(allocator);
         }
 
@@ -481,7 +477,7 @@ pub fn RobinHoodTreeType(comptime Table: type) type {
 
         pub fn clear(tree: *Tree) void {
             tree.values.clearRetainingCapacity();
-            mem.set(Tag, tree.list.items(.tag).ptr[0..slot_capacity], Tag{});
+            mem.set(Slot, tree.slots, Slot{});
         }
 
         inline fn reduce(comptime Int: type, hash: u64, comptime range: ?comptime_int) Int {
@@ -490,29 +486,37 @@ pub fn RobinHoodTreeType(comptime Table: type) type {
             return @truncate(Int, v % r);
         }
 
-        pub fn get(tree: *const Tree, key: Key) ?*const Value {
-            const slice = tree.list.slice();
-            const tags = slice.items(.tag).ptr[0..slot_capacity];
-            const slots = slice.items(.slot).ptr[0..slot_capacity];
-            const key_hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
-
-            const hash = reduce(Hash, key_hash, null);
-            assert(hash != 0);
-
-            var probe: Probe = 0;
-            var index = reduce(u32, key_hash, slot_capacity);
+        inline fn search(tree: *const Tree, key: Key, comptime reserve: bool) ?*Value {
+            const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
+            const new_ref = @intCast(u24, tree.values.items.len) + 1;
+            var new_slot = Slot{ .probe = 0, .ref = new_ref };
+            var index = reduce(u32, hash, slot_capacity);
 
             while (true) {
-                const tag = tags[index];
-                if (tag.hash == hash) {
-                    const value = &tree.values.items[slots[index]];
+                const slot = tree.slots[index];
+                const ref = math.sub(u32, slot.ref, 1) catch {
+                    if (reserve) tree.slots[index] = new_slot;
+                    return null;
+                };
+
+                if (new_slot.ref == new_ref) {
+                    const value = &tree.values.items[ref];
                     if (compare_keys(key, key_from_value(value)) == .eq) return value;
                 }
 
-                if ((tag.hash == 0) or (probe > tag.probe)) return null;
+                if (slot.probe < new_slot.probe) {
+                    if (!reserve) return null;
+                    tree.slots[index] = new_slot;
+                    new_slot = slot;
+                }
+
                 index = (index + 1) % slot_capacity;
-                probe += 1;
+                new_slot.probe += 1;
             }
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            return tree.search(key, false);
         }
 
         pub const Entry = struct {
@@ -521,51 +525,11 @@ pub fn RobinHoodTreeType(comptime Table: type) type {
         };
 
         pub fn upsert(tree: *Tree, key: Key) Entry {
-            const slice = tree.list.slice();
-            const tags = slice.items(.tag).ptr[0..slot_capacity];
-            const slots = slice.items(.slot).ptr[0..slot_capacity];
-            const key_hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
-
-            var slot_tag = Tag{ .probe = 0, .hash = reduce(Hash, key_hash, null) };
-            assert(slot_tag.hash != 0);
-
-            var slot: u32 = 0;
-            var slot_value: ?*Value = null;
-            var index = reduce(u32, key_hash, slot_capacity);
-
-            while (true) {
-                const tag = tags[index];
-                if (tag.hash == 0) {
-                    const value = slot_value orelse blk: {
-                        slot = tree.count();
-                        break :blk tree.values.addOneAssumeCapacity();
-                    };
-
-                    slots[index] = slot;
-                    tags[index] = slot_tag;
-                    return .{ .value = value, .exists = false };
-                }
-
-                if (tag.hash == slot_tag.hash) {
-                    const value = &tree.values.items[slots[index]];
-                    if (compare_keys(key, key_from_value(value)) == .eq) {
-                        assert(slot_value == null);
-                        return .{ .value = value, .exists = true };
-                    }
-                }
-
-                if (slot_tag.probe > tag.probe) {
-                    if (slot_value == null) {
-                        slot = tree.count();
-                        slot_value = tree.values.addOneAssumeCapacity();
-                    }
-                    mem.swap(u32, &slot, &slots[index]);
-                    mem.swap(Tag, &slot_tag, &tags[index]);
-                }
-
-                index = (index + 1) % slot_capacity;
-                slot_tag.probe += 1;
-            }
+            const maybe_value = tree.search(key, true);
+            return .{
+                .value = maybe_value orelse tree.values.addOneAssumeCapacity(),
+                .exists = maybe_value != null,
+            };
         }
 
         pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
@@ -573,7 +537,7 @@ pub fn RobinHoodTreeType(comptime Table: type) type {
 
             // Values are allocated in tree.values contiguously and tree.slots will be cleared.
             // Reuse tree.slots memory as indexes to sort tree.values.
-            const slots = tree.list.items(.slot).ptr[0..tree.count()];
+            const slots = @ptrCast([*]u32, tree.slots.ptr)[0..tree.count()];
             for (slots) |*s, i| s.* = @intCast(u32, i);
 
             const SortContext = struct {
