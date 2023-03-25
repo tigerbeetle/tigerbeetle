@@ -428,6 +428,193 @@ pub fn SlotMapTreeType(comptime Table: type) type {
     };
 }
 
+pub fn RobinHoodTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const value_count_max = Table.value_count_max;
+
+    return struct {
+        const Tree = @This();
+
+        const Probe = u8;
+        const Hash = u24;
+        const Tag = packed struct {
+            probe: Probe = 0,
+            hash: Hash = 0,
+        };
+
+        const Values = std.ArrayListUnmanaged(Value);
+        const List = std.MultiArrayList(struct {
+            slot: u32,
+            tag: Tag,
+        });
+
+        const capacity = @intCast(u32, value_count_max);
+        const slot_capacity = capacity * 2;
+
+        values: Values,
+        list: List,
+
+        pub fn init(allocator: mem.Allocator) !Tree {
+            var values = try Values.initCapacity(allocator, value_count_max);
+            errdefer values.deinit(allocator);
+
+            var list = List{};
+            try list.ensureTotalCapacity(allocator, slot_capacity);
+            errdefer list.deinit(allocator);
+
+            var tree = Tree{ .values = values, .list = list };
+            tree.clear();
+            return tree;
+        }
+
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.list.deinit(allocator);
+            tree.values.deinit(allocator);
+        }
+
+        pub fn count(tree: *const Tree) u32 {
+            return @intCast(u32, tree.values.items.len);
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.values.clearRetainingCapacity();
+            mem.set(Tag, tree.list.items(.tag).ptr[0..slot_capacity], Tag{});
+        }
+
+        inline fn reduce(comptime Int: type, hash: u64, comptime range: ?comptime_int) Int {
+            const r = range orelse return @truncate(Int, hash >> (64 - @bitSizeOf(Int)));
+            const v = hash >> (64 - @bitSizeOf(math.IntFittingRange(0, r)));
+            return @truncate(Int, v % r);
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            const slice = tree.list.slice();
+            const tags = slice.items(.tag).ptr[0..slot_capacity];
+            const slots = slice.items(.slot).ptr[0..slot_capacity];
+            const key_hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
+
+            const hash = reduce(Hash, key_hash, null);
+            assert(hash != 0);
+
+            var probe: Probe = 0;
+            var index = reduce(u32, key_hash, slot_capacity);
+
+            while (true) {
+                const tag = tags[index];
+                if (tag.hash == hash) {
+                    const value = &tree.values.items[slots[index]];
+                    if (compare_keys(key, key_from_value(value)) == .eq) return value;
+                }
+
+                if ((tag.hash == 0) or (probe > tag.probe)) return null;
+                index = (index + 1) % slot_capacity;
+                probe += 1;
+            }
+        }
+
+        pub const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn upsert(tree: *Tree, key: Key) Entry {
+            const slice = tree.list.slice();
+            const tags = slice.items(.tag).ptr[0..slot_capacity];
+            const slots = slice.items(.slot).ptr[0..slot_capacity];
+            const key_hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
+
+            var slot_tag = Tag{ .probe = 0, .hash = reduce(Hash, key_hash, null) };
+            assert(slot_tag.hash != 0);
+
+            var slot: u32 = 0;
+            var slot_value: ?*Value = null;
+            var index = reduce(u32, key_hash, slot_capacity);
+
+            while (true) {
+                const tag = tags[index];
+                if (tag.hash == 0) {
+                    const value = slot_value orelse blk: {
+                        slot = tree.count();
+                        break :blk tree.values.addOneAssumeCapacity();
+                    };
+
+                    slots[index] = slot;
+                    tags[index] = slot_tag;
+                    return .{ .value = value, .exists = false };
+                }
+
+                if (tag.hash == slot_tag.hash) {
+                    const value = &tree.values.items[slots[index]];
+                    if (compare_keys(key, key_from_value(value)) == .eq) {
+                        assert(slot_value == null);
+                        return .{ .value = value, .exists = true };
+                    }
+                }
+
+                if (slot_tag.probe > tag.probe) {
+                    if (slot_value == null) {
+                        slot = tree.count();
+                        slot_value = tree.values.addOneAssumeCapacity();
+                    }
+                    mem.swap(u32, &slot, &slots[index]);
+                    mem.swap(Tag, &slot_tag, &tags[index]);
+                }
+
+                index = (index + 1) % slot_capacity;
+                slot_tag.probe += 1;
+            }
+        }
+
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+
+            // Values are allocated in tree.values contiguously and tree.slots will be cleared.
+            // Reuse tree.slots memory as indexes to sort tree.values.
+            const slots = tree.list.items(.slot).ptr[0..tree.count()];
+            for (slots) |*s, i| s.* = @intCast(u32, i);
+
+            const SortContext = struct {
+                values: *const Values,
+
+                fn less_than(context: @This(), a_slot: u32, b_slot: u32) bool {
+                    const a_key = key_from_value(&context.values.items[a_slot]);
+                    const b_key = key_from_value(&context.values.items[b_slot]);
+                    return compare_keys(a_key, b_key) == .lt;
+                }
+            };
+
+            const context = SortContext{ .values = &tree.values };
+            std.sort.sort(u32, slots, context, SortContext.less_than);
+            return .{ .tree = tree, .slots = slots, .values_max = values_max.ptr };
+        }
+
+        pub const Iterator = struct {
+            tree: *Tree,
+            index: u32 = 0,
+            slots: []const u32,
+            values_max: [*]Value,
+
+            pub fn next(it: *Iterator) ?*const Value {
+                if (it.index >= it.slots.len) {
+                    it.tree.clear();
+                    return null;
+                }
+
+                const slot = it.slots[it.index];
+                it.index += 1;
+
+                const value = &it.tree.values.items[slot];
+                it.values_max[0] = value.*;
+                it.values_max += 1;
+                return value;
+            }
+        };
+    };
+}
+
 pub fn AATreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -473,7 +660,7 @@ pub fn AATreeType(comptime Table: type) type {
             var index = tree.root;
             const slice = tree.list.slice();
             while (true) {
-                const slot = std.math.sub(u32, index, 1) catch return null;
+                const slot = math.sub(u32, index, 1) catch return null;
                 const value = &slice.items(.value)[slot];
                 const cmp = compare_keys(key, key_from_value(value));
                 if (cmp == .eq) return value;
@@ -493,7 +680,7 @@ pub fn AATreeType(comptime Table: type) type {
         }
 
         fn insert(tree: *Tree, index: u32, key: *const Key, entry: *Entry) u32 {
-            const slot = std.math.sub(u32, index, 1) catch {
+            const slot = math.sub(u32, index, 1) catch {
                 const new_slot = @intCast(u32, tree.list.addOneAssumeCapacity());
                 const slice = tree.list.slice();
 
@@ -518,12 +705,12 @@ pub fn AATreeType(comptime Table: type) type {
         }
 
         fn skew(tree: *const Tree, index: u32) u32 {
-            const slot = std.math.sub(u32, index, 1) catch unreachable;
+            const slot = math.sub(u32, index, 1) catch unreachable;
             const slice = tree.list.slice();
 
             const left_link = &slice.items(.links)[slot][0];
             const left_index = left_link.*;
-            const left_slot = std.math.sub(u32, left_index, 1) catch return index;
+            const left_slot = math.sub(u32, left_index, 1) catch return index;
             if (slice.items(.level)[left_slot] != slice.items(.level)[slot]) return index;
 
             left_link.* = index;
@@ -532,15 +719,15 @@ pub fn AATreeType(comptime Table: type) type {
         }
 
         fn split(tree: *const Tree, index: u32) u32 {
-            const slot = std.math.sub(u32, index, 1) catch unreachable;
+            const slot = math.sub(u32, index, 1) catch unreachable;
             const slice = tree.list.slice();
 
             const right_link = &slice.items(.links)[slot][1];
             const right_index = right_link.*;
-            const right_slot = std.math.sub(u32, right_index, 1) catch return index;
+            const right_slot = math.sub(u32, right_index, 1) catch return index;
 
             const rr_index = slice.items(.links)[right_slot][1];
-            const rr_slot = std.math.sub(u32, rr_index, 1) catch return index;
+            const rr_slot = math.sub(u32, rr_index, 1) catch return index;
             if (slice.items(.level)[rr_slot] != slice.items(.level)[slot]) return index;
 
             right_link.* = index;
@@ -562,13 +749,13 @@ pub fn AATreeType(comptime Table: type) type {
 
             pub fn next(it: *Iterator) ?*const Value {
                 const slice = it.tree.list.slice();
-                while (std.math.sub(u32, it.current, 1) catch null) |slot| {
+                while (math.sub(u32, it.current, 1) catch null) |slot| {
                     slice.items(.stack)[it.top] = slot;
                     it.top += 1;
                     it.current = slice.items(.links)[slot][0];
                 }
 
-                it.top = std.math.sub(u32, it.top, 1) catch {
+                it.top = math.sub(u32, it.top, 1) catch {
                     it.tree.clear();
                     return null;
                 };
@@ -656,7 +843,7 @@ pub fn RBTreeType(comptime Table: type) type {
             var index = tree.root;
             const slice = tree.list.slice();
             while (true) {
-                const slot = std.math.sub(u32, index, 1) catch return null;
+                const slot = math.sub(u32, index, 1) catch return null;
                 const value = &slice.items(.value)[slot];
                 const cmp = compare_keys(key, key_from_value(value));
                 if (cmp == .eq) return value;
@@ -697,7 +884,7 @@ pub fn RBTreeType(comptime Table: type) type {
 
             // Link the node to the parent.
             const parent_link = blk: {
-                const parent_slot = std.math.sub(u32, ctx.parent, 1) catch break :blk &tree.root;
+                const parent_slot = math.sub(u32, ctx.parent, 1) catch break :blk &tree.root;
                 break :blk &nodes[parent_slot].links[@boolToInt(ctx.right)];
             };
             assert(parent_link.* == 0);
@@ -706,15 +893,15 @@ pub fn RBTreeType(comptime Table: type) type {
             // Fixup color property after insert.
             while (true) {
                 var parent_index = nodes[index - 1].get_parent();
-                var parent = &nodes[std.math.sub(u32, parent_index, 1) catch break];
+                var parent = &nodes[math.sub(u32, parent_index, 1) catch break];
                 if (parent.get_color() == .black) break;
 
                 var grand_parent_index = parent.get_parent();
-                var grand_parent = &nodes[std.math.sub(u32, grand_parent_index, 1) catch break];
+                var grand_parent = &nodes[math.sub(u32, grand_parent_index, 1) catch break];
                 const right = parent_index == grand_parent.links[1];
 
                 const uncle_index = grand_parent.links[@boolToInt(!right)];
-                if (std.math.sub(u32, uncle_index, 1) catch null) |uncle_slot| {
+                if (math.sub(u32, uncle_index, 1) catch null) |uncle_slot| {
                     const uncle = &nodes[uncle_slot];
                     if (uncle.get_color() == .black) break;
 
@@ -756,13 +943,13 @@ pub fn RBTreeType(comptime Table: type) type {
             const sibling_link = &target.links[@boolToInt(right)];
             const sibling_index = sibling_link.*;
             const maybe_sibling = blk: {
-                const sibling_slot = std.math.sub(u32, sibling_index, 1) catch break :blk null;
+                const sibling_slot = math.sub(u32, sibling_index, 1) catch break :blk null;
                 break :blk &nodes[sibling_slot];
             };
 
             const parent_index = node.get_parent();
             const parent_link = blk: {
-                const parent_slot = std.math.sub(u32, parent_index, 1) catch break :blk &tree.root;
+                const parent_slot = math.sub(u32, parent_index, 1) catch break :blk &tree.root;
                 const parent = &nodes[parent_slot];
                 break :blk &parent.links[@boolToInt(parent.links[1] == index)];
             };
@@ -790,13 +977,13 @@ pub fn RBTreeType(comptime Table: type) type {
 
             pub fn next(it: *Iterator) ?*const Value {
                 const slice = it.tree.list.slice();
-                while (std.math.sub(u32, it.current, 1) catch null) |slot| {
+                while (math.sub(u32, it.current, 1) catch null) |slot| {
                     slice.items(.stack)[it.top] = slot;
                     it.top += 1;
                     it.current = slice.items(.node)[slot].links[0];
                 }
 
-                it.top = std.math.sub(u32, it.top, 1) catch {
+                it.top = math.sub(u32, it.top, 1) catch {
                     it.tree.clear();
                     return null;
                 };
