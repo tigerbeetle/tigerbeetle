@@ -88,12 +88,11 @@ pub fn main() !void {
 
     const tm = @import("table_mutable.zig");
     inline for (.{
-        .{ "std.HashMap", tm.TableMutableType(Table, "") },
-        // .{ "IndexMap", tm.TableMutableIndexType(Table, "") },
+        .{ "std.HashMap", tm.TableMutableTreeType(Table, "", tm.HashMapTreeType) },
+        .{ "SlotMap", tm.TableMutableTreeType(Table, "", tm.SlotMapTreeType) },
+        .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
         .{ "SkipList", tm.TableMutableTreeType(Table, "", tm.SkipListTreeType) },
-        // .{ "MinHeap", tm.TableMutableTreeType(Table, "", tm.HeapTreeType) },
-        // .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
-        // .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
+        .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
     }) |setup| {
         try bench(setup[1], setup[0], allocator, values, sorted_values, &timer, rng_seed);
     }

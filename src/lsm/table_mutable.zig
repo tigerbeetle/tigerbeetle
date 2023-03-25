@@ -3,30 +3,20 @@ const mem = std.mem;
 const meta = std.meta;
 const math = std.math;
 const assert = std.debug.assert;
-const constants = @import("../constants.zig");
 
-fn ValuesCacheType(comptime Table: type, comptime tree_name: [:0]const u8) type {
-    return @import("set_associative_cache.zig").SetAssociativeCache(
-        Table.Key,
-        Table.Value,
-        Table.key_from_value,
-        struct {
-            inline fn hash(key: Table.Key) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&key));
-            }
-        }.hash,
-        struct {
-            inline fn equal(a: Table.Key, b: Table.Key) bool {
-                return Table.compare_keys(a, b) == .eq;
-            }
-        }.equal,
-        .{},
-        tree_name,
-    );
-}
+const constants = @import("../constants.zig");
+const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 /// Range queries are not supported on the TableMutable, it must first be made immutable.
 pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) type {
+    return TableMutableTreeType(Table, tree_name, HashMapTreeType);
+}
+
+pub fn TableMutableTreeType(
+    comptime Table: type,
+    comptime tree_name: [:0]const u8,
+    comptime TreeType: anytype,
+) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
@@ -35,18 +25,32 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
     const tombstone = Table.tombstone;
     const value_count_max = Table.value_count_max;
     const usage = Table.usage;
+    const Tree = TreeType(Table);
 
     return struct {
         const TableMutable = @This();
 
-        const load_factor = 50;
-        const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
+        pub const ValuesCache = SetAssociativeCache(
+            Key,
+            Value,
+            Table.key_from_value,
+            struct {
+                inline fn hash(key: Key) u64 {
+                    return std.hash.Wyhash.hash(0, mem.asBytes(&key));
+                }
+            }.hash,
+            struct {
+                inline fn equal(a: Key, b: Key) bool {
+                    return compare_keys(a, b) == .eq;
+                }
+            }.equal,
+            .{},
+            tree_name,
+        );
 
-        pub const ValuesCache = ValuesCacheType(Table, tree_name);
+        values_tree: Tree,
 
-        values: Values = .{},
-
-        /// Rather than using values.count(), we count how many values we could have had if every
+        /// Rather than using tree.count(), we count how many values we could have had if every
         /// operation had been on a different key. This means that mistakes in calculating
         /// value_count_max are much easier to catch when fuzzing, rather than requiring very
         /// specific workloads.
@@ -68,26 +72,22 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         // The value type will be []u8 and this will be shared by trees with the same value size."
         values_cache: ?*ValuesCache,
 
-        pub fn init(
-            allocator: mem.Allocator,
-            values_cache: ?*ValuesCache,
-        ) !TableMutable {
-            var values: Values = .{};
-            try values.ensureTotalCapacity(allocator, value_count_max);
-            errdefer values.deinit(allocator);
+        pub fn init(allocator: mem.Allocator, values_cache: ?*ValuesCache) !TableMutable {
+            var tree = try Tree.init(allocator);
+            errdefer tree.deinit(allocator);
 
             return TableMutable{
-                .values = values,
+                .values_tree = tree,
                 .values_cache = values_cache,
             };
         }
 
         pub fn deinit(table: *TableMutable, allocator: mem.Allocator) void {
-            table.values.deinit(allocator);
+            table.values_tree.deinit(allocator);
         }
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
-            if (table.values.getKeyPtr(tombstone_from_key(key))) |value| {
+            if (table.values_tree.get(key)) |value| {
                 return value;
             }
             if (table.values_cache) |cache| {
@@ -100,67 +100,64 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         pub fn put(table: *TableMutable, value: *const Value) void {
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
+
+            const key = key_from_value(value);
+            const entry = table.values_tree.upsert(key);
             switch (usage) {
                 .secondary_index => {
-                    const existing = table.values.fetchRemove(value.*);
-                    if (existing) |kv| {
-                        // If there was a previous operation on this key then it must have been a remove.
+                    if (entry.exists) {
+                        // If there was a previous operation on this key, it must have been remove.
                         // The put and remove cancel out.
-                        assert(tombstone(&kv.key));
+                        assert(tombstone(entry.value));
                     } else {
-                        table.values.putAssumeCapacityNoClobber(value.*, {});
+                        entry.value.* = value.*;
                     }
                 },
                 .general => {
-                    // If the key is already present in the hash map, the old key will not be overwritten
-                    // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
-                    // level getOrPut() API and manually overwrite the old key.
-                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
-                    upsert.key_ptr.* = value.*;
+                    // Overwrite the existing key and value.
+                    entry.value.* = value.*;
                 },
             }
 
-            // The hash map's load factor may allow for more capacity because of rounding:
-            assert(table.values.count() <= value_count_max);
+            assert(table.count() <= value_count_max);
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
+
+            const key = key_from_value(value);
+            const entry = table.values_tree.upsert(key);
             switch (usage) {
                 .secondary_index => {
-                    const existing = table.values.fetchRemove(value.*);
-                    if (existing) |kv| {
+                    if (entry.exists) {
                         // The previous operation on this key then it must have been a put.
                         // The put and remove cancel out.
-                        assert(!tombstone(&kv.key));
+                        assert(!tombstone(entry.value));
                     } else {
-                        // If the put is already on-disk, then we need to follow it with a tombstone.
-                        // The put and the tombstone may cancel each other out later during compaction.
-                        table.values.putAssumeCapacityNoClobber(tombstone_from_key(key_from_value(value)), {});
+                        // If the put is already on-disk, we need to follow it with a tombstone.
+                        // The put and tombstone may cancel each other out later during compaction.
+                        entry.value.* = tombstone_from_key(key);
                     }
                 },
                 .general => {
-                    // If the key is already present in the hash map, the old key will not be overwritten
-                    // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
-                    // level getOrPut() API and manually overwrite the old key.
-                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
-                    upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+                    // Overwrite the existing key and value with a tombstone.
+                    entry.value.* = tombstone_from_key(key);
                 },
             }
 
-            assert(table.values.count() <= value_count_max);
+            assert(table.count() <= value_count_max);
         }
 
         pub fn clear(table: *TableMutable) void {
-            assert(table.values.count() > 0);
+            assert(table.values_tree.count() > 0);
             table.value_count_worst_case = 0;
-            table.values.clearRetainingCapacity();
-            assert(table.values.count() == 0);
+            table.values_tree.clear();
+            assert(table.values_tree.count() == 0);
         }
 
         pub fn count(table: *const TableMutable) u32 {
-            const value = @intCast(u32, table.values.count());
+            const value = @intCast(u32, table.values_tree.count());
             assert(value <= value_count_max);
             return value;
         }
@@ -170,16 +167,15 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             table: *TableMutable,
             values_max: []Value,
         ) []const Value {
-            assert(table.count() > 0);
-            assert(table.count() <= value_count_max);
-            assert(table.count() <= values_max.len);
+            const table_count = table.count();
+            assert(table_count > 0);
+            assert(table_count <= value_count_max);
+            assert(table_count <= values_max.len);
             assert(values_max.len == value_count_max);
 
-            var i: usize = 0;
-            var it = table.values.keyIterator();
+            var i: u32 = 0;
+            var it = table.values_tree.iterate_sort_clear(values_max);
             while (it.next()) |value| : (i += 1) {
-                values_max[i] = value.*;
-
                 if (table.values_cache) |cache| {
                     if (tombstone(value)) {
                         cache.remove(key_from_value(value));
@@ -190,12 +186,10 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             }
 
             const values = values_max[0..i];
-            assert(values.len == table.count());
-            std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
-
-            table.clear();
+            assert(values.len == table_count);
             assert(table.count() == 0);
 
+            table.value_count_worst_case = 0;
             return values;
         }
 
@@ -205,21 +199,100 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
     };
 }
 
-/// Range queries are not supported on the TableMutable, it must first be made immutable.
-pub fn TableMutableIndexType(comptime Table: type, comptime tree_name: [:0]const u8) type {
+pub fn HashMapTreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
     const key_from_value = Table.key_from_value;
-    const tombstone_from_key = Table.tombstone_from_key;
-    const tombstone = Table.tombstone;
     const value_count_max = Table.value_count_max;
-    const usage = Table.usage;
+    const tombstone_from_key = Table.tombstone_from_key;
 
     return struct {
-        const TableMutable = @This();
+        const Tree = @This();
 
-        pub const ValuesCache = ValuesCacheType(Table, tree_name);
+        const load_factor = 50;
+        const Map = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
+
+        map: Map,
+
+        pub fn init(allocator: mem.Allocator) !Tree {
+            var map: Map = .{};
+            try map.ensureTotalCapacity(allocator, value_count_max);
+            errdefer map.deinit(allocator);
+
+            return Tree{ .map = map };
+        }
+
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.map.deinit(allocator);
+        }
+
+        pub fn count(tree: *const Tree) u32 {
+            return tree.map.count();
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.map.clearRetainingCapacity();
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            return tree.map.getKeyPtr(tombstone_from_key(key));
+        }
+
+        pub const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn upsert(tree: *Tree, key: Key) Entry {
+            const result = tree.map.getOrPutAssumeCapacity(tombstone_from_key(key));
+            return .{ .value = result.key_ptr, .exists = result.found_existing };
+        }
+
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+            return .{ .tree = tree, .keys = tree.map.keyIterator(), .values_max = values_max };
+        }
+
+        pub const Iterator = struct {
+            tree: *Tree,
+            keys: Map.KeyIterator,
+            add: u32 = 0,
+            values_max: []Value,
+
+            fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
+                return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
+            }
+
+            pub fn next(it: *Iterator) ?*const Value {
+                if (it.keys.next()) |value| {
+                    it.values_max[it.add] = value.*;
+                    it.add += 1;
+                    return value;
+                }
+
+                const values = it.values_max[0..it.add];
+                assert(values.len == it.tree.count());
+                std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+
+                it.tree.clear();
+                assert(it.tree.count() == 0);
+                return null;
+            }
+        };
+    };
+}
+
+pub fn SlotMapTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const value_count_max = Table.value_count_max;
+    const tombstone_from_key = Table.tombstone_from_key;
+
+    return struct {
+        const Tree = @This();
 
         const Values = std.ArrayListUnmanaged(Value);
 
@@ -251,32 +324,7 @@ pub fn TableMutableIndexType(comptime Table: type, comptime tree_name: [:0]const
         slots: SlotMap,
         values: Values,
 
-        /// Rather than using values.count(), we count how many values we could have had if every
-        /// operation had been on a different key. This means that mistakes in calculating
-        /// value_count_max are much easier to catch when fuzzing, rather than requiring very
-        /// specific workloads.
-        /// Invariant: value_count_worst_case <= value_count_max
-        value_count_worst_case: u32 = 0,
-
-        /// This is used to accelerate point lookups and is not used for range queries.
-        /// Secondary index trees used only for range queries can therefore set this to null.
-        ///
-        /// The values cache is only used for the latest snapshot for simplicity.
-        /// Earlier snapshots will still be able to utilize the block cache.
-        ///
-        /// The values cache is updated (in bulk) when the mutable table is sorted and frozen,
-        /// rather than updating on every `put()`/`remove()`.
-        /// This amortizes cache inserts for hot keys in the mutable table, and avoids redundantly
-        /// storing duplicate values in both the mutable table and values cache.
-        // TODO Share cache between trees of different grooves:
-        // "A set associative cache of values shared by trees with the same key/value sizes.
-        // The value type will be []u8 and this will be shared by trees with the same value size."
-        values_cache: ?*ValuesCache,
-
-        pub fn init(
-            allocator: mem.Allocator,
-            values_cache: ?*ValuesCache,
-        ) !TableMutable {
+        pub fn init(allocator: mem.Allocator) !Tree {
             var slots = SlotMap{};
             try slots.ensureTotalCapacityContext(allocator, value_count_max, undefined);
             errdefer slots.deinit(allocator);
@@ -284,139 +332,61 @@ pub fn TableMutableIndexType(comptime Table: type, comptime tree_name: [:0]const
             var values = try Values.initCapacity(allocator, value_count_max);
             errdefer values.deinit(allocator);
 
-            return TableMutable{
-                .slots = slots,
-                .values = values,
-                .values_cache = values_cache,
-            };
+            return Tree{ .slots = slots, .values = values };
         }
 
-        pub fn deinit(table: *TableMutable, allocator: mem.Allocator) void {
-            table.values.deinit(allocator);
-            table.slots.deinit(allocator);
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.values.deinit(allocator);
+            tree.slots.deinit(allocator);
         }
 
-        pub fn get(table: *const TableMutable, key: Key) ?*const Value {
+        pub fn count(tree: *const Tree) u32 {
+            return @intCast(u32, tree.values.items.len);
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.slots.clearRetainingCapacity();
+            assert(tree.slots.count() == 0);
+
+            tree.values.clearRetainingCapacity();
+            assert(tree.count() == 0);
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
             const lookup = tombstone_from_key(key);
-            const slot_map_context = SlotMapContext{ .values = &table.values, .lookup = &lookup };
-
-            if (table.slots.getKeyAdapted(lookup_slot, slot_map_context)) |slot| {
-                return &table.values.items[slot];
-            }
-
-            if (table.values_cache) |cache| {
-                // Check the cache after the mutable table (see `values_cache` for explanation).
-                if (cache.get(key)) |value| return value;
-            }
-
-            return null;
+            const context = SlotMapContext{ .values = &tree.values, .lookup = &lookup };
+            const slot = tree.slots.getKeyAdapted(lookup_slot, context) orelse return null;
+            return &tree.values.items[slot];
         }
 
-        const Entry = struct {
+        pub const Entry = struct {
             value: *Value,
             exists: bool,
         };
 
-        fn upsert(table: *TableMutable, lookup: *const Value) Entry {
-            const slot_map_context = SlotMapContext{ .values = &table.values, .lookup = lookup };
-            const result = table.slots.getOrPutAssumeCapacityContext(lookup_slot, slot_map_context);
+        pub fn upsert(tree: *Tree, key: Key) Entry {
+            const lookup = tombstone_from_key(key);
+            const context = SlotMapContext{ .values = &tree.values, .lookup = &lookup };
+            const result = tree.slots.getOrPutAssumeCapacityContext(lookup_slot, context);
 
             if (result.found_existing) {
-                const value = &table.values.items[result.key_ptr.*];
+                const value = &tree.values.items[result.key_ptr.*];
                 return .{ .value = value, .exists = true };
             }
 
-            const slot = @intCast(u32, table.values.items.len);
+            const slot = @intCast(u32, tree.values.items.len);
             result.key_ptr.* = slot;
 
-            const value = table.values.addOneAssumeCapacity();
+            const value = tree.values.addOneAssumeCapacity();
             return .{ .value = value, .exists = false };
         }
 
-        pub fn put(table: *TableMutable, value: *const Value) void {
-            assert(table.value_count_worst_case < value_count_max);
-            table.value_count_worst_case += 1;
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
 
-            const entry = table.upsert(value);
-            switch (usage) {
-                .secondary_index => {
-                    if (entry.exists) {
-                        // If there was a previous operation on this key, it must have been remove.
-                        // The put and remove cancel out.
-                        assert(tombstone(key_from_value(entry.value)));
-                    } else {
-                        entry.value.* = value.*;
-                    }
-                },
-                .general => {
-                    // Overwrite the existing key and value.
-                    entry.value.* = value.*;
-                },
-            }
-
-            // The slot map's load factor may allow for more capacity because of rounding:
-            assert(table.slots.count() <= value_count_max);
-            assert(table.count() <= value_count_max);
-        }
-
-        pub fn remove(table: *TableMutable, value: *const Value) void {
-            assert(table.value_count_worst_case < value_count_max);
-            table.value_count_worst_case += 1;
-
-            const entry = table.upsert(value);
-            switch (usage) {
-                .secondary_index => {
-                    if (entry.exists) {
-                        // The previous operation on this key must have been a put.
-                        // The put and remove cancel out.
-                        assert(!tombstone(key_from_value(entry.value)));
-                    } else {
-                        // If the put is already on-disk, we need to follow it with a tombstone.
-                        // The put and tombstone may cancel each other out later during compaction.
-                        entry.value.* = tombstone_from_key(key_from_value(value));
-                    }
-                },
-                .general => {
-                    // Overwrite the existing key and value with a tombstone.
-                    entry.value.* = tombstone_from_key(key_from_value(value));
-                },
-            }
-
-            // The slot map's load factor may allow for more capacity because of rounding:
-            assert(table.slots.count() <= value_count_max);
-            assert(table.count() <= value_count_max);
-        }
-
-        pub fn clear(table: *TableMutable) void {
-            assert(table.count() > 0);
-            table.value_count_worst_case = 0;
-
-            table.slots.clearRetainingCapacity();
-            assert(table.slots.count() == 0);
-
-            table.values.clearRetainingCapacity();
-            assert(table.count() == 0);
-        }
-
-        pub fn count(table: *const TableMutable) u32 {
-            const value = @intCast(u32, table.values.items.len);
-            assert(value <= value_count_max);
-            return value;
-        }
-
-        /// The returned slice is invalidated whenever this is called for any tree.
-        pub fn sort_into_values_and_clear(
-            table: *TableMutable,
-            values_max: []Value,
-        ) []const Value {
-            assert(table.count() > 0);
-            assert(table.count() <= value_count_max);
-            assert(table.count() <= values_max.len);
-            assert(values_max.len == value_count_max);
-
-            // Values are allocated in table.values contiguously and table.slots will be cleared.
-            // Reuse table.slots memory as indexes to sort table.values.
-            const slots = table.slots.keyIterator().items[0..table.count()];
+            // Values are allocated in tree.values contiguously and tree.slots will be cleared.
+            // Reuse tree.slots memory as indexes to sort tree.values.
+            const slots = tree.slots.keyIterator().items[0..tree.count()];
             for (slots) |*s, i| s.* = @intCast(u32, i);
 
             const SortContext = struct {
@@ -429,345 +399,30 @@ pub fn TableMutableIndexType(comptime Table: type, comptime tree_name: [:0]const
                 }
             };
 
-            const sort_context = SortContext{ .values = &table.values };
-            std.sort.sort(u32, slots, sort_context, SortContext.less_than);
-
-            for (slots) |slot, i| {
-                const value = &table.values.items[slot];
-                values_max[i] = value.*;
-
-                if (table.values_cache) |cache| {
-                    if (tombstone(value)) {
-                        cache.remove(key_from_value(value));
-                    } else {
-                        cache.insert(value);
-                    }
-                }
-            }
-
-            const values = values_max[0..slots.len];
-            assert(values.len == table.count());
-
-            table.clear();
-            assert(table.count() == 0);
-
-            return values;
-        }
-    };
-}
-
-pub fn TableMutableTreeType(
-    comptime Table: type,
-    comptime tree_name: [:0]const u8,
-    comptime TreeType: anytype,
-) type {
-    const Key = Table.Key;
-    const Value = Table.Value;
-    const compare_keys = Table.compare_keys;
-    const key_from_value = Table.key_from_value;
-    const tombstone_from_key = Table.tombstone_from_key;
-    const tombstone = Table.tombstone;
-    const value_count_max = Table.value_count_max;
-    const usage = Table.usage;
-
-    return struct {
-        const TableMutable = @This();
-        const Tree = TreeType(Table);
-
-        pub const ValuesCache = ValuesCacheType(Table, tree_name);
-
-        value_count_worst_case: u32 = 0,
-        values_cache: ?*ValuesCache,
-        values_tree: Tree,
-
-        pub fn init(allocator: mem.Allocator, values_cache: ?*ValuesCache) !TableMutable {
-            var values_tree = try Tree.init(allocator, @intCast(u32, value_count_max));
-            errdefer values_tree.deinit(allocator);
-
-            return TableMutable{
-                .values_cache = values_cache,
-                .values_tree = values_tree,
-            };
-        }
-
-        pub fn deinit(table: *TableMutable, allocator: mem.Allocator) void {
-            table.values_tree.deinit(allocator);
-        }
-
-        pub fn get(table: *const TableMutable, key: Key) ?*const Value {
-            if (table.values_tree.get(key)) |value| {
-                return value;
-            }
-
-            if (table.values_cache) |cache| {
-                // Check the cache after the mutable table (see `values_cache` for explanation).
-                if (cache.get(key)) |value| return value;
-            }
-
-            return null;
-        }
-
-        pub fn put(table: *TableMutable, value: *const Value) void {
-            assert(table.value_count_worst_case < value_count_max);
-            table.value_count_worst_case += 1;
-
-            const key = key_from_value(value);
-            const entry = table.values_tree.get_or_put(key);
-            switch (usage) {
-                .secondary_index => {
-                    if (entry.exists) {
-                        // If there was a previous operation on this key then it must have been a
-                        // remove. The put and remove cancel out.
-                        assert(tombstone(entry.value));
-                    } else {
-                        entry.value.* = value.*;
-                    }
-                },
-                .general => {
-                    // Make sure to overwrite the old value if it exists.
-                    entry.value.* = value.*;
-                },
-            }
-
-            assert(table.values_tree.count() <= value_count_max);
-        }
-
-        pub fn remove(table: *TableMutable, value: *const Value) void {
-            assert(table.value_count_worst_case < value_count_max);
-            table.value_count_worst_case += 1;
-
-            const key = key_from_value(value);
-            const entry = table.values_tree.get_or_put(key);
-            switch (usage) {
-                .secondary_index => {
-                    if (entry.exists) {
-                        // The previous operation on this key then it must have been a put.
-                        // The put and remove cancel out.
-                        assert(!tombstone(entry.value));
-                    } else {
-                        // If the put is already on-disk, we need to follow it with a tombstone.
-                        // The put and tombstone may cancel each other out later during compaction.
-                        entry.value.* = tombstone_from_key(key);
-                    }
-                },
-                .general => {
-                    // Make sure to overwrite the old value if it exists.
-                    entry.value.* = tombstone_from_key(key);
-                },
-            }
-
-            assert(table.values_tree.count() <= value_count_max);
-        }
-
-        pub fn clear(table: *TableMutable) void {
-            assert(table.count() > 0);
-            table.value_count_worst_case = 0;
-            table.values_tree.clear();
-            assert(table.values_tree.count() == 0);
-        }
-
-        pub fn count(table: *const TableMutable) u32 {
-            const value_count = table.values_tree.count();
-            assert(value_count <= value_count_max);
-            return value_count;
-        }
-
-        /// The returned slice is invalidated whenever this is called for any tree.
-        pub fn sort_into_values_and_clear(
-            table: *TableMutable,
-            values_max: []Value,
-        ) []const Value {
-            assert(table.count() > 0);
-            assert(table.count() <= value_count_max);
-            assert(table.count() <= values_max.len);
-            assert(values_max.len == value_count_max);
-
-            var i: u32 = 0;
-            var it = table.values_tree.iterate_then_clear();
-            while (it.next()) |value| : (i += 1) {
-                values_max[i] = value.*;
-
-                // Double check that it's sorted.
-                if (std.math.sub(u32, i, 1) catch null) |prev_i| {
-                    const prev_key = key_from_value(&values_max[prev_i]);
-                    assert(compare_keys(prev_key, key_from_value(value)) != .gt);
-                }
-
-                if (table.values_cache) |cache| {
-                    if (tombstone(value)) {
-                        cache.remove(key_from_value(value));
-                    } else {
-                        cache.insert(value);
-                    }
-                }
-            }
-
-            assert(table.count() == 0);
-            table.value_count_worst_case = 0;
-            return values_max[0..i];
-        }
-    };
-}
-
-pub fn SkipListTreeType(comptime Table: type) type {
-    const Key = Table.Key;
-    const Value = Table.Value;
-    const compare_keys = Table.compare_keys;
-    const key_from_value = Table.key_from_value;
-
-    return struct {
-        const Tree = @This();
-        const levels_max = 10;
-
-        values: std.ArrayListUnmanaged(Value),
-        slots: std.ArrayListUnmanaged(u32),
-
-        header_ref: u32 = 0,
-        level: u8 = 0,
-        lcg: u32 = 0,
-
-        pub fn init(allocator: mem.Allocator, max_entries: u32) !Tree {
-            var values = try std.ArrayListUnmanaged(Value).initCapacity(allocator, max_entries);
-            errdefer values.deinit(allocator);
-
-            const num_slots = (max_entries + 1) * (1 + levels_max);
-            var slots = try std.ArrayListUnmanaged(u32).initCapacity(allocator, num_slots);
-            errdefer slots.deinit(allocator);
-
-            var tree = Tree{ .values = values, .slots = slots };
-            tree.clear();
-            return tree;
-        }
-
-        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            tree.slots.deinit(allocator);
-            tree.values.deinit(allocator);
-        }
-
-        fn reserve(tree: *Tree, slot_ref: u32, level: u8) u32 {
-            const node = @intCast(u32, tree.slots.items.len);
-            tree.slots.appendNTimesAssumeCapacity(0, 1 + level + 1);
-            tree.slots.items[node] = slot_ref;
-            return node + 1;
-        }
-
-        fn search(tree: *const Tree, key: Key, update_refs: ?*[levels_max + 1]u32) ?*Value {
-            var level = tree.level;
-            var current_ref = tree.header_ref;
-
-            while (true) {
-                while (true) {
-                    const current = current_ref - 1;
-                    const forward_ref = tree.slots.items[current + 1 + level];
-                    const forward = math.sub(u32, forward_ref, 1) catch break;
-
-                    const slot_ref = tree.slots.items[forward];
-                    const slot = math.sub(u32, slot_ref, 1) catch break;
-
-                    const forward_key = key_from_value(&tree.values.items[slot]);
-                    if (compare_keys(forward_key, key) != .lt) break;
-                    current_ref = forward_ref;
-                }
-
-                if (update_refs) |u| u[level] = current_ref;
-                level = math.sub(u8, level, 1) catch break;
-            }
-
-            const forward_ref = tree.slots.items[(current_ref - 1) + 1];
-            const current = math.sub(u32, forward_ref, 1) catch return null;
-
-            const slot_ref = tree.slots.items[current];
-            const slot = math.sub(u32, slot_ref, 1) catch return null;
-
-            const value = &tree.values.items[slot];
-            if (compare_keys(key, key_from_value(value)) == .eq) return value;
-            return null;
-        }
-
-        pub fn get(tree: *const Tree, key: Key) ?*const Value {
-            return tree.search(key, null);
-        }
-
-        pub const Entry = struct {
-            value: *Value,
-            exists: bool,
-        };
-
-        pub fn get_or_put(tree: *Tree, key: Key) Entry {
-            var update_refs = [_]u32{0} ** (levels_max + 1);
-            if (tree.search(key, &update_refs)) |value| {
-                return .{ .value = value, .exists = true };
-            }
-
-            var rand_level: u8 = 0;
-            while (rand_level < levels_max) : (rand_level += 1) {
-                if (tree.lcg == 0) tree.lcg = 0xdeadbeef; // random seed
-                tree.lcg = (tree.lcg *% 1103515245) +% 12345;
-                if ((tree.lcg >> 31) & 1 == 0) break;
-            }
-
-            if (rand_level > tree.level) {
-                var i: u8 = tree.level + 1;
-                while (i < rand_level + 1) : (i += 1) update_refs[i] = tree.header_ref;
-                tree.level = rand_level;
-            }
-
-            const slot = @intCast(u32, tree.values.items.len);
-            const value = tree.values.addOneAssumeCapacity();
-
-            const slot_ref = slot + 1;
-            const node_ref = tree.reserve(slot_ref, rand_level);
-
-            var i: u8 = 0;
-            while (i <= rand_level) : (i += 1) {
-                const update = update_refs[i] - 1;
-                const forward_link = &tree.slots.items[update + 1 + i];
-
-                const node = node_ref - 1;
-                const node_link = &tree.slots.items[node + 1 + i];
-
-                node_link.* = forward_link.*;
-                forward_link.* = node_ref;
-            }
-
-            return .{ .value = value, .exists = false };
-        }
-
-        pub fn count(tree: *const Tree) u32 {
-            return @intCast(u32, tree.values.items.len);
-        }
-
-        pub fn clear(tree: *Tree) void {
-            tree.values.clearRetainingCapacity();
-            tree.slots.clearRetainingCapacity();
-
-            tree.level = 0;
-            tree.header_ref = tree.reserve(0, levels_max);
-        }
-
-        pub fn iterate_then_clear(tree: *Tree) Iterator {
-            const header = tree.header_ref - 1;
-            const node_ref = tree.slots.items[header + 1];
-            return .{ .tree = tree, .node_ref = node_ref };
+            const context = SortContext{ .values = &tree.values };
+            std.sort.sort(u32, slots, context, SortContext.less_than);
+            return .{ .tree = tree, .slots = slots, .values_max = values_max.ptr };
         }
 
         pub const Iterator = struct {
             tree: *Tree,
-            node_ref: u32,
+            index: u32 = 0,
+            slots: []const u32,
+            values_max: [*]Value,
 
             pub fn next(it: *Iterator) ?*const Value {
-                while (true) {
-                    const node = math.sub(u32, it.node_ref, 1) catch {
-                        it.tree.clear();
-                        return null;
-                    };
-
-                    const forward_ref = it.tree.slots.items[node + 1];
-                    it.node_ref = forward_ref;
-
-                    const slot_ref = it.tree.slots.items[node];
-                    return &it.tree.values.items[slot_ref - 1];
+                if (it.index >= it.slots.len) {
+                    it.tree.clear();
+                    return null;
                 }
+
+                const slot = it.slots[it.index];
+                it.index += 1;
+
+                const value = &it.tree.values.items[slot];
+                it.values_max[0] = value.*;
+                it.values_max += 1;
+                return value;
             }
         };
     };
@@ -778,23 +433,24 @@ pub fn AATreeType(comptime Table: type) type {
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
     const key_from_value = Table.key_from_value;
-
-    const List = std.MultiArrayList(struct {
-        value: Value,
-        links: [2]u32,
-        stack: u32,
-        level: u8,
-    });
+    const value_count_max = Table.value_count_max;
 
     return struct {
         const Tree = @This();
 
+        const List = std.MultiArrayList(struct {
+            value: Value,
+            links: [2]u32,
+            stack: u32,
+            level: u8,
+        });
+
         list: List,
         root: u32 = 0,
 
-        pub fn init(allocator: mem.Allocator, max_entries: u32) !Tree {
+        pub fn init(allocator: mem.Allocator) !Tree {
             var list = List{};
-            try list.ensureTotalCapacity(allocator, max_entries);
+            try list.ensureTotalCapacity(allocator, value_count_max);
             errdefer list.deinit(allocator);
 
             return Tree{ .list = list };
@@ -830,7 +486,7 @@ pub fn AATreeType(comptime Table: type) type {
             exists: bool,
         };
 
-        pub fn get_or_put(tree: *Tree, key: Key) Entry {
+        pub fn upsert(tree: *Tree, key: Key) Entry {
             var entry: Entry = undefined;
             tree.root = tree.insert(tree.root, &key, &entry);
             return entry;
@@ -893,14 +549,16 @@ pub fn AATreeType(comptime Table: type) type {
             return right_index;
         }
 
-        pub fn iterate_then_clear(tree: *Tree) Iterator {
-            return .{ .current = tree.root, .tree = tree };
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+            return .{ .current = tree.root, .tree = tree, .values_max = values_max.ptr };
         }
 
         pub const Iterator = struct {
             top: u32 = 0,
             current: u32,
             tree: *Tree,
+            values_max: [*]Value,
 
             pub fn next(it: *Iterator) ?*const Value {
                 const slice = it.tree.list.slice();
@@ -917,7 +575,11 @@ pub fn AATreeType(comptime Table: type) type {
 
                 const slot = slice.items(.stack)[it.top];
                 it.current = slice.items(.links)[slot][1];
-                return &slice.items(.value)[slot];
+                const value = &slice.items(.value)[slot];
+
+                it.values_max[0] = value.*;
+                it.values_max += 1;
+                return value;
             }
         };
     };
@@ -928,6 +590,7 @@ pub fn RBTreeType(comptime Table: type) type {
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
     const key_from_value = Table.key_from_value;
+    const value_count_max = Table.value_count_max;
 
     return struct {
         const Tree = @This();
@@ -963,9 +626,9 @@ pub fn RBTreeType(comptime Table: type) type {
         list: List,
         root: u32 = 0,
 
-        pub fn init(allocator: mem.Allocator, max_entries: u32) !Tree {
+        pub fn init(allocator: mem.Allocator) !Tree {
             var list = List{};
-            try list.ensureTotalCapacity(allocator, max_entries);
+            try list.ensureTotalCapacity(allocator, value_count_max);
             errdefer list.deinit(allocator);
 
             return Tree{ .list = list };
@@ -1013,7 +676,7 @@ pub fn RBTreeType(comptime Table: type) type {
             exists: bool,
         };
 
-        pub fn get_or_put(tree: *Tree, key: Key) Entry {
+        pub fn upsert(tree: *Tree, key: Key) Entry {
             var ctx = Context{};
             if (tree.lookup(&ctx, key)) |value| {
                 return .{ .value = value, .exists = true };
@@ -1114,14 +777,16 @@ pub fn RBTreeType(comptime Table: type) type {
             sibling_link.* = index;
         }
 
-        pub fn iterate_then_clear(tree: *Tree) Iterator {
-            return .{ .current = tree.root, .tree = tree };
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+            return .{ .current = tree.root, .tree = tree, .values_max = values_max.ptr };
         }
 
         pub const Iterator = struct {
             top: u32 = 0,
             current: u32,
             tree: *Tree,
+            values_max: [*]Value,
 
             pub fn next(it: *Iterator) ?*const Value {
                 const slice = it.tree.list.slice();
@@ -1138,13 +803,17 @@ pub fn RBTreeType(comptime Table: type) type {
 
                 const slot = slice.items(.stack)[it.top];
                 it.current = slice.items(.node)[slot].links[1];
-                return &slice.items(.value)[slot];
+                const value = &slice.items(.value)[slot];
+
+                it.values_max[0] = value.*;
+                it.values_max += 1;
+                return value;
             }
         };
     };
 }
 
-pub fn HeapTreeType(comptime Table: type) type {
+pub fn SkipListTreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
@@ -1153,43 +822,75 @@ pub fn HeapTreeType(comptime Table: type) type {
 
     return struct {
         const Tree = @This();
-        const List = std.MultiArrayList(struct {
-            value: Value,
-            slot: u32,
-            tag: u8,
-        });
+        const levels_max = 10;
 
-        list: List,
+        values: std.ArrayListUnmanaged(Value),
+        slots: std.ArrayListUnmanaged(u32),
 
-        pub fn init(allocator: mem.Allocator, max_entries: u32) !Tree {
-            assert(max_entries == value_count_max);
+        header_ref: u32 = 0,
+        level: u8 = 0,
+        lcg: u32 = 0,
 
-            var list = List{};
-            try list.ensureTotalCapacity(allocator, max_entries);
-            errdefer list.deinit(allocator);
+        pub fn init(allocator: mem.Allocator) !Tree {
+            var values = try std.ArrayListUnmanaged(Value).initCapacity(allocator, value_count_max);
+            errdefer values.deinit(allocator);
 
-            var tree = Tree{ .list = list };
+            const num_slots = (value_count_max + 1) * (1 + levels_max);
+            var slots = try std.ArrayListUnmanaged(u32).initCapacity(allocator, num_slots);
+            errdefer slots.deinit(allocator);
+
+            var tree = Tree{ .values = values, .slots = slots };
             tree.clear();
             return tree;
         }
 
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
-            tree.list.deinit(allocator);
+            tree.slots.deinit(allocator);
+            tree.values.deinit(allocator);
         }
 
-        pub fn count(tree: *const Tree) u32 {
-            return @intCast(u32, tree.list.len);
+        fn reserve(tree: *Tree, slot_ref: u32, level: u8) u32 {
+            const node = @intCast(u32, tree.slots.items.len);
+            tree.slots.appendNTimesAssumeCapacity(0, 1 + level + 1);
+            tree.slots.items[node] = slot_ref;
+            return node + 1;
         }
 
-        pub fn clear(tree: *Tree) void {
-            tree.list.shrinkRetainingCapacity(0);
-            map_clear(&tree.list.slice());
+        fn search(tree: *const Tree, key: Key, update_refs: ?*[levels_max + 1]u32) ?*Value {
+            var level = tree.level;
+            var current_ref = tree.header_ref;
+
+            while (true) {
+                while (true) {
+                    const current = current_ref - 1;
+                    const forward_ref = tree.slots.items[current + 1 + level];
+                    const forward = math.sub(u32, forward_ref, 1) catch break;
+
+                    const slot_ref = tree.slots.items[forward];
+                    const slot = math.sub(u32, slot_ref, 1) catch break;
+
+                    const forward_key = key_from_value(&tree.values.items[slot]);
+                    if (compare_keys(forward_key, key) != .lt) break;
+                    current_ref = forward_ref;
+                }
+
+                if (update_refs) |u| u[level] = current_ref;
+                level = math.sub(u8, level, 1) catch break;
+            }
+
+            const forward_ref = tree.slots.items[(current_ref - 1) + 1];
+            const current = math.sub(u32, forward_ref, 1) catch return null;
+
+            const slot_ref = tree.slots.items[current];
+            const slot = math.sub(u32, slot_ref, 1) catch return null;
+
+            const value = &tree.values.items[slot];
+            if (compare_keys(key, key_from_value(value)) == .eq) return value;
+            return null;
         }
 
         pub fn get(tree: *const Tree, key: Key) ?*const Value {
-            const slice = tree.list.slice();
-            const entry = map_entry(&slice, key);
-            return map_get(&slice, entry);
+            return tree.search(key, null);
         }
 
         pub const Entry = struct {
@@ -1197,124 +898,88 @@ pub fn HeapTreeType(comptime Table: type) type {
             exists: bool,
         };
 
-        pub fn get_or_put(tree: *Tree, key: Key) Entry {
-            var slice = tree.list.slice();
-            const entry = map_entry(&slice, key);
-            if (map_get(&slice, entry)) |value| return .{ .value = value, .exists = true };
-
-            const slot = @intCast(u32, tree.list.addOneAssumeCapacity());
-            slice.len += 1;
-
-            map_set(&slice, entry, slot);
-            return .{ .value = &slice.items(.value)[slot], .exists = false };
-        }
-
-        fn map_entry(slice: *const List.Slice, key: Key) u64 {
-            const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
-            const fingerprint = @truncate(u7, hash >> (64 - 7));
-            const tag = (@as(u8, fingerprint) << 1) | 1;
-
-            const capacity = @intCast(u32, value_count_max);
-            const tags = slice.items(.tag).ptr[0..capacity];
-            const slots = slice.items(.slot).ptr[0..capacity];
-
-            var pos = @intCast(u32, hash >> 32) % capacity;
-            while (true) : (pos = (pos + 1) % capacity) {
-                const result = (@as(u64, pos) << 8) | tag;
-                if (tags[pos] == 0) return result - 1;
-                if (tags[pos] != tag) continue;
-
-                const value = &slice.items(.value)[slots[pos]];
-                if (compare_keys(key, key_from_value(value)) == .eq) return result;
+        pub fn upsert(tree: *Tree, key: Key) Entry {
+            var update_refs = [_]u32{0} ** (levels_max + 1);
+            if (tree.search(key, &update_refs)) |value| {
+                return .{ .value = value, .exists = true };
             }
+
+            var rand_level: u8 = 0;
+            while (rand_level < levels_max) : (rand_level += 1) {
+                if (tree.lcg == 0) tree.lcg = 0xdeadbeef; // random seed
+                tree.lcg = (tree.lcg *% 1103515245) +% 12345;
+                if ((tree.lcg >> 31) & 1 == 0) break;
+            }
+
+            if (rand_level > tree.level) {
+                var i: u8 = tree.level + 1;
+                while (i < rand_level + 1) : (i += 1) update_refs[i] = tree.header_ref;
+                tree.level = rand_level;
+            }
+
+            const slot = @intCast(u32, tree.values.items.len);
+            const value = tree.values.addOneAssumeCapacity();
+
+            const slot_ref = slot + 1;
+            const node_ref = tree.reserve(slot_ref, rand_level);
+
+            var i: u8 = 0;
+            while (i <= rand_level) : (i += 1) {
+                const update = update_refs[i] - 1;
+                const forward_link = &tree.slots.items[update + 1 + i];
+
+                const node = node_ref - 1;
+                const node_link = &tree.slots.items[node + 1 + i];
+
+                node_link.* = forward_link.*;
+                forward_link.* = node_ref;
+            }
+
+            return .{ .value = value, .exists = false };
         }
 
-        fn map_get(slice: *const List.Slice, entry: u64) ?*Value {
-            if (entry & 1 == 0) return null;
-            const slot = slice.items(.slot).ptr[0..slice.capacity][entry >> 8];
-            return &slice.items(.value)[slot];
+        pub fn count(tree: *const Tree) u32 {
+            return @intCast(u32, tree.values.items.len);
         }
 
-        fn map_set(slice: *const List.Slice, entry: u64, slot: u32) void {
-            assert(entry & 1 == 0);
-            slice.items(.slot).ptr[0..slice.capacity][entry >> 8] = slot;
-            slice.items(.tag).ptr[0..slice.capacity][entry >> 8] = @truncate(u8, entry) | 1;
+        pub fn clear(tree: *Tree) void {
+            tree.values.clearRetainingCapacity();
+            tree.slots.clearRetainingCapacity();
+
+            tree.level = 0;
+            tree.header_ref = tree.reserve(0, levels_max);
         }
 
-        fn map_clear(slice: *const List.Slice) void {
-            const tags = slice.items(.tag).ptr[0..slice.capacity];
-            mem.set(u8, tags, 0);
-        }
-
-        pub fn iterate_then_clear(tree: *Tree) Iterator {
-            const slice = tree.list.slice();
-            const size = tree.count();
-
-            var slot: u32 = 0;
-            while (slot < size) : (slot += 1) heap_push(&slice, slot);
-            return .{ .tree = tree, .heap_size = size };
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+            const header = tree.header_ref - 1;
+            const node_ref = tree.slots.items[header + 1];
+            return .{ .tree = tree, .node_ref = node_ref, .values_max = values_max.ptr };
         }
 
         pub const Iterator = struct {
             tree: *Tree,
-            heap_size: u32,
+            node_ref: u32,
+            values_max: [*]Value,
 
             pub fn next(it: *Iterator) ?*const Value {
-                it.heap_size = std.math.sub(u32, it.heap_size, 1) catch {
-                    it.tree.clear();
-                    return null;
-                };
+                while (true) {
+                    const node = math.sub(u32, it.node_ref, 1) catch {
+                        it.tree.clear();
+                        return null;
+                    };
 
-                const slice = it.tree.list.slice();
-                return heap_pop(&slice, it.heap_size);
+                    const forward_ref = it.tree.slots.items[node + 1];
+                    it.node_ref = forward_ref;
+
+                    const slot_ref = it.tree.slots.items[node];
+                    const value = &it.tree.values.items[slot_ref - 1];
+
+                    it.values_max[0] = value.*;
+                    it.values_max += 1;
+                    return value;
+                }
             }
         };
-
-        fn heap_push(slice: *const List.Slice, slot: u32) void {
-            const values = slice.items(.value);
-            const slots = slice.items(.slot);
-
-            var current = slot;
-            slots[current] = slot;
-            while (true) {
-                const next = std.math.sub(u32, current, 1) catch break;
-                const parent = next >> 1;
-
-                const parent_key = key_from_value(&values[slots[parent]]);
-                const current_key = key_from_value(&values[slots[current]]);
-                if (compare_keys(parent_key, current_key) != .gt) break;
-
-                mem.swap(u32, &slots[current], &slots[parent]);
-                current = parent;
-            }
-        }
-
-        fn heap_pop(slice: *const List.Slice, end: u32) *Value {
-            const values = slice.items(.value);
-            const slots = slice.items(.slot);
-            const value = &values[slots[0]];
-
-            var current: u32 = 0;
-            slots[current] = slots[end];
-            while (true) {
-                var smallest = current;
-                const left = (current << 1) + 1;
-                const right = (current << 1) + 2;
-
-                if (left < end and compare_keys(
-                    key_from_value(&values[slots[left]]),
-                    key_from_value(&values[slots[current]]),
-                ) == .lt) smallest = left;
-
-                if (right < end and compare_keys(
-                    key_from_value(&values[slots[right]]),
-                    key_from_value(&values[slots[smallest]]),
-                ) == .lt) smallest = right;
-
-                if (smallest == current) return value;
-                mem.swap(u32, &slots[current], &slots[smallest]);
-                current = smallest;
-            }
-        }
     };
 }
