@@ -91,8 +91,9 @@ pub fn main() !void {
         .{ "std.HashMap", tm.TableMutableTreeType(Table, "", tm.HashMapTreeType) },
         .{ "SlotMap", tm.TableMutableTreeType(Table, "", tm.SlotMapTreeType) },
         .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
-        .{ "SkipList", tm.TableMutableTreeType(Table, "", tm.SkipListTreeType) },
         .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
+        .{ "SkipList", tm.TableMutableTreeType(Table, "", tm.SkipListTreeType) },
+        .{ "RobinHood", tm.TableMutableTreeType(Table, "", tm.RobinHoodTreeType) },
     }) |setup| {
         try bench(setup[1], setup[0], allocator, values, sorted_values, &timer, rng_seed);
     }
