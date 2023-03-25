@@ -95,6 +95,7 @@ pub fn main() !void {
         .{ "SkipList", tm.TableMutableTreeType(Table, "", tm.SkipListTreeType) },
         .{ "RobinHood", tm.TableMutableTreeType(Table, "", tm.RobinHoodTreeType) },
         .{ "SwissMap", tm.TableMutableTreeType(Table, "", tm.SwissMapTreeType) },
+        .{ "F14", tm.TableMutableTreeType(Table, "", tm.F14TreeType) },
     }) |setup| {
         try bench(setup[1], setup[0], allocator, values, sorted_values, &timer, rng_seed);
     }
