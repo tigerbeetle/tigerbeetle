@@ -615,6 +615,202 @@ pub fn RobinHoodTreeType(comptime Table: type) type {
     };
 }
 
+pub fn SwissMapTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const value_count_max = Table.value_count_max;
+
+    return struct {
+        const Tree = @This();
+
+        const Tag = packed struct {
+            exists: bool = false,
+            fingerprint: u7 = 0,
+        };
+
+        const Values = std.ArrayListUnmanaged(Value);
+        const List = std.MultiArrayList(struct {
+            slot: u32,
+            tag: Tag,
+        });
+
+        const capacity = @intCast(u32, value_count_max);
+        const slot_capacity = capacity * 2;
+
+        values: Values,
+        list: List,
+
+        pub fn init(allocator: mem.Allocator) !Tree {
+            var values = try Values.initCapacity(allocator, value_count_max);
+            errdefer values.deinit(allocator);
+
+            var list = List{};
+            try list.ensureTotalCapacity(allocator, slot_capacity);
+            errdefer list.deinit(allocator);
+
+            var tree = Tree{ .values = values, .list = list };
+            tree.clear();
+            return tree;
+        }
+
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.list.deinit(allocator);
+            tree.values.deinit(allocator);
+        }
+
+        pub fn count(tree: *const Tree) u32 {
+            return @intCast(u32, tree.values.items.len);
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.values.clearRetainingCapacity();
+            mem.set(Tag, tree.list.items(.tag).ptr[0..slot_capacity], Tag{});
+        }
+
+        inline fn reduce(comptime Int: type, hash: u64, comptime range: ?comptime_int) Int {
+            const r = range orelse return @truncate(Int, hash >> (64 - @bitSizeOf(Int)));
+            const v = hash >> (64 - @bitSizeOf(math.IntFittingRange(0, r)));
+            return @truncate(Int, v % r);
+        }
+
+        fn search(tree: *const Tree, key: Key, reserve: bool) ?*Value {
+            const slice = tree.list.slice();
+            const tags = slice.items(.tag).ptr[0..slot_capacity];
+            const slots = slice.items(.slot).ptr[0..slot_capacity];
+
+            const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
+            const fingerprint = reduce(u7, hash, null);
+            var index = reduce(u32, hash, slot_capacity);
+
+            const tag_match = @bitCast(u8, Tag{ .exists = true, .fingerprint = fingerprint });
+            const tag_empty = @bitCast(u8, Tag{});
+
+            while (true) {
+                const scan_lanes = 16;
+                const ScanVector = meta.Vector(scan_lanes, u8);
+                const ScanMask = meta.Int(.unsigned, scan_lanes);
+
+                var next_index = index + scan_lanes;
+                defer index = next_index % slot_capacity;
+
+                // Scan linearly until there's enough contiguous memory to scan with Vectors.
+                if (next_index > slot_capacity) {
+                    const tag = tags[index];
+
+                    // Check if there's an empty slot to insert into.
+                    if (@bitCast(u8, tag) == tag_empty) {
+                        if (reserve) {
+                            tags[index] = @bitCast(Tag, tag_match);
+                            slots[index] = tree.count();
+                        }
+                        return null;
+                    }
+
+                    // Check if has a matching tag and value.
+                    if (@bitCast(u8, tag) == tag_match) {
+                        const value = &tree.values.items[slots[index]];
+                        if (compare_keys(key, key_from_value(value)) == .eq) {
+                            return value;
+                        }
+                    }
+
+                    // Check the next entry.
+                    next_index = index + 1;
+                    continue;
+                }
+
+                // Read a bunch of tags into a Vector (SIMD).
+                const lane: ScanVector = @ptrCast(*[scan_lanes]u8, tags[index..][0..scan_lanes]).*;
+
+                // Check if there's any matching tags with matching values.
+                var match = @ptrCast(*const ScanMask, &(lane == @splat(scan_lanes, tag_match))).*;
+                while (match != 0) : (match &= match - 1) {
+                    const match_index = index + @ctz(ScanMask, match);
+                    const value = &tree.values.items[slots[match_index]];
+                    if (compare_keys(key, key_from_value(value)) == .eq) {
+                        return value;
+                    }
+                }
+
+                // Check if there's any empty tags for us to insert into.
+                const empty = @ptrCast(*const ScanMask, &(lane == @splat(scan_lanes, tag_empty))).*;
+                if (empty != 0) {
+                    const empty_index = index + @ctz(ScanMask, empty);
+                    if (reserve) {
+                        tags[empty_index] = @bitCast(Tag, tag_match);
+                        slots[empty_index] = tree.count();
+                    }
+                    return null;
+                }
+            }
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            return tree.search(key, false);
+        }
+
+        pub const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn upsert(tree: *Tree, key: Key) Entry {
+            const maybe_value = tree.search(key, true);
+            return .{
+                .value = maybe_value orelse tree.values.addOneAssumeCapacity(),
+                .exists = maybe_value != null,
+            };
+        }
+
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+
+            // Values are allocated in tree.values contiguously and tree.slots will be cleared.
+            // Reuse tree.slots memory as indexes to sort tree.values.
+            const slots = tree.list.items(.slot).ptr[0..tree.count()];
+            for (slots) |*s, i| s.* = @intCast(u32, i);
+
+            const SortContext = struct {
+                values: *const Values,
+
+                fn less_than(context: @This(), a_slot: u32, b_slot: u32) bool {
+                    const a_key = key_from_value(&context.values.items[a_slot]);
+                    const b_key = key_from_value(&context.values.items[b_slot]);
+                    return compare_keys(a_key, b_key) == .lt;
+                }
+            };
+
+            const context = SortContext{ .values = &tree.values };
+            std.sort.sort(u32, slots, context, SortContext.less_than);
+            return .{ .tree = tree, .slots = slots, .values_max = values_max.ptr };
+        }
+
+        pub const Iterator = struct {
+            tree: *Tree,
+            index: u32 = 0,
+            slots: []const u32,
+            values_max: [*]Value,
+
+            pub fn next(it: *Iterator) ?*const Value {
+                if (it.index >= it.slots.len) {
+                    it.tree.clear();
+                    return null;
+                }
+
+                const slot = it.slots[it.index];
+                it.index += 1;
+
+                const value = &it.tree.values.items[slot];
+                it.values_max[0] = value.*;
+                it.values_max += 1;
+                return value;
+            }
+        };
+    };
+}
+
 pub fn AATreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
