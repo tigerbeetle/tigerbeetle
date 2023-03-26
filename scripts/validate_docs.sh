@@ -21,4 +21,3 @@ if [[ -n "$SOURCE_REPO" ]]; then
 fi
 
 ( cd docs_website && npm install && ./scripts/build.sh "$BRANCH" "$REPO" )
-rm -rf docs_website
