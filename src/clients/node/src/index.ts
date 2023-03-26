@@ -1,11 +1,11 @@
-export * from './types'
+export * from './bindings'
 import {
   Account,
   Transfer,
   CreateAccountsError,
   CreateTransfersError,
   Operation,
-} from './types'
+} from './bindings'
 
 function getBinding (): Binding {
   const { arch, platform } = process
