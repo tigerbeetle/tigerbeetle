@@ -12,3 +12,5 @@ simulator
 zig/
 zig-cache/
 zig-out/
+
+docs_website
