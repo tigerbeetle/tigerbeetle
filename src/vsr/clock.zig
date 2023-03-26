@@ -640,6 +640,10 @@ const ClockSimulator = struct {
         pub fn deinit(packet: *const Packet) void {
             _ = packet;
         }
+
+        pub fn command(_: *const Packet) Command {
+            return .ping; // Value doesn't matter.
+        }
     };
 
     const Options = struct {
