@@ -2,6 +2,8 @@ const std = @import("std");
 const tb = @import("../../tigerbeetle.zig");
 const tb_client = @import("../c/tb_client.zig");
 
+const output_file = "src/clients/node/src/bindings.ts";
+
 const TypeMapping = struct {
     name: []const u8,
     hidden_fields: []const []const u8 = &.{},
@@ -220,5 +222,19 @@ pub fn main() !void {
 
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
-    try std.fs.cwd().writeFile("src/clients/node/src/bindings.ts", buffer.items);
+    try std.fs.cwd().writeFile(output_file, buffer.items);
+}
+
+const testing = std.testing;
+
+test "bindings node" {
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    try generate_bindings(&buffer);
+
+    const current = try std.fs.cwd().readFileAlloc(testing.allocator, output_file, std.math.maxInt(usize));
+    defer testing.allocator.free(current);
+
+    try testing.expectEqualStrings(current, buffer.items);
 }
