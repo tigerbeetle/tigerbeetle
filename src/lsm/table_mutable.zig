@@ -633,7 +633,7 @@ pub fn SlotMapTreeType(comptime Table: type) type {
             }
         };
 
-        const load_factor = 50;
+        const load_factor = 90;
         const SlotMap = std.HashMapUnmanaged(u32, void, SlotMapContext, load_factor);
 
         slots: SlotMap,
