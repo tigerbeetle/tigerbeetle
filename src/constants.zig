@@ -202,24 +202,34 @@ comptime {
 /// - We must provide enough headers to cover all uncommitted headers so that the new
 ///   primary (if we are in a view change) can decide whether to discard uncommitted headers
 ///   that cannot be repaired because they are gaps. See DVCQuorum for more detail.
+/// - +1 to leave room for commit_max, in case a backup converts the SV to a DVC.
 pub const view_change_headers_suffix_max = config.cluster.view_change_headers_suffix_max;
 
 /// The number of prepare headers to include in the body of a DVC/SV.
 ///
+/// start_view:
+///
 /// - We must include all uncommitted headers.
+/// - +1 We must include the highest cluster-committed header (in case the SV is converted to a DVC
+///   by the backup). (This is part of view_change_headers_suffix_max).
 /// - +2: We must provide the header corresponding to each checkpoint-trigger in the intact
 ///   suffix of our journal.
 ///   - These help a lagging replica catch up when its `op < commit_max`.
 ///   - There are at most two of these in the journal.
 ///     (There are 2 immediately after we checkpoint, until we prepare enough to overwrite one).
+///
+/// do_view_change:
+///
+/// - We must include all uncommitted headers.
+/// - +1 We must include the highest cluster-committed header, so that the new primary still has a
+///   head op if it truncates the entire pipeline.
 pub const view_change_headers_max = view_change_headers_suffix_max + 2;
 
 comptime {
-    assert(view_change_headers_suffix_max > 0);
-    assert(view_change_headers_suffix_max >= pipeline_prepare_queue_max);
+    assert(view_change_headers_suffix_max >= pipeline_prepare_queue_max + 1);
 
     assert(view_change_headers_max > 0);
-    assert(view_change_headers_max >= pipeline_prepare_queue_max + 2);
+    assert(view_change_headers_max >= pipeline_prepare_queue_max + 3);
     assert(view_change_headers_max <= journal_slot_count);
     assert(view_change_headers_max <= @divFloor(message_body_size_max, @sizeOf(vsr.Header)));
     assert(view_change_headers_max > view_change_headers_suffix_max);
