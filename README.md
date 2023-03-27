@@ -49,35 +49,28 @@ Docker](#with-docker).
 Install TigerBeetle by grabbing the latest release from
 GitHub.
 
-#### Prebuilt Linux binary
+x86_64 and aarch64 builds are available for macOS and Linux. Only
+x86_64 builds are available for Windows.
+
+For example:
 
 ```bash
-$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
-$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip
-$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
+$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2023-03-27-weekly/tigerbeetle-x86_64-linux-2023-03-27-weekly.zip
+$ unzip tigerbeetle-x86_64-linux-2023-03-27-weekly.zip
+$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle # On Windows, add $(pwd) to $env:PATH instead.
 $ tigerbeetle version --verbose | head -n6
 TigerBeetle version experimental
 
-git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
+git_commit="55c8fdf1f52c7a174d1bc9d9785cf4e327cae182"
 
-zig_version=0.9.1
-mode=Mode.ReleaseSafe
+build.mode=Mode.ReleaseSafe
+build.zig_version=0.9.1
 ```
 
-#### Prebuilt macOS binary
-
-```bash
-$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
-$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip
-$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
-$ tigerbeetle version --verbose | head -n6
-TigerBeetle version experimental
-
-git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
-
-zig_version=0.9.1
-mode=Mode.ReleaseSafe
-```
+NOTE: This example version is not kept up-to-date. So always check the
+[releases](https://github.com/tigerbeetledb/tigerbeetle/releases) page
+for the latest version. You can also find debug builds for each
+arch/OS combo on the release page as well.
 
 #### Building from source
 
@@ -270,6 +263,7 @@ For further reading:
 
 * [Join the TigerBeetle community on Slack.](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
 * [Subscribe to our monthly newsletter.](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
+* [Check out past and upcoming talks.](/docs/TALKS.md)
 
 ## Benchmarks
 
@@ -304,23 +298,9 @@ You may be interested in:
 * [demos/io_uring](./demos/io_uring), how ring buffers can eliminate kernel syscalls, reduce server hardware requirements by a factor of two, and change the way we think about event loops.
 * [demos/hash_table](./demos/hash_table), how linear probing compares with cuckoo probing, and what we look for in a hash table that needs to scale to millions (and billions) of account transfers.
 
-## Short-Term Roadmap
+## Roadmap
 
-Done:
-
-1. Consensus protocol readiness.
-
-In progress:
-
-2. Storage engine readiness.
-  * Until this happens you'll occasionally see assertion failures in
-    LSM code as we tune overtight or incorrect assertions, or as
-    assertions detect bugs and shut TigerBeetle down safely.
-  * See [#189](https://github.com/tigerbeetledb/tigerbeetle/issues/189) for details.
-3. Recovery readiness.
-  * See [#212](https://github.com/tigerbeetledb/tigerbeetle/issues/212) for details.
-4. Support querying all transfers associated with an account id.
-  * Until this is implemented you can only query individual accounts and transfers by id.
+See https://github.com/tigerbeetledb/tigerbeetle/issues/259.
 
 ## License
 
