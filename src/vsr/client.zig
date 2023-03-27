@@ -44,7 +44,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 append: *Request,
             },
 
-            pub fn slice(self: *@This()) []u8 {
+            pub fn slice(self: *const @This()) []u8 {
                 var message = switch (self.batch_physical) {
                     .new => |value| value,
                     .append => |value| value.message,
@@ -390,7 +390,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // We will set request when submiting the batch,
             // and set parent, context, view and checksums only when sending for the first time:
-            const message = self.get_message();
+            const message = self.message_bus.get_message();
             message.header.* = .{
                 .client = self.id,
                 .cluster = self.cluster,
@@ -468,16 +468,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     request.demux_list.?.tail = batch_logical.demux;
                 },
             }
-        }
-
-        /// Acquires a message from the message bus if one is available.
-        pub fn get_message(self: *Self) *Message {
-            return self.message_bus.get_message();
-        }
-
-        /// Releases a message back to the message bus.
-        pub fn unref(self: *Self, message: *Message) void {
-            self.message_bus.unref(message);
         }
 
         fn on_eviction(self: *Self, eviction: *const Message) void {
@@ -622,6 +612,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // the entire message can be returned at once.
             if (demux_list.head.next == null) {
                 assert(demux_list.head.callback != null);
+                defer self.batch_demux_pool.release(demux_list.head);
                 demux_list.head.callback.?.function(
                     demux_list.head.callback.?.user_data,
                     operation,

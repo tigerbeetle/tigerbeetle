@@ -69,7 +69,7 @@ pub fn main() !void {
 
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
-    var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", 3000)};
+    var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", constants.port)};
 
     var io = try IO.init(32, 0);
 
@@ -110,7 +110,6 @@ pub fn main() !void {
         .batch_index = 0,
         .transfer_index = 0,
         .transfer_next_arrival_ns = 0,
-        .message = null,
         .callback = null,
         .done = false,
     };
@@ -164,7 +163,6 @@ const Benchmark = struct {
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
-    message: ?*MessagePool.Message,
     callback: ?fn (*Benchmark) void,
     done: bool,
 
@@ -324,39 +322,34 @@ const Benchmark = struct {
         payload: []u8,
     ) void {
         b.callback = callback;
-        b.message = b.client.get_message();
+
+        const batch = b.client.get_batch(operation, @intCast(u32, payload.len)) catch |err|
+            panic("Client returned error: {}", .{err});
 
         stdx.copy_disjoint(
-            .inexact,
+            .exact,
             u8,
-            b.message.?.buffer[@sizeOf(vsr.Header)..],
+            batch.slice(),
             payload,
         );
 
-        b.client.request(
+        b.client.submit_batch(
             @intCast(u128, @ptrToInt(b)),
             send_complete,
-            operation,
-            b.message.?,
-            payload.len,
+            batch,
         );
     }
 
     fn send_complete(
         user_data: u128,
         operation: StateMachine.Operation,
-        result: Client.Error![]const u8,
+        result: []const u8,
     ) void {
-        _ = operation;
-
-        const result_payload = result catch |err|
-            panic("Client returned error: {}", .{err});
-
         switch (operation) {
             .create_accounts => {
                 const create_accounts_results = std.mem.bytesAsSlice(
                     tb.CreateAccountsResult,
-                    result_payload,
+                    result,
                 );
                 if (create_accounts_results.len > 0) {
                     panic("CreateAccountsResults: {any}", .{create_accounts_results});
@@ -365,7 +358,7 @@ const Benchmark = struct {
             .create_transfers => {
                 const create_transfers_results = std.mem.bytesAsSlice(
                     tb.CreateTransfersResult,
-                    result_payload,
+                    result,
                 );
                 if (create_transfers_results.len > 0) {
                     panic("CreateTransfersResults: {any}", .{create_transfers_results});
@@ -375,10 +368,6 @@ const Benchmark = struct {
         }
 
         const b = @intToPtr(*Benchmark, @intCast(u64, user_data));
-
-        b.client.unref(b.message.?);
-        b.message = null;
-
         const callback = b.callback.?;
         b.callback = null;
         callback(b);
