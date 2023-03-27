@@ -324,6 +324,7 @@ pub fn ReplicaType(
         /// Seeded with the replica's index number.
         prng: std.rand.DefaultPrng,
 
+        /// Used by `Cluster` in the simulator.
         context: ?*anyopaque = null,
         /// Simulator hooks.
         on_change_state: ?fn (replica: *const Self) void = null,
