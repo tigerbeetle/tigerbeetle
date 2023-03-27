@@ -1031,6 +1031,7 @@ pub fn checksum(source: []const u8) u128 {
 pub fn quorums(replica_count: u8) struct {
     replication: u8,
     view_change: u8,
+    nack_prepare: u8,
 } {
     assert(replica_count > 0);
 
@@ -1060,6 +1061,7 @@ pub fn quorums(replica_count: u8) struct {
     return .{
         .replication = quorum_replication,
         .view_change = quorum_view_change,
+        .nack_prepare = replica_count - quorum_replication + 1,
     };
 }
 
@@ -1068,11 +1070,20 @@ test "quorums" {
 
     const expect_replication = [_]u8{ 1, 2, 2, 2, 3, 3, 3, 3 };
     const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
-
+    const expect_nack_prepare = [_]u8{ 1, 1, 2, 3, 3, 4, 5, 6 };
     for (expect_replication[0..]) |_, i| {
-        const actual = quorums(@intCast(u8, i) + 1);
+        const replicas = @intCast(u8, i) + 1;
+        const actual = quorums(replicas);
         try std.testing.expectEqual(actual.replication, expect_replication[i]);
         try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
+        try std.testing.expectEqual(actual.nack_prepare, expect_nack_prepare[i]);
+
+        // The nack quorum only differs from the view-change quorum when R=2.
+        if (replicas == 2) {
+            try std.testing.expectEqual(actual.nack_prepare, 1);
+        } else {
+            try std.testing.expectEqual(actual.nack_prepare, actual.view_change);
+        }
     }
 }
 
