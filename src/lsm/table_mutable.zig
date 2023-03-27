@@ -394,6 +394,210 @@ pub fn HashMapSlotSortTreeType(comptime Table: type) type {
     };
 }
 
+pub fn SkipHashTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const value_count_max = Table.value_count_max;
+
+    return struct {
+        const Tree = @This();
+
+        const capacity = @intCast(u32, value_count_max) + 1;
+        const levels_max = blk: {
+            var level: u32 = 0;
+            while (true) : (level += 1) {
+                const n = @intToFloat(f64, level);
+                const limit = math.pow(f64, math.e, n);
+                if (@floatToInt(u32, limit) > capacity) break;
+            }
+            break :blk level;
+        };
+
+        const probability_table = blk: {
+            var table: [levels_max]f64 = undefined;
+            for (table) |*probability, i| {
+                const default = @floatCast(f64, 1 / math.e);
+                probability.* = math.pow(f64, default, @intToFloat(f64, i));
+            }
+            break :blk table;
+        };
+
+        const load_capacity = ((capacity * 2) * 70) / 100; // 70% of 2x seems to be ideal.
+        const list_capacity = (math.ceilPowerOfTwo(u32, load_capacity) catch unreachable);
+        const List = std.MultiArrayList(struct {
+            tag: u8,
+            slot: u32,
+        });
+
+        const Values = std.ArrayListUnmanaged(Value);
+        const Links = std.ArrayListUnmanaged(u32);
+
+        values: Values,
+        links: Links,
+        list: List,
+        prng: std.rand.DefaultPrng = std.rand.DefaultPrng.init(42),
+
+        pub fn init(allocator: mem.Allocator) !Tree {
+            var values = try Values.initCapacity(allocator, value_count_max);
+            errdefer values.deinit(allocator);
+
+            var links = try Links.initCapacity(allocator, capacity * (1 + levels_max));
+            errdefer links.deinit(allocator);
+
+            var list = List{};
+            try list.ensureTotalCapacity(allocator, list_capacity);
+            errdefer list.deinit(allocator);
+
+            var tree = Tree{ .values = values, .links = links, .list = list };
+            tree.clear();
+            return tree;
+        }
+
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.list.deinit(allocator);
+            tree.links.deinit(allocator);
+            tree.values.deinit(allocator);
+        }
+
+        pub fn count(tree: *const Tree) u32 {
+            return @intCast(u32, tree.values.items.len);
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.values.clearRetainingCapacity();
+            tree.links.clearRetainingCapacity();
+
+            const tags = tree.list.items(.tag).ptr[0..list_capacity];
+            mem.set(u8, tags, 0);
+
+            const head = @intCast(u32, tree.links.items.len);
+            tree.links.appendNTimesAssumeCapacity(0, 1 + levels_max);
+            mem.set(u32, tree.links.items[head + 1 ..][0..levels_max], 0);
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            const slice = tree.list.slice();
+            const tags = slice.items(.tag).ptr[0..list_capacity];
+            const slots = slice.items(.slot).ptr[0..list_capacity];
+
+            const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
+            const tag = @truncate(u8, hash >> (64 - 7)) | 0x80;
+
+            var index = @truncate(u32, hash) % list_capacity;
+            while (true) : (index = (index +% 1) % list_capacity) {
+                if (tags[index] == 0) return null;
+                if (tags[index] != tag) continue;
+
+                const slot = slots[index];
+                const value = &tree.values.items[slot];
+                if (compare_keys(key, key_from_value(value)) == .eq) return value;
+            }
+        }
+
+        pub const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn upsert(tree: *Tree, key: Key) Entry {
+            const slice = tree.list.slice();
+            const tags = slice.items(.tag).ptr[0..list_capacity];
+            const slots = slice.items(.slot).ptr[0..list_capacity];
+
+            const hash = std.hash_map.getAutoHashFn(Key, Table.HashMapContextValue)(.{}, key);
+            const tag = @truncate(u8, hash >> (64 - 7)) | 0x80;
+
+            var index = @truncate(u32, hash) % list_capacity;
+            while (true) : (index = (index +% 1) % list_capacity) {
+                if (tags[index] == 0) {
+                    const slot = @intCast(u32, tree.values.items.len);
+                    slots[index] = slot;
+                    tags[index] = tag;
+                    tree.insert(key, slot);
+
+                    const value = tree.values.addOneAssumeCapacity();
+                    return .{ .value = value, .exists = false };
+                }
+
+                if (tags[index] != tag) {
+                    continue;
+                }
+
+                const slot = slots[index];
+                const value = &tree.values.items[slot];
+                if (compare_keys(key, key_from_value(value)) != .eq) continue;
+                return .{ .value = value, .exists = true };
+            }
+        }
+
+        fn insert(tree: *Tree, key: Key, slot: u32) void {
+            var prev: u32 = 0;
+            var next_link: u32 = 0;
+            var level: u32 = levels_max - 1;
+            var update = mem.zeroes([levels_max]u32);
+
+            while (true) {
+                level = math.sub(u32, level, 1) catch break;
+                next_link = tree.links.items[prev + 1 + level];
+
+                while (true) {
+                    const next = math.sub(u32, next_link, 1) catch break;
+                    const next_slot = tree.links.items[next];
+                    const value = &tree.values.items[next_slot];
+                    if (compare_keys(key, key_from_value(value)) != .gt) break;
+                    prev = next;
+                    next_link = tree.links.items[next + 1 + level];
+                }
+
+                update[level] = prev;
+            }
+
+            const rand_level = blk: {
+                var r = tree.prng.random().float(f64);
+                level = 1;
+                while (level < levels_max and r < probability_table[level]) level += 1;
+                break :blk level;
+            };
+
+            const node = @intCast(u32, tree.links.items.len);
+            tree.links.appendNTimesAssumeCapacity(0, 1 + rand_level);
+            tree.links.items[node] = slot;
+
+            for (tree.links.items[node + 1 ..][0..rand_level]) |*link, i| {
+                const update_node = update[i];
+                const node_link = &tree.links.items[update_node + 1 + i];
+                link.* = node_link.*;
+                node_link.* = node + 1;
+            }
+        }
+
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+            const node_link = tree.links.items[0 + 1];
+            return .{ .tree = tree, .node_link = node_link, .values_max = values_max.ptr };
+        }
+
+        pub const Iterator = struct {
+            tree: *Tree,
+            node_link: u32,
+            values_max: [*]Value,
+
+            pub fn next(it: *Iterator) ?*const Value {
+                const node = math.sub(u32, it.node_link, 1) catch {
+                    it.tree.clear();
+                    return null;
+                };
+
+                it.node_link = it.tree.links.items[node + 1];
+                const slot = it.tree.links.items[node];
+                return &it.tree.values.items[slot];
+            }
+        };
+    };
+}
+
 pub fn SlotMapTreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;

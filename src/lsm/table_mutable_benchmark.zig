@@ -89,14 +89,15 @@ pub fn main() !void {
     const tm = @import("table_mutable.zig");
     inline for (.{
         .{ "std.HashMap", tm.TableMutableTreeType(Table, "", tm.HashMapTreeType) },
-        .{ "HashMapSlotSort", tm.TableMutableTreeType(Table, "", tm.HashMapSlotSortTreeType) },
+        // .{ "HashMapSlotSort", tm.TableMutableTreeType(Table, "", tm.HashMapSlotSortTreeType) },
+        .{ "SkipHash", tm.TableMutableTreeType(Table, "", tm.SkipHashTreeType) },
         .{ "SlotMap", tm.TableMutableTreeType(Table, "", tm.SlotMapTreeType) },
-        .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
-        .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
+        // .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
+        // .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
         .{ "SkipList", tm.TableMutableTreeType(Table, "", tm.SkipListTreeType) },
         .{ "RobinHood", tm.TableMutableTreeType(Table, "", tm.RobinHoodTreeType) },
-        .{ "SwissMap", tm.TableMutableTreeType(Table, "", tm.SwissMapTreeType) },
-        .{ "F14", tm.TableMutableTreeType(Table, "", tm.F14TreeType) },
+        // .{ "SwissMap", tm.TableMutableTreeType(Table, "", tm.SwissMapTreeType) },
+        // .{ "F14", tm.TableMutableTreeType(Table, "", tm.F14TreeType) },
     }) |setup| {
         try bench(setup[1], setup[0], allocator, values, sorted_values, &timer, rng_seed);
     }
