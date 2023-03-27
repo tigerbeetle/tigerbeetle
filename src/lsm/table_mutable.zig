@@ -394,6 +394,166 @@ pub fn HashMapSlotSortTreeType(comptime Table: type) type {
     };
 }
 
+pub fn SkipHashMapTreeType(comptime Table: type) type {
+    const Key = Table.Key;
+    const Value = Table.Value;
+    const compare_keys = Table.compare_keys;
+    const key_from_value = Table.key_from_value;
+    const value_count_max = Table.value_count_max;
+    const tombstone_from_key = Table.tombstone_from_key;
+
+    return struct {
+        const Tree = @This();
+
+        const capacity = @intCast(u32, value_count_max) + 1;
+        const levels_max = blk: {
+            var level: u32 = 0;
+            while (true) : (level += 1) {
+                const n = @intToFloat(f64, level);
+                const limit = math.pow(f64, math.e, n);
+                if (@floatToInt(u32, limit) > capacity) break;
+            }
+            break :blk level;
+        };
+
+        const probability_table = blk: {
+            var table: [levels_max]f64 = undefined;
+            for (table) |*probability, i| {
+                const default = @floatCast(f64, 1 / math.e);
+                probability.* = math.pow(f64, default, @intToFloat(f64, i));
+            }
+            break :blk table;
+        };
+
+        const load_factor = 50;
+        const Map = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
+        const Links = std.ArrayListUnmanaged(u32);
+
+        map: Map,
+        links: Links,
+        prng: std.rand.DefaultPrng = std.rand.DefaultPrng.init(42),
+
+        pub fn init(allocator: mem.Allocator) !Tree {
+            var map: Map = .{};
+            try map.ensureTotalCapacity(allocator, value_count_max);
+            errdefer map.deinit(allocator);
+
+            var links = try Links.initCapacity(allocator, capacity * (1 + levels_max));
+            errdefer links.deinit(allocator);
+
+            var tree = Tree{ .map = map, .links = links };
+            tree.clear();
+            return tree;
+        }
+
+        pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
+            tree.map.deinit(allocator);
+            tree.links.deinit(allocator);
+        }
+
+        pub fn count(tree: *const Tree) u32 {
+            return @intCast(u32, tree.map.count());
+        }
+
+        pub fn clear(tree: *Tree) void {
+            tree.map.clearRetainingCapacity();
+            tree.links.clearRetainingCapacity();
+
+            const head = @intCast(u32, tree.links.items.len);
+            tree.links.appendNTimesAssumeCapacity(0, 1 + levels_max);
+            mem.set(u32, tree.links.items[head + 1 ..][0..levels_max], 0);
+        }
+
+        pub fn get(tree: *const Tree, key: Key) ?*const Value {
+            return tree.map.getKeyPtr(tombstone_from_key(key));
+        }
+
+        pub const Entry = struct {
+            value: *Value,
+            exists: bool,
+        };
+
+        pub fn upsert(tree: *Tree, key: Key) Entry {
+            const result = tree.map.getOrPutAssumeCapacity(tombstone_from_key(key));
+            if (!result.found_existing) tree.insert(key, result.key_ptr);
+            return .{ .value = result.key_ptr, .exists = result.found_existing };
+        }
+
+        inline fn value_to_slot(tree: *const Tree, value: *const Value) u32 {
+            const offset = @ptrToInt(value) - @ptrToInt(tree.map.keyIterator().items);
+            return @intCast(u32, offset / @sizeOf(Value));
+        }
+
+        inline fn slot_to_value(tree: *const Tree, slot: u32) *const Value {
+            return &tree.map.keyIterator().items[slot];
+        }
+
+        fn insert(tree: *Tree, key: Key, value: *const Value) void {
+            var prev: u32 = 0;
+            var next_link: u32 = 0;
+            var level: u32 = levels_max - 1;
+            var update = mem.zeroes([levels_max]u32);
+
+            while (true) {
+                level = math.sub(u32, level, 1) catch break;
+                next_link = tree.links.items[prev + 1 + level];
+
+                while (true) {
+                    const next = math.sub(u32, next_link, 1) catch break;
+                    const next_slot = tree.links.items[next];
+                    const next_value = tree.slot_to_value(next_slot);
+                    if (compare_keys(key, key_from_value(next_value)) != .gt) break;
+                    prev = next;
+                    next_link = tree.links.items[next + 1 + level];
+                }
+
+                update[level] = prev;
+            }
+
+            const rand_level = blk: {
+                var r = tree.prng.random().float(f64);
+                level = 1;
+                while (level < levels_max and r < probability_table[level]) level += 1;
+                break :blk level;
+            };
+
+            const node = @intCast(u32, tree.links.items.len);
+            tree.links.appendNTimesAssumeCapacity(0, 1 + rand_level);
+            tree.links.items[node] = tree.value_to_slot(value);
+
+            for (tree.links.items[node + 1 ..][0..rand_level]) |*link, i| {
+                const update_node = update[i];
+                const node_link = &tree.links.items[update_node + 1 + i];
+                link.* = node_link.*;
+                node_link.* = node + 1;
+            }
+        }
+
+        pub fn iterate_sort_clear(tree: *Tree, values_max: []Value) Iterator {
+            assert(tree.count() <= values_max.len);
+            const node_link = tree.links.items[0 + 1];
+            return .{ .tree = tree, .node_link = node_link, .values_max = values_max.ptr };
+        }
+
+        pub const Iterator = struct {
+            tree: *Tree,
+            node_link: u32,
+            values_max: [*]Value,
+
+            pub fn next(it: *Iterator) ?*const Value {
+                const node = math.sub(u32, it.node_link, 1) catch {
+                    it.tree.clear();
+                    return null;
+                };
+
+                it.node_link = it.tree.links.items[node + 1];
+                const slot = it.tree.links.items[node];
+                return it.tree.slot_to_value(slot);
+            }
+        };
+    };
+}
+
 pub fn SkipHashTreeType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
