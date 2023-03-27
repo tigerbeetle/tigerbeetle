@@ -108,6 +108,10 @@ pub fn ReplicaType(
         /// The minimum number of replicas required to form a view change quorum:
         quorum_view_change: u8,
 
+        /// The minimum number of replicas required to nack an uncommitted pipeline prepare
+        /// header/message.
+        quorum_nack_prepare: u8,
+
         time: Time,
 
         /// A distributed fault-tolerant clock for lower and upper bounds on the primary's wall clock:
@@ -587,8 +591,10 @@ pub fn ReplicaType(
             const quorums = vsr.quorums(replica_count);
             const quorum_replication = quorums.replication;
             const quorum_view_change = quorums.view_change;
+            const quorum_nack_prepare = quorums.nack_prepare;
             assert(quorum_replication <= replica_count);
             assert(quorum_view_change <= replica_count);
+            assert(quorum_nack_prepare <= replica_count);
 
             if (replica_count <= 2) {
                 assert(quorum_replication == replica_count);
@@ -656,6 +662,7 @@ pub fn ReplicaType(
                 .replica = replica_index,
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
+                .quorum_nack_prepare = quorum_nack_prepare,
                 // Copy the (already-initialized) time back, to avoid regressing the monotonic
                 // clock guard.
                 .time = self.time,
@@ -1898,9 +1905,9 @@ pub fn ReplicaType(
             assert(!self.solo());
 
             const threshold = if (self.journal.faulty.bit(slot))
-                self.replica_count - self.quorum_replication + 1
+                self.quorum_nack_prepare
             else
-                self.replica_count - self.quorum_replication;
+                self.quorum_nack_prepare - 1;
 
             if (threshold == 0) {
                 assert(self.replica_count == 2);
