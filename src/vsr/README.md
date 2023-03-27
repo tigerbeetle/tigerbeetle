@@ -104,11 +104,15 @@ A replica sends `command=do_view_change` to all replicas, with the `view` it is 
 - The _backup_ of the `view` uses to `do_view_change` to updates its current `view` (transitioning to `status=view_change`).
 
 DVCs include headers from prepares which are:
-- _present_ (in the replica's WAL) and valid
-- _missing_ (never written to the replica's WAL)
-- _corrupt_ (in the replica's WAL)
+- _present_: A valid header, corresponding to a valid prepare in the replica's WAL.
+- _missing_: A valid header, corresponding to a prepare that the replica has not prepared/acked.
+- _corrupt_: A valid header, corresponding to a corrupt prepare in the replica's WAL.
+- _blank_: A placeholder (fake) header, corresponding to a header that the replica has never seen.
+- _fault_: A placeholder (fake) header, corresponding to a header that the replica _may have_ prepared/acked.
 
-These cases are distinguished during [WAL repair](#protocol-repair-wal).
+If the new primary collects a _nack quorum_ of _blank_ headers for a particular possibly-uncommitted op, it truncates the log.
+
+These cases are farther distinguished during [WAL repair](#protocol-repair-wal).
 
 When the primary collects its DVC quorum:
 1. If any DVC in the quorum is ahead of the primary by more than one checkpoint,
