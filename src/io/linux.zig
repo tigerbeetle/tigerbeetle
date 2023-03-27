@@ -937,8 +937,6 @@ pub const IO = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
-        _ = callback;
-
         completion.* = .{
             .io = self,
             .context = context,

@@ -63,7 +63,7 @@ const rawCreateTransfers = async (batch: Buffer): Promise<CreateTransfersError[]
       }
 
       try {
-        client.rawRequest(Operation.CREATE_TRANSFER, batch, callback)
+        client.rawRequest(Operation.create_transfers, batch, callback)
       } catch (error) {
         reject(error)
       }
