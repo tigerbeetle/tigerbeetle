@@ -89,13 +89,13 @@ pub fn main() !void {
     const tm = @import("table_mutable.zig");
     inline for (.{
         .{ "std.HashMap", tm.TableMutableTreeType(Table, "", tm.HashMapTreeType) },
-        .{ "HashMapSlotSort", tm.TableMutableTreeType(Table, "", tm.HashMapSlotSortTreeType) },
-        .{ "SkipHash", tm.TableMutableTreeType(Table, "", tm.SkipHashTreeType) },
-        .{ "SkipHashMap", tm.TableMutableTreeType(Table, "", tm.SkipHashMapTreeType) },
+        // .{ "HashMapSlotSort", tm.TableMutableTreeType(Table, "", tm.HashMapSlotSortTreeType) },
+        // .{ "SkipHash", tm.TableMutableTreeType(Table, "", tm.SkipHashTreeType) },
+        .{ "ManualSlot", tm.TableMutableTreeType(Table, "", tm.ManualSlotTreeType) },
         //.{ "SlotMap", tm.TableMutableTreeType(Table, "", tm.SlotMapTreeType) },
         // .{ "AA-Tree", tm.TableMutableTreeType(Table, "", tm.AATreeType) },
         // .{ "RB-Tree", tm.TableMutableTreeType(Table, "", tm.RBTreeType) },
-        .{ "SkipList", tm.TableMutableTreeType(Table, "", tm.SkipListTreeType) },
+        // .{ "SkipList", tm.TableMutableTreeType(Table, "", tm.SkipListTreeType) },
         // .{ "RobinHood", tm.TableMutableTreeType(Table, "", tm.RobinHoodTreeType) },
         // .{ "SwissMap", tm.TableMutableTreeType(Table, "", tm.SwissMapTreeType) },
         // .{ "F14", tm.TableMutableTreeType(Table, "", tm.F14TreeType) },
@@ -163,6 +163,7 @@ fn bench(
             assert(miss_result == null);
         }
 
+        mem.set(Key.Value, sorted_values[0..count_max], undefined);
         const sort_start = timer.read();
         const sorted = table_mutable.sort_into_values_and_clear(sorted_values);
         sort_elapsed = timer.read() - sort_start;
