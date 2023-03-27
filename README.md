@@ -57,7 +57,7 @@ For example:
 ```bash
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2023-03-27-weekly/tigerbeetle-x86_64-linux-2023-03-27-weekly.zip
 $ unzip tigerbeetle-x86_64-linux-2023-03-27-weekly.zip
-$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle # On Windows, add this directory to $env:PATH instead.
+$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle # On Windows, add $(pwd) to $env:PATH instead.
 $ tigerbeetle version --verbose | head -n6
 TigerBeetle version experimental
 
