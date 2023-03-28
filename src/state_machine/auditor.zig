@@ -3,6 +3,7 @@
 //!
 //! The Auditor expects replies in ascending commit order.
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_auditor);
 
@@ -10,13 +11,14 @@ const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const IdPermutation = @import("../test/id.zig").IdPermutation;
+const IdPermutation = @import("../testing/id.zig").IdPermutation;
 
 // TODO(zig) This won't be necessary in Zig 0.10.
-const PriorityQueue = @import("../test/priority_queue.zig").PriorityQueue;
-const Storage = @import("../test/storage.zig").Storage;
+const PriorityQueue = @import("../testing/priority_queue.zig").PriorityQueue;
+const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
@@ -74,11 +76,11 @@ pub const AccountingAuditor = struct {
         transfers_pending_max: usize,
 
         /// From the Auditor's point-of-view, all stalled requests are still in-flight, even if
-        /// their reply has actually arrived at the Conductor.
+        /// their reply has actually arrived at the ReplySequence.
         ///
         /// A request stops being "in-flight" when `on_reply` is called.
         ///
-        /// This should equal the Conductor's `stalled_queue_capacity`.
+        /// This should equal the ReplySequence's `stalled_queue_capacity`.
         in_flight_max: usize,
     };
 
@@ -234,9 +236,8 @@ pub const AccountingAuditor = struct {
             assert(!cr.debits_exceed_credits(0));
             assert(!cr.credits_exceed_debits(0));
 
-            // TODO(Timeouts): When timeouts are implemented in the StateMachine, remove this panic.
-            // In the mean time, if the VOPR hits this error, just ignore it.
-            @panic("tick_to_timestamp: timeouts are not implemented in the StateMachine yet");
+            // TODO(Timeouts): When timeouts are implemented in the StateMachine, remove this unimplemented.
+            stdx.unimplemented("timeouts");
         }
 
         self.timestamp = timestamp;

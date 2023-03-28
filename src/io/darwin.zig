@@ -13,9 +13,9 @@ pub const IO = struct {
     kq: os.fd_t,
     time: Time = .{},
     io_inflight: usize = 0,
-    timeouts: FIFO(Completion) = .{},
-    completed: FIFO(Completion) = .{},
-    io_pending: FIFO(Completion) = .{},
+    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
+    completed: FIFO(Completion) = .{ .name = "io_completed" },
+    io_pending: FIFO(Completion) = .{ .name = "io_pending" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -125,7 +125,7 @@ pub const IO = struct {
         }
 
         var completed = self.completed;
-        self.completed = .{};
+        self.completed.reset();
         while (completed.pop()) |completion| {
             (completion.callback)(self, completion);
         }
@@ -571,6 +571,25 @@ pub const IO = struct {
         completion: *Completion,
         nanoseconds: u63,
     ) void {
+        // Special case a zero timeout as a yield.
+        if (nanoseconds == 0) {
+            completion.* = .{
+                .next = null,
+                .context = context,
+                .operation = undefined,
+                .callback = struct {
+                    fn on_complete(_io: *IO, _completion: *Completion) void {
+                        _ = _io;
+                        const _context = @intToPtr(Context, @ptrToInt(_completion.context));
+                        callback(_context, _completion, {});
+                    }
+                }.on_complete,
+            };
+
+            self.completed.push(completion);
+            return;
+        }
+
         self.submit(
             context,
             callback,

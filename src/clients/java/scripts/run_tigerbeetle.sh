@@ -2,8 +2,7 @@
 set -eEuo pipefail
 
 echo "Building TigerBeetle..."
-(cd ./src/zig/lib/tigerbeetle && ./zig/zig build -Dcpu=baseline -Drelease-safe)
-(cd ./src/zig/lib/tigerbeetle && mv ./zig-out/bin/tigerbeetle .)
+(cd ../../../ && ./zig/zig build install -Dcpu=baseline -Drelease-safe)
 
 echo "Formatting replica ..."
 
@@ -13,8 +12,8 @@ if [ -f "$FILE" ]; then
     rm "$FILE"
 fi
 
-./src/zig/lib/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 "$FILE"
+../../../tigerbeetle format --cluster=0 --replica=0 --replica-count=1 "$FILE"
 
 echo "Starting tigerbeetle ..."
 FILE="./0_0.tigerbeetle.examples"
-./src/zig/lib/tigerbeetle/tigerbeetle start --addresses=3000 "$FILE"
+../../../tigerbeetle start --addresses=3000 "$FILE"

@@ -8,10 +8,10 @@ COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
 echo "Building TigerBeetle..."
-(cd ./src/zig/lib/tigerbeetle && ./zig/zig build -Dcpu=baseline -Drelease-safe)
-(cd ./src/zig/lib/tigerbeetle && mv ./zig-out/bin/tigerbeetle .)
+(cd ../../.. && ./zig/zig build install -Dcpu=baseline -Drelease-safe)
+
 echo "Building TigerBeetle Java Client"
-(cd src/tigerbeetle-java && mvn -B compile --quiet)
+mvn -B compile --quiet
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -41,14 +41,14 @@ do
         rm "$FILE"
     fi
 
-    ./src/zig/lib/tigerbeetle/tigerbeetle format --cluster=0 --replica="$I" "$FILE" > benchmark.log 2>&1
+    ../../../tigerbeetle format --cluster=0 --replica="$I" --replica-count=1 "$FILE" > benchmark.log 2>&1
 done
 
 for I in $REPLICAS
 do
     echo "Starting replica $I..."
     FILE="./0_${I}.tigerbeetle.benchmark"
-    ./src/zig/lib/tigerbeetle/tigerbeetle start --addresses=3001 "$FILE" > benchmark.log 2>&1 &
+    ../../../tigerbeetle start --addresses=3001 "$FILE" > benchmark.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:
@@ -56,13 +56,13 @@ sleep 1
 
 echo ""
 echo "Benchmarking..."
-java -cp ./src/tigerbeetle-java/target/classes benchmark/Benchmark
+java -cp ./target/classes benchmark/Benchmark
 echo ""
 
-for I in 0
+for I in $REPLICAS
 do
     FILE="./0_${I}.tigerbeetle.benchmark"
-    if [ -f $FILE ]; then
-        rm $FILE
+    if [ -f "$FILE" ]; then
+        rm "$FILE"
     fi
 done

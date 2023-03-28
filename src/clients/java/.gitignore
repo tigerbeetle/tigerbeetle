@@ -1,8 +1,6 @@
-zig-cache/
-zig-out/
-src/tigerbeetle-java/build
-src/tigerbeetle-java/target
-src/tigerbeetle-java/src/main/resources/lib/**
+build
+target
+src/main/resources/lib/**
 examples/build
 examples/target
 *tigerbeetle.benchmark

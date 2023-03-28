@@ -4,21 +4,45 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const log = std.log.scoped(.vsr);
 
-const constants = @import("constants.zig");
-
-/// The version of our Viewstamped Replication protocol in use, including customizations.
-/// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
-pub const Version: u8 = 0;
+// vsr.zig is the root of a zig package, reexport all public APIs.
+//
+// Note that we don't promise any stability of these interfaces yet.
+pub const constants = @import("constants.zig");
+pub const io = @import("io.zig");
+pub const message_bus = @import("message_bus.zig");
+pub const message_pool = @import("message_pool.zig");
+pub const state_machine = @import("state_machine.zig");
+pub const storage = @import("storage.zig");
+pub const tigerbeetle = @import("tigerbeetle.zig");
+pub const time = @import("time.zig");
+pub const tracer = @import("tracer.zig");
+pub const config = @import("config.zig");
+pub const stdx = @import("stdx.zig");
+pub const superblock = @import("vsr/superblock.zig");
+pub const lsm = .{
+    .tree = @import("lsm/tree.zig"),
+    .grid = @import("lsm/grid.zig"),
+    .groove = @import("lsm/groove.zig"),
+    .forest = @import("lsm/forest.zig"),
+    .posted_groove = @import("lsm/posted_groove.zig"),
+};
+pub const testing = .{
+    .cluster = @import("testing/cluster.zig"),
+};
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
-pub const Clock = @import("vsr/clock.zig").Clock;
+pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
-pub const SuperBlockType = @import("vsr/superblock.zig").SuperBlockType;
-pub const VSRState = @import("vsr/superblock.zig").SuperBlockSector.VSRState;
+pub const SuperBlockType = superblock.SuperBlockType;
+pub const VSRState = superblock.SuperBlockHeader.VSRState;
+
+/// The version of our Viewstamped Replication protocol in use, including customizations.
+/// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
+pub const Version: u8 = 0;
 
 pub const ProcessType = enum { replica, client };
 
@@ -28,7 +52,7 @@ pub const Zone = enum {
     wal_prepares,
     grid,
 
-    const size_superblock = @import("vsr/superblock.zig").superblock_zone_size;
+    const size_superblock = superblock.superblock_zone_size;
     const size_wal_headers = constants.journal_size_headers;
     const size_wal_prepares = constants.journal_size_prepares;
 
@@ -72,6 +96,9 @@ pub const Command = enum(u8) {
     ping,
     pong,
 
+    ping_client,
+    pong_client,
+
     request,
     prepare,
     prepare_ok,
@@ -81,9 +108,6 @@ pub const Command = enum(u8) {
     start_view_change,
     do_view_change,
     start_view,
-
-    recovery,
-    recovery_response,
 
     request_start_view,
     request_headers,
@@ -138,6 +162,8 @@ pub const Operation = enum(u8) {
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
+    const checksum_body_empty = checksum(&.{});
+
     comptime {
         assert(@sizeOf(Header) == 128);
         // Assert that there is no implicit padding in the struct.
@@ -174,7 +200,7 @@ pub const Header = extern struct {
     /// detecting whether a session has been evicted is solved by the session number.
     client: u128 = 0,
 
-    /// The checksum of the message to which this message refers, or a unique recovery nonce.
+    /// The checksum of the message to which this message refers.
     ///
     /// We use this cryptographic context in various ways, for example:
     ///
@@ -184,7 +210,6 @@ pub const Header = extern struct {
     /// * A `commit` sets this to the checksum of the latest committed prepare.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `nack_prepare` sets this to the checksum of the prepare being nacked.
-    /// * A `recovery` and `recovery_response` sets this to the nonce.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -194,6 +219,8 @@ pub const Header = extern struct {
     /// than earlier ones. The request number is used by the replicas to avoid running requests more
     /// than once; it is also used by the client to discard duplicate responses to its requests.
     /// A client is allowed to have at most one request inflight at a time.
+    ///
+    /// * A `do_view_change` sets this to its latest log_view number.
     request: u32 = 0,
 
     /// The cluster number binds intention into the header, so that a client or replica can indicate
@@ -210,13 +237,16 @@ pub const Header = extern struct {
 
     /// The op number of the latest prepare that may or may not yet be committed. Uncommitted ops
     /// may be replaced by different ops if they do not survive through a view change.
+    ///
+    /// * A `request_headers` sets this to the maximum op requested (inclusive).
     op: u64 = 0,
 
     /// The commit number of the latest committed prepare. Committed ops are immutable.
     ///
     /// * A `do_view_change` sets this to `commit_min`, to indicate the sending replica's progress.
     ///   The sending replica may continue to commit after sending the DVC.
-    /// * A `start_view` sets this to `commit_max`.
+    /// * A `start_view` sets this to `commit_min`/`commit_max` (they are the same).
+    /// * A `request_headers` sets this to the minimum op requested (inclusive).
     commit: u64 = 0,
 
     /// This field is used in various ways:
@@ -225,10 +255,9 @@ pub const Header = extern struct {
     ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
     /// * A `reply` sets this to the corresponding `prepare`'s timestamp.
     ///   This allows the test workload to verify transfer timeouts.
-    /// * A `do_view_change` sets this to the latest normal view number.
     /// * A `pong` sets this to the sender's wall clock value.
-    /// * A `request_prepare` sets this to `1` when `context` is set to a checksum, and `0`
-    ///   otherwise.
+    /// * A `commit` message sets this to the replica's monotonic timestamp.
+    /// * A `do_view_change` and `start_view` set this to the replica's `op_checkpoint`.
     timestamp: u64 = 0,
 
     /// The size of the Header structure (always), plus any associated body.
@@ -291,6 +320,8 @@ pub const Header = extern struct {
             .reserved => self.invalid_reserved(),
             .ping => self.invalid_ping(),
             .pong => self.invalid_pong(),
+            .ping_client => self.invalid_ping_client(),
+            .pong_client => self.invalid_pong_client(),
             .request => self.invalid_request(),
             .prepare => self.invalid_prepare(),
             .prepare_ok => self.invalid_prepare_ok(),
@@ -299,8 +330,6 @@ pub const Header = extern struct {
             .start_view_change => self.invalid_start_view_change(),
             .do_view_change => self.invalid_do_view_change(),
             .start_view => self.invalid_start_view(),
-            .recovery => self.invalid_recovery(),
-            .recovery_response => self.invalid_recovery_response(),
             .request_start_view => self.invalid_request_start_view(),
             .request_headers => self.invalid_request_headers(),
             .request_prepare => self.invalid_request_prepare(),
@@ -329,10 +358,14 @@ pub const Header = extern struct {
     fn invalid_ping(self: *const Header) ?[]const u8 {
         assert(self.command == .ping);
         if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -343,7 +376,43 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
+        if (self.timestamp == 0) return "timestamp == 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_ping_client(self: *const Header) ?[]const u8 {
+        assert(self.command == .ping_client);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client == 0) return "client == 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.replica != 0) return "replica != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_pong_client(self: *const Header) ?[]const u8 {
+        assert(self.command == .pong_client);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -360,10 +429,11 @@ pub const Header = extern struct {
             .root => return "operation == .root",
             .register => {
                 // The first request a client makes must be to register with the cluster:
-                if (self.parent != 0) return "parent != 0";
-                if (self.context != 0) return "context != 0";
-                if (self.request != 0) return "request != 0";
+                if (self.parent != 0) return "register: parent != 0";
+                if (self.context != 0) return "register: context != 0";
+                if (self.request != 0) return "register: request != 0";
                 // The .register operation carries no payload:
+                if (self.checksum_body != checksum_body_empty) return "register: checksum_body != expected";
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
@@ -389,6 +459,7 @@ pub const Header = extern struct {
                 if (self.op != 0) return "root: op != 0";
                 if (self.commit != 0) return "root: commit != 0";
                 if (self.timestamp != 0) return "root: timestamp != 0";
+                if (self.checksum_body != checksum_body_empty) return "root: checksum_body != expected";
                 if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
                 if (self.replica != 0) return "root: replica != 0";
             },
@@ -411,6 +482,7 @@ pub const Header = extern struct {
 
     fn invalid_prepare_ok(self: *const Header) ?[]const u8 {
         assert(self.command == .prepare_ok);
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
@@ -429,6 +501,7 @@ pub const Header = extern struct {
                 if (self.client == 0) return "client == 0";
                 if (self.op == 0) return "op == 0";
                 if (self.op <= self.commit) return "op <= commit";
+                if (self.timestamp == 0) return "timestamp == 0";
                 if (self.operation == .register) {
                     if (self.request != 0) return "request != 0";
                 } else {
@@ -464,7 +537,9 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.timestamp == 0) return "timestamp == 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -478,6 +553,8 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -487,7 +564,6 @@ pub const Header = extern struct {
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -498,30 +574,6 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_recovery(self: *const Header) ?[]const u8 {
-        assert(self.command == .recovery);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_recovery_response(self: *const Header) ?[]const u8 {
-        assert(self.command == .recovery_response);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -535,6 +587,8 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -545,8 +599,10 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
         if (self.commit > self.op) return "op_min > op_max";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -557,11 +613,9 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
-        switch (self.timestamp) {
-            0 => if (self.context != 0) return "context != 0",
-            1 => {}, // context is a checksum, which may be 0.
-            else => return "timestamp > 1",
-        }
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -585,6 +639,8 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -597,6 +653,8 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -615,15 +673,7 @@ pub const Header = extern struct {
             },
             .prepare => return .unknown,
             // These messages identify the peer as either a replica or a client:
-            // TODO Assert that pong responses from a replica do not echo the pinging client's ID.
-            .ping, .pong => {
-                if (self.client > 0) {
-                    assert(self.replica == 0);
-                    return .client;
-                } else {
-                    return .replica;
-                }
-            },
+            .ping_client => return .client,
             // All other messages identify the peer as a replica:
             else => return .replica,
         }
@@ -683,7 +733,7 @@ pub const Timeout = struct {
 
     /// It's important to check that when fired() is acted on that the timeout is stopped/started,
     /// otherwise further ticks around the event loop may trigger a thundering herd of messages.
-    pub fn fired(self: *Timeout) bool {
+    pub fn fired(self: *const Timeout) bool {
         if (self.ticking and self.ticks >= self.after) {
             log.debug("{}: {s} fired", .{ self.id, self.name });
             if (self.ticks > self.after) {
@@ -806,8 +856,6 @@ pub fn exponential_backoff_with_jitter(
 }
 
 test "exponential_backoff_with_jitter" {
-    const testing = std.testing;
-
     var prng = std.rand.DefaultPrng.init(0);
     const random = prng.random();
 
@@ -818,8 +866,8 @@ test "exponential_backoff_with_jitter" {
     var attempt = max - attempts;
     while (attempt < max) : (attempt += 1) {
         const ebwj = exponential_backoff_with_jitter(random, min, max, attempt);
-        try testing.expect(ebwj >= min);
-        try testing.expect(ebwj <= max);
+        try std.testing.expect(ebwj >= min);
+        try std.testing.expect(ebwj <= max);
     }
 }
 
@@ -973,6 +1021,8 @@ pub fn sector_ceil(offset: u64) u64 {
 }
 
 pub fn checksum(source: []const u8) u128 {
+    @setEvalBranchQuota(4000);
+
     var target: [32]u8 = undefined;
     std.crypto.hash.Blake3.hash(source, target[0..], .{});
     return @bitCast(u128, target[0..@sizeOf(u128)].*);
@@ -982,25 +1032,169 @@ pub fn quorums(replica_count: u8) struct {
     replication: u8,
     view_change: u8,
 } {
-    const majority = @divFloor(replica_count, 2) + 1;
-    assert(majority <= replica_count);
+    assert(replica_count > 0);
 
     assert(constants.quorum_replication_max >= 2);
-    const quorum_replication = std.math.min(constants.quorum_replication_max, majority);
+    // For replica_count=2, set quorum_replication=2 even though =1 would intersect.
+    // This improves durability of small clusters.
+    const quorum_replication = if (replica_count == 2) 2 else std.math.min(
+        constants.quorum_replication_max,
+        stdx.div_ceil(replica_count, 2),
+    );
+    assert(quorum_replication <= replica_count);
     assert(quorum_replication >= 2 or quorum_replication == replica_count);
 
-    const quorum_view_change = std.math.max(
-        replica_count - quorum_replication + 1,
-        majority,
-    );
+    // For replica_count=2, set quorum_view_change=2 even though =1 would intersect.
+    // This avoids special cases for a single-replica view-change in Replica.
+    const quorum_view_change =
+        if (replica_count == 2) 2 else replica_count - quorum_replication + 1;
     // The view change quorum may be more expensive to make the replication quorum cheaper.
     // The insight is that the replication phase is by far more common than the view change.
     // This trade-off allows us to optimize for the common case.
     // See the comments in `constants.zig` for further explanation.
-    assert(quorum_view_change >= majority);
+    assert(quorum_view_change <= replica_count);
+    assert(quorum_view_change >= 2 or quorum_view_change == replica_count);
+    assert(quorum_view_change >= @divFloor(replica_count, 2) + 1);
+    assert(quorum_view_change + quorum_replication > replica_count);
 
     return .{
         .replication = quorum_replication,
         .view_change = quorum_view_change,
     };
 }
+
+test "quorums" {
+    if (constants.quorum_replication_max != 3) return error.SkipZigTest;
+
+    const expect_replication = [_]u8{ 1, 2, 2, 2, 3, 3, 3, 3 };
+    const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
+
+    for (expect_replication[0..]) |_, i| {
+        const actual = quorums(@intCast(u8, i) + 1);
+        try std.testing.expectEqual(actual.replication, expect_replication[i]);
+        try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
+    }
+}
+
+pub const Headers = struct {
+    pub const Array = std.BoundedArray(Header, constants.view_change_headers_max);
+    /// The SuperBlock's persisted VSR headers.
+    /// One of the following:
+    ///
+    /// - SV headers (consecutive chain)
+    /// - DVC headers (disjoint chain)
+    pub const ViewChangeSlice = ViewChangeHeadersSlice;
+    pub const ViewChangeArray = ViewChangeHeadersArray;
+};
+
+const ViewChangeHeadersSlice = struct {
+    /// Headers are ordered from high-to-low op.
+    slice: []const Header,
+
+    pub fn init(slice: []const Header) ViewChangeHeadersSlice {
+        ViewChangeHeadersSlice.verify(slice);
+
+        return .{ .slice = slice };
+    }
+
+    pub fn verify(slice: []const Header) void {
+        assert(slice.len > 0);
+        assert(slice.len <= constants.view_change_headers_max);
+
+        var child: ?*const Header = null;
+        for (slice) |*header| {
+            assert(header.valid_checksum());
+            assert(header.command == .prepare);
+
+            if (child) |child_header| {
+                assert(header.op < child_header.op);
+                assert(header.view <= child_header.view);
+                assert((header.op + 1 == child_header.op) ==
+                    (header.checksum == child_header.parent));
+                assert(header.timestamp < child_header.timestamp);
+            }
+            child = header;
+        }
+    }
+
+    const ViewRange = struct {
+        min: u32, // inclusive
+        max: u32, // inclusive
+
+        pub fn contains(range: ViewRange, view: u32) bool {
+            return range.min <= view and view <= range.max;
+        }
+    };
+
+    /// Returns the range of possible views (of prepare, not commit) for a message that is part of
+    /// the same log_view as these headers.
+    ///
+    /// - When these are DVC headers for a log_view=V, we must be in view_change status working to
+    ///   transition to a view beyond V. So we will never prepare anything else as part of view V.
+    /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
+    ///   more ops), but those ops will laways be part of the log_view. If they were prepared during
+    ///   a view prior to the log_view, they would already be part of the headers.
+    pub fn view_for_op(headers: ViewChangeHeadersSlice, op: u64, log_view: u32) ViewRange {
+        const header_newest = &headers.slice[0];
+        const header_oldest = &headers.slice[headers.slice.len - 1];
+
+        if (op < header_oldest.op) return .{ .min = 0, .max = header_oldest.view };
+        if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
+
+        for (headers.slice) |*header| {
+            if (header.op == op) return .{ .min = header.view, .max = header.view };
+        }
+
+        for (headers.slice[0 .. headers.slice.len - 1]) |*header_next, header_next_index| {
+            const header_prev = headers.slice[header_next_index + 1];
+            if (header_prev.op < op and op < header_next.op) {
+                return .{ .min = header_prev.view, .max = header_next.view };
+            }
+        }
+        unreachable;
+    }
+};
+
+test "Headers.ViewChangeSlice.view_for_op" {
+    var headers_array = [_]Header{
+        std.mem.zeroInit(Header, .{ .op = 9, .view = 10 }),
+        std.mem.zeroInit(Header, .{ .op = 6, .view = 7 }),
+    };
+
+    const headers = Headers.ViewChangeSlice{ .slice = &headers_array };
+    try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(10, 12), .{ .min = 12, .max = 12 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(9, 12), .{ .min = 10, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(8, 12), .{ .min = 7, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(7, 12), .{ .min = 7, .max = 10 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(6, 12), .{ .min = 7, .max = 7 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(5, 12), .{ .min = 0, .max = 7 }));
+    try std.testing.expect(std.meta.eql(headers.view_for_op(0, 12), .{ .min = 0, .max = 7 }));
+}
+
+/// The headers of a SV or DVC message.
+const ViewChangeHeadersArray = struct {
+    array: Headers.Array,
+
+    pub fn root(cluster: u32) ViewChangeHeadersArray {
+        var array = Headers.Array{ .buffer = undefined };
+        array.appendAssumeCapacity(Header.root_prepare(cluster));
+        return ViewChangeHeadersArray.init(array);
+    }
+
+    pub fn init_from_slice(slice: []const Header) ViewChangeHeadersArray {
+        Headers.ViewChangeSlice.verify(slice);
+        return .{ .array = Headers.Array.fromSlice(slice) catch unreachable };
+    }
+
+    pub fn replace(headers: *ViewChangeHeadersArray, slice: []const Header) void {
+        Headers.ViewChangeSlice.verify(slice);
+        headers.array.len = 0;
+        for (slice) |*header| headers.array.appendAssumeCapacity(header.*);
+    }
+
+    fn init(array: Headers.Array) ViewChangeHeadersArray {
+        Headers.ViewChangeSlice.verify(array.constSlice());
+        return .{ .array = array };
+    }
+};

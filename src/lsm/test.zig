@@ -15,6 +15,7 @@ const Storage = @import("../storage.zig").Storage;
 const IO = @import("../io.zig").IO;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
 const GridType = @import("grid.zig").GridType;
@@ -35,8 +36,7 @@ const Environment = struct {
     const node_count = 1024;
     const cache_entries_max = 2 * 1024 * 1024;
     const forest_options = StateMachine.forest_options(.{
-        // Ignored by StateMachine.forest_options().
-        .lsm_forest_node_count = undefined,
+        .lsm_forest_node_count = node_count,
         .cache_entries_accounts = cache_entries_max,
         .cache_entries_transfers = cache_entries_max,
         .cache_entries_posted = cache_entries_max,
@@ -121,7 +121,7 @@ const Environment = struct {
     }
 
     fn tick(env: *Environment) !void {
-        env.grid.tick();
+        // env.grid.tick();
         try env.io.tick();
     }
 
@@ -203,15 +203,16 @@ const Environment = struct {
 
         log.debug("forest checkpointing completed!", .{});
 
-        var vsr_state = env.superblock.staging.vsr_state;
-        vsr_state.commit_min += 1;
-        vsr_state.commit_min_checkpoint += 1;
+        const vsr_state = &env.superblock.staging.vsr_state;
 
         env.state = .superblock_checkpointing;
         env.superblock.checkpoint(
             superblock_checkpoint_callback,
             &env.superblock_context,
-            vsr_state,
+            .{
+                .commit_min_checkpoint = vsr_state.commit_min_checkpoint + 1,
+                .commit_min = vsr_state.commit_min + 1,
+            },
         );
     }
 

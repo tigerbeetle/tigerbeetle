@@ -1,4 +1,59 @@
-const binding: Binding = require('./client.node')
+function getBinding (): Binding {
+  const { arch, platform } = process
+
+  const archMap = {
+    "arm64": "aarch64",
+    "x64": "x86_64"
+  }
+
+  const platformMap = {
+    "linux": "linux",
+    "darwin": "macos"
+  }
+
+  if (! (arch in archMap)) {
+    throw new Error(`Unsupported arch: ${arch}`)
+  }
+
+  if (! (platform in platformMap)) {
+    throw new Error(`Unsupported platform: ${platform}`)
+  }
+
+  let extra = ''
+
+  /**
+   * We need to detect during runtime which libc we're running on to load the correct NAPI.
+   * binary.
+   *
+   * Rationale: The /proc/self/map_files/ subdirectory contains entries corresponding to
+   * memory-mapped files loaded by Node.
+   * https://man7.org/linux/man-pages/man5/proc.5.html: We detect a musl-based distro by
+   * checking if any library contains the name "musl".
+   *
+   * Prior art: https://github.com/xerial/sqlite-jdbc/issues/623
+   */
+
+  const fs = require('fs')
+  const path = require('path')
+
+  if (platform === 'linux') {
+    extra = '-gnu'
+
+    for (const file of fs.readdirSync("/proc/self/map_files/")) {
+      const realPath = fs.readlinkSync(path.join("/proc/self/map_files/", file))
+      if (realPath.includes('musl')) {
+        extra = '-musl'
+        break
+      }
+    }
+  }
+
+  const filename = `./bin/${archMap[arch]}-${platformMap[platform]}${extra}/client.node`
+  return require(filename)
+}
+
+const binding = getBinding()
+
 interface Binding {
   init: (args: BindingInitArgs) => Context
   request: (context: Context, operation: Operation, batch: Event[], result: ResultCallback) => void
@@ -44,20 +99,22 @@ export enum CreateAccountError {
   // ok = 0 (No Error)
   linked_event_failed = 1,
   linked_event_chain_open,
+  timestamp_must_be_zero,
 
   reserved_flag,
   reserved_field,
 
   id_must_not_be_zero,
   id_must_not_be_int_max,
+
+  flags_are_mutually_exclusive,
+
   ledger_must_not_be_zero,
   code_must_not_be_zero,
   debits_pending_must_be_zero,
   debits_posted_must_be_zero,
   credits_pending_must_be_zero,
   credits_posted_must_be_zero,
-
-  mutually_exclusive_flags,
 
   exists_with_different_flags,
   exists_with_different_user_data,
@@ -90,19 +147,25 @@ export enum TransferFlags {
   linked = (1 << 0),
   pending = (1 << 1),
   post_pending_transfer = (1 << 2),
-  void_pending_transfer = (1 << 3)
+  void_pending_transfer = (1 << 3),
+  balancing_debit = (1 << 4),
+  balancing_credit = (1 << 5),
 }
 
 export enum CreateTransferError {
   // ok = 0 (No Error)
   linked_event_failed = 1,
   linked_event_chain_open,
+  timestamp_must_be_zero,
 
   reserved_flag,
   reserved_field,
 
   id_must_not_be_zero,
   id_must_not_be_int_max,
+
+  flags_are_mutually_exclusive,
+
   debit_account_id_must_not_be_zero,
   debit_account_id_must_not_be_int_max,
   credit_account_id_must_not_be_zero,
@@ -110,6 +173,10 @@ export enum CreateTransferError {
   accounts_must_be_different,
 
   pending_id_must_be_zero,
+  pending_id_must_not_be_zero,
+  pending_id_must_not_be_int_max,
+  pending_id_must_be_different,
+  timeout_reserved_for_pending_transfer,
 
   ledger_must_not_be_zero,
   code_must_not_be_zero,
@@ -120,34 +187,6 @@ export enum CreateTransferError {
 
   accounts_must_have_the_same_ledger,
   transfer_must_have_the_same_ledger_as_accounts,
-
-  exists_with_different_flags,
-  exists_with_different_debit_account_id,
-  exists_with_different_credit_account_id,
-  exists_with_different_user_data,
-  exists_with_different_pending_id,
-  exists_with_different_timeout,
-  exists_with_different_code,
-  exists_with_different_amount,
-  exists,
-
-  overflows_debits_pending,
-  overflows_credits_pending,
-  overflows_debits_posted,
-  overflows_credits_posted,
-  overflows_debits,
-  overflows_credits,
-
-  exceeds_credits,
-  exceeds_debits,
-
-  cannot_post_and_void_pending_transfer,
-  pending_transfer_cannot_post_or_void_another,
-  timeout_reserved_for_pending_transfer,
-
-  pending_id_must_not_be_zero,
-  pending_id_must_not_be_int_max,
-  pending_id_must_be_different,
 
   pending_transfer_not_found,
   pending_transfer_not_pending,
@@ -164,6 +203,27 @@ export enum CreateTransferError {
   pending_transfer_already_voided,
 
   pending_transfer_expired,
+
+  exists_with_different_flags,
+  exists_with_different_debit_account_id,
+  exists_with_different_credit_account_id,
+  exists_with_different_pending_id,
+  exists_with_different_user_data,
+  exists_with_different_timeout,
+  exists_with_different_code,
+  exists_with_different_amount,
+  exists,
+
+  overflows_debits_pending,
+  overflows_credits_pending,
+  overflows_debits_posted,
+  overflows_credits_posted,
+  overflows_debits,
+  overflows_credits,
+  overflows_timeout,
+
+  exceeds_credits,
+  exceeds_debits,
 }
 
 export type CreateTransfersError = {

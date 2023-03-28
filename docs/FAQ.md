@@ -72,7 +72,7 @@ hardware.
 
 With financial data, it's also important not to lump it together with
 general purpose data. The risk profile is different: retention
-policies, compliance requirements,and privacy concerns. In auditing
+policies, compliance requirements, and privacy concerns. In auditing
 the term is “separation of concerns”. And the performance
 characteristics, auditability, and availability requirements are also
 dissimilar from general purpose data. In much the same way that you
@@ -80,7 +80,7 @@ would store large objects in an object store, or streaming data in a
 queue, you really do want separation of concerns for your financial
 data and a mission critical database to store it.
 
-## What is two-phase commit?
+## What is a two-phase transfer?
 
 This is a reference to the [two-phase commit protocol for distributed
 transactions](https://en.wikipedia.org/wiki/Two-phase_commit_protocol).

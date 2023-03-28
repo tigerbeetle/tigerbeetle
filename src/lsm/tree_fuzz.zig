@@ -4,7 +4,7 @@ const allocator = testing.allocator;
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
-const fuzz = @import("../test/fuzz.zig");
+const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 
 const log = std.log.scoped(.lsm_tree_fuzz);
@@ -13,9 +13,10 @@ const tracer = @import("../tracer.zig");
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
-const Storage = @import("../test/storage.zig").Storage;
+const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
 const GridType = @import("grid.zig").GridType;
@@ -62,6 +63,7 @@ const Key = packed struct {
     }
 };
 
+const FuzzOpTag = std.meta.Tag(FuzzOp);
 const FuzzOp = union(enum) {
     // TODO Test range queries.
     compact: struct {
@@ -72,22 +74,24 @@ const FuzzOp = union(enum) {
     remove: Key.Value,
     get: Key,
 };
-const FuzzOpTag = std.meta.Tag(FuzzOp);
+
+const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
+const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
+const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
 
 const cluster = 32;
 const replica = 4;
+const replica_count = 6;
 const node_count = 1024;
-const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
-const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
-
 const tree_options = .{
-    .commit_entries_max = commit_entries_max,
     // This is the smallest size that set_associative_cache will allow us.
     .cache_entries_max = 2048,
 };
 
-const puts_since_compact_max = commit_entries_max;
-
+// We must call compact after every 'batch'.
+// Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
+// Every `FuzzOp.put` issues one remove and one put.
+const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
 const compacts_per_checkpoint = std.math.divCeil(
     usize,
     constants.journal_slot_count,
@@ -98,6 +102,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
         const Environment = @This();
 
+        const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
         const Table = TableType(
             Key,
             Key.Value,
@@ -106,19 +111,20 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             Key.sentinel_key,
             Key.tombstone,
             Key.tombstone_from_key,
+            value_count_max,
             table_usage,
         );
-        const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
 
         const State = enum {
-            uninit,
             init,
-            formatted,
+            superblock_format,
             superblock_open,
+            tree_init,
             tree_open,
-            tree_compacting,
-            tree_checkpointing,
-            superblock_checkpointing,
+            fuzzing,
+            tree_compact,
+            tree_checkpoint,
+            superblock_checkpoint,
             tree_lookup,
         };
 
@@ -126,70 +132,40 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         storage: *Storage,
         message_pool: MessagePool,
         superblock: SuperBlock,
-        superblock_context: SuperBlock.Context = undefined,
+        superblock_context: SuperBlock.Context,
         grid: Grid,
         node_pool: NodePool,
         tree: Tree,
-        // We need @fieldParentPtr() of tree, so we can't use an optional Tree.
-        tree_exists: bool,
-        lookup_context: Tree.LookupContext = undefined,
-        lookup_value: ?*const Key.Value = null,
-        checkpoint_op: ?u64 = null,
+        lookup_context: Tree.LookupContext,
+        lookup_value: ?*const Key.Value,
+        checkpoint_op: ?u64,
 
-        fn init(env: *Environment, storage: *Storage) !void {
-            env.state = .uninit;
-
+        pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
+            var env: Environment = undefined;
+            env.state = .init;
             env.storage = storage;
-            errdefer env.storage.deinit(allocator);
 
             env.message_pool = try MessagePool.init(allocator, .replica);
-            errdefer env.message_pool.deinit(allocator);
+            defer env.message_pool.deinit(allocator);
 
             env.superblock = try SuperBlock.init(allocator, .{
                 .storage = env.storage,
                 .storage_size_limit = constants.storage_size_max,
                 .message_pool = &env.message_pool,
             });
-            errdefer env.superblock.deinit(allocator);
+            defer env.superblock.deinit(allocator);
 
             env.grid = try Grid.init(allocator, &env.superblock);
-            errdefer env.grid.deinit(allocator);
+            defer env.grid.deinit(allocator);
 
             env.node_pool = try NodePool.init(allocator, node_count);
-            errdefer env.node_pool.deinit(allocator);
+            defer env.node_pool.deinit(allocator);
 
-            // Tree must be initialized with an open superblock.
             env.tree = undefined;
-            env.tree_exists = false;
+            env.lookup_value = null;
+            env.checkpoint_op = null;
 
-            env.state = .init;
-        }
-
-        fn deinit(env: *Environment) void {
-            assert(env.state != .uninit);
-
-            if (env.tree_exists) {
-                env.tree.deinit(allocator);
-                env.tree_exists = false;
-            }
-            env.node_pool.deinit(allocator);
-            env.grid.deinit(allocator);
-            env.superblock.deinit(allocator);
-            env.message_pool.deinit(allocator);
-
-            env.state = .uninit;
-        }
-
-        fn tick(env: *Environment) void {
-            env.grid.tick();
-            env.storage.tick();
-        }
-
-        fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
-            // Sometimes IO completes synchronously (eg if cached), so we might already be in next_state before ticking.
-            assert(env.state == current_state or env.state == next_state);
-            while (env.state == current_state) env.tick();
-            assert(env.state == next_state);
+            try env.open_then_apply(fuzz_ops);
         }
 
         fn change_state(env: *Environment, current_state: State, next_state: State) void {
@@ -197,123 +173,128 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = next_state;
         }
 
-        pub fn format(storage: *Storage) !void {
-            var env: Environment = undefined;
+        fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
+            // Sometimes operations complete synchronously so we might already be in next_state before ticking.
+            //assert(env.state == current_state or env.state == next_state);
+            while (env.state == current_state) env.storage.tick();
+            assert(env.state == next_state);
+        }
 
-            try env.init(storage);
-            defer env.deinit();
-
-            assert(env.state == .init);
+        pub fn open_then_apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
+            env.change_state(.init, .superblock_format);
             env.superblock.format(superblock_format_callback, &env.superblock_context, .{
                 .cluster = cluster,
                 .replica = replica,
+                .replica_count = replica_count,
             });
-            env.tick_until_state_change(.init, .formatted);
+
+            env.tick_until_state_change(.superblock_format, .superblock_open);
+            env.superblock.open(superblock_open_callback, &env.superblock_context);
+
+            env.tick_until_state_change(.superblock_open, .tree_init);
+            env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, tree_options);
+            defer env.tree.deinit(allocator);
+
+            env.change_state(.tree_init, .tree_open);
+            env.tree.open(tree_open_callback);
+
+            env.tick_until_state_change(.tree_open, .fuzzing);
+            try env.apply(fuzz_ops);
         }
 
         fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
             const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-            env.change_state(.init, .formatted);
-        }
-
-        pub fn open(env: *Environment) void {
-            assert(env.state == .init);
-            env.superblock.open(superblock_open_callback, &env.superblock_context);
-            env.tick_until_state_change(.init, .tree_open);
+            env.change_state(.superblock_format, .superblock_open);
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
             const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-            env.change_state(.init, .superblock_open);
-            env.tree = Tree.init(allocator, &env.node_pool, &env.grid, tree_options) catch unreachable;
-            env.tree_exists = true;
-            env.tree.open(tree_open_callback);
+            env.change_state(.superblock_open, .tree_init);
         }
 
         fn tree_open_callback(tree: *Tree) void {
             const env = @fieldParentPtr(@This(), "tree", tree);
-            env.change_state(.superblock_open, .tree_open);
+            env.change_state(.tree_open, .fuzzing);
         }
 
         pub fn compact(env: *Environment, op: u64) void {
-            env.change_state(.tree_open, .tree_compacting);
+            env.change_state(.fuzzing, .tree_compact);
             env.tree.compact(tree_compact_callback, op);
-            env.tick_until_state_change(.tree_compacting, .tree_open);
+            env.tick_until_state_change(.tree_compact, .fuzzing);
         }
 
         fn tree_compact_callback(tree: *Tree) void {
             const env = @fieldParentPtr(@This(), "tree", tree);
-            env.change_state(.tree_compacting, .tree_open);
+            env.change_state(.tree_compact, .fuzzing);
         }
 
         pub fn checkpoint(env: *Environment, op: u64) void {
+            assert(env.checkpoint_op == null);
             env.checkpoint_op = op - constants.lsm_batch_multiple;
-            env.change_state(.tree_open, .tree_checkpointing);
+
+            env.change_state(.fuzzing, .tree_checkpoint);
             env.tree.checkpoint(tree_checkpoint_callback);
-            env.tick_until_state_change(.tree_checkpointing, .superblock_checkpointing);
-            env.tick_until_state_change(.superblock_checkpointing, .tree_open);
+            env.tick_until_state_change(.tree_checkpoint, .superblock_checkpoint);
+            env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
         }
 
         fn tree_checkpoint_callback(tree: *Tree) void {
             const env = @fieldParentPtr(@This(), "tree", tree);
-            env.change_state(.tree_checkpointing, .superblock_checkpointing);
+            const op = env.checkpoint_op.?;
+            env.checkpoint_op = null;
+
+            env.change_state(.tree_checkpoint, .superblock_checkpoint);
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
-                .commit_min = env.checkpoint_op.?,
-                .commit_max = env.checkpoint_op.? + 1,
-                .view_normal = 0,
-                .view = 0,
+                .commit_min = op,
+                .commit_max = op + 1,
             });
-            env.checkpoint_op = null;
         }
 
         fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
             const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-            env.change_state(.superblock_checkpointing, .tree_open);
+            env.change_state(.superblock_checkpoint, .fuzzing);
         }
 
-        fn get(env: *Environment, key: Key) ?*const Key.Value {
+        pub fn get(env: *Environment, key: Key) ?*const Key.Value {
+            env.change_state(.fuzzing, .tree_lookup);
+
             if (env.tree.lookup_from_memory(env.tree.lookup_snapshot_max, key)) |value| {
+                env.change_state(.tree_lookup, .fuzzing);
                 return Tree.unwrap_tombstone(value);
-            } else {
-                env.change_state(.tree_open, .tree_lookup);
-                env.lookup_context = undefined;
-                env.lookup_value = null;
-                env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max, key);
-                env.tick_until_state_change(.tree_lookup, .tree_open);
-                return env.lookup_value;
             }
+
+            env.lookup_value = null;
+            env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max, key);
+            env.tick_until_state_change(.tree_lookup, .fuzzing);
+            return env.lookup_value;
         }
 
         fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Key.Value) void {
             const env = @fieldParentPtr(Environment, "lookup_context", lookup_context);
             assert(env.lookup_value == null);
             env.lookup_value = value;
-            env.change_state(.tree_lookup, .tree_open);
+            env.change_state(.tree_lookup, .fuzzing);
         }
 
-        fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
-            var env: Environment = undefined;
-
-            try env.init(storage);
-            defer env.deinit();
-
-            // Open the superblock then tree.
-            env.open();
-
+        pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
             // The tree should behave like a simple key-value data-structure.
             // We'll compare it to a hash map.
             var model = std.hash_map.AutoHashMap(Key, Key.Value).init(allocator);
             defer model.deinit();
 
             for (fuzz_ops) |fuzz_op, fuzz_op_index| {
+                assert(env.state == .fuzzing);
                 log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
-                const storage_size_used = storage.size_used();
-                log.debug("storage.size_used = {}/{}", .{ storage_size_used, storage.size });
+
+                const storage_size_used = env.storage.size_used();
+                log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
+
                 const model_size = model.count() * @sizeOf(Key.Value);
                 log.debug("space_amplification = {d:.2}", .{
                     @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
                 });
+
                 // Apply fuzz_op to the tree and the model.
                 switch (fuzz_op) {
                     .compact => |compact| {
@@ -489,14 +470,10 @@ pub fn main() !void {
     // TODO Use inline switch after upgrading to zig 0.10
     switch (table_usage) {
         .general => {
-            const Environment = EnvironmentType(.general);
-            try Environment.format(&storage);
-            try Environment.run(&storage, fuzz_ops);
+            try EnvironmentType(.general).run(&storage, fuzz_ops);
         },
         .secondary_index => {
-            const Environment = EnvironmentType(.secondary_index);
-            try Environment.format(&storage);
-            try Environment.run(&storage, fuzz_ops);
+            try EnvironmentType(.secondary_index).run(&storage, fuzz_ops);
         },
     }
 

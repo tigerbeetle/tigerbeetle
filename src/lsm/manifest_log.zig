@@ -28,11 +28,12 @@ const log = std.log.scoped(.manifest_log);
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const util = @import("../util.zig");
+const stdx = @import("../stdx.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("grid.zig").GridType;
 const BlockType = @import("grid.zig").BlockType;
+const alloc_block = @import("grid.zig").alloc_block;
 const tree = @import("tree.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
@@ -93,7 +94,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             tree.compaction_tables_input_max + // Remove.
             tree.compaction_tables_output_max);
 
-        const blocks_count_appends = util.div_ceil(compaction_appends_max, Block.entry_count_max);
+        const blocks_count_appends = stdx.div_ceil(compaction_appends_max, Block.entry_count_max);
 
         /// The upper-bound of manifest log blocks we must buffer.
         ///
@@ -151,10 +152,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             var blocks: [blocks_count_max]BlockPtr = undefined;
             for (blocks) |*block, i| {
                 errdefer for (blocks[0..i]) |b| allocator.free(b);
-
-                const block_slice =
-                    try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
-                block.* = block_slice[0..constants.block_size];
+                block.* = try alloc_block(allocator);
             }
             errdefer for (blocks) |b| allocator.free(b);
 
@@ -255,7 +253,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 const label = labels_used[entry];
                 const table = &tables_used[entry];
 
-                if (manifest.insert_table_extent(table.address, block_reference.address, entry)) {
+                if (manifest.insert_table_extent(manifest_log.tree_hash, table.address, block_reference.address, entry)) {
                     switch (label.event) {
                         .insert => manifest_log.open_event(manifest_log, label.level, table),
                         .remove => manifest.queue_for_compaction(block_reference.address),
@@ -332,7 +330,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
             const address = Block.address(block);
-            if (manifest.update_table_extent(table.address, address, entry)) |previous_block| {
+            if (manifest.update_table_extent(manifest_log.tree_hash, table.address, address, entry)) |previous_block| {
                 manifest.queue_for_compaction(previous_block);
                 if (label.event == .remove) manifest.queue_for_compaction(address);
             } else {
@@ -404,14 +402,14 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 return;
             }
 
-            const block = manifest_log.blocks.head().?;
-            verify_block(block, null, null);
+            const block = manifest_log.blocks.head_ptr().?;
+            verify_block(block.*, null, null);
 
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            const address = Block.address(block);
+            const header = mem.bytesAsValue(vsr.Header, block.*[0..@sizeOf(vsr.Header)]);
+            const address = Block.address(block.*);
             assert(address > 0);
 
-            const entry_count = Block.entry_count(block);
+            const entry_count = Block.entry_count(block.*);
 
             if (manifest_log.blocks_closed == 1 and manifest_log.blocks.count == 1) {
                 // This might be the last block of a checkpoint, which can be a partial block.
@@ -433,6 +431,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 block,
                 address,
             );
+            manifest_log.blocks.advance_head();
         }
 
         fn write_block_callback(write: *Grid.Write) void {
@@ -441,7 +440,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(manifest_log.writing);
 
             manifest_log.blocks_closed -= 1;
-            manifest_log.blocks.advance_head();
             assert(manifest_log.blocks_closed <= manifest_log.blocks.count);
 
             manifest_log.write_block();
@@ -547,7 +545,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 // Remove the extent if the table is the latest version.
                 // We must iterate entries in forward order to drop the extent here.
                 // Otherwise, stale versions earlier in the block may reappear.
-                if (manifest.remove_table_extent(table.address, block_reference.address, entry)) {
+                if (manifest.remove_table_extent(manifest_log.tree_hash, table.address, block_reference.address, entry)) {
                     switch (label.event) {
                         // Append the table, updating the table extent:
                         .insert => manifest_log.append(label, table),

@@ -28,6 +28,11 @@ The [`Account.flags.linked`](../accounts.md#flagslinked) flag was set on the las
 batch, which is not legal. (`flags.linked` indicates that the chain continues to the next
 operation).
 
+### `timestamp_must_be_zero`
+The account was not created.
+The [`Account.timestamp`](../accounts.md#timestamp) is nonzero, but must be zero.
+The cluster is responsible for setting this field.
+
 ### `reserved_flag`
 The account was not created.
 [`Account.flags.reserved`](../accounts.md#flagsreserved) is nonzero, but must be zero.
@@ -43,6 +48,15 @@ The account was not created.
 ### `id_must_not_be_int_max`
 The account was not created.
 [`Account.id`](../accounts.md#id) is `2^128 - 1`, which is a reserved value.
+
+### `flags_are_mutually_exclusive`
+The account was not created.
+An account cannot be created with the specified combination of
+[`Account.flags`](../accounts.md#flags).
+
+The following flags are mutually exclusive:
+- [`Account.flags.debits_must_not_exceed_credits`](../accounts.md#flagsdebits_must_not_exceed_credits)
+- [`Account.flags.credits_must_not_exceed_debits`](../accounts.md#flagscredits_must_not_exceed_debits)
 
 ### `ledger_must_not_be_zero`
 The account was not created.
@@ -75,15 +89,6 @@ The account was not created.
 [`Account.credits_posted`](../accounts.md#credits_posted) is nonzero, but must be zero.
 
 An account's debits and credits are only modified by transfers.
-
-### `mutually_exclusive_flags`
-The account was not created.
-An account cannot be created with the specified combination of
-[`Account.flags`](../accounts.md#flags).
-
-The following flags are mutually exclusive:
-- [`Account.flags.debits_must_not_exceed_credits`](../accounts.md#flagsdebits_must_not_exceed_credits)
-- [`Account.flags.credits_must_not_exceed_debits`](../accounts.md#flagscredits_must_not_exceed_debits)
 
 ### `exists_with_different_flags`
 An account with the same `id` already exists, but with different [`flags`](../accounts.md#flags).

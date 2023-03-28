@@ -6,6 +6,7 @@ const IO_Uring = linux.IO_Uring;
 const io_uring_cqe = linux.io_uring_cqe;
 const io_uring_sqe = linux.io_uring_sqe;
 const log = std.log.scoped(.io);
+const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
@@ -16,10 +17,16 @@ pub const IO = struct {
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: FIFO(Completion) = .{},
+    unqueued: FIFO(Completion) = .{ .name = "io_unqueued" },
 
     /// Completions that are ready to have their callbacks run.
-    completed: FIFO(Completion) = .{},
+    completed: FIFO(Completion) = .{ .name = "io_completed" },
+
+    ios_queued: u64 = 0,
+    ios_in_kernel: u64 = 0,
+
+    flush_tracer_slot: ?tracer.SpanStart = null,
+    callback_tracer_slot: ?tracer.SpanStart = null,
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
@@ -34,6 +41,9 @@ pub const IO = struct {
     }
 
     pub fn deinit(self: *IO) void {
+        assert(self.flush_tracer_slot == null);
+        assert(self.callback_tracer_slot == null);
+
         self.ring.deinit();
     }
 
@@ -86,6 +96,15 @@ pub const IO = struct {
             linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
             timeout_sqe.user_data = 0;
             timeouts += 1;
+
+            // We don't really want to count this timeout as an io,
+            // but it's tricky to track separately.
+            self.ios_queued += 1;
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_queued" } },
+                @intToFloat(f64, self.ios_queued),
+            );
+
             // The amount of time this call will block is bounded by the timeout we just submitted:
             try self.flush(1, &timeouts, &etime);
         }
@@ -96,25 +115,42 @@ pub const IO = struct {
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
+        tracer.start(
+            &self.flush_tracer_slot,
+            .io_flush,
+            @src(),
+        );
+
         // Flush any queued SQEs and reuse the same syscall to wait for completions if required:
         try self.flush_submissions(wait_nr, timeouts, etime);
         // We can now just peek for any CQEs without waiting and without another syscall:
         try self.flush_completions(0, timeouts, etime);
-        // Run completions only after all completions have been flushed:
-        // Loop on a copy of the linked list, having reset the list first, so that any synchronous
-        // append on running a completion is executed only the next time round the event loop,
-        // without creating an infinite loop.
-        {
-            var copy = self.completed;
-            self.completed = .{};
-            while (copy.pop()) |completion| completion.complete();
-        }
-        // Again, loop on a copy of the list to avoid an infinite loop:
+
+        // The SQE array is empty from flush_submissions(). Fill it up with unqueued completions.
+        // This runs before `self.completed` is flushed below to prevent new IO from reserving SQE
+        // slots and potentially starving those in `self.unqueued`.
+        // Loop over a copy to avoid an infinite loop of `enqueue()` re-adding to `self.unqueued`.
         {
             var copy = self.unqueued;
-            self.unqueued = .{};
+            self.unqueued.reset();
             while (copy.pop()) |completion| self.enqueue(completion);
         }
+
+        // Run completions only after all completions have been flushed:
+        // Loop until all completions are processed. Calls to complete() may queue more work
+        // and extend the duration of the loop, but this is fine as it 1) executes completions
+        // that become ready without going through another syscall from flush_submissions() and
+        // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
+        while (self.completed.pop()) |completion| completion.complete(&self.callback_tracer_slot);
+
+        // At this point, unqueued could have completions either by 1) those who didn't get an SQE
+        // during the popping of unqueued or 2) completion.complete() which start new IO. These
+        // unqueued completions will get priority to acquiring SQEs on the next flush().
+
+        tracer.end(
+            &self.flush_tracer_slot,
+            .io_flush,
+        );
     }
 
     fn flush_completions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
@@ -129,6 +165,8 @@ pub const IO = struct {
             };
             if (completed > wait_remaining) wait_remaining = 0 else wait_remaining -= completed;
             for (cqes[0..completed]) |cqe| {
+                self.ios_in_kernel -= 1;
+
                 if (cqe.user_data == 0) {
                     timeouts.* -= 1;
                     // We are only done if the timeout submitted was completed due to time, not if
@@ -146,13 +184,19 @@ pub const IO = struct {
                 // * confusing stack traces.
                 self.completed.push(completion);
             }
+
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_in_kernel" } },
+                @intToFloat(f64, self.ios_in_kernel),
+            );
+
             if (completed < cqes.len) break;
         }
     }
 
     fn flush_submissions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
         while (true) {
-            _ = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
+            const submitted = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
                 error.SignalInterrupt => continue,
                 // Wait for some completions and then try again:
                 // See https://github.com/axboe/liburing/issues/281 re: error.SystemResources.
@@ -164,6 +208,18 @@ pub const IO = struct {
                 },
                 else => return err,
             };
+
+            self.ios_queued -= submitted;
+            self.ios_in_kernel += submitted;
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_queued" } },
+                @intToFloat(f64, self.ios_queued),
+            );
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_in_kernel" } },
+                @intToFloat(f64, self.ios_in_kernel),
+            );
+
             break;
         }
     }
@@ -176,6 +232,12 @@ pub const IO = struct {
             },
         };
         completion.prep(sqe);
+
+        self.ios_queued += 1;
+        tracer.plot(
+            .{ .queue_count = .{ .queue_name = "io_queued" } },
+            @intToFloat(f64, self.ios_queued),
+        );
     }
 
     /// This struct holds the data needed for a single io_uring operation
@@ -238,7 +300,7 @@ pub const IO = struct {
             sqe.user_data = @ptrToInt(completion);
         }
 
-        fn complete(completion: *Completion) void {
+        fn complete(completion: *Completion, callback_tracer_slot: *?tracer.SpanStart) void {
             switch (completion.operation) {
                 .accept => {
                     const result = blk: {
@@ -268,7 +330,7 @@ pub const IO = struct {
                             break :blk @intCast(os.socket_t, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .close => {
                     const result = blk: {
@@ -286,7 +348,7 @@ pub const IO = struct {
                             assert(completion.result == 0);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .connect => {
                     const result = blk: {
@@ -320,7 +382,7 @@ pub const IO = struct {
                             assert(completion.result == 0);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .read => {
                     const result = blk: {
@@ -350,7 +412,7 @@ pub const IO = struct {
                             break :blk @intCast(usize, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .recv => {
                     const result = blk: {
@@ -378,7 +440,7 @@ pub const IO = struct {
                             break :blk @intCast(usize, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .send => {
                     const result = blk: {
@@ -413,7 +475,7 @@ pub const IO = struct {
                             break :blk @intCast(usize, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .timeout => {
                     assert(completion.result < 0);
@@ -426,7 +488,7 @@ pub const IO = struct {
                         .TIME => {}, // A success.
                         else => |errno| os.unexpectedErrno(errno),
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
                 .write => {
                     const result = blk: {
@@ -457,11 +519,28 @@ pub const IO = struct {
                             break :blk @intCast(usize, completion.result);
                         }
                     };
-                    completion.callback(completion.context, completion, &result);
+                    call_callback(completion, &result, callback_tracer_slot);
                 },
             }
         }
     };
+
+    fn call_callback(
+        completion: *Completion,
+        result: *const anyopaque,
+        callback_tracer_slot: *?tracer.SpanStart,
+    ) void {
+        tracer.start(
+            callback_tracer_slot,
+            .io_callback,
+            @src(),
+        );
+        completion.callback(completion.context, completion, result);
+        tracer.end(
+            callback_tracer_slot,
+            .io_callback,
+        );
+    }
 
     /// This union encodes the set of operations supported as well as their arguments.
     const Operation = union(enum) {
@@ -819,6 +898,14 @@ pub const IO = struct {
                 },
             },
         };
+
+        // Special case a zero timeout as a yield.
+        if (nanoseconds == 0) {
+            completion.result = -@intCast(i32, @enumToInt(std.os.E.TIME));
+            self.completed.push(completion);
+            return;
+        }
+
         self.enqueue(completion);
     }
 

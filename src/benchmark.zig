@@ -1,70 +1,36 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const constants = @import("constants.zig");
-
+const panic = std.debug.panic;
 const log = std.log;
 pub const log_level: std.log.Level = .err;
 
-const cli = @import("cli.zig");
+const constants = @import("constants.zig");
+const stdx = @import("stdx.zig");
+const random_int_exponential = @import("testing/fuzz.zig").random_int_exponential;
 const IO = @import("io.zig").IO;
-
-const util = @import("util.zig");
 const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
+    .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
-
 const vsr = @import("vsr.zig");
 const Client = vsr.Client(StateMachine, MessageBus);
-
 const tb = @import("tigerbeetle.zig");
 
-const batches_count = 100;
-
-const transfers_per_batch: u32 = @divExact(
+const account_count_per_batch = @divExact(
+    constants.message_size_max - @sizeOf(vsr.Header),
+    @sizeOf(tb.Account),
+);
+const transfer_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tb.Transfer),
 );
-comptime {
-    assert(transfers_per_batch >= 2041);
-}
-
-const transfers_max: u32 = batches_count * transfers_per_batch;
-
-var accounts = [_]tb.Account{
-    .{
-        .id = 1,
-        .user_data = 0,
-        .reserved = [_]u8{0} ** 48,
-        .ledger = 2,
-        .code = 1,
-        .flags = .{},
-        .debits_pending = 0,
-        .debits_posted = 0,
-        .credits_pending = 0,
-        .credits_posted = 0,
-    },
-    .{
-        .id = 2,
-        .user_data = 0,
-        .reserved = [_]u8{0} ** 48,
-        .ledger = 2,
-        .code = 1,
-        .flags = .{},
-        .debits_pending = 0,
-        .debits_posted = 0,
-        .credits_pending = 0,
-        .credits_posted = 0,
-    },
-};
-var create_transfers_latency_max: i64 = 0;
 
 pub fn main() !void {
-    const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
@@ -76,15 +42,38 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
+    var account_count: usize = 10_000;
+    var transfer_count: usize = 10_000_000;
+    var transfer_count_per_second: usize = 1_000_000;
+
+    var args = std.process.args();
+
+    // Discard executable name.
+    _ = try args.next(allocator).?;
+
+    // Parse arguments.
+    while (args.next(allocator)) |arg_or_err| {
+        const arg = try arg_or_err;
+        _ = (try parse_arg(allocator, &args, arg, "--account-count", &account_count)) or
+            (try parse_arg(allocator, &args, arg, "--transfer-count", &transfer_count)) or
+            (try parse_arg(allocator, &args, arg, "--transfer-count-per-second", &transfer_count_per_second)) or
+            panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
+    }
+
+    if (account_count < 2) panic("Need at least two acconts, got {}", .{account_count});
+
+    const transfer_arrival_rate_ns = @divTrunc(
+        std.time.ns_per_s,
+        transfer_count_per_second,
+    );
+
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
     var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", constants.port)};
 
     var io = try IO.init(32, 0);
-    defer io.deinit();
 
     var message_pool = try MessagePool.init(allocator, .client);
-    defer message_pool.deinit(allocator);
 
     var client = try Client.init(
         allocator,
@@ -97,218 +86,318 @@ pub fn main() !void {
             .io = &io,
         },
     );
-    defer client.deinit(allocator);
 
-    // Pre-allocate a million transfers:
-    const transfers = try allocator.alloc(tb.Transfer, transfers_max);
-    defer allocator.free(transfers);
+    var benchmark = Benchmark{
+        .io = &io,
+        .message_pool = &message_pool,
+        .client = &client,
+        .batch_accounts = try std.ArrayList(tb.Account).initCapacity(allocator, account_count_per_batch),
+        .account_count = account_count,
+        .account_index = 0,
+        .rng = std.rand.DefaultPrng.init(42),
+        .timer = try std.time.Timer.start(),
+        .batch_latency_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count),
+        .transfer_latency_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count),
+        .batch_transfers = try std.ArrayList(tb.Transfer).initCapacity(allocator, transfer_count_per_batch),
+        .batch_start_ns = 0,
+        .tranfer_index = 0,
+        .transfer_count = transfer_count,
+        .transfer_count_per_second = transfer_count_per_second,
+        .transfer_arrival_rate_ns = transfer_arrival_rate_ns,
+        .transfer_start_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count_per_batch),
+        .batch_index = 0,
+        .transfer_index = 0,
+        .transfer_next_arrival_ns = 0,
+        .message = null,
+        .callback = null,
+        .done = false,
+    };
 
-    for (transfers) |*transfer, index| {
-        transfer.* = .{
-            .id = index + 1,
-            .debit_account_id = accounts[0].id,
-            .credit_account_id = accounts[1].id,
-            .user_data = 0,
-            .reserved = 0,
-            .pending_id = 0,
-            .timeout = 0,
-            .ledger = 2,
-            .code = 1,
-            .flags = .{},
-            .amount = 1,
-            .timestamp = 0,
-        };
+    benchmark.create_accounts();
+
+    while (!benchmark.done) {
+        benchmark.client.tick();
+        try benchmark.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
-
-    try wait_for_connect(&client, &io);
-
-    var queue = TimedQueue.init(&client, &io);
-    try queue.push(.{
-        .operation = StateMachine.Operation.create_accounts,
-        .data = std.mem.sliceAsBytes(accounts[0..]),
-    });
-
-    try queue.execute();
-    assert(queue.end != null);
-    assert(queue.batches.empty());
-
-    var count: u64 = 0;
-    queue.reset();
-    while (count < transfers.len) {
-        try queue.push(.{
-            .operation = .create_transfers,
-            .data = std.mem.sliceAsBytes(transfers[count..][0..transfers_per_batch]),
-        });
-        count += transfers_per_batch;
-    }
-    assert(count == transfers_max);
-
-    try queue.execute();
-    assert(queue.end != null);
-    assert(queue.batches.empty());
-
-    var ms = queue.end.? - queue.start.?;
-
-    const result: i64 = @divFloor(@intCast(i64, transfers.len * 1000), ms);
-    try stdout.print("============================================\n", .{});
-    try stdout.print("{} transfers per second\n\n", .{result});
-    try stdout.print("max p100 latency per {} transfers = {}ms\n", .{
-        transfers_per_batch,
-        queue.transfers_latency_max,
-    });
 }
 
-const Batch = struct {
-    operation: StateMachine.Operation,
-    data: []u8,
-};
+fn parse_arg(
+    allocator: std.mem.Allocator,
+    args: *std.process.ArgIterator,
+    arg: []const u8,
+    arg_name: []const u8,
+    arg_value: *usize,
+) !bool {
+    if (!std.mem.eql(u8, arg, arg_name)) return false;
 
-const TimedQueue = struct {
-    batch_start: ?i64,
-    start: ?i64,
-    end: ?i64,
-    transfers_latency_max: i64,
-    client: *Client,
+    const int_string_or_err = args.next(allocator) orelse
+        panic("Expected an argument to {s}", .{arg_name});
+    const int_string = try int_string_or_err;
+    arg_value.* = std.fmt.parseInt(usize, int_string, 10) catch |err|
+        panic(
+        "Could not parse \"{}\" as an integer: {}",
+        .{ std.zig.fmtEscapes(int_string), err },
+    );
+    return true;
+}
+
+const Benchmark = struct {
     io: *IO,
-    batches: RingBuffer(Batch, batches_count, .array),
+    message_pool: *MessagePool,
+    client: *Client,
+    batch_accounts: std.ArrayList(tb.Account),
+    account_count: usize,
+    account_index: usize,
+    rng: std.rand.DefaultPrng,
+    timer: std.time.Timer,
+    batch_latency_ns: std.ArrayList(u64),
+    transfer_latency_ns: std.ArrayList(u64),
+    batch_transfers: std.ArrayList(tb.Transfer),
+    batch_start_ns: usize,
+    tranfer_index: usize,
+    transfer_count: usize,
+    transfer_count_per_second: usize,
+    transfer_arrival_rate_ns: usize,
+    transfer_start_ns: std.ArrayList(u64),
+    batch_index: usize,
+    transfer_index: usize,
+    transfer_next_arrival_ns: usize,
+    message: ?*MessagePool.Message,
+    callback: ?fn (*Benchmark) void,
+    done: bool,
 
-    pub fn init(client: *Client, io: *IO) TimedQueue {
-        var self = TimedQueue{
-            .batch_start = null,
-            .start = null,
-            .end = null,
-            .transfers_latency_max = 0,
-            .client = client,
-            .io = io,
-            .batches = .{},
-        };
-
-        return self;
-    }
-
-    pub fn reset(self: *TimedQueue) void {
-        self.batch_start = null;
-        self.start = null;
-        self.end = null;
-        self.transfers_latency_max = 0;
-    }
-
-    pub fn push(self: *TimedQueue, batch: Batch) !void {
-        try self.batches.push(batch);
-    }
-
-    pub fn execute(self: *TimedQueue) !void {
-        assert(self.start == null);
-        assert(!self.batches.empty());
-        self.reset();
-        log.debug("executing batches...", .{});
-
-        const now = std.time.milliTimestamp();
-        self.start = now;
-        if (self.batches.head_ptr()) |starting_batch| {
-            log.debug("sending first batch...", .{});
-            self.batch_start = now;
-            const message = self.client.get_message();
-            defer self.client.unref(message);
-
-            util.copy_disjoint(
-                .inexact,
-                u8,
-                message.buffer[@sizeOf(vsr.Header)..],
-                std.mem.sliceAsBytes(starting_batch.data),
-            );
-            self.client.request(
-                @intCast(u128, @ptrToInt(self)),
-                TimedQueue.lap,
-                starting_batch.operation,
-                message,
-                starting_batch.data.len,
-            );
+    fn create_accounts(b: *Benchmark) void {
+        if (b.account_index >= b.account_count) {
+            b.create_transfers();
+            return;
         }
 
-        while (!self.batches.empty()) {
-            self.client.tick();
-            try self.io.run_for_ns(5 * std.time.ns_per_ms);
+        // Reset batch.
+        b.batch_accounts.resize(0) catch unreachable;
+
+        // Fill batch.
+        while (b.account_index < b.account_count and
+            b.batch_accounts.items.len < account_count_per_batch)
+        {
+            b.batch_accounts.appendAssumeCapacity(.{
+                .id = @bitReverse(u128, b.account_index + 1),
+                .user_data = 0,
+                .reserved = [_]u8{0} ** 48,
+                .ledger = 2,
+                .code = 1,
+                .flags = .{},
+                .debits_pending = 0,
+                .debits_posted = 0,
+                .credits_pending = 0,
+                .credits_posted = 0,
+            });
+            b.account_index += 1;
         }
+
+        // Submit batch.
+        b.send(
+            create_accounts,
+            .create_accounts,
+            std.mem.sliceAsBytes(b.batch_accounts.items),
+        );
     }
 
-    pub fn lap(
+    fn create_transfers(b: *Benchmark) void {
+        if (b.transfer_index >= b.transfer_count) {
+            b.finish();
+            return;
+        }
+
+        if (b.transfer_index == 0) {
+            // Init timer.
+            b.timer.reset();
+            b.transfer_next_arrival_ns = b.timer.read();
+        }
+
+        const random = b.rng.random();
+
+        b.batch_transfers.resize(0) catch unreachable;
+        b.transfer_start_ns.resize(0) catch unreachable;
+
+        // Busy-wait for at least one transfer to be available.
+        while (b.transfer_next_arrival_ns >= b.timer.read()) {}
+        b.batch_start_ns = b.timer.read();
+
+        // Fill batch.
+        while (b.transfer_index < b.transfer_count and
+            b.batch_transfers.items.len < transfer_count_per_batch and
+            b.transfer_next_arrival_ns < b.batch_start_ns)
+        {
+            const debit_account_index = random.uintLessThan(u64, b.account_count);
+            var credit_account_index = random.uintLessThan(u64, b.account_count);
+            if (debit_account_index == credit_account_index) {
+                credit_account_index = (credit_account_index + 1) % b.account_count;
+            }
+            assert(debit_account_index != credit_account_index);
+            b.batch_transfers.appendAssumeCapacity(.{
+                // Reverse the bits to stress non-append-only index for `id`.
+                .id = @bitReverse(u128, b.transfer_index + 1),
+                .debit_account_id = @bitReverse(u128, debit_account_index + 1),
+                .credit_account_id = @bitReverse(u128, credit_account_index + 1),
+                .user_data = random.int(u128),
+                .reserved = 0,
+                // TODO Benchmark posting/voiding pending transfers.
+                .pending_id = 0,
+                .timeout = 0,
+                .ledger = 2,
+                .code = random.int(u16) +| 1,
+                .flags = .{},
+                .amount = random_int_exponential(random, u64, 10_000) +| 1,
+                .timestamp = 0,
+            });
+            b.transfer_start_ns.appendAssumeCapacity(b.transfer_next_arrival_ns);
+
+            b.transfer_index += 1;
+            b.transfer_next_arrival_ns += random_int_exponential(random, u64, b.transfer_arrival_rate_ns);
+        }
+
+        assert(b.batch_transfers.items.len > 0);
+
+        // Submit batch.
+        b.send(
+            create_transfers_finish,
+            .create_transfers,
+            std.mem.sliceAsBytes(b.batch_transfers.items),
+        );
+    }
+
+    fn create_transfers_finish(b: *Benchmark) void {
+        // Record latencies.
+        const batch_end_ns = b.timer.read();
+        log.debug("batch {}: {} tx in {} ms\n", .{
+            b.batch_index,
+            b.batch_transfers.items.len,
+            @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms),
+        });
+        b.batch_latency_ns.appendAssumeCapacity(batch_end_ns - b.batch_start_ns);
+        for (b.transfer_start_ns.items) |start_ns| {
+            b.transfer_latency_ns.appendAssumeCapacity(batch_end_ns - start_ns);
+        }
+
+        b.batch_index += 1;
+        b.create_transfers();
+    }
+
+    fn finish(b: *Benchmark) void {
+        const total_ns = b.timer.read();
+
+        const less_than_ns = (struct {
+            fn lessThan(_: void, ns1: u64, ns2: u64) bool {
+                return ns1 < ns2;
+            }
+        }).lessThan;
+        std.sort.sort(u64, b.batch_latency_ns.items, {}, less_than_ns);
+        std.sort.sort(u64, b.transfer_latency_ns.items, {}, less_than_ns);
+
+        const stdout = std.io.getStdOut().writer();
+
+        stdout.print("{} batches in {d:.2} s\n", .{
+            b.batch_index,
+            @intToFloat(f64, total_ns) / std.time.ns_per_s,
+        }) catch unreachable;
+        stdout.print("load offered = {} tx/s\n", .{
+            b.transfer_count_per_second,
+        }) catch unreachable;
+        stdout.print("load accepted = {} tx/s\n", .{
+            @divTrunc(
+                b.transfer_count * std.time.ns_per_s,
+                total_ns,
+            ),
+        }) catch unreachable;
+        print_deciles(stdout, "batch", b.batch_latency_ns.items);
+        print_deciles(stdout, "transfer", b.transfer_latency_ns.items);
+
+        b.done = true;
+    }
+
+    fn send(
+        b: *Benchmark,
+        callback: fn (*Benchmark) void,
+        operation: StateMachine.Operation,
+        payload: []u8,
+    ) void {
+        b.callback = callback;
+        b.message = b.client.get_message();
+
+        stdx.copy_disjoint(
+            .inexact,
+            u8,
+            b.message.?.buffer[@sizeOf(vsr.Header)..],
+            payload,
+        );
+
+        b.client.request(
+            @intCast(u128, @ptrToInt(b)),
+            send_complete,
+            operation,
+            b.message.?,
+            payload.len,
+        );
+    }
+
+    fn send_complete(
         user_data: u128,
         operation: StateMachine.Operation,
-        results: Client.Error![]const u8,
+        result: Client.Error![]const u8,
     ) void {
-        const now = std.time.milliTimestamp();
-        const value = results catch |err| {
-            log.err("Client returned error={o}", .{@errorName(err)});
-            @panic("Client returned error during benchmarking.");
-        };
+        _ = operation;
 
-        const self: *TimedQueue = @intToPtr(*TimedQueue, @intCast(usize, user_data));
-        const completed_batch: ?Batch = self.batches.pop();
-        assert(completed_batch != null);
-        assert(completed_batch.?.operation == operation);
+        const result_payload = result catch |err|
+            panic("Client returned error: {}", .{err});
 
-        log.debug("completed batch operation={} start={}", .{
-            completed_batch.?.operation,
-            self.batch_start,
-        });
-        const latency = now - self.batch_start.?;
         switch (operation) {
             .create_accounts => {
-                const create_accounts_results = std.mem.bytesAsSlice(tb.CreateAccountsResult, value);
+                const create_accounts_results = std.mem.bytesAsSlice(
+                    tb.CreateAccountsResult,
+                    result_payload,
+                );
                 if (create_accounts_results.len > 0) {
-                    log.err("CreateAccountsResults={any}", .{create_accounts_results});
-                    @panic("Unexpected result creating accounts.");
+                    panic("CreateAccountsResults: {any}", .{create_accounts_results});
                 }
             },
             .create_transfers => {
-                const create_transfers_results = std.mem.bytesAsSlice(tb.CreateTransfersResult, value);
+                const create_transfers_results = std.mem.bytesAsSlice(
+                    tb.CreateTransfersResult,
+                    result_payload,
+                );
                 if (create_transfers_results.len > 0) {
-                    log.err("CreateTransfersResults={any}", .{create_transfers_results});
-                    @panic("Unexpected result creating transfers.");
-                }
-
-                if (latency > self.transfers_latency_max) {
-                    self.transfers_latency_max = latency;
+                    panic("CreateTransfersResults: {any}", .{create_transfers_results});
                 }
             },
             else => unreachable,
         }
 
-        if (self.batches.head_ptr()) |next_batch| {
-            const message = self.client.get_message();
-            defer self.client.unref(message);
+        const b = @intToPtr(*Benchmark, @intCast(u64, user_data));
 
-            util.copy_disjoint(
-                .inexact,
-                u8,
-                message.buffer[@sizeOf(vsr.Header)..],
-                std.mem.sliceAsBytes(next_batch.data),
-            );
+        b.client.unref(b.message.?);
+        b.message = null;
 
-            self.batch_start = std.time.milliTimestamp();
-            self.client.request(
-                @intCast(u128, @ptrToInt(self)),
-                TimedQueue.lap,
-                next_batch.operation,
-                message,
-                next_batch.data.len,
-            );
-        } else {
-            log.debug("stopping timer...", .{});
-            self.end = now;
-        }
+        const callback = b.callback.?;
+        b.callback = null;
+        callback(b);
     }
 };
 
-fn wait_for_connect(client: *Client, io: *IO) !void {
-    var ticks: u32 = 0;
-    while (ticks < 20) : (ticks += 1) {
-        client.tick();
-        // We tick IO outside of client so that an IO instance can be shared by multiple clients:
-        // Otherwise we will hit io_uring memory restrictions too quickly.
-        try io.tick();
-
-        std.time.sleep(10 * std.time.ns_per_ms);
+fn print_deciles(
+    stdout: anytype,
+    label: []const u8,
+    latencies: []const u64,
+) void {
+    var decile: usize = 0;
+    while (decile <= 10) : (decile += 1) {
+        const index = @divTrunc(latencies.len * decile, 10) -| 1;
+        stdout.print("{s} latency p{}0 = {} ms\n", .{
+            label,
+            decile,
+            @divTrunc(
+                latencies[index],
+                std.time.ns_per_ms,
+            ),
+        }) catch unreachable;
     }
 }

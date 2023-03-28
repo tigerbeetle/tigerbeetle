@@ -1,0 +1,13 @@
+demos/bitcast/bench-decode
+demos/bitcast/decode
+demos/bitcast/transfers
+dist/
+journal
+/main
+simulator
+/tigerbeetle
+/tigerbeetle.exe
+*_*.tigerbeetle
+zig/
+zig-cache/
+zig-out/

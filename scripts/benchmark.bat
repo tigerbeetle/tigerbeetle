@@ -27,14 +27,13 @@ echo.
 exit /b
 
 :main
-zig\zig.exe build -Drelease-safe
-move zig-out\bin\tigerbeetle.exe . >nul
+zig\zig.exe build install -Drelease-safe -Dconfig=production
 
 for /l %%i in (0, 1, 0) do (
     echo Initializing replica %%i
     set ZIG_FILE=.\0_%%i.tigerbeetle.benchmark
     if exist "!ZIG_FILE!" DEL /F "!ZIG_FILE!"
-    .\tigerbeetle.exe format --cluster=0 --replica=%%i !ZIG_FILE! > benchmark.log 2>&1
+    .\tigerbeetle.exe format --cluster=0 --replica=%%i --replica-count=1 !ZIG_FILE! > benchmark.log 2>&1
 )
 
 for /l %%i in (0, 1, 0) do (
@@ -43,10 +42,14 @@ for /l %%i in (0, 1, 0) do (
     start /B "tigerbeetle_%%i" .\tigerbeetle.exe start --addresses=3001 !ZIG_FILE! > benchmark.log 2>&1
 )
 
-rem Wait for replicas to start, listen and connect:
-timeout /t 2
-
 echo.
 echo Benchmarking...
-zig\zig.exe build benchmark -Drelease-safe
+
+set ARGS=
+for %%a in (%*) do (
+    if not "%%a"==":main" (
+        SET ARGS=!ARGS! %%a
+    )
+)
+zig\zig.exe build benchmark -Drelease-safe -Dconfig=production -- %ARGS%
 exit /b %errorlevel%

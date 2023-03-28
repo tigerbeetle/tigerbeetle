@@ -1,0 +1,12 @@
+# Gotta go fast
+name: Smoke Test CI
+
+on:
+  workflow_call:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh && ./zig/zig build install

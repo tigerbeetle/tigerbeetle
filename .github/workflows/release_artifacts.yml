@@ -1,0 +1,41 @@
+name: "Release (artifacts)"
+
+on:
+  release:
+    types: [published]
+  workflow_call:
+
+jobs:
+  build_and_upload_binaries:
+    strategy:
+      matrix:
+        debug: ["", "--debug"]
+        target: [aarch64-linux, x86_64-linux, aarch64-macos, x86_64-macos, x86_64-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        # By default, this will do a shallow clone and won't have tags - which we need.
+        # https://github.com/actions/checkout/issues/701
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: Build tigerbeetle
+      run: env TARGET=${{ matrix.target }} ./scripts/install.sh ${{ matrix.debug }}
+
+    # Use github.sha, not HEAD, so we can't have any race conditions where a new commit gets
+    # pushed before this pipeline runs. When invoked by workflow_call, this will be set to
+    # the value that triggered the parent workflow. Even though technically that's a scheduled
+    # call, GH set it to the last commit on the default branch.
+    - name: Upload on release
+      run: |
+        export GIT_TAG=`git tag --points-at ${{ github.sha }}` && \
+        export RELEASE_ID=`curl -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' "https://api.github.com/repos/tigerbeetledb/tigerbeetle/releases/tags/${GIT_TAG}" | jq '.id'` && \
+        export BINARY="$([ ${{ matrix.target }} = x86_64-windows ] && echo tigerbeetle.exe || echo tigerbeetle)" && \
+        zip -9 tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip $BINARY && \
+        curl --fail \
+          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Content-Type: application/zip" \
+          --data-binary @./tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip \
+          "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip"

@@ -22,11 +22,11 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
 const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
 const TableExtent = @import("../vsr/superblock_manifest.zig").Manifest.TableExtent;
-const Storage = @import("../test/storage.zig").Storage;
+const Storage = @import("../testing/storage.zig").Storage;
 const Grid = @import("grid.zig").GridType(Storage);
 const BlockType = @import("grid.zig").BlockType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage, TableInfo);
-const fuzz = @import("../test/fuzz.zig");
+const fuzz = @import("../testing/fuzz.zig");
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
@@ -198,7 +198,7 @@ fn generate_events(
         event.* = switch (event_type) {
             .insert_new => insert: {
                 const level = random.uintLessThan(u7, constants.lsm_levels);
-                const table = .{
+                const table = TableInfo{
                     .checksum = 0,
                     .address = i + 1,
                     .snapshot_min = 1,
@@ -210,10 +210,11 @@ fn generate_events(
                     .level = level,
                     .table = table,
                 });
-                break :insert ManifestEvent{ .insert = .{
+                const insert = ManifestEvent{ .insert = .{
                     .level = level,
                     .table = table,
                 } };
+                break :insert insert;
             },
 
             .insert_change_level => insert: {
@@ -223,27 +224,30 @@ fn generate_events(
                 }
 
                 table.level += 1;
-                break :insert ManifestEvent{ .insert = .{
+                const insert = ManifestEvent{ .insert = .{
                     .level = table.level,
                     .table = table.table,
                 } };
+                break :insert insert;
             },
 
             .insert_change_snapshot => insert: {
                 const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
                 table.table.snapshot_max += 1;
-                break :insert ManifestEvent{ .insert = .{
+                const insert = ManifestEvent{ .insert = .{
                     .level = table.level,
                     .table = table.table,
                 } };
+                break :insert insert;
             },
 
             .remove => remove: {
                 const table = tables.swapRemove(random.uintLessThan(usize, tables.items.len));
-                break :remove ManifestEvent{ .remove = .{
+                const remove = ManifestEvent{ .remove = .{
                     .level = table.level,
                     .table = table.table,
                 } };
+                break :remove remove;
             },
 
             .compact => ManifestEvent{ .compact = {} },
@@ -319,7 +323,7 @@ const Environment = struct {
 
     fn wait(env: *Environment, manifest_log: *ManifestLog) void {
         while (env.pending > 0) {
-            manifest_log.grid.tick();
+            // manifest_log.grid.tick();
             manifest_log.superblock.storage.tick();
         }
     }
@@ -330,6 +334,7 @@ const Environment = struct {
         env.manifest_log.superblock.format(format_superblock_callback, &env.superblock_context, .{
             .cluster = 0,
             .replica = 0,
+            .replica_count = 6,
         });
     }
 
@@ -415,16 +420,17 @@ const Environment = struct {
         env.manifest_log.checkpoint(checkpoint_callback);
         env.wait(&env.manifest_log);
 
-        var vsr_state = env.manifest_log.superblock.working.vsr_state;
-        vsr_state.commit_min += 1;
-        vsr_state.commit_min_checksum += 1;
-        vsr_state.commit_max += 1;
+        const vsr_state = &env.manifest_log.superblock.working.vsr_state;
 
         env.pending += 1;
         env.manifest_log.superblock.checkpoint(
             checkpoint_superblock_callback,
             &env.superblock_context,
-            vsr_state,
+            .{
+                .commit_min_checksum = vsr_state.commit_min_checksum + 1,
+                .commit_min = vsr_state.commit_min + 1,
+                .commit_max = vsr_state.commit_max + 1,
+            },
         );
         env.wait(&env.manifest_log);
 
@@ -615,7 +621,7 @@ fn verify_manifest(
     try std.testing.expect(std.mem.eql(u64, expect.addresses[0..c], actual.addresses[0..c]));
 
     try std.testing.expect(hash_map_equals(
-        u64,
+        SuperBlock.Manifest.TableExtentKey,
         SuperBlock.Manifest.TableExtent,
         &expect.tables,
         &actual.tables,

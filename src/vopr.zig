@@ -8,7 +8,7 @@ const log = std.log;
 
 const simulator = @import("simulator.zig");
 const vsr = @import("vsr.zig");
-const util = @import("util.zig");
+const stdx = @import("stdx.zig");
 
 // TODO use DNS instead since hard-coding an IP address isn't ideal.
 const default_send_address = net.Address.initIp4([4]u8{ 65, 21, 207, 251 }, 5555);
@@ -138,14 +138,14 @@ fn build_simulator(
     mode: std.builtin.Mode,
 ) void {
     const mode_str = switch (mode) {
-        .Debug => "-ODebug",
-        .ReleaseSafe => "-OReleaseSafe",
+        .Debug => "-Ddebug",
+        .ReleaseSafe => "-Drelease-safe",
         else => unreachable,
     };
 
     const exec_result = std.ChildProcess.exec(.{
         .allocator = allocator,
-        .argv = &.{ "zig/zig", "build-exe", "./src/simulator.zig", mode_str },
+        .argv = &.{ "zig/zig", "build", "simulator", mode_str },
     }) catch |err| {
         fatal("unable to build the simulator binary. Error: {}", .{err});
     };
@@ -184,7 +184,7 @@ fn run_simulator(
     // simulator's exit code.
     const exit_code = run_child_process(
         allocator,
-        &.{ "./simulator", seed_str.items },
+        &.{ "./zig-out/bin/simulator", seed_str.items },
     );
 
     const result = switch (exit_code) {
@@ -375,7 +375,7 @@ fn create_report(allocator: mem.Allocator, bug: Bug, seed: u64) Report {
 
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(std.mem.asBytes(&message)[@sizeOf(u128)..45], hash[0..], .{});
-    util.copy_disjoint(.exact, u8, message.checksum[0..], hash[0..message.checksum.len]);
+    stdx.copy_disjoint(.exact, u8, message.checksum[0..], hash[0..message.checksum.len]);
 
     return message;
 }
