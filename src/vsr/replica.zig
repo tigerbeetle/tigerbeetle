@@ -427,8 +427,9 @@ pub fn ReplicaType(
             while (!self.opened) self.superblock.storage.tick();
 
             const vsr_headers = self.superblock.working.vsr_headers();
-            var vsr_headers_iterator = vsr_headers.iterate_valid();
-            while (vsr_headers_iterator.next()) |header| {
+            for (vsr_headers.slice) |*header| {
+                if (vsr.Headers.dvc_header_type(header) != .valid) continue;
+
                 const slot = .{ .index = header.op % constants.journal_slot_count };
                 if (header.op > self.op_checkpoint_trigger()) {
                     // Ignore an op that is too far head for our journal.
@@ -463,8 +464,8 @@ pub fn ReplicaType(
             // the vsr_headers head op may be part of the checkpoint after this one.
             maybe(vsr_headers.slice[0].op > self.op_checkpoint_trigger());
 
-            vsr_headers_iterator.reset();
-            var op_head = while (vsr_headers_iterator.next()) |header| {
+            var op_head = for (vsr_headers.slice) |*header| {
+                if (vsr.Headers.dvc_header_type(header) != .valid) continue;
                 if (header.op <= self.op_checkpoint_trigger()) break header.op;
             } else unreachable;
             assert(op_head <= self.op_checkpoint_trigger());
@@ -1413,7 +1414,7 @@ pub fn ReplicaType(
                         self.replica,
                         self.view,
                     });
-                    self.primary_print_do_view_change_quorum("on_do_view_change");
+                    self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
                 },
                 .complete_invalid => {
@@ -1421,7 +1422,7 @@ pub fn ReplicaType(
                         self.replica,
                         self.view,
                     });
-                    self.primary_print_do_view_change_quorum("on_do_view_change");
+                    self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
                 },
                 .complete_valid => |*headers_canonical| headers_canonical.next().?.op,
@@ -1431,7 +1432,7 @@ pub fn ReplicaType(
                 self.replica,
                 self.view,
             });
-            self.primary_print_do_view_change_quorum("on_do_view_change");
+            self.primary_log_do_view_change_quorum("on_do_view_change");
 
             const op_checkpoint_max =
                 DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
@@ -3077,6 +3078,7 @@ pub fn ReplicaType(
                 .start_view => {
                     self.primary_update_view_headers();
                     assert(self.view_headers.command == .start_view);
+                    assert(self.view_headers.array.get(0).op == self.op);
                 },
                 else => unreachable,
             }
@@ -4850,6 +4852,8 @@ pub fn ReplicaType(
                 self.status == .recovering_head);
             assert(self.op_checkpoint() <= self.commit_min);
 
+            assert(header.valid_checksum());
+            assert(header.invalid() == null);
             assert(header.command == .prepare);
             assert(header.view <= self.view);
             assert(header.op <= self.op); // Never advance the op.
@@ -5730,8 +5734,9 @@ pub fn ReplicaType(
                 DVCQuorum.dvcs_uncanonical(self.do_view_change_from_all_replicas);
             for (dvcs_uncanonical.constSlice()) |message| {
                 const message_headers = message_body_as_view_headers(message);
-                var message_headers_iterator = message_headers.iterate_valid();
-                while (message_headers_iterator.next()) |header| {
+                for (message_headers.slice) |*header| {
+                    if (vsr.Headers.dvc_header_type(header) != .valid) continue;
+
                     // We must trust headers that other replicas have committed, because
                     // repair_header() will not repair a header if the hash chain has a gap.
                     if (header.op <= message.header.commit) {
@@ -5752,7 +5757,7 @@ pub fn ReplicaType(
             }
         }
 
-        fn primary_print_do_view_change_quorum(
+        fn primary_log_do_view_change_quorum(
             self: *const Self,
             comptime context: []const u8,
         ) void {
@@ -6729,16 +6734,16 @@ const DVCQuorum = struct {
     }) union(enum) {
         // The quorum has fewer than "quorum_view_change" DVCs.
         // We are waiting for DVCs from the remaining replicas.
-        awaiting_quorum: void,
+        awaiting_quorum,
         // The quorum has at least "quorum_view_change" DVCs.
         // The quorum has fewer than "replica_count" DVCs.
         // The quorum collected so far is insufficient to determine which headers can be nacked
         // (due to an excess of faults).
         // We must wait for DVCs from one or more remaining replicas.
-        awaiting_repair: void,
+        awaiting_repair,
         // All replicas have contributed a DVC, but there are too many faults to start a new view.
         // The cluster is deadlocked, unable to ever complete a view change.
-        complete_invalid: void,
+        complete_invalid,
         // The quorum is complete, and sufficient to start the new view.
         complete_valid: HeaderIterator,
     } {
@@ -6793,8 +6798,9 @@ const DVCQuorum = struct {
             if (found) {
                 // This op is eligible to be the view's head.
             } else {
-                // Never nack op_head_min (aka commit_max).
-                if (op != op_head_min and nacks >= options.quorum_nack_prepare) {
+                if (nacks >= options.quorum_nack_prepare) {
+                    // Never nack op_head_min (aka commit_max).
+                    assert(op > op_head_min);
                     break op - 1;
                 } else {
                     if (dvcs_total < options.replica_count) {
@@ -6808,7 +6814,7 @@ const DVCQuorum = struct {
         assert(op_head >= op_head_min);
         assert(op_head <= op_head_max);
 
-        return .{ .complete_valid = .{
+        return .{ .complete_valid = HeaderIterator{
             .dvcs = dvcs,
             .op_max = op_head,
             .op_min = op_head_min,
