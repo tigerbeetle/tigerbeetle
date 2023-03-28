@@ -471,22 +471,18 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             std.os.exit(@enumToInt(failure));
         }
 
-        fn log_replica(cluster: *const Self, event: enum {
-            crash,
-            recover,
-            commit,
-            checkpoint_start,
-            checkpoint_done,
-        }, replica_index: u8) void {
+        fn log_replica(
+            cluster: *const Self,
+            event: enum(u8) {
+                crash = '$',
+                recover = '^',
+                commit = ' ',
+                checkpoint_start = '[',
+                checkpoint_done = ']',
+            },
+            replica_index: u8,
+        ) void {
             const replica = &cluster.replicas[replica_index];
-
-            const event_character: u8 = switch (event) {
-                .crash => '$',
-                .recover => '^',
-                .commit => ' ',
-                .checkpoint_start => '[',
-                .checkpoint_done => ']',
-            };
 
             var statuses = [_]u8{' '} ** constants.nodes_max;
             if (cluster.replica_health[replica_index] == .down) {
@@ -535,7 +531,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     "{[view]:>4}V " ++
                     "{[commit_min]:>3}/{[commit_max]:_>3}C " ++
                     "{[journal_op_min]:>3}:{[journal_op_max]:_>3}Jo " ++
-                    "{[journal_dirty]:>2}Jd {[journal_faulty]:>2}Jf " ++
+                    "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
                     "{[wal_op_min]:>3}:{[wal_op_max]:>3}Wo " ++
                     "{[grid_blocks_free]:>7}Gf", .{
                     .view = replica.view,
@@ -563,7 +559,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             log.info("{[index]: >2} {[event]c} {[role]c} {[statuses]s}" ++
                 "  {[replica]s}  {[pipeline]s}", .{
                 .index = replica.replica,
-                .event = event_character,
+                .event = @enumToInt(event),
                 .role = role,
                 .statuses = statuses[0 .. cluster.replica_count + cluster.standby_count],
                 .replica = info,
