@@ -330,13 +330,15 @@ pub fn ReplicaType(
         on_change_state: ?fn (replica: *const Self) void = null,
         /// Called immediately after a compaction.
         on_compact: ?fn (replica: *const Self) void = null,
+        /// Called immediately before a checkpoint.
+        on_checkpoint_start: ?fn (replica: *const Self) void = null,
         /// Called immediately after a checkpoint.
         /// Note: The replica may checkpoint without calling this function:
         /// 1. Begin checkpoint.
         /// 2. Write 2/4 SuperBlock copies.
         /// 3. Crash.
         /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
-        on_checkpoint: ?fn (replica: *const Self) void = null,
+        on_checkpoint_done: ?fn (replica: *const Self) void = null,
 
         /// Called when `commit_prepare` finishes committing.
         commit_callback: ?fn (*Self) void = null,
@@ -2725,6 +2727,8 @@ pub fn ReplicaType(
                     .checkpoint,
                     @src(),
                 );
+                if (self.on_checkpoint_start) |on_checkpoint| on_checkpoint(self);
+
                 self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
                 self.commit_op_done();
@@ -2783,7 +2787,7 @@ pub fn ReplicaType(
                 .checkpoint,
             );
 
-            if (self.on_checkpoint) |on_checkpoint| on_checkpoint(self);
+            if (self.on_checkpoint_done) |on_checkpoint| on_checkpoint(self);
             self.commit_op_done();
         }
 
@@ -3760,7 +3764,7 @@ pub fn ReplicaType(
         }
 
         /// Returns the index into the configuration of the primary for a given view.
-        fn primary_index(self: *const Self, view: u32) u8 {
+        pub fn primary_index(self: *const Self, view: u32) u8 {
             return @intCast(u8, @mod(view, self.replica_count));
         }
 
