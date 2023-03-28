@@ -72,32 +72,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             buffer: []BatchDemux,
             stack: ?*BatchDemux,
 
-            pub fn init(allocator: mem.Allocator) error{OutOfMemory}!@This() {
-                // Max number of logical batches:
-                // client_request_queue_max * (max of operations per physical batch):
-                const batch_logical_max = constants.client_request_queue_max *
-                    comptime blk: {
-                    var max: usize = 0;
-                    inline for (std.enums.values(StateMachine.Operation)) |operation| {
-                        switch (operation) {
-                            .reserved, .root, .register => continue,
-                            else => if (StateMachine.constants
-                                .operation_batch_logical_allowed(operation))
-                            {
-                                const batch_max = StateMachine.constants.operation_batch_max(operation);
-                                max = std.math.max(max, batch_max);
-                            },
-                        }
-                    }
-
-                    assert(max > 0);
-                    break :blk max;
-                };
-
-                return try init_capacity(allocator, batch_logical_max);
-            }
-
-            pub fn init_capacity(allocator: mem.Allocator, batch_logical_max: usize) error{OutOfMemory}!@This() {
+            pub fn init(allocator: mem.Allocator, batch_logical_max: usize) error{OutOfMemory}!@This() {
                 var buffer = try allocator.alloc(BatchDemux, batch_logical_max);
                 var list = blk: {
                     var head: ?*BatchDemux = null;
@@ -228,7 +203,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             );
             errdefer message_bus.deinit(allocator);
 
-            var batch_demux_pool = try BatchDemuxPool.init_capacity(allocator, batch_logical_max);
+            var batch_demux_pool = try BatchDemuxPool.init(allocator, batch_logical_max);
             errdefer batch_demux_pool.deinit(allocator);
 
             var self = Self{

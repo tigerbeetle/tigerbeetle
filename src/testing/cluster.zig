@@ -188,6 +188,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     client_id_permutation.encode(i + client_id_permutation_shift),
                     options.cluster_id,
                     options.replica_count,
+                    constants.client_batch_logical_max,
                     &client_pools[i],
                     .{ .network = network },
                 );

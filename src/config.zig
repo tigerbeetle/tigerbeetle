@@ -44,6 +44,7 @@ const ConfigProcess = struct {
     cache_transfers_max: usize,
     cache_transfers_posted_max: usize,
     client_request_queue_max: usize = 32,
+    client_batch_logical_max: usize = 32 * 1024,
     lsm_manifest_node_size: usize = 16 * 1024,
     connection_delay_min_ms: u64 = 50,
     connection_delay_max_ms: u64 = 1000,

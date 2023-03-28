@@ -38,7 +38,7 @@ pub fn request(
     on_reply: fn (
         user_data: u128,
         operation: StateMachine.Operation,
-        results: Client.Error![]const u8,
+        results: []const u8,
     ) void,
 ) !void {
     const allocator = std.heap.page_allocator;
@@ -57,6 +57,7 @@ pub fn request(
         client_id,
         cluster_id,
         @intCast(u8, addresses.len),
+        constants.client_batch_logical_max,
         &message_pool,
         .{
             .configuration = &addresses,
@@ -65,18 +66,15 @@ pub fn request(
     );
     defer client.deinit(allocator);
 
-    const message = client.get_message();
-    defer client.unref(message);
-
     const body = std.mem.asBytes(&batch);
-    stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(Header)..], body);
+    const batch_logical = client.get_batch(operation, @as(u32, body.len)) catch unreachable;
 
-    client.request(
+    stdx.copy_disjoint(.exact, u8, batch_logical.slice(), body);
+
+    client.submit_batch(
         0,
         on_reply,
-        operation,
-        message,
-        body.len,
+        batch_logical,
     );
 
     while (client.request_queue.count > 0) {
@@ -88,7 +86,7 @@ pub fn request(
 pub fn on_create_accounts(
     user_data: u128,
     operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
+    results: []const u8,
 ) void {
     _ = user_data;
     _ = operation;
@@ -99,7 +97,7 @@ pub fn on_create_accounts(
 pub fn on_lookup_accounts(
     user_data: u128,
     operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
+    results: []const u8,
 ) void {
     _ = user_data;
     _ = operation;
@@ -110,7 +108,7 @@ pub fn on_lookup_accounts(
 pub fn on_lookup_transfers(
     user_data: u128,
     operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
+    results: []const u8,
 ) void {
     _ = user_data;
     _ = operation;
@@ -121,7 +119,7 @@ pub fn on_lookup_transfers(
 pub fn on_create_transfers(
     user_data: u128,
     operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
+    results: []const u8,
 ) void {
     _ = user_data;
     _ = operation;
@@ -129,8 +127,7 @@ pub fn on_create_transfers(
     print_results(CreateTransfersResult, results);
 }
 
-fn print_results(comptime Results: type, results: Client.Error![]const u8) void {
-    const body = results catch unreachable;
+fn print_results(comptime Results: type, body: []const u8) void {
     const slice = std.mem.bytesAsSlice(Results, body);
     for (slice) |result| {
         std.debug.print("{}\n", .{result});

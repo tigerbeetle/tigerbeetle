@@ -240,6 +240,9 @@ pub const connection_send_queue_max_client = 2;
 /// The maximum number of outgoing requests that may be queued on a client (including the in-flight request).
 pub const client_request_queue_max = config.process.client_request_queue_max;
 
+/// The maximum number of logical batches that may be queued on a client (spread across all requests).
+pub const client_batch_logical_max = config.process.client_batch_logical_max;
+
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 /// If the backlog argument is greater than the value in `/proc/sys/net/core/somaxconn`, then it is
 /// silently truncated to that value. Since Linux 5.4, the default in this file is 4096.
