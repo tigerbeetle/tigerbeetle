@@ -1058,10 +1058,13 @@ pub fn quorums(replica_count: u8) struct {
     assert(quorum_view_change >= @divFloor(replica_count, 2) + 1);
     assert(quorum_view_change + quorum_replication > replica_count);
 
+    const quorum_nack_prepare = replica_count - quorum_replication + 1;
+    assert(quorum_nack_prepare + quorum_replication > replica_count);
+
     return .{
         .replication = quorum_replication,
         .view_change = quorum_view_change,
-        .nack_prepare = replica_count - quorum_replication + 1,
+        .nack_prepare = quorum_nack_prepare,
     };
 }
 
@@ -1071,6 +1074,7 @@ test "quorums" {
     const expect_replication = [_]u8{ 1, 2, 2, 2, 3, 3, 3, 3 };
     const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
     const expect_nack_prepare = [_]u8{ 1, 1, 2, 3, 3, 4, 5, 6 };
+
     for (expect_replication[0..]) |_, i| {
         const replicas = @intCast(u8, i) + 1;
         const actual = quorums(replicas);
@@ -1099,7 +1103,7 @@ pub const Headers = struct {
 
     fn dvc_blank(op: u64) Header {
         return std.mem.zeroInit(Header, .{
-            .command = .prepare,
+            .command = .reserved,
             .op = op,
             .checksum = 0,
         });
@@ -1107,17 +1111,17 @@ pub const Headers = struct {
 
     fn dvc_fault(op: u64) Header {
         return std.mem.zeroInit(Header, .{
-            .command = .prepare,
+            .command = .reserved,
             .op = op,
             .checksum = 1,
         });
     }
 
     pub fn dvc_header_type(header: *const Header) enum { blank, fault, valid } {
-        assert(header.command == .prepare);
-
         if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
         if (std.meta.eql(header.*, Headers.dvc_fault(header.op))) return .fault;
+
+        assert(header.command == .prepare);
         if (constants.verify) assert(header.valid_checksum());
         return .valid;
     }
@@ -1143,47 +1147,45 @@ const ViewChangeHeadersSlice = struct {
         assert(headers.slice.len > 0);
         assert(headers.slice.len <= constants.view_change_headers_max);
 
-        const op_head = headers.slice[0].op;
+        const head = &headers.slice[0];
+        // A DVC's head op is never a gap or faulty.
+        // A SV never includes gaps or faulty headers.
+        assert(Headers.dvc_header_type(head) == .valid);
 
         if (headers.command == .start_view) {
             assert(headers.slice.len >= @minimum(
                 constants.view_change_headers_suffix_max,
-                op_head + 1, // +1 to include the head itself
+                head.op + 1, // +1 to include the head itself.
             ));
         }
 
-        var child: ?*const Header = null;
-        for (headers.slice) |*header, i| {
-            assert(header.command == .prepare);
+        var child = head;
+        for (headers.slice[1..]) |*header, i| {
+            const index = i + 1;
+            assert(header.command == .prepare or header.command == .reserved);
+            assert(header.op < child.op);
 
             // DVC: Ops are consecutive (with explicit blank headers).
             // SV: The first "pipeline + 1" ops of the SV are consecutive.
             if (headers.command == .do_view_change or
-                (headers.command == .start_view and i < constants.pipeline_prepare_queue_max + 1))
+                (headers.command == .start_view and
+                index < constants.pipeline_prepare_queue_max + 1))
             {
-                assert(header.op == op_head - i);
+                assert(header.op == head.op - index);
             }
 
-            if (child) |child_header| {
-                assert(header.op < child_header.op);
-
-                switch (Headers.dvc_header_type(header)) {
-                    .blank, .fault => {
-                        assert(headers.command == .do_view_change);
-                        continue; // Don't update "child".
-                    },
-                    .valid => {
-                        assert(header.view <= child_header.view);
-                        assert(header.timestamp < child_header.timestamp);
-                        if (header.op + 1 == child_header.op) {
-                            assert(header.checksum == child_header.parent);
-                        }
-                    },
-                }
-            } else {
-                // A DVC's head op is never a gap or faulty.
-                // A SV never includes gaps or faulty headers.
-                assert(Headers.dvc_header_type(header) == .valid);
+            switch (Headers.dvc_header_type(header)) {
+                .blank, .fault => {
+                    assert(headers.command == .do_view_change);
+                    continue; // Don't update "child".
+                },
+                .valid => {
+                    assert(header.view <= child.view);
+                    assert(header.timestamp < child.timestamp);
+                    if (header.op + 1 == child.op) {
+                        assert(header.checksum == child.parent);
+                    }
+                },
             }
             child = header;
         }
@@ -1219,7 +1221,9 @@ const ViewChangeHeadersSlice = struct {
             }
             break :blk &headers.slice[oldest.?];
         };
-        assert(header_oldest.op <= header_newest.op);
+        assert(header_newest.view <= log_view);
+        assert(header_newest.view >= header_oldest.view);
+        assert(header_newest.op >= header_oldest.op);
 
         if (op < header_oldest.op) return .{ .min = 0, .max = header_oldest.view };
         if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
@@ -1350,6 +1354,10 @@ const ViewChangeHeadersArray = struct {
 
     pub fn start_view_into_do_view_change(headers: *ViewChangeHeadersArray) void {
         assert(headers.command == .start_view);
+        // This function is only called by a replica that is lagging behind the primary's
+        // checkpoint, so the start_view has a full suffix of headers.
+        assert(headers.array.get(0).op >= constants.journal_slot_count);
+        assert(headers.array.len >= constants.view_change_headers_suffix_max);
         headers.command = .do_view_change;
 
         // Remove the "hook" checkpoint trigger(s), since they would create gaps in the ops.
@@ -1360,7 +1368,11 @@ const ViewChangeHeadersArray = struct {
         {
             headers.array.len -= 1;
         }
+
         assert(removed <= 2);
+        // The remaining headers may be larger than the suffix because the latest hook may chain
+        // with the suffix, so we can keep it.
+        assert(headers.array.len >= constants.view_change_headers_suffix_max);
         headers.verify();
     }
 
