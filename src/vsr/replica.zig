@@ -467,27 +467,38 @@ pub fn ReplicaType(
             var op_head = for (vsr_headers.slice) |*header| {
                 if (vsr.Headers.dvc_header_type(header) != .valid) continue;
                 if (header.op <= self.op_checkpoint_trigger()) break header.op;
-            } else unreachable;
-            assert(op_head <= self.op_checkpoint_trigger());
+            } else op_head: {
+                // This case can only occur if we loaded an SV for its hook header, then converted
+                // that SV to a DVC (dropping the hooks; see start_view_into_do_view_change()),
+                // but never finished the view change.
+                assert(self.view > self.log_view);
+                break :op_head null;
+            };
+            assert(op_head == null or op_head.? <= self.op_checkpoint_trigger());
 
             for (self.journal.headers) |*header| {
                 assert(header.op <= self.op_checkpoint_trigger());
-                if (header.command == .prepare and header.op > op_head) {
-                    assert(self.log_view >= header.view);
-                    // Typically if there is an op in the WAL higher than the durable headers'
-                    // head op, we must have crashed with a durable SV, not a durable DVC.
-                    //
-                    // However, we could have joined a view and finished some repair before ever
-                    // updating our view_durable.
-                    //
-                    // To avoid special-casing this all over, we pretend this higher op doesn't
-                    // exist. This is safe because the prior view-change didn't complete.
-                    maybe(self.log_view == self.view);
+                if (header.command == .prepare) {
+                    if (op_head == null) {
+                        assert(self.log_view < self.view);
+                        op_head = header.op;
+                    } else if (op_head.? < header.op) {
+                        assert(self.log_view >= header.view);
+                        // Typically if there is an op in the WAL higher than the durable headers'
+                        // head op, we must have crashed with a durable SV, not a durable DVC.
+                        //
+                        // However, we could have joined a view and finished some repair before ever
+                        // updating our view_durable.
+                        //
+                        // To avoid special-casing this all over, we pretend this higher op doesn't
+                        // exist. This is safe because the prior view-change didn't complete.
+                        maybe(self.log_view == self.view);
 
-                    if (self.log_view == self.view) op_head = header.op;
+                        if (self.log_view == self.view) op_head = header.op;
+                    }
                 }
             }
-            self.op = op_head;
+            self.op = op_head.?;
             self.commit_max = std.math.max(
                 self.commit_max,
                 self.op -| constants.pipeline_prepare_queue_max,
