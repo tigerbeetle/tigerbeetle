@@ -1,0 +1,175 @@
+# This workflow will build a package using Maven and then publish it to Maven Central when a release is created
+
+name: "clients/java"
+
+on:
+  workflow_call:
+    secrets:
+      MAVEN_GPG_SECRET_KEY:
+        required: true
+      MAVEN_CENTRAL_USERNAME:
+        required: true
+      MAVEN_CENTRAL_TOKEN:
+        required: true
+      MAVEN_GPG_SECRET_KEY_PASSWORD:
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - name: Set up JDK
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        server-id: ossrh
+        server-username: MAVEN_USERNAME
+        server-password: MAVEN_CENTRAL_TOKEN
+        gpg-private-key: ${{ secrets.MAVEN_GPG_SECRET_KEY }}
+        gpg-passphrase: MAVEN_GPG_PASSPHRASE
+        settings-path: ${{ github.workspace }}
+
+    - name: Format linter
+      working-directory: src/clients/java
+      run: mvn -B formatter:validate --file pom.xml
+
+    - name: Install Zig
+      working-directory: src/clients/java
+      run: ./scripts/install.sh
+
+    - name: Example programs
+      working-directory: src/clients/java/examples
+      run: mvn compile
+
+    - name: Build
+      working-directory: src/clients/java
+      run: mvn -B package --file pom.xml
+
+    - name: Save local package
+      uses: actions/upload-artifact@v3
+      with:
+        name: jar-artifact
+        path: |
+          src/clients/java/target/*.jar
+          !src/clients/java/target/*javadoc.jar
+          !src/clients/java/target/*sources.jar
+
+    - name: Publish to the Maven Central Repository
+      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      working-directory: src/clients/java
+      run: |
+        mvn -B versions:set -DnewVersion=$BASE_VERSION-$(git rev-list --count HEAD) --file pom.xml
+        mvn -B clean deploy -Dmaven.test.skip --file pom.xml -s $GITHUB_WORKSPACE/settings.xml
+      env:
+        BASE_VERSION: 0.0.1
+        MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+        MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
+        MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
+
+  prepare_validation_tests:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Prepare validation tests
+    
+    steps:
+    - uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        server-id: github
+        settings-path: ${{ github.workspace }}
+
+    - name: Restore local package
+      uses: actions/download-artifact@v3
+      with:
+        name: jar-artifact
+        path: test/
+   
+    - name: Create a simple test program
+      run: |
+        mkdir -p test
+        cat <<"EOF" > test/Main.java
+        import com.tigerbeetle.Client;
+        public class Main {
+            public static void main(String[] args) {
+                try (Client client = new Client(0, new String[] { "3000"})) {
+                    client.close();
+                    System.out.println("Success");
+                    System.exit(0);
+                } catch (Exception exception) {
+                    exception.printStackTrace();
+                    System.exit(-1);
+                }
+            }
+        }
+        EOF
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: test-artifact
+        path: test/*.*
+
+  run_validation_tests:
+    needs: prepare_validation_tests
+    name: Validate on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        
+    steps:
+    - uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        server-id: github
+        settings-path: ${{ github.workspace }}
+
+    - uses: actions/download-artifact@v3
+      with:
+        name: test-artifact
+        path: test/
+
+    - name: Run validation
+      run: |
+        cd test
+        java -cp "./*" Main.java
+
+  run_validation_tests_on_containers:
+    needs: prepare_validation_tests
+    runs-on: ubuntu-latest
+    name: Validate on ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - openjdk:20-oracle
+          - openjdk:17-bullseye
+          - openjdk:17-alpine
+          - eclipse-temurin:19-alpine
+          - eclipse-temurin:19
+          - azul/zulu-openjdk:19
+          - azul/zulu-openjdk-alpine:19
+          - azul/zulu-openjdk-centos:19
+          - azul/zulu-openjdk-debian:19
+          - amazoncorretto:17
+          - amazoncorretto:17-alpine
+    steps:
+    - uses: actions/download-artifact@v3
+      with:
+        name: test-artifact
+        path: ./test
+
+    - name: Run validation
+      run: |
+        docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java

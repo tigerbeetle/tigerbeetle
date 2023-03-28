@@ -34,6 +34,8 @@ Fields used by each mode of transfer:
 | `flags.pending`               | false        | true     | false        | false        |
 | `flags.post_pending_transfer` | false        | false    | true         | false        |
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
+| `flags.balancing_debit`       | optional     | optional | false        | false        |
+| `flags.balancing_credit`      | optional     | optional | false        | false        |
 | `amount`                      | required     | required | optional     | optional     |
 
 TigerBeetle uses the same data structures internally and
@@ -307,6 +309,8 @@ This specifies (optional) transfer behavior.
 Constraints:
 
 * Type is 16-bit unsigned integer (2 bytes)
+* Some flags are mutually exclusive; see
+  [`flags_are_mutually_exclusive`](./operations/create_transfers.md#flags_are_mutually_exclusive).
 
 #### `flags.linked`
 
@@ -364,10 +368,65 @@ Mark the transfer as a [post-pending transfer](#post-pending-transfer).
 
 Mark the transfer as a [void-pending transfer](#void-pending-transfer).
 
+### `flags.balancing_debit`
+
+Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
+such that `debit_account.debits_pending + debit_account.debits_posted ≤ debit_account.credits_posted`.
+If `amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
+
+If the highest amount transferable is `0`, returns
+[`exceeds_credits`](./operations/create_transfers.md#exceeds_credits).
+
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
+if the amount of the retry differs from the amount that was actually transferred.
+
+The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
+less than or equal to the amount that was passed to `create_transfers`.
+
+`flags.balancing_debit` is exclusive with the `flags.post_pending_transfer`/`flags.void_pending_transfer`
+flags because posting or voiding a pending transfer will never exceed/overflow either account's limits.
+
+`flags.balancing_debit` is compatible with (and orthogonal to) `flags.balancing_credit`.
+
+##### Examples
+
+- [Close Account](../recipes/close-account.md)
+
+### `flags.balancing_credit`
+
+Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
+such that `credit_account.credits_pending + credit_account.credits_posted ≤ credit_account.debits_posted`.
+If `amount` is set to `0`, transfer at most `2^64 - 1` (i.e. as much as possible).
+
+If the highest amount transferable is `0`, returns
+[`exceeds_debits`](./operations/create_transfers.md#exceeds_debits).
+
+Retrying a balancing transfer will return
+[`exists_with_different_amount`](./operations/create_transfers.md#exists_with_different_amount)
+if the amount of the retry differs from the amount that was actually transferred.
+
+The `amount` of the recorded transfer is set to the actual amount that was transferred, which is
+less than or equal to the amount that was passed to `create_transfers`.
+
+`flags.balancing_credit` is exclusive with the `flags.post_pending_transfer`/`flags.void_pending_transfer`
+flags because posting or voiding a pending transfer will never exceed/overflow either account's limits.
+
+`flags.balancing_credit` is compatible with (and orthogonal to) `flags.balancing_debit`.
+
+##### Examples
+
+- [Close Account](../recipes/close-account.md)
+
 ### `amount`
 
 This is how much should be debited from the `debit_account_id` account
 and credited to the `credit_account_id` account.
+
+- When `flags.balancing_debit` is set, this is the maximum amount that will be debited/credited,
+  where the actual transfer amount is determined by the debit account's constraints.
+- When `flags.balancing_credit` is set, this is the maximum amount that will be debited/credited,
+  where the actual transfer amount is determined by the credit account's constraints.
 
 Constraints:
 
@@ -378,13 +437,20 @@ Constraints:
 * When `flags.void_pending_transfer` is set:
   * If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
   * If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
-* When `flags.post_pending_transfer` and `flags.void_pending_transfer` are not set, `amount` must
-  not be zero.
+* When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero,
+  it will automatically be set to the maximum amount that does not violate the corresponding
+  account limits. (Equivalent to setting `amount = 2^64 - 1`).
+* When all of the following flags are not set, `amount` must be nonzero:
+  * `flags.post_pending_transfer`
+  * `flags.void_pending_transfer`
+  * `flags.balancing_debit`
+  * `flags.balancing_credit`
 
 #### Examples
 
 - For representing fractional amounts (e.g. `$12.34`), see
   [Fractional Amounts](../recipes/fractional-amounts.md).
+- For balancing transfers, see [Close Account](../recipes/close-account.md).
 
 ### `timestamp`
 

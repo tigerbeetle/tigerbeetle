@@ -29,7 +29,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 results: Error![]const u8,
             ) void;
             user_data: u128,
-            callback: Callback,
+            // Null iff operation=register.
+            callback: ?Callback,
             message: *Message,
         };
 
@@ -86,7 +87,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         on_reply_context: ?*anyopaque = null,
         /// Used for testing. Called for replies to all operations (including `register`).
         on_reply_callback: ?fn (
-            context: ?*anyopaque,
             client: *Self,
             request: *Message,
             reply: *Message,
@@ -160,7 +160,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 return;
             }
             switch (message.header.command) {
-                .pong => self.on_pong(message),
+                .pong_client => self.on_pong_client(message),
                 .reply => self.on_reply(message),
                 .eviction => self.on_eviction(message),
                 else => {
@@ -193,7 +193,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message: *Message,
             message_body_size: usize,
         ) void {
+            assert(operation != .reserved);
+            assert(operation != .root);
+            assert(operation != .register);
+
             self.register();
+            assert(self.request_number > 0);
 
             // We will set parent, context, view and checksums only when sending for the first time:
             message.header.* = .{
@@ -204,9 +209,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(u32, @sizeOf(Header) + message_body_size),
             };
-
-            assert(self.request_number > 0);
-            self.request_number += 1;
 
             log.debug("{}: request: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -223,6 +225,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             const was_empty = self.request_queue.empty();
 
+            self.request_number += 1;
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
@@ -270,8 +273,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             @panic("session evicted: too many concurrent client sessions");
         }
 
-        fn on_pong(self: *Self, pong: *const Message) void {
-            assert(pong.header.command == .pong);
+        fn on_pong_client(self: *Self, pong: *const Message) void {
+            assert(pong.header.command == .pong_client);
             assert(pong.header.cluster == self.cluster);
 
             if (pong.header.client != 0) {
@@ -367,15 +370,19 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
 
             if (self.on_reply_callback) |on_reply_callback| {
-                on_reply_callback(self.on_reply_context, self, inflight.message, reply);
+                on_reply_callback(self, inflight.message, reply);
             }
 
-            if (inflight.message.header.operation != .register) {
-                inflight.callback(
+            if (inflight.callback) |callback| {
+                assert(inflight.message.header.operation != .register);
+
+                callback(
                     inflight.user_data,
                     inflight.message.header.operation.cast(StateMachine),
                     reply.body(),
                 );
+            } else {
+                assert(inflight.message.header.operation == .register);
             }
         }
 
@@ -383,7 +390,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.ping_timeout.reset();
 
             const ping = Header{
-                .command = .ping,
+                .command = .ping_client,
                 .cluster = self.cluster,
                 .client = self.id,
             };
@@ -455,7 +462,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             self.request_queue.push_assume_capacity(.{
                 .user_data = 0,
-                .callback = undefined,
+                .callback = null,
                 .message = message.ref(),
             });
 

@@ -12,8 +12,8 @@ pub const IO = struct {
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
-    timeouts: FIFO(Completion) = .{},
-    completed: FIFO(Completion) = .{},
+    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
+    completed: FIFO(Completion) = .{ .name = "io_completed" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -62,7 +62,7 @@ pub const IO = struct {
     };
 
     fn flush(self: *IO, mode: FlushMode) !void {
-        if (self.completed.peek() == null) {
+        if (self.completed.empty()) {
             // Compute how long to poll by flushing timeout completions.
             // NOTE: this may push to completed queue
             var timeout_ms: ?os.windows.DWORD = null;
@@ -78,7 +78,7 @@ pub const IO = struct {
             }
 
             // Poll for IO iff theres IO pending and flush_timeouts() found no ready completions
-            if (self.io_pending > 0 and self.completed.peek() == null) {
+            if (self.io_pending > 0 and self.completed.empty()) {
                 // In blocking mode, we're always waiting at least until the timeout by run_for_ns.
                 // In non-blocking mode, we shouldn't wait at all.
                 const io_timeout = switch (mode) {
@@ -115,7 +115,7 @@ pub const IO = struct {
         // Must read all `completions` before invoking the callbacks
         // as the callbacks could potentially submit more completions.
         var completed = self.completed;
-        self.completed = .{};
+        self.completed.reset();
         while (completed.pop()) |completion| {
             (completion.callback)(Completion.Context{
                 .io = self,
@@ -868,6 +868,24 @@ pub const IO = struct {
         completion: *Completion,
         nanoseconds: u63,
     ) void {
+        // Special case a zero timeout as a yield.
+        if (nanoseconds == 0) {
+            completion.* = .{
+                .next = null,
+                .context = @ptrCast(?*anyopaque, context),
+                .operation = undefined,
+                .callback = struct {
+                    fn on_complete(ctx: Completion.Context) void {
+                        const _context = @intToPtr(Context, @ptrToInt(ctx.completion.context));
+                        callback(_context, ctx.completion, {});
+                    }
+                }.on_complete,
+            };
+
+            self.completed.push(completion);
+            return;
+        }
+
         self.submit(
             context,
             callback,

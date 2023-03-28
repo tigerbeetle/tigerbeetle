@@ -13,10 +13,6 @@ comptime {
     assert(constants.message_size_max % constants.sector_size == 0);
 }
 
-/// Add an extra sector_size bytes to allow a partially received subsequent
-/// message to be shifted to make space for 0 padding to vsr.sector_ceil.
-const message_size_max_padded = constants.message_size_max + constants.sector_size;
-
 /// The number of full-sized messages allocated at initialization by the replica message pool.
 /// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
 pub const messages_max_replica = messages_max: {
@@ -26,7 +22,8 @@ pub const messages_max_replica = messages_max: {
     sum += constants.journal_iops_write_max; // Journal writes
     sum += constants.clients_max; // SuperBlock.client_table
     sum += 1; // Replica.loopback_queue
-    sum += constants.pipeline_max; // Replica.pipeline
+    sum += constants.pipeline_prepare_queue_max; // Replica.Pipeline{Queue|Cache}
+    sum += constants.pipeline_request_queue_max; // Replica.Pipeline{Queue|Cache}
     sum += 1; // Replica.commit_prepare
     // Replica.do_view_change_from_all_replicas quorum:
     // Replica.recovery_response_quorum is only used for recovery and does not increase the limit.
@@ -67,7 +64,7 @@ pub const MessagePool = struct {
     pub const Message = struct {
         // TODO: replace this with a header() function to save memory
         header: *Header,
-        buffer: []align(constants.sector_size) u8,
+        buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32 = 0,
         next: ?*Message,
 
@@ -105,13 +102,13 @@ pub const MessagePool = struct {
                 const buffer = try allocator.allocAdvanced(
                     u8,
                     constants.sector_size,
-                    message_size_max_padded,
+                    constants.message_size_max,
                     .exact,
                 );
                 const message = try allocator.create(Message);
                 message.* = .{
                     .header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]),
-                    .buffer = buffer,
+                    .buffer = buffer[0..constants.message_size_max],
                     .next = pool.free_list,
                 };
                 pool.free_list = message;
@@ -126,7 +123,7 @@ pub const MessagePool = struct {
         var free_count: usize = 0;
         while (pool.free_list) |message| {
             pool.free_list = message.next;
-            allocator.free(message.buffer);
+            allocator.free(@as([]const u8, message.buffer));
             allocator.destroy(message);
             free_count += 1;
         }
@@ -151,7 +148,7 @@ pub const MessagePool = struct {
     pub fn unref(pool: *MessagePool, message: *Message) void {
         message.references -= 1;
         if (message.references == 0) {
-            if (builtin.mode == .Debug) mem.set(u8, message.buffer, undefined);
+            mem.set(u8, message.buffer, 0);
             message.next = pool.free_list;
             pool.free_list = message;
         }

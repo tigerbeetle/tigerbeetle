@@ -43,7 +43,7 @@ func main() {
 	}
 
 	for _, err := range res {
-		log.Printf("Error creating account %d: %s", err.Index, err.Code)
+		log.Printf("Error creating account %d: %s", err.Index, err.Result)
 		return
 	}
 
@@ -72,7 +72,7 @@ func main() {
 		for _, err := range res {
 			id := int(err.Index) + i
 			if id < SAMPLES {
-				log.Printf("Error creating transfer %d: %s", id, err.Code)
+				log.Printf("Error creating transfer %d: %s", id, err.Result)
 			}
 			return
 		}

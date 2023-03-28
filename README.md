@@ -53,7 +53,7 @@ GitHub.
 
 ```bash
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
-$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip 
+$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 $ tigerbeetle version --verbose | head -n6
 TigerBeetle version experimental
@@ -68,7 +68,7 @@ mode=Mode.ReleaseSafe
 
 ```bash
 $ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
-$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip 
+$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 $ tigerbeetle version --verbose | head -n6
 TigerBeetle version experimental
@@ -88,8 +88,8 @@ You will need POSIX userland, curl or wget, tar, and xz.
 
 ```bash
 $ git clone https://github.com/tigerbeetledb/tigerbeetle.git
-$ git checkout 2022-11-16-weekly # Or latest tag
 $ cd tigerbeetle
+$ git checkout 2022-11-16-weekly # Or latest tag
 $ scripts/install.sh
 ```
 
@@ -102,7 +102,7 @@ directory. No global changes. The result will place the compiled
 Then create the TigerBeetle data file.
 
 ```bash
-$ ./tigerbeetle format --cluster=0 --replica=0 0_0.tigerbeetle
+$ ./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
 ```
@@ -123,7 +123,7 @@ First provision TigerBeetle's data directory.
 
 ```bash
 $ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
-    format --cluster=0 --replica=0 /data/0_0.tigerbeetle
+    format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
 ```
@@ -264,6 +264,7 @@ For further reading:
 * For Node.js: [tigerbeetle-node](./src/clients/node)
 * For Golang: [tigerbeetle-go](./src/clients/go)
 * For Java: [tigerbeetle-java](./src/clients/java)
+* For C# and Dotnet: [tigerbeetle-dotnet](./src/clients/dotnet)
 
 ## Community
 
@@ -323,6 +324,7 @@ In progress:
 
 ## License
 
+Copyright 2023 TigerBeetle, Inc
 Copyright 2020-2022 Coil Technologies, Inc
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use these files except in compliance with the License. You may obtain a copy of the License at

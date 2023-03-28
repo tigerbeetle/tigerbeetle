@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<Import Project="TigerBeetle.props" />
+	<PropertyGroup>
+		<TargetFrameworks>net6.0</TargetFrameworks>
+		<LangVersion>10</LangVersion>
+		<Nullable>enable</Nullable>
+		<AssemblyName>TigerBeetle</AssemblyName>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<UseCurrentRuntimeIdentifier>true</UseCurrentRuntimeIdentifier>
+		<TargetFrameworks>netstandard2.1;net6.0</TargetFrameworks>		
+	</PropertyGroup>
+	<PropertyGroup>
+		<OS Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</OS>
+	</PropertyGroup>
+	<Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="'$(OS)'=='Windows'">
+		<Exec Command=".\zig\zig.exe build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)\..\..\..\.." />
+	</Target>
+	<Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="'$(OS)'!='Windows'">
+		<Exec Command="zig/zig build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../../.." />
+	</Target>
+	<ItemGroup>
+		<Content Include="runtimes\**\*.so">
+		  <PackagePath>%(Identity)</PackagePath>
+		  <Pack>true</Pack>
+		</Content>
+		<Content Include="runtimes\**\*.dylib">
+			<PackagePath>%(Identity)</PackagePath>
+			<Pack>true</Pack>
+		</Content>
+		<Content Include="runtimes\**\*.dll">
+			<PackagePath>%(Identity)</PackagePath>
+			<Pack>true</Pack>
+		</Content>		
+	</ItemGroup>
+</Project>

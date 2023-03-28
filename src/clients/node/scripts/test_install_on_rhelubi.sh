@@ -2,7 +2,9 @@
 
 set -e
 
-./scripts/build.sh
+if [ -z ${SKIP_NODE_BUILD+x} ]; then
+	./scripts/build.sh
+fi
 
 # Prebuild the container with this directory because we have no need for its artifacts
 id=$(docker build -q -f - ../../.. < <(echo "
@@ -15,7 +17,6 @@ yum update -y
 yum install -y xz wget git glibc tar
 wget -O- -q https://rpm.nodesource.com/setup_18.x | bash -
 yum install -y nodejs
-ln -s /lib64/libc.so.6 /lib64/libc.so
 npm install /wrk/src/clients/node/tigerbeetle-node-*.tgz
 node -e 'require(\"tigerbeetle-node\"); console.log(\"SUCCESS!\")'
 "

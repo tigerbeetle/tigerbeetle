@@ -11,24 +11,20 @@ const format_wal_prepares = @import("./journal.zig").format_wal_prepares;
 pub fn format(
     comptime Storage: type,
     allocator: std.mem.Allocator,
-    cluster: u32,
-    replica: u8,
+    options: vsr.SuperBlockType(Storage).FormatOptions,
     storage: *Storage,
     superblock: *vsr.SuperBlockType(Storage),
 ) !void {
     const ReplicaFormat = ReplicaFormatType(Storage);
     var replica_format = ReplicaFormat{};
 
-    try replica_format.format_wal(allocator, cluster, storage);
+    try replica_format.format_wal(allocator, options.cluster, storage);
     assert(!replica_format.formatting);
 
     superblock.format(
         ReplicaFormat.format_superblock_callback,
         &replica_format.superblock_context,
-        .{
-            .cluster = cluster,
-            .replica = replica,
-        },
+        options,
     );
 
     replica_format.formatting = true;
@@ -151,11 +147,12 @@ test "format" {
     const superblock_zone_size = @import("./superblock.zig").superblock_zone_size;
     const data_file_size_min = @import("./superblock.zig").data_file_size_min;
     const MessagePool = @import("../message_pool.zig").MessagePool;
-    const Storage = @import("../test/storage.zig").Storage;
+    const Storage = @import("../testing/storage.zig").Storage;
     const SuperBlock = vsr.SuperBlockType(Storage);
     const allocator = std.testing.allocator;
     const cluster = 0;
     const replica = 1;
+    const replica_count = 1;
 
     var storage = try Storage.init(
         allocator,
@@ -179,22 +176,27 @@ test "format" {
     });
     defer superblock.deinit(allocator);
 
-    try format(Storage, allocator, cluster, replica, &storage, &superblock);
+    try format(Storage, allocator, .{
+        .cluster = cluster,
+        .replica = replica,
+        .replica_count = replica_count,
+    }, &storage, &superblock);
 
-    // Verify the superblock sectors.
+    // Verify the superblock headers.
     var copy: u8 = 0;
     while (copy < constants.superblock_copies) : (copy += 1) {
-        const sector = storage.superblock_sector(copy);
+        const superblock_header = storage.superblock_header(copy);
 
-        try std.testing.expectEqual(sector.copy, copy);
-        try std.testing.expectEqual(sector.replica, replica);
-        try std.testing.expectEqual(sector.cluster, cluster);
-        try std.testing.expectEqual(sector.storage_size, storage.size);
-        try std.testing.expectEqual(sector.sequence, 1);
-        try std.testing.expectEqual(sector.vsr_state.commit_min, 0);
-        try std.testing.expectEqual(sector.vsr_state.commit_max, 0);
-        try std.testing.expectEqual(sector.vsr_state.view, 0);
-        try std.testing.expectEqual(sector.vsr_state.view_normal, 0);
+        try std.testing.expectEqual(superblock_header.copy, copy);
+        try std.testing.expectEqual(superblock_header.cluster, cluster);
+        try std.testing.expectEqual(superblock_header.storage_size, storage.size);
+        try std.testing.expectEqual(superblock_header.sequence, 1);
+        try std.testing.expectEqual(superblock_header.vsr_state.commit_min, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.commit_max, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.view, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.log_view, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.replica, replica);
+        try std.testing.expectEqual(superblock_header.vsr_state.replica_count, replica_count);
     }
 
     // Verify the WAL headers and prepares zones.

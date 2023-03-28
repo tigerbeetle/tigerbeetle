@@ -1,0 +1,58 @@
+name: macOS
+
+on:
+  workflow_call:
+
+# Our M1 runners are self hosted, and not ephemeral like standard GitHub action runners.
+# Limit the token permissions to be read - so even if they were compromised, no damage
+# could be done.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+    runs-on: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
+      - run: ./scripts/build.sh test
+      - run: ./scripts/install.sh
+
+  benchmark:
+    strategy:
+      matrix:
+        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+    runs-on: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/benchmark.sh --transfer-count 4000
+
+  c_sample:
+    strategy:
+      matrix:
+        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+    runs-on: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
+      - run: ./scripts/build.sh c_sample -Drelease-safe
+
+  # TODO(Phil): This never worked, get it working.
+  # Validation only. The linux / docs step validates and checks the diff.
+  # Also, this only validates that Docker on macOS works. It doesn't
+  # test that the commands run on macOS outside of Docker.
+  # docs:
+  #   runs-on: macos-latest
+  #   steps:
+  #     - uses: actions/checkout@v3
+  # 
+  #     # Runs checks against generated client docs
+  #     - run: ./scripts/install_zig.sh
+  #     - run: ( cd src/clients && ../../zig/zig run docs_generate.zig -- --no-generate )
+  #   env:
+  #     # Somehow this is not the same as GITHUB_SHA.
+  #     # https://github.com/orgs/community/discussions/26325
+  #     GIT_SHA: ${{ github.event.pull_request.head.sha }}

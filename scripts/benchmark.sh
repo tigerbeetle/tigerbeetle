@@ -12,8 +12,14 @@ fi
 COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
-zig/zig build -Drelease-safe
-mv zig-out/bin/tigerbeetle .
+# Determine the appropriate target flag (to support macos Ventura)
+if [ "$(uname)" = "Linux" ]; then
+    ZIG_TARGET="-Dtarget=native-linux"
+else
+    ZIG_TARGET="-Dtarget=native-macos"
+fi
+
+./scripts/build.sh install -Drelease-safe -Dconfig=production $ZIG_TARGET
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -43,7 +49,7 @@ do
         rm "$FILE"
     fi
 
-    ./tigerbeetle format --cluster=0 --replica="$I" "$FILE" > benchmark.log 2>&1
+    ./tigerbeetle format --cluster=0 --replica="$I" --replica-count=1 "$FILE" > benchmark.log 2>&1
 done
 
 for I in $REPLICAS
@@ -53,12 +59,9 @@ do
     ./tigerbeetle start --addresses=3001 "$FILE" >> benchmark.log 2>&1 &
 done
 
-# Wait for replicas to start, listen and connect:
-sleep 1
-
 echo ""
 echo "Benchmarking..."
-zig/zig build benchmark -Drelease-safe
+./scripts/build.sh benchmark -Drelease-safe -Dconfig=production $ZIG_TARGET -- "$@"
 echo ""
 
 for I in $REPLICAS

@@ -16,8 +16,6 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_op;
 
 fn ObjectTreeHelpers(comptime Object: type) type {
-    assert(@hasField(Object, "id"));
-    assert(std.meta.fieldInfo(Object, .id).field_type == u128);
     assert(@hasField(Object, "timestamp"));
     assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
 
@@ -121,6 +119,7 @@ fn IndexTreeType(
     comptime Storage: type,
     comptime Field: type,
     comptime tree_name: [:0]const u8,
+    comptime value_count_max: usize,
 ) type {
     const Key = CompositeKey(IndexCompositeKeyType(Field));
     const Table = TableType(
@@ -131,6 +130,7 @@ fn IndexTreeType(
         Key.sentinel_key,
         Key.tombstone,
         Key.tombstone_from_key,
+        value_count_max,
         .secondary_index,
     );
 
@@ -147,6 +147,10 @@ pub fn GrooveType(
     comptime Object: type,
     /// An anonymous struct instance which contains the following:
     ///
+    /// - value_count_max: { .field = usize }:
+    ///     An anonymous struct which contains, for each field of `Object`,
+    ///     the maximum number of values per table for the corresponding index tree.
+    ///
     /// - ignored: [][]const u8:
     ///     An array of fields on the Object type that should not be given index trees
     ///
@@ -157,8 +161,9 @@ pub fn GrooveType(
 ) type {
     @setEvalBranchQuota(64000);
 
-    assert(@hasField(Object, "id"));
-    assert(std.meta.fieldInfo(Object, .id).field_type == u128);
+    const has_id = @hasField(Object, "id");
+    if (has_id) assert(std.meta.fieldInfo(Object, .id).field_type == u128);
+
     assert(@hasField(Object, "timestamp"));
     assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
 
@@ -179,7 +184,12 @@ pub fn GrooveType(
 
         if (!ignored) {
             const tree_name = @typeName(Object) ++ "." ++ field.name;
-            const IndexTree = IndexTreeType(Storage, field.field_type, tree_name);
+            const IndexTree = IndexTreeType(
+                Storage,
+                field.field_type,
+                tree_name,
+                @field(groove_options.value_count_max, field.name),
+            );
             index_fields = index_fields ++ [_]std.builtin.TypeInfo.StructField{
                 .{
                     .name = field.name,
@@ -219,7 +229,12 @@ pub fn GrooveType(
         // Create an IndexTree for the DerivedType:
         const tree_name = @typeName(Object) ++ "." ++ field.name;
         const DerivedType = @typeInfo(derive_return_type).Optional.child;
-        const IndexTree = IndexTreeType(Storage, DerivedType, tree_name);
+        const IndexTree = IndexTreeType(
+            Storage,
+            DerivedType,
+            tree_name,
+            @field(groove_options.value_count_max, field.name),
+        );
 
         index_fields = index_fields ++ &.{
             .{
@@ -246,7 +261,7 @@ pub fn GrooveType(
         };
     }
 
-    const ObjectTree = blk: {
+    const _ObjectTree = blk: {
         const Table = TableType(
             u64, // key = timestamp
             Object,
@@ -255,6 +270,7 @@ pub fn GrooveType(
             ObjectTreeHelpers(Object).sentinel_key,
             ObjectTreeHelpers(Object).tombstone,
             ObjectTreeHelpers(Object).tombstone_from_key,
+            groove_options.value_count_max.timestamp,
             .general,
         );
 
@@ -262,7 +278,7 @@ pub fn GrooveType(
         break :blk TreeType(Table, Storage, tree_name);
     };
 
-    const IdTree = blk: {
+    const _IdTree = if (!has_id) void else blk: {
         const Table = TableType(
             u128,
             IdTreeValue,
@@ -271,6 +287,7 @@ pub fn GrooveType(
             IdTreeValue.sentinel_key,
             IdTreeValue.tombstone,
             IdTreeValue.tombstone_from_key,
+            groove_options.value_count_max.id,
             .general,
         );
 
@@ -278,7 +295,7 @@ pub fn GrooveType(
         break :blk TreeType(Table, Storage, tree_name);
     };
 
-    const IndexTrees = @Type(.{
+    const _IndexTrees = @Type(.{
         .Struct = .{
             .layout = .Auto,
             .fields = index_fields,
@@ -296,22 +313,26 @@ pub fn GrooveType(
     });
 
     // Verify no hash collisions between all the trees:
-    comptime var hashes: []const u128 = &.{ObjectTree.hash};
+    comptime var hashes: []const u128 = &.{_ObjectTree.hash};
 
-    inline for (std.meta.fields(IndexTrees)) |field| {
-        const IndexTree = @TypeOf(@field(@as(IndexTrees, undefined), field.name));
+    if (has_id) {
+        const hash: []const u128 = &.{_IdTree.hash};
+        assert(std.mem.indexOf(u128, hashes, hash) == null);
+        hashes = hashes ++ hash;
+    }
+    inline for (std.meta.fields(_IndexTrees)) |field| {
+        const IndexTree = @TypeOf(@field(@as(_IndexTrees, undefined), field.name));
         const hash: []const u128 = &.{IndexTree.hash};
-
         assert(std.mem.indexOf(u128, hashes, hash) == null);
         hashes = hashes ++ hash;
     }
 
     // Verify groove index count:
-    const indexes_count_actual = std.meta.fields(IndexTrees).len;
+    const indexes_count_actual = std.meta.fields(_IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len -
         groove_options.ignored.len -
-        // The id/timestamp field is implicitly ignored since it's the primary key for ObjectTree:
-        2 +
+        // The id/timestamp fields are implicitly ignored since it's the primary key for ObjectTree:
+        (1 + @boolToInt(has_id)) +
         std.meta.fields(@TypeOf(groove_options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
@@ -372,6 +393,10 @@ pub fn GrooveType(
     return struct {
         const Groove = @This();
 
+        pub const ObjectTree = _ObjectTree;
+        pub const IdTree = _IdTree;
+        pub const IndexTrees = _IndexTrees;
+
         const Grid = GridType(Storage);
 
         const Callback = fn (*Groove) void;
@@ -381,24 +406,26 @@ pub fn GrooveType(
             open,
         };
 
-        const PrefetchIDs = std.AutoHashMapUnmanaged(u128, void);
+        const primary_field = if (has_id) "id" else "timestamp";
+        const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
+        const PrefetchIDs = std.AutoHashMapUnmanaged(PrimaryKey, void);
 
         const PrefetchObjectsContext = struct {
             pub fn hash(_: PrefetchObjectsContext, object: Object) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&object.id));
+                return std.hash.Wyhash.hash(0, mem.asBytes(&@field(object, primary_field)));
             }
 
             pub fn eql(_: PrefetchObjectsContext, a: Object, b: Object) bool {
-                return a.id == b.id;
+                return @field(a, primary_field) == @field(b, primary_field);
             }
         };
         const PrefetchObjectsAdapter = struct {
-            pub fn hash(_: PrefetchObjectsAdapter, id: u128) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&id));
+            pub fn hash(_: PrefetchObjectsAdapter, key: PrimaryKey) u64 {
+                return std.hash.Wyhash.hash(0, mem.asBytes(&key));
             }
 
-            pub fn eql(_: PrefetchObjectsAdapter, a_id: u128, b_object: Object) bool {
-                return a_id == b_object.id;
+            pub fn eql(_: PrefetchObjectsAdapter, a_key: PrimaryKey, b_object: Object) bool {
+                return a_key == @field(b_object, primary_field);
             }
         };
         const PrefetchObjects = std.HashMapUnmanaged(Object, void, PrefetchObjectsContext, 70);
@@ -431,7 +458,7 @@ pub fn GrooveType(
             prefetch_entries_max: u32,
 
             tree_options_object: ObjectTree.Options,
-            tree_options_id: IdTree.Options,
+            tree_options_id: if (has_id) IdTree.Options else void,
             tree_options_index: IndexTreeOptions,
         };
 
@@ -450,13 +477,13 @@ pub fn GrooveType(
             );
             errdefer object_tree.deinit(allocator);
 
-            var id_tree = try IdTree.init(
+            var id_tree = if (!has_id) {} else (try IdTree.init(
                 allocator,
                 node_pool,
                 grid,
                 options.tree_options_id,
-            );
-            errdefer id_tree.deinit(allocator);
+            ));
+            errdefer if (has_id) id_tree.deinit(allocator);
 
             var index_trees_initialized: usize = 0;
             var index_trees: IndexTrees = undefined;
@@ -507,7 +534,7 @@ pub fn GrooveType(
             }
 
             groove.objects.deinit(allocator);
-            groove.ids.deinit(allocator);
+            if (has_id) groove.ids.deinit(allocator);
 
             groove.prefetch_ids.deinit(allocator);
             groove.prefetch_objects.deinit(allocator);
@@ -515,8 +542,8 @@ pub fn GrooveType(
             groove.* = undefined;
         }
 
-        pub fn get(groove: *const Groove, id: u128) ?*const Object {
-            return groove.prefetch_objects.getKeyPtrAdapted(id, PrefetchObjectsAdapter{});
+        pub fn get(groove: *const Groove, key: PrimaryKey) ?*const Object {
+            return groove.prefetch_objects.getKeyPtrAdapted(key, PrefetchObjectsAdapter{});
         }
 
         /// Must be called directly before the state machine begins queuing ids for prefetch.
@@ -526,7 +553,7 @@ pub fn GrooveType(
             // output tables until the compaction is complete. (Until then, the output tables may
             // be in the manifest but not yet on disk).
             const snapshot_max = groove.objects.lookup_snapshot_max;
-            assert(snapshot_max == groove.ids.lookup_snapshot_max);
+            assert(!has_id or snapshot_max == groove.ids.lookup_snapshot_max);
 
             const snapshot_target = snapshot orelse snapshot_max;
             assert(snapshot_target <= snapshot_max);
@@ -546,8 +573,13 @@ pub fn GrooveType(
         /// This must be called by the state machine for every key to be prefetched.
         /// We tolerate duplicate IDs enqueued by the state machine.
         /// For example, if all unique operations require the same two dependencies.
-        pub fn prefetch_enqueue(groove: *Groove, id: u128) void {
-            if (groove.ids.lookup_from_memory(groove.prefetch_snapshot.?, id)) |id_tree_value| {
+        pub fn prefetch_enqueue(groove: *Groove, key: PrimaryKey) void {
+            if (!has_id) {
+                groove.prefetch_ids.putAssumeCapacity(key, {});
+                return;
+            }
+
+            if (groove.ids.lookup_from_memory(groove.prefetch_snapshot.?, key)) |id_tree_value| {
                 if (id_tree_value.tombstone()) {
                     // Do nothing; an explicit ID tombstone indicates that the object was deleted.
                 } else {
@@ -556,16 +588,16 @@ pub fn GrooveType(
                         id_tree_value.timestamp,
                     )) |object| {
                         assert(!ObjectTreeHelpers(Object).tombstone(object));
-                        assert(object.id == id);
+                        assert(object.id == key);
                         groove.prefetch_objects.putAssumeCapacity(object.*, {});
                     } else {
                         // The id was in the IdTree's value cache, but not in the ObjectTree's
                         // value cache.
-                        groove.prefetch_ids.putAssumeCapacity(id, {});
+                        groove.prefetch_ids.putAssumeCapacity(key, {});
                     }
                 }
             } else {
-                groove.prefetch_ids.putAssumeCapacity(id, {});
+                groove.prefetch_ids.putAssumeCapacity(key, {});
             }
         }
 
@@ -642,7 +674,7 @@ pub fn GrooveType(
             // TODO(ifreund): use a union for these to save memory, likely an extern union
             // so that we can safetly @ptrCast() until @fieldParentPtr() is implemented
             // for unions. See: https://github.com/ziglang/zig/issues/6611
-            lookup_id: IdTree.LookupContext = undefined,
+            lookup_id: if (has_id) IdTree.LookupContext else void = undefined,
             lookup_object: ObjectTree.LookupContext = undefined,
 
             fn lookup_start_next(worker: *PrefetchWorker) void {
@@ -650,6 +682,11 @@ pub fn GrooveType(
                     worker.context.worker_finished();
                     return;
                 };
+
+                if (!has_id) {
+                    worker.lookup_with_timestamp(id.*);
+                    return;
+                }
 
                 if (worker.context.groove.ids.lookup_from_memory(
                     worker.context.snapshot,
@@ -699,32 +736,34 @@ pub fn GrooveType(
                         );
                     }
 
-                    if (id_tree_value.tombstone()) {
-                        worker.lookup_start_next();
+                    if (!id_tree_value.tombstone()) {
+                        worker.lookup_with_timestamp(id_tree_value.timestamp);
                         return;
                     }
-
-                    if (worker.context.groove.objects.lookup_from_memory(
-                        worker.context.snapshot,
-                        id_tree_value.timestamp,
-                    )) |object| {
-                        // The object is not a tombstone; the ID and Object trees are in sync.
-                        assert(!ObjectTreeHelpers(Object).tombstone(object));
-
-                        worker.context.groove.prefetch_objects.putAssumeCapacityNoClobber(object.*, {});
-                        worker.lookup_start_next();
-                        return;
-                    }
-
-                    worker.context.groove.objects.lookup_from_levels(
-                        lookup_object_callback,
-                        &worker.lookup_object,
-                        worker.context.snapshot,
-                        id_tree_value.timestamp,
-                    );
-                } else {
-                    worker.lookup_start_next();
                 }
+
+                worker.lookup_start_next();
+            }
+
+            fn lookup_with_timestamp(worker: *PrefetchWorker, timestamp: u64) void {
+                if (worker.context.groove.objects.lookup_from_memory(
+                    worker.context.snapshot,
+                    timestamp,
+                )) |object| {
+                    // The object is not a tombstone; the ID (if any) and Object trees are in sync.
+                    assert(!ObjectTreeHelpers(Object).tombstone(object));
+
+                    worker.context.groove.prefetch_objects.putAssumeCapacityNoClobber(object.*, {});
+                    worker.lookup_start_next();
+                    return;
+                }
+
+                worker.context.groove.objects.lookup_from_levels(
+                    lookup_object_callback,
+                    &worker.lookup_object,
+                    worker.context.snapshot,
+                    timestamp,
+                );
             }
 
             fn lookup_object_callback(
@@ -733,7 +772,7 @@ pub fn GrooveType(
             ) void {
                 const worker = @fieldParentPtr(PrefetchWorker, "lookup_object", completion);
 
-                // The result must be non-null as we keep the ID and Object trees in sync.
+                // The result must be non-null as we keep the ID (if any) and Object trees in sync.
                 const object = result.?;
                 assert(!ObjectTreeHelpers(Object).tombstone(object));
 
@@ -743,14 +782,21 @@ pub fn GrooveType(
         };
 
         pub fn put_no_clobber(groove: *Groove, object: *const Object) void {
-            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(object.id, PrefetchObjectsAdapter{});
+            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(
+                @field(object, primary_field),
+                PrefetchObjectsAdapter{},
+            );
             assert(!gop.found_existing);
             groove.insert(object);
             gop.key_ptr.* = object.*;
         }
 
         pub fn put(groove: *Groove, object: *const Object) void {
-            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(object.id, PrefetchObjectsAdapter{});
+            const gop = groove.prefetch_objects.getOrPutAssumeCapacityAdapted(
+                @field(object, primary_field),
+                PrefetchObjectsAdapter{},
+            );
+
             if (gop.found_existing) {
                 groove.update(gop.key_ptr, object);
             } else {
@@ -762,7 +808,7 @@ pub fn GrooveType(
         /// Insert the value into the objects tree and its fields into the index trees.
         fn insert(groove: *Groove, object: *const Object) void {
             groove.objects.put(object);
-            groove.ids.put(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
+            if (has_id) groove.ids.put(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
@@ -776,7 +822,7 @@ pub fn GrooveType(
 
         /// Update the object and index trees by diff'ing the old and new values.
         fn update(groove: *Groove, old: *const Object, new: *const Object) void {
-            assert(old.id == new.id);
+            assert(@field(old, primary_field) == @field(new, primary_field));
             assert(old.timestamp == new.timestamp);
 
             // Update the object tree entry if any of the fields (even ignored) are different.
@@ -806,12 +852,14 @@ pub fn GrooveType(
             }
         }
 
-        /// Asserts that the object with the given ID exists.
-        pub fn remove(groove: *Groove, id: u128) void {
-            const object = groove.prefetch_objects.getKeyPtrAdapted(id, PrefetchObjectsAdapter{}).?;
+        /// Asserts that the object with the given PrimaryKey exists.
+        pub fn remove(groove: *Groove, key: PrimaryKey) void {
+            const object = groove.prefetch_objects.getKeyPtrAdapted(key, PrefetchObjectsAdapter{}).?;
 
             groove.objects.remove(object);
-            groove.ids.remove(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
+            if (has_id) {
+                groove.ids.remove(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
+            }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
@@ -824,11 +872,14 @@ pub fn GrooveType(
 
             // TODO(zig) Replace this with a call to removeByPtr() after upgrading to 0.10.
             // removeByPtr() replaces an unnecessary lookup here with some pointer arithmetic.
-            assert(groove.prefetch_objects.removeAdapted(object.id, PrefetchObjectsAdapter{}));
+            assert(groove.prefetch_objects.removeAdapted(
+                @field(object, primary_field),
+                PrefetchObjectsAdapter{},
+            ));
         }
 
         /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
-        const join_pending_max = 2 + std.meta.fields(IndexTrees).len;
+        const join_pending_max = 1 + @boolToInt(has_id) + std.meta.fields(IndexTrees).len;
 
         fn JoinType(comptime join_op: JoinOp) type {
             return struct {
@@ -897,7 +948,7 @@ pub fn GrooveType(
             const Join = JoinType(.open);
             Join.start(groove, callback);
 
-            groove.ids.open(Join.tree_callback(.ids));
+            if (has_id) groove.ids.open(Join.tree_callback(.ids));
             groove.objects.open(Join.tree_callback(.objects));
 
             inline for (std.meta.fields(IndexTrees)) |field| {
@@ -912,7 +963,7 @@ pub fn GrooveType(
             Join.start(groove, callback);
 
             // Compact the ObjectTree and IdTree
-            groove.ids.compact(Join.tree_callback(.ids), op);
+            if (has_id) groove.ids.compact(Join.tree_callback(.ids), op);
             groove.objects.compact(Join.tree_callback(.objects), op);
 
             // Compact the IndexTrees.
@@ -928,7 +979,7 @@ pub fn GrooveType(
             Join.start(groove, callback);
 
             // Checkpoint the IdTree and ObjectTree.
-            groove.ids.checkpoint(Join.tree_callback(.ids));
+            if (has_id) groove.ids.checkpoint(Join.tree_callback(.ids));
             groove.objects.checkpoint(Join.tree_callback(.objects));
 
             // Checkpoint the IndexTrees.
@@ -948,6 +999,19 @@ test "Groove" {
         Storage,
         Transfer,
         .{
+            // Doesn't matter for this test.
+            .value_count_max = .{
+                .timestamp = 1,
+                .id = 1,
+                .debit_account_id = 1,
+                .credit_account_id = 1,
+                .user_data = 1,
+                .pending_id = 1,
+                .timeout = 1,
+                .ledger = 1,
+                .code = 1,
+                .amount = 1,
+            },
             .ignored = [_][]const u8{ "reserved", "user_data", "flags" },
             .derived = .{},
         },

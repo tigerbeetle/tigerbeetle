@@ -159,9 +159,9 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 func getResultSize(op C.TB_OPERATION) uintptr {
 	switch op {
 	case C.TB_OPERATION_CREATE_ACCOUNTS:
-		fallthrough
+		return unsafe.Sizeof(types.AccountEventResult{})
 	case C.TB_OPERATION_CREATE_TRANSFERS:
-		return unsafe.Sizeof(types.EventResult{})
+		return unsafe.Sizeof(types.TransferEventResult{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OPERATION_LOOKUP_TRANSFERS:
@@ -271,57 +271,40 @@ func onGoPacketCompletion(
 	req.ready <- struct{}{}
 }
 
-func (c *c_client) doCreate(
-	op C.TB_OPERATION,
-	data unsafe.Pointer,
-	count int,
-) ([]types.EventResult, error) {
-	results := make([]types.EventResult, count)
-	resultData := unsafe.Pointer(&results[0])
+func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error) {
+	count := len(accounts)
+	results := make([]types.AccountEventResult, count)
+	wrote, err := c.doRequest(
+		C.TB_OPERATION_CREATE_ACCOUNTS,
+		count,
+		unsafe.Pointer(&accounts[0]),
+		unsafe.Pointer(&results[0]),
+	)
 
-	wrote, err := c.doRequest(op, count, data, resultData)
 	if err != nil {
 		return nil, err
 	}
 
-	resultCount := wrote / int(unsafe.Sizeof(types.EventResult{}))
+	resultCount := wrote / int(unsafe.Sizeof(types.TransferEventResult{}))
 	return results[0:resultCount], nil
 }
 
-func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error) {
-	res, err := c.doCreate(C.TB_OPERATION_CREATE_ACCOUNTS, unsafe.Pointer(&accounts[0]), len(accounts))
-	if err != nil {
-		return nil, err
-	}
-
-	if len(res) == 0 {
-		return nil, nil
-	}
-
-	resp := make([]types.AccountEventResult, len(res))
-	for i, r := range res {
-		resp[i] = types.AccountEventResult{Code: types.CreateAccountResult(r.Code), Index: r.Index}
-	}
-
-	return resp, nil
-}
-
 func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error) {
-	res, err := c.doCreate(C.TB_OPERATION_CREATE_TRANSFERS, unsafe.Pointer(&transfers[0]), len(transfers))
+	count := len(transfers)
+	results := make([]types.TransferEventResult, count)
+	wrote, err := c.doRequest(
+		C.TB_OPERATION_CREATE_TRANSFERS,
+		count,
+		unsafe.Pointer(&transfers[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
 	if err != nil {
 		return nil, err
 	}
 
-	if len(res) == 0 {
-		return nil, nil
-	}
-
-	resp := make([]types.TransferEventResult, len(res))
-	for i, r := range res {
-		resp[i] = types.TransferEventResult{Code: types.CreateTransferResult(r.Code), Index: r.Index}
-	}
-
-	return resp, nil
+	resultCount := wrote / int(unsafe.Sizeof(types.TransferEventResult{}))
+	return results[0:resultCount], nil
 }
 
 func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error) {

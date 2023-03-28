@@ -1,0 +1,60 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - 'main'
+
+  # Run on Merge queue
+  merge_group:
+
+  # Run CI for any PRs that target 'main' when they are opened or updated.
+  pull_request:
+    branches:
+      - 'main'
+    types:
+      - opened
+      - synchronize
+
+jobs:
+  smoke:
+    uses: ./.github/workflows/smoke.yml
+  linux:
+    uses: ./.github/workflows/linux.yml
+  windows:
+    uses: ./.github/workflows/windows.yml
+  macos:
+    uses: ./.github/workflows/macos.yml
+  client-dotnet:
+    uses: ./.github/workflows/clients-dotnet.yml
+  client-go:
+    uses: ./.github/workflows/clients-go.yml
+    secrets:
+      TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
+  client-java:
+    uses: ./.github/workflows/clients-java.yml
+    secrets:
+      MAVEN_GPG_SECRET_KEY: ${{ secrets.MAVEN_GPG_SECRET_KEY }}
+      MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
+      MAVEN_GPG_SECRET_KEY_PASSWORD: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
+  client-node:
+    uses: ./.github/workflows/clients-node.yml
+    secrets:
+      TIGERBEETLE_NODE_PUBLISH_KEY: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
+  full-pipeline:
+    needs:
+      - smoke
+      - linux
+      - windows
+      - macos
+      - client-dotnet
+      - client-go
+      - client-java
+      - client-node
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: All CI Jobs Passed
+        working-directory: ./
+        run: exit 0

@@ -18,7 +18,7 @@ const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_o
 /// TigerBeetle's state machine requires a map from u128 ID to posted boolean for transfers
 /// and this type implements that.
 /// TODO Make the LSM Forest library flexible enough to be able to get rid of this special case.
-pub fn PostedGrooveType(comptime Storage: type) type {
+pub fn PostedGrooveType(comptime Storage: type, value_count_max: usize) type {
     return struct {
         const PostedGroove = @This();
 
@@ -67,6 +67,7 @@ pub fn PostedGrooveType(comptime Storage: type) type {
             Value.sentinel_key,
             Value.tombstone,
             Value.tombstone_from_key,
+            value_count_max,
             .general,
         );
 
@@ -101,7 +102,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
         pub const Options = struct {
             cache_entries_max: u32,
             prefetch_entries_max: u32,
-            commit_entries_max: u32,
         };
 
         pub fn init(
@@ -116,7 +116,6 @@ pub fn PostedGrooveType(comptime Storage: type) type {
                 grid,
                 .{
                     .cache_entries_max = options.cache_entries_max,
-                    .commit_entries_max = options.commit_entries_max,
                 },
             );
             errdefer tree.deinit(allocator);
@@ -357,7 +356,11 @@ pub fn PostedGrooveType(comptime Storage: type) type {
 test "PostedGroove" {
     const Storage = @import("../storage.zig").Storage;
 
-    const PostedGroove = PostedGrooveType(Storage);
+    const PostedGroove = PostedGrooveType(
+        Storage,
+        // Doesn't matter for this test.
+        1,
+    );
 
     _ = PostedGroove.init;
     _ = PostedGroove.deinit;

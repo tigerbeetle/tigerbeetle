@@ -1,0 +1,77 @@
+name: "clients/node"
+
+defaults:
+  run:
+    working-directory: ./src/clients/node
+
+on:
+  workflow_call:
+    secrets:
+      TIGERBEETLE_NODE_PUBLISH_KEY:
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - run: ./scripts/version_set.sh
+      - run: ./scripts/build.sh
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: node-binaries
+          path: src/clients/node/tigerbeetle-node-*.tgz
+
+  test_install:
+    # We use self hosted runners for M1 here. See macos.yml for an explaination
+    permissions:
+      contents: read
+
+    needs: build
+    strategy:
+      matrix:
+        distro: [alpine, debian, ubuntu, fedora, rhelubi, amazonlinux, mac, mac-m1-12.6, mac-m1-13.2]
+
+    runs-on: ${{ matrix.distro == 'mac' && 'macos-latest' || matrix.distro == 'mac-m1-12.6' && 'macos-12.6' || matrix.distro == 'mac-m1-13.2' && 'macos-13.2' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: node-binaries
+          path: src/clients/node
+
+      - run: ./scripts/test_install_on_${{ matrix.distro == 'mac' && 'host' || matrix.distro == 'mac-m1-12.6' && 'host' || matrix.distro == 'mac-m1-13.2' && 'host' || matrix.distro }}.sh
+        env:
+          SKIP_NODE_BUILD: true
+
+# Disable version check for now, as it basically requires us to bump version in package.json for every chage.
+# Now that Github enforces that our CI is green, that becomes very painful.
+#
+#  version_check:
+#    needs: [test_install]
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v3
+#      - run: npm install && ./scripts/version_check.sh
+
+  publish:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [test_install]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: node-binaries
+          path: src/clients/node
+
+      - run: scripts/publish.sh
+        env:
+          TIGERBEETLE_NODE_PUBLISH_KEY: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}

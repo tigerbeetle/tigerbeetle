@@ -1,3 +1,7 @@
+//! Constants are the configuration that the code actually imports — they include:
+//! - all of the configuration values (flattened)
+//! - derived configuration values,
+
 const std = @import("std");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
@@ -18,14 +22,15 @@ else
 // Default is `.none`.
 pub const tracer_backend = config.process.tracer_backend;
 
+// Which mode to use for ./testing/hash_log.zig.
+pub const hash_log_mode = config.process.hash_log_mode;
+
 /// The maximum number of replicas allowed in a cluster.
 pub const replicas_max = 6;
-
-pub const state_machine = config.cluster.state_machine;
-pub const StateMachineType = switch (config.cluster.state_machine) {
-    .accounting => @import("state_machine.zig").StateMachineType,
-    .testing => @import("test/state_machine.zig").StateMachineType,
-};
+/// The maximum number of standbys allowed in a cluster.
+pub const standbys_max = 6;
+/// The maximum number of nodes (either standbys or active replicas) allowed in a cluster.
+pub const nodes_max = replicas_max + standbys_max;
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.
@@ -37,14 +42,14 @@ comptime {
     assert(clients_max >= Config.Cluster.clients_max_min);
 }
 
-/// The minimum number of nodes required to form a quorum for replication:
+/// The maximum number of nodes required to form a quorum for replication.
 /// Majority quorums are only required across view change and replication phases (not within).
 /// As per Flexible Paxos, provided `quorum_replication + quorum_view_change > replicas`:
 /// 1. you may increase `quorum_view_change` above a majority, so that
 /// 2. you can decrease `quorum_replication` below a majority, to optimize the common case.
 /// This improves latency by reducing the number of nodes required for synchronous replication.
 /// This reduces redundancy only in the short term, asynchronous replication will still continue.
-/// The size of the replication quorum is limited to the minimum of this value and actual majority.
+/// The size of the replication quorum is limited to the minimum of this value and ⌈replicas/2⌉.
 /// The size of the view change quorum will then be automatically inferred from quorum_replication.
 pub const quorum_replication_max = config.cluster.quorum_replication_max;
 
@@ -131,13 +136,16 @@ comptime {
     assert(journal_slot_count >= Config.Cluster.journal_slot_count_min);
     assert(journal_slot_count >= lsm_batch_multiple * 2);
     assert(journal_slot_count % lsm_batch_multiple == 0);
-    assert(journal_size_max == journal_size_headers + journal_size_prepares);
+    // The journal must have at least two pipelines of messages to ensure that a new, fully-repaired
+    // primary has enough headers for a complete SV message, even if the view-change just truncated
+    // another pipeline of messages. (See op_repair_min()).
+    assert(journal_slot_count >= pipeline_prepare_queue_max * 2);
 
     assert(journal_size_max == journal_size_headers + journal_size_prepares);
 }
 
 /// The maximum number of connections that can be held open by the server at any time:
-pub const connections_max = replicas_max + clients_max;
+pub const connections_max = nodes_max + clients_max;
 
 /// The maximum size of a message in bytes:
 /// This is also the limit of all inflight data across multiple pipelined requests per connection.
@@ -156,12 +164,66 @@ comptime {
     assert(message_size_max >= @sizeOf(vsr.Header));
     assert(message_size_max >= sector_size);
     assert(message_size_max >= Config.Cluster.message_size_max_min(clients_max));
+
+    // Ensure that DVC/SV messages can fit all necessary headers.
+    assert(message_body_size_max >= view_change_headers_max * @sizeOf(vsr.Header));
 }
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
 /// possibly be uncommitted during a view change, and this must be constant for all replicas.
-pub const pipeline_max = clients_max;
+pub const pipeline_prepare_queue_max = config.cluster.pipeline_prepare_queue_max;
+
+/// The maximum number of Viewstamped Replication request messages that can be queued at a primary,
+/// waiting to prepare.
+// TODO(Zig): After 0.10, change this to simply "clients_max -| pipeline_prepare_queue_max".
+// In Zig 0.9 compilation fails with "operation caused overflow" despite the saturating subtraction.
+// See: https://github.com/ziglang/zig/issues/10870
+pub const pipeline_request_queue_max =
+    if (clients_max < pipeline_prepare_queue_max)
+    0
+else
+    clients_max - pipeline_prepare_queue_max;
+
+comptime {
+    // A prepare-queue capacity larger than clients_max is wasted.
+    assert(pipeline_prepare_queue_max <= clients_max);
+    // A total queue capacity larger than clients_max is wasted.
+    assert(pipeline_prepare_queue_max + pipeline_request_queue_max <= clients_max);
+    assert(pipeline_prepare_queue_max > 0);
+    assert(pipeline_request_queue_max >= 0);
+}
+
+/// Maximum number of headers from the WAL suffix to include in an SV message.
+/// Must at least cover the full pipeline.
+/// Increasing this reduces likelihood that backups will need to repair their suffix's headers.
+///
+/// CRITICAL:
+/// - We must provide enough headers to cover all uncommitted headers so that the new
+///   primary (if we are in a view change) can decide whether to discard uncommitted headers
+///   that cannot be repaired because they are gaps. See DVCQuorum for more detail.
+pub const view_change_headers_suffix_max = config.cluster.view_change_headers_suffix_max;
+
+/// The number of prepare headers to include in the body of a DVC/SV.
+///
+/// - We must include all uncommitted headers.
+/// - +2: We must provide the header corresponding to each checkpoint-trigger in the intact
+///   suffix of our journal.
+///   - These help a lagging replica catch up when its `op < commit_max`.
+///   - There are at most two of these in the journal.
+///     (There are 2 immediately after we checkpoint, until we prepare enough to overwrite one).
+pub const view_change_headers_max = view_change_headers_suffix_max + 2;
+
+comptime {
+    assert(view_change_headers_suffix_max > 0);
+    assert(view_change_headers_suffix_max >= pipeline_prepare_queue_max);
+
+    assert(view_change_headers_max > 0);
+    assert(view_change_headers_max >= pipeline_prepare_queue_max + 2);
+    assert(view_change_headers_max <= journal_slot_count);
+    assert(view_change_headers_max <= @divFloor(message_body_size_max, @sizeOf(vsr.Header)));
+    assert(view_change_headers_max > view_change_headers_suffix_max);
+}
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.
@@ -257,14 +319,19 @@ pub const direct_io = config.process.direct_io;
 pub const direct_io_required = config.process.direct_io_required;
 
 // TODO Add in the Grid's IOPS and the upper-bound that the Superblock will use.
-pub const iops_read_max = journal_iops_read_max;
-pub const iops_write_max = journal_iops_write_max;
+pub const iops_read_max = journal_iops_read_max + grid_iops_read_max;
+pub const iops_write_max = journal_iops_write_max + grid_iops_write_max;
 
 /// The maximum number of concurrent WAL read I/O operations to allow at once.
 pub const journal_iops_read_max = config.process.journal_iops_read_max;
 /// The maximum number of concurrent WAL write I/O operations to allow at once.
-/// Ideally this is at least as high as pipeline_max, but it is safe to be lower.
+/// Ideally this is at least as high as pipeline_prepare_queue_max, but it is safe to be lower.
 pub const journal_iops_write_max = config.process.journal_iops_write_max;
+
+/// The maximum number of concurrent grid read I/O operations to allow at once.
+pub const grid_iops_read_max = config.process.grid_iops_read_max;
+/// The maximum number of concurrent grid write I/O operations to allow at once.
+pub const grid_iops_write_max = config.process.grid_iops_write_max;
 
 /// The number of redundant copies of the superblock in the superblock storage zone.
 /// This must be either { 4, 6, 8 }, i.e. an even number, for more efficient flexible quorums.
@@ -305,8 +372,6 @@ pub const block_size = config.cluster.block_size;
 
 comptime {
     assert(block_size % sector_size == 0);
-    assert(lsm_table_size_max % sector_size == 0);
-    assert(lsm_table_size_max % block_size == 0);
 }
 
 /// The number of levels in an LSM tree.
@@ -327,10 +392,6 @@ comptime {
 /// factor of 8 for lower write amplification rather than the more typical growth factor of 10.
 pub const lsm_growth_factor = config.cluster.lsm_growth_factor;
 
-/// The maximum cumulative size of a table — computed as the sum of the size of the index block,
-/// filter blocks, and data blocks.
-pub const lsm_table_size_max = config.cluster.lsm_table_size_max;
-
 /// Size of nodes used by the LSM tree manifest implementation.
 /// TODO Double-check this with our "LSM Manifest" spreadsheet.
 pub const lsm_manifest_node_size = config.process.lsm_manifest_node_size;
@@ -338,8 +399,6 @@ pub const lsm_manifest_node_size = config.process.lsm_manifest_node_size;
 /// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
 /// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
 /// means that the transfer tree's mutable table will be sized to 8191 * 4 = 32764 transfers.
-/// TODO Assert this relative to lsm_table_size_max.
-/// We want to ensure that a mutable table can be converted to an immutable table without overflow.
 pub const lsm_batch_multiple = config.cluster.lsm_batch_multiple;
 
 comptime {

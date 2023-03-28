@@ -6,8 +6,7 @@ COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
 cd ./src/tigerbeetle
-"$CWD"/zig/zig build -Drelease-safe
-mv zig-out/bin/tigerbeetle "$CWD"
+"$CWD"/zig/zig build install -Drelease-safe
 cd "$CWD"
 
 REPLICAS="0"
@@ -41,7 +40,7 @@ FILE="./benchmark/cluster_${CLUSTER_ID}_replica_0.tigerbeetle"
 if [ -f $FILE ]; then
     rm $FILE
 fi
-./tigerbeetle format --cluster=$CLUSTER_ID --replica=0 $FILE
+./tigerbeetle format --cluster=$CLUSTER_ID --replica=0 --replica-count=1 $FILE
 
 for I in $REPLICAS
 do
