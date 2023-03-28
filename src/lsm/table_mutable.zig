@@ -189,7 +189,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
             const values = values_max[0..i];
             assert(values.len == table.count());
-            std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+            quick_sort(values);
 
             table.clear();
             assert(table.count() == 0);
@@ -197,8 +197,58 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             return values;
         }
 
-        fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
-            return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
+        fn quick_sort(values: []Value) void {
+            var low: i32 = 0;
+            var high = @intCast(i32, values.len - 1);
+            var top: u32 = 0;
+            var stack: [32][2]i32 = undefined;
+            while (true) {
+                while (true) {
+                    if (high - low <= 32) break insertion_sort(values.ptr, low, high);
+                    const p = partition(values.ptr, low, high);
+                    if (p + 1 < high) {
+                        stack[top] = .{ p + 1, high };
+                        top += 1;
+                    }
+                    high = p - 1;
+                    if (high <= low) break;
+                }
+                top = math.sub(u32, top, 1) catch break;
+                low = stack[top][0];
+                high = stack[top][1];
+            }
+        }
+
+        fn partition(values: [*]Value, low: i32, high: i32) i32 {
+            const pivot_ptr = &values[@intCast(u32, high)];
+            var pivot = key_from_value(pivot_ptr);
+            var i = low - 1;
+            var j = low;
+            while (j <= high - 1) : (j += 1) {
+                const slot = &values[@intCast(u32, j)];
+                if (compare_keys(key_from_value(slot), pivot) == .lt) {
+                    i += 1;
+                    mem.swap(Value, &values[@intCast(u32, i)], slot);
+                }
+            }
+            i += 1;
+            mem.swap(Value, &values[@intCast(u32, i)], pivot_ptr);
+            return i;
+        }
+
+        fn insertion_sort(values: [*]Value, low: i32, high: i32) void {
+            var i = low + 1;
+            while (i < high + 1) : (i += 1) {
+                const value = values[@intCast(u32, i)];
+                var j = i;
+                while (j > low) {
+                    const slot = &values[@intCast(u32, j - 1)];
+                    if (compare_keys(key_from_value(slot), key_from_value(&value)) != .gt) break;
+                    mem.swap(Value, &values[@intCast(u32, j)], slot);
+                    j -= 1;
+                }
+                values[@intCast(u32, j)] = value;
+            }
         }
     };
 }
