@@ -88,7 +88,9 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 results: []Result(operation),
                 index: u32,
 
-                pub fn init(reply: []align(16) u8) Self {
+                pub fn init(
+                    reply: []align(@alignOf(Result(operation))) u8,
+                ) Self {
                     return .{
                         .results = std.mem.bytesAsSlice(Result(operation), reply),
                         .index = 0,
@@ -96,19 +98,11 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 }
 
                 /// Decodes the state machine reply into multiple logical batches.
-                /// Example for create_accounts and create_transfers:
-                ///
-                /// Reply (index,result):
-                /// (0,x),(1,x),(3,x),(5,x),(20,x)
-                ///
-                /// Demux process:
-                /// Offset | Size | Reply       | Demuxed reply
-                /// -------|------|-------------|---------------
-                ///  0     | 2    | (0,x),(1,x) | (0,x),(1,x)
-                ///  2     | 10   | (3,x),(5,x) | (1,x),(3,x)
-                ///  12    | 8    | ()          | ()
-                ///  20    | 1    | (20,x)      | (0,x)
-                pub fn decode(self: *Self, demux_offset: u32, demux_size: u32) []const u8 {
+                pub fn decode(
+                    self: *Self,
+                    demux_offset: u32,
+                    demux_size: u32,
+                ) []const u8 {
 
                     // There is no more results to process,
                     // therefore this is an empty result (all success).
@@ -2384,6 +2378,152 @@ fn test_equal_n_bytes(comptime n: usize) !void {
         b[i] = 0;
     }
     try expectEqual(true, routine(a, b));
+}
+
+// Reply (index,result):
+// (0,0),(1,1),(3,2),(5,3),(20,4)
+//
+// Demux process:
+// Offset | Size | Reply       | Demuxed reply
+// -------|------|-------------|---------------
+//  0     | 2    | (0,0),(1,1) | (0,0),(1,1)
+//  2     | 10   | (3,2),(5,3) | (1,2),(3,3)
+//  12    | 8    | ()          | ()
+//  20    | 1    | (20,4)      | (0,4)
+test "demux: multiple batches" {
+    const batches = .{
+        .{ .off_set = 0, .size = 2 },
+        .{ .off_set = 2, .size = 10 },
+        .{ .off_set = 12, .size = 8 },
+        .{ .off_set = 20, .size = 1 },
+    };
+
+    const reply_indexes = .{ 0, 1, 3, 5, 20 };
+
+    const expected_indexes = .{
+        .{ 0, 1 },
+        .{ 1, 3 },
+        .{},
+        .{0},
+    };
+
+    try test_demux(batches, reply_indexes, expected_indexes);
+}
+
+// Reply (index,result):
+// (0,0),(1,1),(2,2)
+//
+// Demux process:
+// Offset | Size | Reply            | Demuxed reply
+// -------|------|------------------|-------------------
+//  0     | 3    | (0,0),(1,1)(2,2) | (0,0),(1,1),(2,2)
+test "demux: single batch" {
+    const batches = .{
+        .{ .off_set = 0, .size = 3 },
+    };
+
+    const reply_indexes = .{ 0, 1, 2 };
+
+    const expected_indexes = .{
+        .{ 0, 1, 2 },
+    };
+
+    try test_demux(batches, reply_indexes, expected_indexes);
+}
+
+// Reply (index,result):
+// ()
+//
+// Demux process:
+// Offset | Size | Reply  | Demuxed reply
+// -------|------|----- --|-------------------
+//  0     | 1    | ()     | ()
+//  1     | 5    | ()     | ()
+//  6     | 4    | ()     | ()
+test "demux: empty reply" {
+    const batches = .{
+        .{ .off_set = 0, .size = 1 },
+        .{ .off_set = 1, .size = 5 },
+        .{ .off_set = 6, .size = 4 },
+    };
+
+    const reply_indexes = .{};
+
+    const expected_indexes = .{
+        .{},
+        .{},
+        .{},
+    };
+
+    try test_demux(batches, reply_indexes, expected_indexes);
+}
+
+fn test_demux(
+    comptime batches: anytype,
+    comptime reply_indexes: anytype,
+    comptime expected_indexes: anytype,
+) !void {
+    comptime assert(batches.len == expected_indexes.len);
+
+    const Storage = @import("storage.zig").Storage;
+    const StateMachine = StateMachineType(Storage, .{
+        .message_body_size_max = 32 * @sizeOf(Account),
+        .lsm_batch_multiple = 1,
+    });
+
+    inline for (comptime std.enums.values(StateMachine.Operation)) |operation| {
+        switch (operation) {
+            .reserved, .root, .register => continue,
+            else => if (comptime StateMachine.constants
+                .operation_batch_logical_allowed(operation))
+            {
+                const Result = StateMachine.Result(operation);
+                const Event = StateMachine.Event(operation);
+                const ResultEnum = std.meta.fieldInfo(Result, .result).field_type;
+
+                var result: [reply_indexes.len]Result = undefined;
+                inline for (reply_indexes) |reply_index, i| {
+                    result[i] = .{
+                        .index = reply_index,
+                        .result = @intToEnum(ResultEnum, i),
+                    };
+                }
+
+                var demux = StateMachine.DemuxerType(operation).init(
+                    std.mem.asBytes(&result),
+                );
+
+                var enum_value: u32 = 0;
+                inline for (batches) |batch, i| {
+                    const expected = expected_indexes[i];
+                    const data = std.mem.bytesAsSlice(
+                        Result,
+                        demux.decode(
+                            batch.off_set * @sizeOf(Event),
+                            batch.size * @sizeOf(Event),
+                        ),
+                    );
+
+                    try testing.expectEqual(@as(usize, expected.len), data.len);
+                    inline for (expected) |demuxed_index, j| {
+                        // Checking the demuxed index:
+                        try testing.expectEqual(
+                            @as(u32, demuxed_index),
+                            data[j].index,
+                        );
+
+                        // Checking the result:
+                        try testing.expectEqual(
+                            @intToEnum(ResultEnum, enum_value),
+                            data[j].result,
+                        );
+
+                        enum_value += 1;
+                    }
+                }
+            },
+        }
+    }
 }
 
 test "StateMachine: ref all decls" {

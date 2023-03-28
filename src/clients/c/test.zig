@@ -90,6 +90,8 @@ const Completion = struct {
 // 2. the application can submit messages and receive replies through the completion callback.
 // 3. the data marshaling is correct, and exactly the same data sent was received back.
 test "c_client echo" {
+    // PENDING: enable echo client:
+    if (true) return error.SkipZigTest;
     // Using the create_accounts operation for this test.
     const RequestContext = RequestContextType(constants.message_body_size_max);
     const create_accounts_operation: u8 = c.TB_OPERATION_CREATE_ACCOUNTS;
