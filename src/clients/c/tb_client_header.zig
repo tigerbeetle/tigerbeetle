@@ -71,6 +71,7 @@ fn to_uppercase(comptime input: []const u8) []const u8 {
 
 fn emit_enum(
     buffer: *std.ArrayList(u8),
+    comptime Type: type,
     comptime type_info: anytype,
     comptime c_name: []const u8,
     comptime value_fmt: []const u8,
@@ -91,7 +92,10 @@ fn emit_enum(
             try buffer.writer().print("    {s}_{s} = " ++ value_fmt ++ ",\n", .{
                 c_name[0..suffix_pos],
                 to_uppercase(field.name),
-                i,
+                if (@typeInfo(Type) == .Enum)
+                    @enumToInt(@field(Type, field.name))
+                else
+                    i, // packed struct field.
             });
         }
     }
@@ -157,7 +161,7 @@ pub fn main() !void {
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
                 .Auto => @compileError("Invalid C struct type: " ++ @typeName(ZigType)),
-                .Packed => try emit_enum(&buffer, info, c_name, "1 << {d}", &.{"padding"}),
+                .Packed => try emit_enum(&buffer, ZigType, info, c_name, "1 << {d}", &.{"padding"}),
                 .Extern => try emit_struct(&buffer, info, c_name),
             },
             .Enum => |info| {
@@ -166,7 +170,7 @@ pub fn main() !void {
                     skip = &.{ "reserved", "root", "register" };
                 }
 
-                try emit_enum(&buffer, info, c_name, "{d}", skip);
+                try emit_enum(&buffer, ZigType, info, c_name, "{d}", skip);
             },
             else => try buffer.writer().print("typedef {s} {s}; \n\n", .{
                 resolve_c_type(ZigType),

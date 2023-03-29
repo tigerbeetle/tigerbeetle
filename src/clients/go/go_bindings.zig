@@ -89,7 +89,7 @@ fn is_upper_case(comptime word: []const u8) bool {
 
 fn emit_enum(
     buffer: *std.ArrayList(u8),
-    comptime type_info: anytype,
+    comptime Type: type,
     comptime name: []const u8,
     comptime prefix: []const u8,
     comptime int_type: []const u8,
@@ -100,13 +100,14 @@ fn emit_enum(
         int_type,
     });
 
+    const type_info = @typeInfo(Type).Enum;
     const min_len = calculate_min_len(type_info);
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields) |field| {
         const enum_name = prefix ++ to_pascal_case(field.name, min_len);
         try buffer.writer().print("\t{s} {s} = {d}\n", .{
             enum_name,
             name,
-            i,
+            @enumToInt(@field(Type, field.name)),
         });
     }
 
@@ -236,7 +237,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                 .Packed => try emit_packed_struct(buffer, info, name, comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
                 .Extern => try emit_struct(buffer, info, name),
             },
-            .Enum => |info| try emit_enum(buffer, info, name, type_mapping[2], comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
+            .Enum => try emit_enum(buffer, ZigType, name, type_mapping[2], comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
         }
     }
