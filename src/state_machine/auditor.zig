@@ -16,10 +16,7 @@ const IdPermutation = @import("../testing/id.zig").IdPermutation;
 // TODO(zig) This won't be necessary in Zig 0.10.
 const PriorityQueue = @import("../testing/priority_queue.zig").PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = constants.message_body_size_max,
-    .lsm_batch_multiple = constants.lsm_batch_multiple,
-});
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants);
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
 pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult);

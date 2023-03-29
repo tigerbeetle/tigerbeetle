@@ -22,10 +22,10 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
 
-pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
-    message_body_size_max: usize,
-    lsm_batch_multiple: usize,
-}) type {
+pub fn StateMachineType(comptime Storage: type, comptime constants_: type) type {
+    assert(constants_.message_body_size_max > 0);
+    assert(constants_.lsm_batch_multiple > 0);
+
     return struct {
         const StateMachine = @This();
         const Grid = @import("lsm/grid.zig").GridType(Storage);
@@ -1357,10 +1357,10 @@ const TestContext = struct {
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("lsm/grid.zig").GridType(Storage);
-    const StateMachine = StateMachineType(Storage, .{
+    const StateMachine = StateMachineType(Storage, struct {
         // Overestimate the batch size because the test never compacts.
-        .message_body_size_max = message_body_size_max,
-        .lsm_batch_multiple = 1,
+        const message_body_size_max = TestContext.message_body_size_max;
+        const lsm_batch_multiple = 1;
     });
     const message_body_size_max = 32 * @sizeOf(Account);
 
@@ -1561,10 +1561,10 @@ fn check(comptime test_table: []const u8) !void {
     var transfers = std.AutoHashMap(u128, Transfer).init(allocator);
     defer transfers.deinit();
 
-    var request = std.ArrayListAligned(u8, TestContext.message_body_size_max).init(allocator);
+    var request = std.ArrayListAligned(u8, 16).init(allocator);
     defer request.deinit();
 
-    var reply = std.ArrayListAligned(u8, TestContext.message_body_size_max).init(allocator);
+    var reply = std.ArrayListAligned(u8, 16).init(allocator);
     defer reply.deinit();
 
     var operation: ?TestContext.StateMachine.Operation = null;
@@ -2310,9 +2310,9 @@ fn test_equal_n_bytes(comptime n: usize) !void {
 
 test "StateMachine: ref all decls" {
     const Storage = @import("storage.zig").Storage;
-    const StateMachine = StateMachineType(Storage, .{
-        .message_body_size_max = 1000 * @sizeOf(Account),
-        .lsm_batch_multiple = 1,
+    const StateMachine = StateMachineType(Storage, struct {
+        const message_body_size_max = 1000 * @sizeOf(Account);
+        const lsm_batch_multiple = 1;
     });
 
     std.testing.refAllDecls(StateMachine);
