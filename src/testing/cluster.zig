@@ -40,14 +40,11 @@ pub const Failure = enum(u8) {
 /// with a replica index.
 const client_id_permutation_shift = constants.nodes_max;
 
-pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, comptime constants: anytype) type) type {
+pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type) type) type {
     return struct {
         const Self = @This();
 
-        pub const StateMachine = StateMachineType(Storage, .{
-            .message_body_size_max = constants.message_body_size_max,
-            .lsm_batch_multiple = constants.lsm_batch_multiple,
-        });
+        pub const StateMachine = StateMachineType(Storage);
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
