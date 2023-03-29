@@ -132,7 +132,8 @@ pub const Operation = enum(u8) {
     /// The value 2 is reserved to register a client session with the cluster.
     register = 2,
 
-    /// Operations exported by the state machine (all other values are free):
+    /// Operations <vsr_operations_reserved are reserved for the control plane.
+    /// Operations ≥vsr_operations_reserved are available for the state machine.
     _,
 
     pub fn from(comptime StateMachine: type, op: StateMachine.Operation) Operation {
@@ -146,6 +147,8 @@ pub const Operation = enum(u8) {
     }
 
     fn check_state_machine_operations(comptime Op: type) void {
+        // TODO(Zig) More rigorous assertions here once "unable to evaluate constant expression"
+        // issues are fixed. (Loop over Operation and Op variants).
         if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
             @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
         }

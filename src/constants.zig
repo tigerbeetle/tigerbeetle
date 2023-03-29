@@ -32,6 +32,14 @@ pub const standbys_max = 6;
 /// The maximum number of nodes (either standbys or active replicas) allowed in a cluster.
 pub const nodes_max = replicas_max + standbys_max;
 
+/// All operations <vsr_operations_reserved are reserved for the control protocol.
+/// All operations ≥vsr_operations_reserved are available for the state machine.
+pub const vsr_operations_reserved = 128;
+
+comptime {
+    assert(vsr_operations_reserved <= std.math.maxInt(u8));
+}
+
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
 /// This impacts the amount of memory allocated at initialization by the server.
 /// This determines the size of the VR client table used to cache replies to clients by client ID.
