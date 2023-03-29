@@ -1405,7 +1405,7 @@ pub fn ReplicaType(
                 self.op_checkpoint());
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
 
-            const op_head = switch (DVCQuorum.headers_canonical(
+            const op_head = switch (DVCQuorum.quorum_headers(
                 self.do_view_change_from_all_replicas,
                 .{
                     .quorum_nack_prepare = self.quorum_nack_prepare,
@@ -1436,7 +1436,7 @@ pub fn ReplicaType(
                     self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
                 },
-                .complete_valid => |*headers_canonical| headers_canonical.next().?.op,
+                .complete_valid => |*quorum_headers| quorum_headers.next().?.op,
             };
 
             log.debug("{}: on_do_view_change: view={} quorum received", .{
@@ -1452,7 +1452,7 @@ pub fn ReplicaType(
             {
                 // When:
                 // 1. the cluster is at a checkpoint ahead of the local checkpoint,
-                // 2. AND the canonical head op is part of a future checkpoint,
+                // 2. AND the quorum's head op is part of a future checkpoint,
                 //    abdicate as primary, jumping to a new view.
                 //
                 // - If 1 and ¬2, then the ops in the next checkpoint are uncommitted and our
@@ -5669,7 +5669,7 @@ pub fn ReplicaType(
                 self.state_machine.prepare_timestamp = timestamp_max;
             }
 
-            var headers_canonical = DVCQuorum.headers_canonical(
+            var quorum_headers = DVCQuorum.quorum_headers(
                 self.do_view_change_from_all_replicas,
                 .{
                     .quorum_nack_prepare = self.quorum_nack_prepare,
@@ -5677,7 +5677,7 @@ pub fn ReplicaType(
                     .replica_count = self.replica_count,
                 },
             ).complete_valid;
-            const header_head = while (headers_canonical.next()) |header| {
+            const header_head = while (quorum_headers.next()) |header| {
                 if (header.op > self.op_checkpoint_trigger()) {
                     // Any ops in the next checkpoint are definitely uncommitted — otherwise,
                     // we would have forfeited to favor a different primary.
@@ -5726,7 +5726,7 @@ pub fn ReplicaType(
                 assert(self.journal.header_with_op(self.op) != null);
             }
 
-            while (headers_canonical.next()) |header| {
+            while (quorum_headers.next()) |header| {
                 assert(header.op < header_head.op);
                 self.replace_header(header);
             }
@@ -5846,8 +5846,6 @@ pub fn ReplicaType(
                 self.pipeline.queue.verify();
             }
 
-            // No need to include "hook" headers; these view_headers will be written to vsr_headers,
-            // not broadcast in an SV message.
             self.view_headers.command = .start_view;
             self.primary_update_view_headers();
             self.view_headers.verify();
@@ -6512,11 +6510,13 @@ pub fn ReplicaType(
 /// The cluster can have many different "versions" of the "same" header.
 /// That is, different headers (different checksum) with the same op.
 /// But at most one version (per op) is "canonical", the remainder are "uncanonical".
-/// - An *uncanonical* message may have been removed/changed during a prior view.
-/// - A *canonical* message was part of the most recent log_view.
-///   - Canonical messages do not necessarily survive into the new view, but they take
-///     precedence over uncanonical messages.
-///   - Canonical messages may be committed or uncommitted.
+/// - A *canonical message* is any DVC message from the most recent log_view in the quorum.
+/// - An *uncanonical header* may have been removed/changed during a prior view.
+/// - A *canonical header* was part of the most recent log_view.
+///   - (That is, the canonical headers are the union of headers from all canonical messages).
+///   - Canonical headers do not necessarily survive into the new view, but they take
+///     precedence over uncanonical headers.
+///   - Canonical headers may be committed or uncommitted.
 ///
 ///
 /// Invariants:
@@ -6543,8 +6543,8 @@ pub fn ReplicaType(
 ///   - When `replica.commit_max ≤ replica.op`,
 ///     the DVC must include a valid/blank/fault header for every op in that range.
 ///   - When `replica.commit_max > replica.op`, only a single header (`replica.op`) is included.
-///   - The DVC will need a valid `commit_max` to complete, since the entire pipeline may be
-///     truncated, and the new primary still needs a head op.
+///   - The DVC will need a valid header corresponding to its `commit_max` to complete, since the
+///     entire pipeline may be truncated, and the new primary still needs a header for its head op.
 /// - The header corresponding to `replica.op` is always "valid", never a "blank"/"fault".
 ///   (Otherwise the replica would be in status=recovering_head and unable to participate).
 ///
@@ -6757,7 +6757,7 @@ const DVCQuorum = struct {
     ///   The first header returned is the new head message.
     /// Otherwise:
     /// - Return the reason the view cannot begin.
-    fn headers_canonical(dvc_quorum: QuorumMessages, options: struct {
+    fn quorum_headers(dvc_quorum: QuorumMessages, options: struct {
         quorum_nack_prepare: u8,
         quorum_view_change: u8,
         replica_count: u8,
@@ -6851,7 +6851,7 @@ const DVCQuorum = struct {
         } };
     }
 
-    /// Iterate the headers of a set of (same-log_view) DVCs, from high-to-low op.
+    /// Iterate the consecutive headers of a set of (same-log_view) DVCs, from high-to-low op.
     const HeaderIterator = struct {
         dvcs: DVCArray,
         op_max: u64,
