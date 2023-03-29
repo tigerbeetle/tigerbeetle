@@ -28,13 +28,14 @@ abstract class Request<TResponse extends Batch> {
     // @formatter:on
 
     enum Operations {
-        CREATE_ACCOUNTS(3),
-        CREATE_TRANSFERS(4),
-        LOOKUP_ACCOUNTS(5),
-        LOOKUP_TRANSFERS(6),
+        // TODO Auto-generate these.
+        CREATE_ACCOUNTS(128),
+        CREATE_TRANSFERS(129),
+        LOOKUP_ACCOUNTS(130),
+        LOOKUP_TRANSFERS(131),
 
-        ECHO_ACCOUNTS(3),
-        ECHO_TRANSFERS(4);
+        ECHO_ACCOUNTS(128),
+        ECHO_TRANSFERS(129);
 
         byte value;
 
