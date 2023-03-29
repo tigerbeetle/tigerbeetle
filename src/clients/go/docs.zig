@@ -20,7 +20,8 @@ pub const GoDocs = Docs{
     ,
 
     .prerequisites = 
-    \\* Go >= 1.17
+    \\* Go >= 1.17 (linux, macos)
+    \\* Go >= 1.20 (windows)
     ,
 
     .project_file = "",
@@ -307,7 +308,7 @@ pub const GoDocs = Docs{
     \\./scripts/install_zig.sh
     \\./zig/zig build go_client -Drelease-safe
     \\cd src/clients/go
-    \\[ "$TEST" = "true" ] && ./zgo.sh test || echo "Skipping client unit tests"
+    \\[ "$TEST" = "true" ] && go test || echo "Skipping client unit tests"
     ,
 
     .current_commit_pre_install_commands = "",
@@ -325,7 +326,7 @@ pub const GoDocs = Docs{
     \\./scripts/install_zig.bat
     \\./zig/zig build go_client -Drelease-safe
     \\cd tigerbeetle/src/clients/go
-    \\[ "$TEST" = "true" ] && ./zgo.bat test || echo "Skipping client unit tests"
+    \\[ "$TEST" = "true" ] && go test || echo "Skipping client unit tests"
     ,
 
     .test_main_prefix = 
