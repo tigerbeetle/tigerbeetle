@@ -6578,6 +6578,34 @@ const DVCQuorum = struct {
                 log_views_all.appendAssumeCapacity(log_view);
             }
         }
+
+        // Verify that DVCs with the same log_view do not conflict.
+        for (log_views_all.constSlice()) |log_view| {
+            const view_dvcs = dvcs_with_log_view(dvc_quorum, log_view);
+            for (view_dvcs.constSlice()) |dvc_a, i| {
+                for (view_dvcs.constSlice()[i + 1 ..]) |dvc_b| {
+                    const headers_a = message_body_as_view_headers(dvc_a);
+                    const headers_b = message_body_as_view_headers(dvc_b);
+                    // Find the intersection of the ops covered by each DVC.
+                    const op_max = std.math.min(dvc_a.header.op, dvc_b.header.op);
+                    const op_min = std.math.max(
+                        headers_a.slice[headers_a.slice.len - 1].op,
+                        headers_b.slice[headers_b.slice.len - 1].op,
+                    );
+
+                    var op = op_min;
+                    while (op <= op_max) : (op += 1) {
+                        const header_a = &headers_a.slice[dvc_a.header.op - op];
+                        const header_b = &headers_b.slice[dvc_b.header.op - op];
+                        if (vsr.Headers.dvc_header_type(header_a) == .valid and
+                            vsr.Headers.dvc_header_type(header_b) == .valid)
+                        {
+                            assert(header_a.checksum == header_b.checksum);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn verify_message(message: *const Message) void {
