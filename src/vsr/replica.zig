@@ -1397,7 +1397,7 @@ pub fn ReplicaType(
             assert(message.header.view == self.view);
             DVCQuorum.verify_message(message);
 
-            self.add_message_to_quorum(&self.do_view_change_from_all_replicas, message);
+            self.primary_receive_do_view_change(message);
 
             // Wait until we have a quorum of messages (including ourself):
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
@@ -2207,24 +2207,20 @@ pub fn ReplicaType(
             self.repair();
         }
 
-        fn add_message_to_quorum(self: *Self, messages: *QuorumMessages, message: *Message) void {
-            assert(messages.len == constants.replicas_max);
+        fn primary_receive_do_view_change(self: *Self, message: *Message) void {
+            assert(!self.solo());
+            assert(self.status == .view_change);
+            assert(self.primary_index(self.view) == self.replica);
+            assert(self.do_view_change_from_all_replicas.len == constants.replicas_max);
+
+            assert(message.header.command == .do_view_change);
             assert(message.header.cluster == self.cluster);
             assert(message.header.replica < self.replica_count);
             assert(message.header.view == self.view);
-            switch (message.header.command) {
-                .do_view_change => {
-                    assert(!self.solo());
-                    assert(self.status == .view_change);
-                    assert(self.primary_index(self.view) == self.replica);
-                },
-                else => unreachable,
-            }
 
             const command: []const u8 = @tagName(message.header.command);
 
-            // Do not allow duplicate messages to trigger multiple passes through a state transition:
-            if (messages[message.header.replica]) |m| {
+            if (self.do_view_change_from_all_replicas[message.header.replica]) |m| {
                 // Assert that this is a duplicate message and not a different message:
                 assert(m.header.command == message.header.command);
                 assert(m.header.replica == message.header.replica);
@@ -2232,43 +2228,38 @@ pub fn ReplicaType(
                 assert(m.header.op == message.header.op);
                 assert(m.header.checksum_body == message.header.checksum_body);
 
-                if (message.header.command == .do_view_change) {
-                    // Replicas don't resend `do_view_change` messages to themselves.
-                    assert(message.header.replica != self.replica);
-                    // A replica may resend a `do_view_change` with a different checkpoint or commit
-                    // if it was checkpointing/committing originally.
-                    // Keep the one with the highest checkpoint, then commit.
-                    // This is *not* necessary for correctness.
-                    if (m.header.timestamp < message.header.timestamp or
-                        (m.header.timestamp == message.header.timestamp and
-                        m.header.commit < message.header.commit))
-                    {
-                        log.debug("{}: on_{s}: replacing " ++
-                            "(newer message replica={} checkpoint={}..{} commit={}..{})", .{
-                            self.replica,
-                            command,
-                            message.header.replica,
-                            m.header.timestamp,
-                            message.header.timestamp,
-                            m.header.commit,
-                            message.header.commit,
-                        });
-                        // TODO(Buggify): skip updating the DVC, since it isn't required for correctness.
-                        self.message_bus.unref(m);
-                        messages[message.header.replica] = message.ref();
-                    } else if (m.header.timestamp != message.header.timestamp or
-                        m.header.commit != message.header.commit)
-                    {
-                        log.debug("{}: on_{s}: ignoring (older message replica={})", .{
-                            self.replica,
-                            command,
-                            message.header.replica,
-                        });
-                    } else {
-                        assert(m.header.checksum == message.header.checksum);
-                    }
+                // Replicas don't resend `do_view_change` messages to themselves.
+                assert(message.header.replica != self.replica);
+                // A replica may resend a `do_view_change` with a different checkpoint or commit
+                // if it was checkpointing/committing originally.
+                // Keep the one with the highest checkpoint, then commit.
+                // This is *not* necessary for correctness.
+                if (m.header.timestamp < message.header.timestamp or
+                    (m.header.timestamp == message.header.timestamp and
+                    m.header.commit < message.header.commit))
+                {
+                    log.debug("{}: on_{s}: replacing " ++
+                        "(newer message replica={} checkpoint={}..{} commit={}..{})", .{
+                        self.replica,
+                        command,
+                        message.header.replica,
+                        m.header.timestamp,
+                        message.header.timestamp,
+                        m.header.commit,
+                        message.header.commit,
+                    });
+                    // TODO(Buggify): skip updating the DVC, since it isn't required for correctness.
+                    self.message_bus.unref(m);
+                    self.do_view_change_from_all_replicas[message.header.replica] = message.ref();
+                } else if (m.header.timestamp != message.header.timestamp or
+                    m.header.commit != message.header.commit)
+                {
+                    log.debug("{}: on_{s}: ignoring (older message replica={})", .{
+                        self.replica,
+                        command,
+                        message.header.replica,
+                    });
                 } else {
-                    assert(m.header.commit == message.header.commit);
                     assert(m.header.checksum == message.header.checksum);
                 }
 
@@ -2279,8 +2270,8 @@ pub fn ReplicaType(
                 });
             } else {
                 // Record the first receipt of this message:
-                assert(messages[message.header.replica] == null);
-                messages[message.header.replica] = message.ref();
+                assert(self.do_view_change_from_all_replicas[message.header.replica] == null);
+                self.do_view_change_from_all_replicas[message.header.replica] = message.ref();
             }
         }
 
