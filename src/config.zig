@@ -200,11 +200,7 @@ pub const configs = struct {
         default_development;
 
     pub const current = current: {
-        var base = if (@hasDecl(root, "decode_events"))
-            // TODO(DJ) This is a hack to work around the absense of tigerbeetle_build_options.
-            // This should be removed once the node client is built using `zig build`.
-            default_development
-        else switch (build_options.config_base) {
+        var base = switch (build_options.config_base) {
             .default => default,
             .production => default_production,
             .development => default_development,
@@ -212,22 +208,11 @@ pub const configs = struct {
         };
 
         // TODO Use additional build options to overwrite other fields.
-        base.process.tracer_backend = if (@hasDecl(root, "tracer_backend"))
-            // TODO(jamii)
-            // This branch is a hack used to work around the absence of tigerbeetle_build_options.
-            // This should be removed once the node client is built using `zig build`.
-            root.tracer_backend
-        else
-            // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
-            // but a different type from a nominal typing perspective.
-            @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
 
-        base.process.hash_log_mode = if (@hasDecl(root, "decode_events"))
-            // TODO(DJ) This is a hack to work around the absense of tigerbeetle_build_options.
-            // This should be removed once the node client is built using `zig build`.
-            .none
-        else
-            @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
+        // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
+        // but a different type from a nominal typing perspective.
+        base.process.tracer_backend = @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
+        base.process.hash_log_mode = @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
 
         break :current base;
     };
