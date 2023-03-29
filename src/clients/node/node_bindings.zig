@@ -88,21 +88,21 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 
 fn emit_enum(
     buffer: *std.ArrayList(u8),
-    comptime type_info: anytype,
+    comptime Type: type,
     comptime mapping: TypeMapping,
 ) !void {
     try emit_docs(buffer, mapping, 0, null);
 
     try buffer.writer().print("export enum {s} {{\n", .{mapping.name});
 
-    inline for (type_info.fields) |field, i| {
+    inline for (@typeInfo(Type).Enum.fields) |field| {
         if (comptime mapping.hidden(field.name)) continue;
 
         try emit_docs(buffer, mapping, 1, field.name);
 
         try buffer.writer().print("  {s} = {d},\n", .{
             field.name,
-            i,
+            @enumToInt(@field(Type, field.name)),
         });
     }
 
@@ -209,7 +209,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                 .Packed => try emit_packed_struct(buffer, info, mapping),
                 .Extern => try emit_struct(buffer, info, mapping),
             },
-            .Enum => |info| try emit_enum(buffer, info, mapping),
+            .Enum => try emit_enum(buffer, ZigType, mapping),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
         }
     }

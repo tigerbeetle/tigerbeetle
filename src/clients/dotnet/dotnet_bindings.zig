@@ -155,6 +155,7 @@ fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []
 
 fn emit_enum(
     buffer: *std.ArrayList(u8),
+    comptime Type: type,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
@@ -194,7 +195,10 @@ fn emit_enum(
             \\        {s} = 
         ++ value_fmt ++ ",\n\n", .{
             to_case(field.name, .pascal),
-            i,
+            if (@typeInfo(Type) == .Enum)
+                @enumToInt(@field(Type, field.name))
+            else
+                i, // packed struct field.
         });
     }
 
@@ -382,6 +386,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                 .Auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
                 .Packed => try emit_enum(
                     buffer,
+                    ZigType,
                     info,
                     mapping,
                     comptime dotnet_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
@@ -396,6 +401,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
             },
             .Enum => |info| try emit_enum(
                 buffer,
+                ZigType,
                 info,
                 mapping,
                 comptime dotnet_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
