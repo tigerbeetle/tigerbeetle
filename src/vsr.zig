@@ -1249,33 +1249,6 @@ const ViewChangeHeadersSlice = struct {
         }
         unreachable;
     }
-
-    pub const Iterator = struct {
-        headers: *const ViewChangeHeadersSlice,
-        index: usize = 0,
-
-        pub fn reset(it: *Iterator) void {
-            it.index = 0;
-        }
-
-        pub fn next(it: *Iterator) ?*const Header {
-            while (it.index < it.headers.slice.len) {
-                const header = &it.headers.slice[it.index];
-                it.index += 1;
-
-                switch (Headers.dvc_header_type(header)) {
-                    .blank => assert(it.headers.command == .do_view_change),
-                    .fault => assert(it.headers.command == .do_view_change),
-                    .valid => return header,
-                }
-            }
-            return null;
-        }
-    };
-
-    pub fn iterate_valid(headers: *const ViewChangeHeadersSlice) Iterator {
-        return .{ .headers = headers };
-    }
 };
 
 test "Headers.ViewChangeSlice.view_for_op" {
