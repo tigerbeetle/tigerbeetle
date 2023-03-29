@@ -25,6 +25,7 @@ const CreateTransferResult = tb.CreateTransferResult;
 pub fn StateMachineType(comptime Storage: type, comptime constants_: type) type {
     assert(constants_.message_body_size_max > 0);
     assert(constants_.lsm_batch_multiple > 0);
+    assert(constants_.vsr_operations_reserved > 0);
 
     return struct {
         const StateMachine = @This();
@@ -222,15 +223,15 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: type) type 
 
         pub const Operation = enum(u8) {
             /// Operations reserved by VR protocol (for all state machines):
-            reserved,
-            root,
-            register,
+            reserved = 0,
+            root = 1,
+            register = 2,
 
             /// Operations exported by TigerBeetle:
-            create_accounts,
-            create_transfers,
-            lookup_accounts,
-            lookup_transfers,
+            create_accounts = constants_.vsr_operations_reserved + 0,
+            create_transfers = constants_.vsr_operations_reserved + 1,
+            lookup_accounts = constants_.vsr_operations_reserved + 2,
+            lookup_transfers = constants_.vsr_operations_reserved + 3,
         };
 
         pub const Options = struct {
@@ -1361,6 +1362,7 @@ const TestContext = struct {
         // Overestimate the batch size because the test never compacts.
         const message_body_size_max = TestContext.message_body_size_max;
         const lsm_batch_multiple = 1;
+        const vsr_operations_reserved = 128;
     });
     const message_body_size_max = 32 * @sizeOf(Account);
 
@@ -2313,6 +2315,7 @@ test "StateMachine: ref all decls" {
     const StateMachine = StateMachineType(Storage, struct {
         const message_body_size_max = 1000 * @sizeOf(Account);
         const lsm_batch_multiple = 1;
+        const vsr_operations_reserved = 128;
     });
 
     std.testing.refAllDecls(StateMachine);

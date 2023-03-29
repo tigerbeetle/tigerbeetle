@@ -6,8 +6,9 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.state_machine);
 
-pub fn StateMachineType(comptime Storage: type) type {
+pub fn StateMachineType(comptime Storage: type, comptime constants_: type) type {
     _ = Storage;
+    _ = constants_;
 
     return struct {
         const StateMachine = @This();

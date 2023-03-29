@@ -716,13 +716,13 @@ namespace TigerBeetle
 
     internal enum TBOperation : byte
     {
-        CreateAccounts = 3,
+        CreateAccounts = 128,
 
-        CreateTransfers = 4,
+        CreateTransfers = 129,
 
-        LookupAccounts = 5,
+        LookupAccounts = 130,
 
-        LookupTransfers = 6,
+        LookupTransfers = 131,
 
     }
 
