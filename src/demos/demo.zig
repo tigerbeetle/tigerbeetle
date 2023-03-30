@@ -16,7 +16,7 @@ const IO = vsr.io.IO;
 const Storage = vsr.storage.Storage;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants);
+const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Header = vsr.Header;
 const Client = vsr.Client(StateMachine, MessageBus);
 

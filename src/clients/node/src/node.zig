@@ -13,7 +13,7 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
 const Storage = @import("../../../storage.zig").Storage;
-const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, constants);
+const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 const MessageBus = @import("../../../message_bus.zig").MessageBusClient;
 const MessagePool = @import("../../../message_pool.zig").MessagePool;

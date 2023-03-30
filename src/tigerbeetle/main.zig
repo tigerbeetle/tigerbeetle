@@ -22,7 +22,7 @@ const Storage = vsr.storage.Storage;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants);
+const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
 const SuperBlock = vsr.SuperBlockType(Storage);
