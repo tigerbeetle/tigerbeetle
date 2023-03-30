@@ -6571,37 +6571,30 @@ const DVCQuorum = struct {
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
         for (dvcs.constSlice()) |message| verify_message(message);
 
-        var log_views_all = std.BoundedArray(u32, constants.replicas_max){ .buffer = undefined };
-        for (dvcs.constSlice()) |message| {
-            const log_view = message.header.request;
-            if (std.mem.count(u32, log_views_all.constSlice(), &.{log_view}) == 0) {
-                log_views_all.appendAssumeCapacity(log_view);
-            }
-        }
-
         // Verify that DVCs with the same log_view do not conflict.
-        for (log_views_all.constSlice()) |log_view| {
-            const view_dvcs = dvcs_with_log_view(dvc_quorum, log_view);
-            for (view_dvcs.constSlice()) |dvc_a, i| {
-                for (view_dvcs.constSlice()[i + 1 ..]) |dvc_b| {
-                    const headers_a = message_body_as_view_headers(dvc_a);
-                    const headers_b = message_body_as_view_headers(dvc_b);
-                    // Find the intersection of the ops covered by each DVC.
-                    const op_max = std.math.min(dvc_a.header.op, dvc_b.header.op);
-                    const op_min = std.math.max(
-                        headers_a.slice[headers_a.slice.len - 1].op,
-                        headers_b.slice[headers_b.slice.len - 1].op,
-                    );
+        for (dvcs.constSlice()) |dvc_a, i| {
+            for (dvcs.constSlice()[0..i]) |dvc_b| {
+                if (dvc_a.header.request != dvc_b.header.request) continue;
 
-                    var op = op_min;
-                    while (op <= op_max) : (op += 1) {
-                        const header_a = &headers_a.slice[dvc_a.header.op - op];
-                        const header_b = &headers_b.slice[dvc_b.header.op - op];
-                        if (vsr.Headers.dvc_header_type(header_a) == .valid and
-                            vsr.Headers.dvc_header_type(header_b) == .valid)
-                        {
-                            assert(header_a.checksum == header_b.checksum);
-                        }
+                const headers_a = message_body_as_view_headers(dvc_a);
+                const headers_b = message_body_as_view_headers(dvc_b);
+                // Find the intersection of the ops covered by each DVC.
+                const op_max = std.math.min(dvc_a.header.op, dvc_b.header.op);
+                const op_min = std.math.max(
+                    headers_a.slice[headers_a.slice.len - 1].op,
+                    headers_b.slice[headers_b.slice.len - 1].op,
+                );
+                // If a replica is lagging, its headers may not overlap at all.
+                maybe(op_min > op_max);
+
+                var op = op_min;
+                while (op <= op_max) : (op += 1) {
+                    const header_a = &headers_a.slice[dvc_a.header.op - op];
+                    const header_b = &headers_b.slice[dvc_b.header.op - op];
+                    if (vsr.Headers.dvc_header_type(header_a) == .valid and
+                        vsr.Headers.dvc_header_type(header_b) == .valid)
+                    {
+                        assert(header_a.checksum == header_b.checksum);
                     }
                 }
             }
