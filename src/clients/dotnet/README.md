@@ -1,3 +1,7 @@
+---
+title: .NET
+---
+
 # tigerbeetle-dotnet
 
 [TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle) client for C# and .Net
