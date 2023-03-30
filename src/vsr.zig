@@ -143,7 +143,19 @@ pub const Operation = enum(u8) {
 
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
+        assert(self.valid(StateMachine));
         return @intToEnum(StateMachine.Operation, @enumToInt(self));
+    }
+
+    pub fn valid(self: Operation, comptime StateMachine: type) bool {
+        check_state_machine_operations(StateMachine.Operation);
+        const operations = comptime std.enums.values(StateMachine.Operation);
+        inline for (operations) |op| {
+            if (@enumToInt(self) == @enumToInt(op)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     fn check_state_machine_operations(comptime Op: type) void {
@@ -440,6 +452,9 @@ pub const Header = extern struct {
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
+                if (@enumToInt(self.operation) < constants.vsr_operations_reserved) {
+                    return "operation is reserved";
+                }
                 // Thereafter, the client must provide the session number in the context:
                 // These requests should set `parent` to the `checksum` of the previous reply.
                 if (self.context == 0) return "context == 0";
