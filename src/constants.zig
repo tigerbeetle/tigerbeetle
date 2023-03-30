@@ -460,5 +460,17 @@ pub const clock_synchronization_window_min_ms = config.process.clock_synchroniza
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = config.process.clock_synchronization_window_max_ms;
 
+pub const StateMachineConfig = struct {
+    message_body_size_max: comptime_int,
+    lsm_batch_multiple: comptime_int,
+    vsr_operations_reserved: u8,
+};
+
+pub const state_machine_config = StateMachineConfig{
+    .message_body_size_max = message_body_size_max,
+    .lsm_batch_multiple = lsm_batch_multiple,
+    .vsr_operations_reserved = vsr_operations_reserved,
+};
+
 /// Whether to perform intensive online verification.
 pub const verify = config.process.verify;
