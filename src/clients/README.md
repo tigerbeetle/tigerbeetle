@@ -57,7 +57,60 @@ To format all Zig files:
 ../../zig/zig fmt .
 ```
 
-## run_with_tb
+
+## integation.zig / client_integration
+
+This directory contains `integration.zig` that sets up an environment
+(without Docker) to run the sample code in
+`src/clients/$client/samples/$sample` against a running TigerBeetle
+server using `run_with_tb` (described below).
+
+Examples:
+
+```bash
+$ ./scripts/build.sh client_integration -- --language java --sample basic
+```
+
+This corresponds to setting up the sample code in
+`src/clients/java/samples/basic/` and running it.
+
+IMPORTANT: For almost all of the dependencies in this script
+(`tigerbeetle`, `java_client`/`go_client`/etc.), this script does not
+make sure that these dependencies are all up-to-date. This is because
+it would take a long time to rebuild all of these every time.
+
+If you're experience weirdness, try `git clean -xfd` (kind of drastic,
+but still) and rebuild TigerBeetle and clients.
+
+Additionally, the Java JAR step is not yet working on Windows. So you
+may need to copy the JAR built from another machine into the right
+location. For example:
+
+```bash
+$ scp server:~/tigerbeetle/src/clients/java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar .\src\clients\java\target\
+```
+
+And finally, it assumes you have the dependencies like `maven` and
+`java` installed when you are running that language's sample code.
+
+### Keep temporary directory
+
+
+This script munges packaging info to make sure the project is
+referencing the local build of the client library rather than the
+build from the package manager. This is important/useful for testing
+local changes.
+
+If you need to debug the munging though you can run this script with
+`--keep-tmp` to prevent the script from deleting the temporary
+directory where the sample code is copied into and where munging takes
+place.
+
+```bash
+$ ./scripts/build.sh client_integration -- --language java --sample basic --keep-tmp
+```
+
+## run_with_tb.zig / run_with_tb
 
 This directory contains `run_with_tb.zig` that proxies commands passed
 to it. Specifically, it:
@@ -71,25 +124,18 @@ to it. Specifically, it:
 Example:
 
 ```bash
-$ ./zig/zig build-exe src/clients/run_with_tb.zig
-$ ./run_with_tb bash -c "npm install tigerbeetle-node && node $(pwd)/myscript.js"
+$ ./scripts/build.sh run_with_tb -- node $(pwd)/myscript.js
 ```
 
-Or:
+If you need to run multiple commands you can wrap in `bash -c " ... "`:
 
 ```bash
-$ ./zig/zig run ./src/clients/run_with_tb.zig -- bash -c "cd $(pwd)/src/clients/go/samples/two-phase && go run main.go"
-```
-
-Or (on Ventura you must go through `./scripts/build.sh`):
-
-```
-$ ./scripts/build.sh run_with_tb -- bash -c "cd $(pwd)/src/clients/go/samples/two-phase && go run main.go"
+$ ./scripts/build.sh run_with_tb -- bash -c "stuff && otherstuff"
 ```
 
 NOTE: All relative file paths in the proxied commands should be
 resolved to absolute file paths since the runner doesn't necessarily
-run in the same directory.
+run in the current directory.
 
 ### Set working directory with `R_CWD`
 

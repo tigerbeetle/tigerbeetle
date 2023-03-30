@@ -758,6 +758,7 @@ fn c_client_sample(
     c_sample_build.dependOn(&install_step.step);
 }
 
+// See src/clients/README.md for documentation.
 fn run_with_tb(
     b: *std.build.Builder,
     mode: Mode,
@@ -773,6 +774,7 @@ fn run_with_tb(
     run_with_tb_build.dependOn(&install_step.step);
 }
 
+// See src/clients/README.md for documentation.
 fn client_integration(
     allocator: std.mem.Allocator,
     b: *std.build.Builder,
