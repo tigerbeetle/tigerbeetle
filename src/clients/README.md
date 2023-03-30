@@ -95,7 +95,6 @@ And finally, it assumes you have the dependencies like `maven` and
 
 ### Keep temporary directory
 
-
 This script munges packaging info to make sure the project is
 referencing the local build of the client library rather than the
 build from the package manager. This is important/useful for testing
