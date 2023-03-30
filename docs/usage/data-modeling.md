@@ -155,4 +155,7 @@ In this arrangement, the suffix could be randomized, but shared by a group's mem
 - A group's role is derived from its `id`'s prefix.
 - A group's members are derived by swapping the `id` prefix.
 
-This technique enables a simple range query to iterate every object with a target role.
+This technique enables a simple range query to iterate every object
+with a target role. While you can't yet do prefix queries within
+TigerBeetle, you could do a prefix query in an external database to
+resolve `id`s and pass the resolved `id`s into TigerBeetle.

@@ -1,4 +1,4 @@
-module basic
+module two-phase
 
 go 1.17
 

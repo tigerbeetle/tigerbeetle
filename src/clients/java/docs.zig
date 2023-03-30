@@ -5,6 +5,7 @@ pub const JavaDocs = Docs{
 
     .markdown_name = "java",
     .extension = "java",
+    .proper_name = "Java",
 
     .test_linux_docker_image = "alpine",
 
@@ -68,7 +69,7 @@ pub const JavaDocs = Docs{
     \\      <groupId>com.tigerbeetle</groupId>
     \\      <artifactId>tigerbeetle-java</artifactId>
     \\      <!-- Grab the latest commit from: https://repo1.maven.org/maven2/com/tigerbeetle/tigerbeetle-java/maven-metadata.xml -->
-    \\      <version>0.0.1-3307</version>
+    \\      <version>0.0.1-3431</version>
     \\    </dependency>
     \\  </dependencies>
     \\</project> 
@@ -91,7 +92,7 @@ pub const JavaDocs = Docs{
     .install_prereqs = "apk add -U maven openjdk11",
 
     .current_commit_pre_install_commands = 
-    \\mvn deploy:deploy-file -Durl=file://$(pwd) -Dfile=$(find . -name '*-SNAPSHOT.jar') -DgroupId=com.tigerbeetle -DartifactId=tigerbeetle-java -Dpackaging=jar -Dversion=0.0.1-3307
+    \\mvn deploy:deploy-file -Durl=file://$(pwd) -Dfile=$(find . -name '*-SNAPSHOT.jar') -DgroupId=com.tigerbeetle -DartifactId=tigerbeetle-java -Dpackaging=jar -Dversion=0.0.1-3431
     \\mkdir -p $HOME/.m2/
     \\echo '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd"><localRepository>'$(pwd)'</localRepository></settings>' > $HOME/.m2/settings.xml
     ,
@@ -196,7 +197,7 @@ pub const JavaDocs = Docs{
     \\// Code to fill out fields for third account
     \\
     \\accountErrors = client.createAccounts(accounts);
-    \\while(accountErrors.next()) {
+    \\while (accountErrors.next()) {
     \\    switch (accountErrors.getResult()) {
     \\        case Exists:
     \\            System.err.printf("Account at %d already exists.\n",
@@ -226,11 +227,11 @@ pub const JavaDocs = Docs{
     \\transfers.add();
     \\transfers.setId(1);
     \\transfers.setDebitAccountId(1);
-    \\transfers.setCreditAccountId(1);
+    \\transfers.setCreditAccountId(2);
     \\transfers.setUserData(2);
     \\transfers.setTimeout(0);
     \\transfers.setLedger(1);
-    \\transfers.setLedger(1);
+    \\transfers.setCode(1);
     \\transfers.setFlags(0);
     \\transfers.setAmount(10);
     \\
@@ -240,7 +241,7 @@ pub const JavaDocs = Docs{
     .create_transfers_documentation = "",
 
     .create_transfers_errors_example = 
-    \\while(transferErrors.next()) {
+    \\while (transferErrors.next()) {
     \\    switch (transferErrors.getResult()) {
     \\        case ExceedsCredits:
     \\            System.err.printf("Transfer at %d exceeds credits.\n",
@@ -396,14 +397,7 @@ pub const JavaDocs = Docs{
     \\[ "$TEST" = "true" ] && mvn test || echo "Skipping client unit tests"
     ,
 
-    .developer_setup_pwsh_commands = 
-    \\git clone https://github.com/tigerbeetledb/tigerbeetle
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
-    \\cd src/clients/java
-    \\./scripts/install.bat
-    \\[ "$TEST" = "true" ] && mvn test || echo "Skipping client unit tests"
-    ,
+    .developer_setup_pwsh_commands = "",
 
     .test_main_prefix = 
     \\package com.tigerbeetle.examples;
