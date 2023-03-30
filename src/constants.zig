@@ -34,7 +34,7 @@ pub const nodes_max = replicas_max + standbys_max;
 
 /// All operations <vsr_operations_reserved are reserved for the control protocol.
 /// All operations ≥vsr_operations_reserved are available for the state machine.
-pub const vsr_operations_reserved = 128;
+pub const vsr_operations_reserved: u8 = 128;
 
 comptime {
     assert(vsr_operations_reserved <= std.math.maxInt(u8));
