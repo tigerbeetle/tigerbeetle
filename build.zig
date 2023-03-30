@@ -188,6 +188,7 @@ pub fn build(b: *std.build.Builder) void {
         go_client(
             b,
             mode,
+            target,
             &.{ &install_step.step, &tb_client_header_generate.step },
             options,
             tracer_backend,
@@ -195,6 +196,7 @@ pub fn build(b: *std.build.Builder) void {
         java_client(
             b,
             mode,
+            target,
             &.{&install_step.step},
             options,
             tracer_backend,
@@ -202,6 +204,7 @@ pub fn build(b: *std.build.Builder) void {
         dotnet_client(
             b,
             mode,
+            target,
             &.{&install_step.step},
             options,
             tracer_backend,
@@ -209,6 +212,7 @@ pub fn build(b: *std.build.Builder) void {
         node_client(
             b,
             mode,
+            target,
             &.{&install_step.step},
             options,
             tracer_backend,
@@ -447,6 +451,7 @@ fn link_tracer_backend(
 fn go_client(
     b: *std.build.Builder,
     mode: Mode,
+    target: CrossTarget,
     dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
@@ -466,6 +471,7 @@ fn go_client(
     const bindings = b.addExecutable("go_bindings", "src/clients/go/go_bindings.zig");
     bindings.addOptions("vsr_options", options);
     bindings.setMainPkgPath("src");
+    bindings.setTarget(target);
     const bindings_step = bindings.run();
 
     // Zig cross-targets:
@@ -502,6 +508,7 @@ fn go_client(
 fn java_client(
     b: *std.build.Builder,
     mode: Mode,
+    target: CrossTarget,
     dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
@@ -515,6 +522,7 @@ fn java_client(
     const bindings = b.addExecutable("java_bindings", "src/clients/java/java_bindings.zig");
     bindings.addOptions("vsr_options", options);
     bindings.setMainPkgPath("src");
+    bindings.setTarget(target);
     const bindings_step = bindings.run();
 
     // Zig cross-targets:
@@ -555,6 +563,7 @@ fn java_client(
 fn dotnet_client(
     b: *std.build.Builder,
     mode: Mode,
+    target: CrossTarget,
     dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
@@ -568,6 +577,7 @@ fn dotnet_client(
     const bindings = b.addExecutable("dotnet_bindings", "src/clients/dotnet/dotnet_bindings.zig");
     bindings.addOptions("vsr_options", options);
     bindings.setMainPkgPath("src");
+    bindings.setTarget(target);
     const bindings_step = bindings.run();
 
     // Zig cross-targets vs Dotnet RID (Runtime Identifier):
@@ -607,6 +617,7 @@ fn dotnet_client(
 fn node_client(
     b: *std.build.Builder,
     mode: Mode,
+    target: CrossTarget,
     dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
@@ -620,6 +631,7 @@ fn node_client(
     const bindings = b.addExecutable("node_bindings", "src/clients/node/node_bindings.zig");
     bindings.addOptions("vsr_options", options);
     bindings.setMainPkgPath("src");
+    bindings.setTarget(target);
     const bindings_step = bindings.run();
 
     // Zig cross-targets
