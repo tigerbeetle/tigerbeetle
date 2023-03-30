@@ -49,7 +49,7 @@ jobs:
       - if: matrix.os == 'windows-latest'
         run: ./scripts/install.bat
       - if: matrix.os == 'windows-latest'
-        run: ./zgo.bat test ./...
+        run: go test ./...
         working-directory: ./src/clients/go
 
   build_sample:
@@ -74,7 +74,7 @@ jobs:
         run: go build
         working-directory: ./src/clients/go/samples/basic
       - if: matrix.os == 'windows-latest'
-        run: ../../zgo.bat build
+        run: go build
         working-directory: ./src/clients/go/samples/basic
 
   publish:
