@@ -17,7 +17,7 @@ jobs:
       - name: Upload binaries
         uses: actions/upload-artifact@v3
         with:
-          name: go-binaries
+          name: go-binaries-${{ github.sha }}
           path: src/clients/go/pkg/native
 
   tests:
@@ -36,7 +36,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v3
         with:
-          name: go-binaries
+          name: go-binaries-${{ github.sha }}
           path: src/clients/go/pkg/native
 
       - if: matrix.os != 'windows-latest'
@@ -64,7 +64,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v3
         with:
-          name: go-binaries
+          name: go-binaries-${{ github.sha }}
           path: src/clients/go/pkg/native
       - run: ./scripts/publish.sh
         env:
@@ -91,7 +91,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v3
         with:
-          name: go-binaries
+          name: go-binaries-${{ github.sha }}
           path: src/clients/go/pkg/native
 
       # Grab Zig
