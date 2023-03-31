@@ -197,57 +197,50 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             return values;
         }
 
+        fn sort_ascending(_: void, a: Value, b: Value) bool {
+            return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
+        }
+
         fn quick_sort(values: []Value) void {
-            var low: i32 = 0;
-            var high = @intCast(i32, values.len - 1);
+            const Range = struct { low: u32, high: u32 };
             var top: u32 = 0;
-            var stack: [32][2]i32 = undefined;
+            var stack: [32]Range = undefined;
+            var range = Range{ .low = 0, .high = @intCast(u32, values.len) - 1 };
+
             while (true) {
                 while (true) {
-                    if (high - low <= 32) break insertion_sort(values.ptr, low, high);
-                    const p = partition(values.ptr, low, high);
-                    if (p + 1 < high) {
-                        stack[top] = .{ p + 1, high };
+                    // Insertion sort instead of splitting/partitioning on smaller ranges.
+                    const slice = values.ptr[range.low .. range.high + 1];
+                    if (slice.len <= 32) {
+                        break std.sort.insertionSort(Value, slice, {}, sort_ascending);
+                    }
+
+                    // Sort one Value, with one side of array less than it and other side greater.
+                    const partition = blk: {
+                        const pivot = key_from_value(&values.ptr[range.high]);
+                        var i = range.low;
+                        for (values.ptr[range.low..range.high]) |*value| {
+                            if (!sort_ascending({}, value.*, tombstone_from_key(pivot))) continue;
+                            mem.swap(Value, &values.ptr[i], value);
+                            i += 1;
+                        }
+                        mem.swap(Value, &values.ptr[i], &values.ptr[range.high]);
+                        break :blk i;
+                    };
+
+                    // Enqueue the right side of the partition to be processed if any.
+                    if (partition + 1 < range.high) {
+                        stack[top] = .{ .low = partition + 1, .high = range.high };
                         top += 1;
                     }
-                    high = p - 1;
-                    if (high <= low) break;
+
+                    // Process the left side of the partition if any.
+                    range.high = math.sub(u32, partition, 1) catch break;
                 }
+
+                // Process enqueued right sides from previous parititions.
                 top = math.sub(u32, top, 1) catch break;
-                low = stack[top][0];
-                high = stack[top][1];
-            }
-        }
-
-        fn partition(values: [*]Value, low: i32, high: i32) i32 {
-            const pivot_ptr = &values[@intCast(u32, high)];
-            var pivot = key_from_value(pivot_ptr);
-            var i = low - 1;
-            var j = low;
-            while (j <= high - 1) : (j += 1) {
-                const slot = &values[@intCast(u32, j)];
-                if (compare_keys(key_from_value(slot), pivot) == .lt) {
-                    i += 1;
-                    mem.swap(Value, &values[@intCast(u32, i)], slot);
-                }
-            }
-            i += 1;
-            mem.swap(Value, &values[@intCast(u32, i)], pivot_ptr);
-            return i;
-        }
-
-        fn insertion_sort(values: [*]Value, low: i32, high: i32) void {
-            var i = low + 1;
-            while (i < high + 1) : (i += 1) {
-                const value = values[@intCast(u32, i)];
-                var j = i;
-                while (j > low) {
-                    const slot = &values[@intCast(u32, j - 1)];
-                    if (compare_keys(key_from_value(slot), key_from_value(&value)) != .gt) break;
-                    mem.swap(Value, &values[@intCast(u32, j)], slot);
-                    j -= 1;
-                }
-                values[@intCast(u32, j)] = value;
+                range = stack[top];
             }
         }
     };
