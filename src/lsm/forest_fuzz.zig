@@ -26,7 +26,7 @@ const Forest = StateMachine.Forest;
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
-pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
+pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 const FuzzOpAction = union(enum) {
     // TODO Test secondary index lookups and range queries.
