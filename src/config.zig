@@ -191,6 +191,14 @@ pub const configs = struct {
         },
     };
 
+    /// Mostly-minimal configuration, with a higher storage limit to ensure that the fuzzers are
+    /// able to max out the LSM levels.
+    pub const fuzz_min = config: {
+        var base = test_min;
+        base.cluster.storage_size_max = 4 * 1024 * 1024 * 1024;
+        break :config base;
+    };
+
     const default = if (@hasDecl(root, "tigerbeetle_config"))
         root.tigerbeetle_config
     else if (builtin.is_test)
