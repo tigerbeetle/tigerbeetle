@@ -143,7 +143,7 @@ connect to the running server and do some accounting!
 First install the Node client.
 
 ```javascript
-$ npm install -g tigerbeetle-node
+$ npm install tigerbeetle-node
 ```
 
 Then create a client connection.

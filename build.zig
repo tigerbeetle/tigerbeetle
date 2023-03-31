@@ -189,6 +189,7 @@ pub fn build(b: *std.build.Builder) void {
             b,
             mode,
             &.{ &install_step.step, &tb_client_header_generate.step },
+            target,
             options,
             tracer_backend,
         );
@@ -196,6 +197,7 @@ pub fn build(b: *std.build.Builder) void {
             b,
             mode,
             &.{&install_step.step},
+            target,
             options,
             tracer_backend,
         );
@@ -203,6 +205,7 @@ pub fn build(b: *std.build.Builder) void {
             b,
             mode,
             &.{&install_step.step},
+            target,
             options,
             tracer_backend,
         );
@@ -227,6 +230,17 @@ pub fn build(b: *std.build.Builder) void {
             &.{ &install_step.step, &tb_client_header_generate.step },
             options,
             tracer_backend,
+        );
+        run_with_tb(
+            b,
+            mode,
+            target,
+        );
+        client_integration(
+            allocator,
+            b,
+            mode,
+            target,
         );
     }
 
@@ -444,10 +458,26 @@ fn link_tracer_backend(
     }
 }
 
+// Zig cross-targets plus Dotnet RID (Runtime Identifier):
+const platforms = .{
+    .{ "x86_64-linux-gnu", "linux-x64" },
+    .{ "x86_64-linux-musl", "linux-musl-x64" },
+    .{ "x86_64-macos", "osx-x64" },
+    .{ "aarch64-linux-gnu", "linux-arm64" },
+    .{ "aarch64-linux-musl", "linux-musl-arm64" },
+    .{
+        // Works around our build issues with Zig 0.9.1 and Ventura Macs. Can be dropped when we upgrade Zig.
+        if (builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) "native-macos" else "aarch64-macos",
+        "osx-arm64",
+    },
+    .{ "x86_64-windows", "win-x64" },
+};
+
 fn go_client(
     b: *std.build.Builder,
     mode: Mode,
     dependencies: []const *std.build.Step,
+    target: CrossTarget,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
@@ -465,37 +495,39 @@ fn go_client(
 
     const bindings = b.addExecutable("go_bindings", "src/clients/go/go_bindings.zig");
     bindings.addOptions("vsr_options", options);
+    bindings.setTarget(target);
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
-    // Zig cross-targets:
-    const platforms = .{
-        "x86_64-linux",
-        "x86_64-macos",
-        "x86_64-windows",
-        "aarch64-linux",
-        "aarch64-macos",
-    };
-
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
+        const name = if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-musl"))
+            "x86_64-linux"
+        else if (comptime std.mem.eql(u8, platform[0], "aarch64-linux-musl"))
+            "aarch64-linux"
+        else
+            platform[0];
 
-        const lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
-        lib.setMainPkgPath("src");
-        lib.setTarget(cross_target);
-        lib.setBuildMode(mode);
-        lib.linkLibC();
-        lib.pie = true;
-        lib.bundle_compiler_rt = true;
+        // We don't need the linux-gnu builds.
+        if (comptime !std.mem.endsWith(u8, platform[0], "linux-gnu")) {
+            const cross_target = CrossTarget.parse(.{ .arch_os_abi = name, .cpu_features = "baseline" }) catch unreachable;
 
-        lib.setOutputDir("src/clients/go/pkg/native/" ++ platform);
+            const lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+            lib.setMainPkgPath("src");
+            lib.setTarget(cross_target);
+            lib.setBuildMode(mode);
+            lib.linkLibC();
+            lib.pie = true;
+            lib.bundle_compiler_rt = true;
 
-        lib.addOptions("vsr_options", options);
-        link_tracer_backend(lib, tracer_backend, cross_target);
+            lib.setOutputDir("src/clients/go/pkg/native/" ++ name);
 
-        lib.step.dependOn(&install_header.step);
-        lib.step.dependOn(&bindings_step.step);
-        build_step.dependOn(&lib.step);
+            lib.addOptions("vsr_options", options);
+            link_tracer_backend(lib, tracer_backend, cross_target);
+
+            lib.step.dependOn(&install_header.step);
+            lib.step.dependOn(&bindings_step.step);
+            build_step.dependOn(&lib.step);
+        }
     }
 }
 
@@ -503,6 +535,7 @@ fn java_client(
     b: *std.build.Builder,
     mode: Mode,
     dependencies: []const *std.build.Step,
+    target: CrossTarget,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
@@ -514,27 +547,17 @@ fn java_client(
 
     const bindings = b.addExecutable("java_bindings", "src/clients/java/java_bindings.zig");
     bindings.addOptions("vsr_options", options);
+    bindings.setTarget(target);
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
-    // Zig cross-targets:
-    const platforms = .{
-        "x86_64-linux-gnu",
-        "x86_64-linux-musl",
-        "x86_64-macos",
-        "aarch64-linux-gnu",
-        "aarch64-linux-musl",
-        "aarch64-macos",
-        "x86_64-windows",
-    };
-
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
         const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.addPackagePath("jui", "src/clients/java/lib/jui/src/jui.zig");
-        lib.setOutputDir("src/clients/java/src/main/resources/lib/" ++ platform);
+        lib.setOutputDir("src/clients/java/src/main/resources/lib/" ++ platform[0]);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
         lib.linkLibC();
@@ -556,6 +579,7 @@ fn dotnet_client(
     b: *std.build.Builder,
     mode: Mode,
     dependencies: []const *std.build.Step,
+    target: CrossTarget,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
@@ -567,19 +591,9 @@ fn dotnet_client(
 
     const bindings = b.addExecutable("dotnet_bindings", "src/clients/dotnet/dotnet_bindings.zig");
     bindings.addOptions("vsr_options", options);
+    bindings.setTarget(target);
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
-
-    // Zig cross-targets vs Dotnet RID (Runtime Identifier):
-    const platforms = .{
-        .{ "x86_64-linux-gnu", "linux-x64" },
-        .{ "x86_64-linux-musl", "linux-musl-x64" },
-        .{ "x86_64-macos", "osx-x64" },
-        .{ "aarch64-linux-gnu", "linux-arm64" },
-        .{ "aarch64-linux-musl", "linux-musl-arm64" },
-        .{ "aarch64-macos", "osx-arm64" },
-        .{ "x86_64-windows", "win-x64" },
-    };
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
@@ -622,42 +636,35 @@ fn node_client(
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
-    // Zig cross-targets
-    const platforms = .{
-        "x86_64-linux-gnu",
-        "x86_64-linux-musl",
-        "x86_64-macos",
-        "aarch64-linux-gnu",
-        "aarch64-linux-musl",
-        "aarch64-macos",
-        // "x86_64-windows", // No Windows support just yet. We need to be on a version with https://github.com/ziglang/zig/commit/b97a68c529b5db15705f4d542d8ead616d27c880
-    };
-
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
-
-        const lib = b.addSharedLibrary("tb_nodeclient", "src/clients/node/src/node.zig", .unversioned);
-        lib.setMainPkgPath("src");
-        lib.setOutputDir("src/clients/node/dist/bin/" ++ platform);
-
-        // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
-        // if you're running zig build node_client manually.
-        lib.addSystemIncludeDir("src/clients/node/node_modules/node-api-headers/include");
-        lib.setTarget(cross_target);
-        lib.setBuildMode(mode);
-        lib.linkLibC();
-        lib.linker_allow_shlib_undefined = true;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
         if (cross_target.os_tag.? == .windows) {
-            lib.linkSystemLibrary("ws2_32");
-            lib.linkSystemLibrary("advapi32");
+            // No Windows support just yet. We need to be on a version with https://github.com/ziglang/zig/commit/b97a68c529b5db15705f4d542d8ead616d27c880
+        } else {
+            const lib = b.addSharedLibrary("tb_nodeclient", "src/clients/node/src/node.zig", .unversioned);
+            lib.setMainPkgPath("src");
+            lib.setOutputDir("src/clients/node/dist/bin/" ++ platform[0]);
+
+            // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
+            // if you're running zig build node_client manually.
+            lib.addSystemIncludeDir("src/clients/node/node_modules/node-api-headers/include");
+            lib.setTarget(cross_target);
+            lib.setBuildMode(mode);
+            lib.linkLibC();
+            lib.linker_allow_shlib_undefined = true;
+
+            if (cross_target.os_tag.? == .windows) {
+                lib.linkSystemLibrary("ws2_32");
+                lib.linkSystemLibrary("advapi32");
+            }
+
+            lib.addOptions("vsr_options", options);
+            link_tracer_backend(lib, tracer_backend, cross_target);
+
+            lib.step.dependOn(&bindings_step.step);
+            build_step.dependOn(&lib.step);
         }
-
-        lib.addOptions("vsr_options", options);
-        link_tracer_backend(lib, tracer_backend, cross_target);
-
-        lib.step.dependOn(&bindings_step.step);
-        build_step.dependOn(&lib.step);
     }
 }
 
@@ -682,26 +689,15 @@ fn c_client(
 
     build_step.dependOn(&install_header.step);
 
-    // Zig cross-targets
-    const platforms = .{
-        "x86_64-linux-gnu",
-        "x86_64-linux-musl",
-        "x86_64-macos",
-        "x86_64-windows",
-        "aarch64-linux-gnu",
-        "aarch64-linux-musl",
-        "aarch64-macos",
-    };
-
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform, .cpu_features = "baseline" }) catch unreachable;
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
         const shared_lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         const static_lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
 
         for ([_]*std.build.LibExeObjStep{ shared_lib, static_lib }) |lib| {
             lib.setMainPkgPath("src");
-            lib.setOutputDir("src/clients/c/lib/" ++ platform);
+            lib.setOutputDir("src/clients/c/lib/" ++ platform[0]);
             lib.setTarget(cross_target);
             lib.setBuildMode(mode);
             lib.linkLibC();
@@ -760,4 +756,70 @@ fn c_client_sample(
 
     const install_step = b.addInstallArtifact(sample);
     c_sample_build.dependOn(&install_step.step);
+}
+
+fn run_with_tb(
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const run_with_tb_build = b.step("run_with_tb", "Build the run_with_tb helper");
+    const binary = b.addExecutable("run_with_tb", "src/clients/run_with_tb.zig");
+    binary.setBuildMode(mode);
+    binary.setTarget(target);
+    run_with_tb_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary);
+    run_with_tb_build.dependOn(&install_step.step);
+}
+
+fn client_integration(
+    allocator: std.mem.Allocator,
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const client_integration_build = b.step("client_integration", "Run sample integration tests for a client library");
+    const binary = b.addExecutable("client_integration", "src/clients/integration.zig");
+    binary.setBuildMode(mode);
+    binary.setTarget(target);
+    client_integration_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary);
+    client_integration_build.dependOn(&install_step.step);
+
+    var to_run = std.ArrayList([]const u8).init(allocator);
+    const sep = if (builtin.os.tag == .windows) "\\" else "/";
+    const ext = if (builtin.os.tag == .windows) ".exe" else "";
+    to_run.append(
+        std.fmt.allocPrint(
+            allocator,
+            ".{s}zig-out{s}bin{s}client_integration{s}",
+            .{
+                sep,
+                sep,
+                sep,
+                ext,
+            },
+        ) catch unreachable,
+    ) catch unreachable;
+
+    var args = std.process.args();
+    var build_and_run = false;
+    while (args.next(allocator)) |arg_or_err| {
+        const arg = arg_or_err catch unreachable;
+
+        if (std.mem.eql(u8, arg, "--")) {
+            build_and_run = true;
+        }
+
+        if (!build_and_run) continue;
+
+        to_run.append(arg) catch unreachable;
+    }
+
+    if (build_and_run) {
+        const run = b.addSystemCommand(to_run.items);
+        client_integration_build.dependOn(&run.step);
+    }
 }

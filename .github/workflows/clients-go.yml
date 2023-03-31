@@ -52,34 +52,9 @@ jobs:
         run: ./zgo.bat test ./...
         working-directory: ./src/clients/go
 
-  build_sample:
-    needs: binaries
-
-    # We use self hosted runners for M1 here. See macos.yml for an explaination
-    permissions:
-      contents: read
-
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v3
-      - name: Download binaries
-        uses: actions/download-artifact@v3
-        with:
-          name: go-binaries
-          path: src/clients/go/pkg/native
-      - if: matrix.os != 'windows-latest'
-        run: go build
-        working-directory: ./src/clients/go/samples/basic
-      - if: matrix.os == 'windows-latest'
-        run: ../../zgo.bat build
-        working-directory: ./src/clients/go/samples/basic
-
   publish:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [binaries, tests, build_sample]
+    needs: [binaries, tests, samples_integration_test]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -95,3 +70,32 @@ jobs:
         env:
           TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
           GITHUB_SHA: ${{ github.sha }}
+
+  samples_integration_test:
+    needs: binaries
+
+    # We use self hosted runners for M1 here. See macos.yml for an explaination
+    permissions:
+      contents: read
+
+    strategy:
+      matrix:
+        # TODO: Add windows-latest in here.
+        os: [ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        sample: [basic, two-phase]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+        with:
+          name: go-binaries
+          path: src/clients/go/pkg/native
+
+      # Grab Zig
+      - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
+
+      - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
+      - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language go --sample ${{ matrix.sample }}
