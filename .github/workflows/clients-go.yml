@@ -39,6 +39,10 @@ jobs:
           name: go-binaries-${{ github.sha }}
           path: src/clients/go/pkg/native
 
+      # Specifically for self-hosted M1 runners, OK if this fails on other envs.
+      - if: matrix.os != 'windows-latest'
+        run: rm -rf /Users/macos/Library/Caches/go-build
+
       - if: matrix.os != 'windows-latest'
         run: ./scripts/install.sh
       - if: matrix.os != 'windows-latest'
@@ -96,6 +100,8 @@ jobs:
 
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
-
+      # Specifically for self-hosted M1 runners, OK if this fails on other envs.
+      - if: matrix.os != 'windows-latest'
+        run: rm -rf /Users/macos/Library/Caches/go-build
       - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language go --sample ${{ matrix.sample }}
