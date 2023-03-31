@@ -109,7 +109,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 .reserved, .root => unreachable,
                 .register => return 0,
                 .echo => {
-                    stdx.copy_disjoint(.exact, u8, output[0..input.len], input);
+                    stdx.copy_disjoint(.inexact, u8, output, input);
                     return input.len;
                 },
             }

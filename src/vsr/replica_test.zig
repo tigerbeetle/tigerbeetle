@@ -41,7 +41,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.R_).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 22 });
 
@@ -49,10 +49,10 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
     try expectEqual(t.replica(.R0).open(), .ok);
     try expectEqual(t.replica(.R0).status(), .recovering_head);
     try expectEqual(t.replica(.R1).open(), .ok);
-    try expectEqual(c.request(24), 20);
+    try c.request(24, 20);
     // With the aid of the last replica, the cluster can recover.
     try expectEqual(t.replica(.R2).open(), .ok);
-    try expectEqual(c.request(24), 24);
+    try c.request(24, 24);
     try expectEqual(t.replica(.R_).commit(), 24);
 }
 
@@ -63,7 +63,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt left of head, 3/3 
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.R_).stop();
     t.replica(.R_).corrupt(.{ .wal_prepare = 10 });
     try expectEqual(t.replica(.R_).open(), .ok);
@@ -81,12 +81,12 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt root)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 0 });
     try expectEqual(t.replica(.R0).open(), .ok);
 
-    try expectEqual(c.request(21), 21);
+    try c.request(21, 21);
     try expectEqual(t.replica(.R_).commit(), 21);
 }
 
@@ -96,21 +96,21 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
 
     var c = t.clients(0, t.cluster.clients.len);
     // Trigger the first checkpoint.
-    try expectEqual(c.request(63), 63);
+    try c.request(checkpoint_trigger_1, checkpoint_trigger_1);
     t.replica(.R0).stop();
 
     // Corrupt op_checkpoint (59) and all ops that follow.
-    var slot: usize = constants.journal_slot_count - constants.lsm_batch_multiple - 1;
-    while (slot < constants.journal_slot_count) : (slot += 1) {
+    var slot: usize = slot_count - constants.lsm_batch_multiple - 1;
+    while (slot < slot_count) : (slot += 1) {
         t.replica(.R0).corrupt(.{ .wal_prepare = slot });
     }
     try expectEqual(t.replica(.R0).open(), .ok);
     try expectEqual(t.replica(.R0).status(), .recovering_head);
 
-    try expectEqual(c.request(64), 64);
+    try c.request(slot_count, slot_count);
     try expectEqual(t.replica(.R0).status(), .normal);
     t.replica(.R1).stop();
-    try expectEqual(c.request(65), 65);
+    try c.request(slot_count + 1, slot_count + 1);
 }
 
 test "Cluster: recovery: WAL prepare corruption (R=1, between checkpoint and head)" {
@@ -119,7 +119,7 @@ test "Cluster: recovery: WAL prepare corruption (R=1, between checkpoint and hea
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 15 });
     try expectEqual(t.replica(.R0).open(), .WALCorrupt);
@@ -131,11 +131,11 @@ test "Cluster: recovery: WAL header corruption (R=1)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_header = 15 });
     try expectEqual(t.replica(.R0).open(), .ok);
-    try expectEqual(c.request(30), 30);
+    try c.request(30, 30);
 }
 
 test "Cluster: recovery: WAL torn prepare, standby with intact prepare (R=1 S=1)" {
@@ -151,11 +151,11 @@ test "Cluster: recovery: WAL torn prepare, standby with intact prepare (R=1 S=1)
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
-    t.replica(.R0).corrupt(.{ .wal_header = 20 });
+    try c.request(20, 20);
     t.replica(.R0).stop();
+    t.replica(.R0).corrupt(.{ .wal_header = 20 });
     try expectEqual(t.replica(.R0).open(), .ok);
-    try expectEqual(c.request(30), 30);
+    try c.request(30, 30);
     try expectEqual(t.replica(.R0).commit(), 30);
     try expectEqual(t.replica(.S0).commit(), 30);
 }
@@ -165,9 +165,9 @@ test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.B2).drop_all(.__, .bidirectional);
-    try expectEqual(c.request(40), 40);
+    try c.request(40, 40);
     try expectEqual(t.replica(.A0).commit(), 40);
     try expectEqual(t.replica(.B1).commit(), 40);
     try expectEqual(t.replica(.B2).commit(), 20);
@@ -178,9 +178,9 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, send-only)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.B2).drop_all(.__, .incoming);
-    try expectEqual(c.request(40), 40);
+    try c.request(40, 40);
     try expectEqual(t.replica(.A0).commit(), 40);
     try expectEqual(t.replica(.B1).commit(), 40);
     try expectEqual(t.replica(.B2).commit(), 20);
@@ -191,10 +191,16 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, receive-only)
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.B2).drop_all(.__, .outgoing);
-    try expectEqual(c.request(40), 40);
+    try c.request(40, 40);
     try expectEqual(t.replica(.A0).commit(), 40);
+    try expectEqual(t.replica(.B1).commit(), 40);
+    // B2 may commit some ops, but at some point is will likely fall behind.
+    // Prepares may be reordered by the network, and if B1 receives X+1 then X,
+    // it will not forward X on, as it is a "repair".
+    // And B2 is partitioned, so it cannot repair its hash chain.
+    try std.testing.expect(t.replica(.B2).commit() >= 20);
 }
 
 test "Cluster: network: partition 1-2 (isolate primary, symmetric)" {
@@ -204,10 +210,13 @@ test "Cluster: network: partition 1-2 (isolate primary, symmetric)" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
-    t.replica(.A0).drop_all(.B1, .bidirectional);
-    t.replica(.A0).drop_all(.B2, .bidirectional);
-    try expectEqual(c.request(30), 30);
+    try c.request(20, 20);
+
+    const p = t.replica(.A0);
+    p.drop_all(.B1, .bidirectional);
+    p.drop_all(.B2, .bidirectional);
+    try c.request(30, 30);
+    try expectEqual(p.commit(), 20);
 }
 
 test "Cluster: network: partition 1-2 (isolate primary, asymmetric, send-only)" {
@@ -218,10 +227,11 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, send-only)" 
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.A0).drop_all(.B1, .incoming);
     t.replica(.A0).drop_all(.B2, .incoming);
-    try expectEqual(c.request(30), 30);
+    // TODO: Explicit coverage marks: This should hit the "primary abdicating" log line.
+    try c.request(30, 30);
 }
 
 test "Cluster: network: partition 1-2 (isolate primary, asymmetric, receive-only)" {
@@ -231,45 +241,53 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, receive-only
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     t.replica(.A0).drop_all(.B1, .outgoing);
     t.replica(.A0).drop_all(.B2, .outgoing);
-    try expectEqual(c.request(30), 30);
+    try c.request(30, 30);
 }
 
-// TODO: https://github.com/tigerbeetledb/tigerbeetle/issues/444
-// test "Cluster: network: partititon client-primary (symmetric)" {
-//     // Clients cannot communicate with the primary, but they still request/reply via a backup.
-//     const t = try TestContext.init(.{ .replica_count = 3 });
-//     defer t.deinit();
-//
-//     var c = t.clients(0, t.cluster.clients.len);
-//     try expectEqual(c.request(20), 20);
-//     t.replica(.A0).drop_all(.C_, .bidirectional);
-//     try expectEqual(c.request(40), 40);
-// }
-//
-// test "Cluster: network: partititon client-primary (asymmetric, drop requests)" {
-//     // Primary cannot receive messages from the clients.
-//     const t = try TestContext.init(.{ .replica_count = 3 });
-//     defer t.deinit();
-//
-//     var c = t.clients(0, t.cluster.clients.len);
-//     try expectEqual(c.request(20), 20);
-//     t.replica(.A0).drop_all(.C_, .incoming);
-//     try expectEqual(c.request(40), 40);
-// }
-//
-// test "Cluster: network: partititon client-primary (asymmetric, drop replies)" {
-//     // Clients cannot receive replies from the primary, but they receive replies from a backup.
-//     const t = try TestContext.init(.{ .replica_count = 3 });
-//     defer t.deinit();
-//
-//     var c = t.clients(0, t.cluster.clients.len);
-//     try expectEqual(c.request(20), 20);
-//     t.replica(.A0).drop_all(.C_, .outgoing);
-//     try expectEqual(c.request(40), 40);
-// }
+test "Cluster: network: partition client-primary (symmetric)" {
+    // Clients cannot communicate with the primary, but they still request/reply via a backup.
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+
+    t.replica(.A0).drop_all(.C_, .bidirectional);
+    // TODO: https://github.com/tigerbeetledb/tigerbeetle/issues/444
+    // try c.request(40, 40);
+    try c.request(40, 20);
+}
+
+test "Cluster: network: partititon client-primary (asymmetric, drop requests)" {
+    // Primary cannot receive messages from the clients.
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+
+    t.replica(.A0).drop_all(.C_, .incoming);
+    // TODO: https://github.com/tigerbeetledb/tigerbeetle/issues/444
+    // try c.request(40, 40);
+    try c.request(40, 20);
+}
+
+test "Cluster: network: partititon client-primary (asymmetric, drop replies)" {
+    // Clients cannot receive replies from the primary, but they receive replies from a backup.
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+
+    t.replica(.A0).drop_all(.C_, .outgoing);
+    // TODO: https://github.com/tigerbeetledb/tigerbeetle/issues/444
+    // try c.request(40, 40);
+    try c.request(40, 20);
+}
 
 test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     // A backup that has fallen behind by two checkpoints can catch up, without using state sync.
@@ -278,7 +296,7 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     try expectEqual(t.replica(.R_).commit(), 20);
 
     var r_lag = t.replica(.B2);
@@ -287,7 +305,7 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     // Commit enough ops to checkpoint once, and then nearly wrap around, leaving enough slack
     // that the lagging backup can repair (without state sync).
     const commit = 20 + slot_count - constants.pipeline_prepare_queue_max;
-    try expectEqual(c.request(commit), commit);
+    try c.request(commit, commit);
     try expectEqual(t.replica(.A0).op_checkpoint(), checkpoint_1);
     try expectEqual(t.replica(.B1).op_checkpoint(), checkpoint_1);
 
@@ -307,46 +325,45 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     try expectEqual(t.replica(.R_).commit(), 20);
 
-    var r_a0 = t.replica(.A0);
-    var r_b1 = t.replica(.B1);
-    var r_b2 = t.replica(.B2);
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
 
-    // B2 cannot see .commit messages, so it lags behind by pipeline_prepare_queue_max commits.
-    r_b1.drop_all(.__, .bidirectional);
+    b1.drop_all(.__, .bidirectional);
 
-    try expectEqual(c.request(checkpoint_trigger_1 - 1), checkpoint_trigger_1 - 1);
-    try expectEqual(r_a0.commit(), checkpoint_trigger_1 - 1);
-    try expectEqual(r_b1.commit(), 20);
-    try expectEqual(r_b2.commit(), checkpoint_trigger_1 - 1);
+    try c.request(checkpoint_trigger_1 - 1, checkpoint_trigger_1 - 1);
+    try expectEqual(a0.commit(), checkpoint_trigger_1 - 1);
+    try expectEqual(b1.commit(), 20);
+    try expectEqual(b2.commit(), checkpoint_trigger_1 - 1);
 
-    r_b2.drop(.__, .incoming, .commit);
-    try expectEqual(c.request(checkpoint_trigger_1 + 1), checkpoint_trigger_1 + 1);
-    try expectEqual(r_a0.op_checkpoint(), checkpoint_1);
-    try expectEqual(r_b1.op_checkpoint(), 0);
-    try expectEqual(r_b2.op_checkpoint(), checkpoint_1);
+    b2.drop(.__, .incoming, .commit);
+    try c.request(checkpoint_trigger_1 + 1, checkpoint_trigger_1 + 1);
+    try expectEqual(a0.op_checkpoint(), checkpoint_1);
+    try expectEqual(b1.op_checkpoint(), 0);
+    try expectEqual(b2.op_checkpoint(), checkpoint_1);
 
     // Partition the primary, but restore B1. B1 will attempt to become the primary next,
     // but it is too far behind, so B2 becomes the new primary instead.
-    r_b2.pass_all(.__, .bidirectional);
-    r_b1.pass_all(.__, .bidirectional);
-    r_a0.drop_all(.__, .bidirectional);
+    b2.pass_all(.__, .bidirectional);
+    b1.pass_all(.__, .bidirectional);
+    a0.drop_all(.__, .bidirectional);
     // TODO: Explicit coverage marks: This should hit the
     // "on_do_view_change: lagging primary; forfeiting" log line.
     t.run();
 
-    try expectEqual(r_b2.role(), .primary);
-    try expectEqual(r_b2.index(), t.replica(.A0).index());
-    try expectEqual(r_b2.view(), r_b1.view());
-    try expectEqual(r_b2.log_view(), r_b1.log_view());
+    try expectEqual(b2.role(), .primary);
+    try expectEqual(b2.index(), t.replica(.A0).index());
+    try expectEqual(b2.view(), b1.view());
+    try expectEqual(b2.log_view(), b1.log_view());
 
     // Thanks to the new primary, the lagging backup is able to catch up to the latest
     // checkpoint/commit.
-    try expectEqual(r_b1.role(), .backup);
-    try expectEqual(r_b1.commit(), checkpoint_trigger_1);
-    try expectEqual(r_b1.op_checkpoint(), checkpoint_1);
+    try expectEqual(b1.role(), .backup);
+    try expectEqual(b1.commit(), checkpoint_trigger_1);
+    try expectEqual(b1.op_checkpoint(), checkpoint_1);
 }
 
 test "Cluster: repair: view-change, new-primary lagging behind checkpoint, truncate all post-checkpoint ops" {
@@ -357,63 +374,63 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, trunc
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(checkpoint_trigger_1 - 1), checkpoint_trigger_1 - 1);
+    try c.request(checkpoint_trigger_1 - 1, checkpoint_trigger_1 - 1);
 
-    var r_a0 = t.replica(.A0);
-    var r_b1 = t.replica(.B1);
-    var r_b2 = t.replica(.B2);
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
 
     // Drop SVCs to ensure A0 cannot abdicate (yet).
     t.replica(.R_).drop(.__, .bidirectional, .start_view_change);
     // B1 can see and ack the checkpoint-trigger prepare, but not its commit, so it cannot checkpoint.
-    r_b1.drop(.__, .incoming, .commit);
+    b1.drop(.__, .incoming, .commit);
     // B2 can see that the checkpoint-trigger prepare commits, but cannot receive the message itself.
     // It will try RSV to advances its head, but don't let it just yet.
-    r_b2.drop(.__, .incoming, .prepare);
-    r_b2.drop(.__, .incoming, .start_view);
+    b2.drop(.__, .incoming, .prepare);
+    b2.drop(.__, .incoming, .start_view);
 
-    try expectEqual(c.request(checkpoint_trigger_1), checkpoint_trigger_1);
-    try expectEqual(r_a0.op_checkpoint(), checkpoint_1);
-    try expectEqual(r_b1.op_checkpoint(), 0);
-    try expectEqual(r_b2.op_checkpoint(), 0);
+    try c.request(checkpoint_trigger_1, checkpoint_trigger_1);
+    try expectEqual(a0.op_checkpoint(), checkpoint_1);
+    try expectEqual(b1.op_checkpoint(), 0);
+    try expectEqual(b2.op_checkpoint(), 0);
 
     // B1 wouldn't prepare these anyway, but we prevent it from learning that the checkpoint
     // trigger is committed.
-    r_b1.drop(.__, .incoming, .prepare);
+    b1.drop(.__, .incoming, .prepare);
 
-    try expectEqual(c.request(checkpoint_trigger_1 + constants.pipeline_prepare_queue_max), checkpoint_trigger_1);
-    try expectEqual(r_a0.op_head(), checkpoint_trigger_1 + constants.pipeline_prepare_queue_max);
-    try expectEqual(r_b1.op_head(), checkpoint_trigger_1);
-    try expectEqual(r_b2.op_head(), checkpoint_trigger_1 - 1);
+    try c.request(checkpoint_trigger_1 + constants.pipeline_prepare_queue_max, checkpoint_trigger_1);
+    try expectEqual(a0.op_head(), checkpoint_trigger_1 + constants.pipeline_prepare_queue_max);
+    try expectEqual(b1.op_head(), checkpoint_trigger_1);
+    try expectEqual(b2.op_head(), checkpoint_trigger_1 - 1);
 
     {
         // Now that A0 has a full pipeline past the checkpoint, allow B2 to advance its head via the
         // hook. But first kick it into recovering_head to force it to load the SV's headers into
         // its view_headers. Those SV headers have an op-max past the next checkpoint, so our
         // op_head does not increase beyond the checkpoint trigger.
-        r_b2.pass(.__, .incoming, .start_view);
-        r_b2.corrupt(.{ .wal_prepare = checkpoint_trigger_1 - 1 });
+        b2.pass(.__, .incoming, .start_view);
+        b2.corrupt(.{ .wal_prepare = checkpoint_trigger_1 - 1 });
 
         // We must receive a prepare to trigger a view_jump, which is what will trigger the RSV.
         // But don't send an ack, since that would allow A0 to send us the next prepare,
         // which would cause us to learn that the trigger is committed,
         // which would cause us to checkpoint.
-        r_b2.pass(.__, .incoming, .prepare);
-        r_b2.drop(.__, .outgoing, .prepare_ok);
+        b2.pass(.__, .incoming, .prepare);
+        b2.drop(.__, .outgoing, .prepare_ok);
 
         // Corrupt headers & prevent header repair so that we can't commit.
-        r_b2.corrupt(.{ .wal_header = 5 });
-        r_b2.drop(.__, .incoming, .headers);
+        b2.corrupt(.{ .wal_header = 5 });
+        b2.drop(.__, .incoming, .headers);
 
-        r_b2.stop();
-        try expectEqual(r_b2.open(), .ok);
-        try expectEqual(r_b2.status(), .recovering_head);
+        b2.stop();
+        try expectEqual(b2.open(), .ok);
+        try expectEqual(b2.status(), .recovering_head);
         t.run();
 
-        try expectEqual(r_b2.status(), .normal);
-        try expectEqual(r_b2.op_checkpoint(), 0);
-        try expectEqual(r_b2.op_head(), checkpoint_trigger_1);
-        try expectEqual(r_b2.view_headers()[0].op, checkpoint_trigger_1 + constants.pipeline_prepare_queue_max);
+        try expectEqual(b2.status(), .normal);
+        try expectEqual(b2.op_checkpoint(), 0);
+        try expectEqual(b2.op_head(), checkpoint_trigger_1);
+        try expectEqual(b2.view_headers()[0].op, checkpoint_trigger_1 + constants.pipeline_prepare_queue_max);
     }
 
     // Take down A0 and allow a view-change.
@@ -421,15 +438,15 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, trunc
     // from the next wrap).
     // TODO Explicit code coverage marks: This hits the "discarded uncommitted ops after trigger"
     // log line in on_do_view_change().
-    r_a0.stop();
-    r_b1.pass_all(.__, .incoming);
-    r_b2.pass_all(.__, .incoming);
+    a0.stop();
+    b1.pass_all(.__, .incoming);
+    b2.pass_all(.__, .incoming);
     t.run();
 
-    try expectEqual(r_b1.status(), .normal);
-    try expectEqual(r_b2.status(), .normal);
-    try expectEqual(r_b1.op_checkpoint(), checkpoint_1);
-    try expectEqual(r_b2.op_checkpoint(), checkpoint_1);
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b2.status(), .normal);
+    try expectEqual(b1.op_checkpoint(), checkpoint_1);
+    try expectEqual(b2.op_checkpoint(), checkpoint_1);
 }
 
 test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header succeed" {
@@ -437,11 +454,11 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     try expectEqual(t.replica(.R_).commit(), 20);
 
     t.replica(.R0).stop();
-    try expectEqual(c.request(24), 24);
+    try c.request(24, 24);
     t.replica(.R1).stop();
     t.replica(.R2).stop();
 
@@ -472,11 +489,11 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try expectEqual(c.request(20), 20);
+    try c.request(20, 20);
     try expectEqual(t.replica(.R_).commit(), 20);
 
     t.replica(.R0).stop();
-    try expectEqual(c.request(24), 24);
+    try c.request(24, 24);
     t.replica(.R1).stop();
     t.replica(.R2).stop();
 
@@ -679,6 +696,7 @@ const TestContext = struct {
                 }
             },
         }
+        assert(array.len > 0);
         return array;
     }
 };
@@ -845,7 +863,8 @@ const TestReplicas = struct {
         for (paths.constSlice()) |path| t.cluster.network.link_filter(path).remove(command);
     }
 
-    const paths_max = constants.nodes_max * (constants.nodes_max + constants.clients_max);
+    // -1: no route to self.
+    const paths_max = constants.nodes_max * (constants.nodes_max - 1 + constants.clients_max);
 
     fn peer_paths(
         t: *const TestReplicas,
@@ -877,17 +896,16 @@ const TestClients = struct {
     clients: std.BoundedArray(usize, constants.clients_max),
     requests: usize = 0,
 
-    pub fn request(t: *TestClients, requests: usize) usize {
-        if (t.requests < requests) {
-            var requests_remaining = requests - t.requests;
-            while (requests_remaining > 0) {
-                for (t.clients.constSlice()) |c| {
-                    t.context.client_requests[c] += 1;
-                    requests_remaining -= 1;
-                    if (requests_remaining == 0) break;
-                }
+    pub fn request(t: *TestClients, requests: usize, expect_replies: usize) !void {
+        assert(t.requests <= requests);
+        defer assert(t.requests == requests);
+
+        outer: while (true) {
+            for (t.clients.constSlice()) |c| {
+                if (t.requests == requests) break :outer;
+                t.context.client_requests[c] += 1;
+                t.requests += 1;
             }
-            t.requests = requests;
         }
 
         const tick_max = 2_000;
@@ -909,7 +927,7 @@ const TestClients = struct {
                 }
             }
         }
-        return t.replies();
+        try std.testing.expectEqual(t.replies(), expect_replies);
     }
 
     pub fn replies(t: *const TestClients) usize {
