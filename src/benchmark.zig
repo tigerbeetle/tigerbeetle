@@ -15,6 +15,7 @@ const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
     .lsm_batch_multiple = constants.lsm_batch_multiple,
+    .client_request_queue_max = constants.client_request_queue_max,
 });
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const vsr = @import("vsr.zig");
@@ -80,7 +81,7 @@ pub fn main() !void {
         client_id,
         cluster_id,
         @intCast(u8, address.len),
-        constants.client_batch_logical_max,
+        StateMachine.constants.batch_logical_max,
         &message_pool,
         .{
             .configuration = address[0..],

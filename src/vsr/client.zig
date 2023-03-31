@@ -30,13 +30,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             results: []const u8,
         ) void;
 
-        pub const Request = struct {
-            // Null iif operation=register.
-            demux_list: ?BatchDemux.List,
-            message: *Message,
-        };
-
-        pub const BatchLogical = struct {
+        pub const Batch = struct {
             operation: StateMachine.Operation,
             demux: *BatchDemux,
             batch_physical: union(enum) {
@@ -117,6 +111,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 demux.next = self.stack;
                 self.stack = demux;
             }
+        };
+
+        const Request = struct {
+            // Null iif operation=register.
+            demux_list: ?BatchDemux.List,
+            message: *Message,
         };
 
         allocator: mem.Allocator,
@@ -284,7 +284,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self: *Self,
             operation: StateMachine.Operation,
             size: u32,
-        ) Error!BatchLogical {
+        ) Error!Batch {
             assert(operation != .reserved);
             assert(operation != .root);
             assert(operation != .register);
@@ -300,16 +300,16 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                         // https://github.com/ziglang/zig/issues/7224
                         if (operation == operation_) {
                             const event_size = @sizeOf(StateMachine.Event(operation_));
-
-                            if (size < StateMachine.constants
-                                .operation_batch_min(operation_) * event_size)
-                                return Error.BatchBodySizeInvalid;
+                            const batch_events_min = StateMachine.constants.operation_batch_events_min(operation_);
+                            const batch_events_max = StateMachine.constants.operation_batch_events_max(operation_);
 
                             if (size % event_size != 0)
                                 return Error.BatchBodySizeInvalid;
 
-                            if (size > StateMachine.constants
-                                .operation_batch_max(operation_) * event_size)
+                            if (size < batch_events_min * event_size)
+                                return Error.BatchBodySizeInvalid;
+
+                            if (size > batch_events_max * event_size)
                                 return Error.BatchBodySizeExceeded;
 
                             break :blk StateMachine.constants
@@ -344,7 +344,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                             // Appending this batch to an existing request:
                             ptr.message.header.size += size;
 
-                            return BatchLogical{
+                            return Batch{
                                 .operation = operation,
                                 .demux = demux,
                                 .batch_physical = .{
@@ -374,7 +374,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .size = @intCast(u32, @sizeOf(Header) + size),
             };
 
-            return BatchLogical{
+            return Batch{
                 .operation = operation,
                 .demux = demux,
                 .batch_physical = .{ .new = message },
@@ -385,22 +385,22 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self: *Self,
             user_data: u128,
             callback: Callback,
-            batch_logical: BatchLogical,
+            batch: Batch,
         ) void {
-            assert(batch_logical.operation != .reserved);
-            assert(batch_logical.operation != .root);
-            assert(batch_logical.operation != .register);
+            assert(batch.operation != .reserved);
+            assert(batch.operation != .root);
+            assert(batch.operation != .register);
 
-            assert(batch_logical.demux.callback == null);
-            batch_logical.demux.callback = .{
+            assert(batch.demux.callback == null);
+            batch.demux.callback = .{
                 .user_data = user_data,
                 .function = callback,
             };
 
-            switch (batch_logical.batch_physical) {
+            switch (batch.batch_physical) {
                 .new => |message| {
                     // This function must be called only for the first logical batch
-                    assert(batch_logical.demux.offset == 0);
+                    assert(batch.demux.offset == 0);
 
                     self.register();
                     assert(self.request_number > 0);
@@ -411,7 +411,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                         user_data,
                         message.header.request,
                         message.header.size,
-                        @tagName(batch_logical.operation),
+                        @tagName(batch.operation),
                     });
 
                     // This was checked during the batch acquisition,
@@ -424,8 +424,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                         // TODO: Compiler glitch if .demux_list is initialized inside Request,
                         // both pointer are set as null.
                         const demux_list = BatchDemux.List{
-                            .head = batch_logical.demux,
-                            .tail = batch_logical.demux,
+                            .head = batch.demux,
+                            .tail = batch.demux,
                         };
                         break :blk Request{
                             .demux_list = demux_list,
@@ -439,8 +439,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .append => |request| {
                     assert(request.demux_list != null);
                     // Append this batch in a queued request
-                    request.demux_list.?.tail.next = batch_logical.demux;
-                    request.demux_list.?.tail = batch_logical.demux;
+                    request.demux_list.?.tail.next = batch.demux;
+                    request.demux_list.?.tail = batch.demux;
                 },
             }
         }

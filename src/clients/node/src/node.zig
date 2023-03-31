@@ -16,6 +16,7 @@ const Storage = @import("../../../storage.zig").Storage;
 const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
     .lsm_batch_multiple = constants.lsm_batch_multiple,
+    .client_request_queue_max = constants.client_request_queue_max,
 });
 const Operation = StateMachine.Operation;
 const MessageBus = @import("../../../message_bus.zig").MessageBusClient;
@@ -151,6 +152,7 @@ const Context = struct {
             client_id,
             cluster,
             @intCast(u8, context.addresses.len),
+            StateMachine.constants.batch_logical_max,
             &context.message_pool,
             .{
                 .configuration = context.addresses,

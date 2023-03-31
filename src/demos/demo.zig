@@ -19,6 +19,7 @@ const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, .{
     .message_body_size_max = constants.message_body_size_max,
     .lsm_batch_multiple = constants.lsm_batch_multiple,
+    .client_request_queue_max = constants.client_request_queue_max,
 });
 
 const Header = vsr.Header;
@@ -57,7 +58,7 @@ pub fn request(
         client_id,
         cluster_id,
         @intCast(u8, addresses.len),
-        constants.client_batch_logical_max,
+        StateMachine.constants.batch_logical_max,
         &message_pool,
         .{
             .configuration = &addresses,

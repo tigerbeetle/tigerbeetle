@@ -75,8 +75,8 @@ const FuzzOp = union(enum) {
     get: Key,
 };
 
-const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
-const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
+const batch_events_max = constants.message_size_max - @sizeOf(vsr.Header);
+const commit_entries_max = @divFloor(batch_events_max, @sizeOf(Key.Value));
 const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
 
 const cluster = 32;
