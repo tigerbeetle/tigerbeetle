@@ -49,6 +49,31 @@
     </dependency>
   </dependencies>
 
+  <profiles>
+    <profile>
+      <id>Windows</id>
+      <activation>
+	<os>
+	  <family>Windows</family>
+	</os>
+      </activation>
+      <properties>
+	<script.extension>.bat</script.extension>
+      </properties>
+    </profile>
+    <profile>
+      <id>unix</id>
+      <activation>
+	<os>
+	  <family>unix</family>
+	</os>
+      </activation>
+      <properties>
+	<script.extension>.sh</script.extension>
+      </properties>
+    </profile>
+  </profiles>
+
   <build>
     <pluginManagement>
       <plugins>
@@ -192,9 +217,8 @@
         </executions>
         <configuration>
           <workingDirectory>${project.basedir}/../../../</workingDirectory>
-          <executable>${project.basedir}/../../../zig/zig</executable>
+          <executable>${project.basedir}/../../../scripts/build${script.extension}</executable>
           <arguments>
-            <argument>build</argument>
             <argument>java_client</argument>
             <argument>-Drelease-safe</argument>
           </arguments>

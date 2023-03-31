@@ -151,6 +151,7 @@ fn emit_packed_struct(
         });
     }
 
+    // Conversion from struct to packed (e.g. AccountFlags.ToUint16())
     try buffer.writer().print("}}\n\n" ++
         "func (f {s}) To{s}() {s} {{\n" ++
         "\tvar ret {s} = 0\n\n", .{
@@ -162,6 +163,7 @@ fn emit_packed_struct(
 
     inline for (type_info.fields) |field, i| {
         if (comptime std.mem.eql(u8, "padding", field.name)) continue;
+
         try buffer.writer().print("\tif f.{s} {{\n" ++
             "\t\tret |= (1 << {d})\n" ++
             "\t}}\n\n", .{
@@ -184,6 +186,7 @@ fn emit_struct(
     });
 
     const min_len = calculate_min_len(type_info);
+    var flagsField = false;
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.field_type)) {
             .Array => |array| {
@@ -193,17 +196,56 @@ fn emit_struct(
                     go_type(array.child),
                 });
             },
-            else => try buffer.writer().print(
-                "\t{s} {s}\n",
-                .{
-                    to_pascal_case(field.name, min_len),
-                    go_type(field.field_type),
-                },
-            ),
+            else => {
+                if (comptime std.mem.eql(u8, field.name, "flags")) {
+                    flagsField = true;
+                }
+
+                try buffer.writer().print(
+                    "\t{s} {s}\n",
+                    .{
+                        to_pascal_case(field.name, min_len),
+                        go_type(field.field_type),
+                    },
+                );
+            },
         }
     }
 
     try buffer.writer().print("}}\n\n", .{});
+
+    if (comptime flagsField) {
+        const flagType = if (comptime std.mem.eql(u8, name, "Account")) tb.AccountFlags else tb.TransferFlags;
+        // Conversion from packed to struct (e.g. Account.AccountFlags())
+        try buffer.writer().print(
+            "func (o {s}) {s}Flags() {s}Flags {{\n" ++
+                "\tvar f {s}Flags\n",
+            .{
+                name,
+                name,
+                name,
+                name,
+            },
+        );
+
+        switch (@typeInfo(flagType)) {
+            .Struct => |info| switch (info.layout) {
+                .Packed => inline for (info.fields) |field, i| {
+                    if (comptime std.mem.eql(u8, "padding", field.name)) continue;
+
+                    try buffer.writer().print("\tf.{s} = ((o.Flags >> {}) & 0x1) == 1\n", .{
+                        to_pascal_case(field.name, null),
+                        i,
+                    });
+                },
+                else => unreachable,
+            },
+            else => unreachable,
+        }
+
+        try buffer.writer().print("\treturn f\n" ++
+            "}}\n\n", .{});
+    }
 }
 
 pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {

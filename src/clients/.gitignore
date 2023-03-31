@@ -1,2 +1,3 @@
 *.o
 docs_generate
+run_with_tb

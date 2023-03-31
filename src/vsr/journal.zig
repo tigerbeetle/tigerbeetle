@@ -1219,7 +1219,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     const slot = Slot{ .index = index };
                     if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
                         var view_range = view_change_headers.view_for_op(header.op, log_view);
-                        view_range.max = std.math.min(view_range.max, log_view);
+                        assert(view_range.max <= log_view);
 
                         if (header.command == .prepare and !view_range.contains(header.view)) {
                             header_untrusted.* = Header.reserved(replica.cluster, index);

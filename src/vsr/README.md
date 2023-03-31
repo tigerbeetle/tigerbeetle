@@ -104,11 +104,15 @@ A replica sends `command=do_view_change` to all replicas, with the `view` it is 
 - The _backup_ of the `view` uses to `do_view_change` to updates its current `view` (transitioning to `status=view_change`).
 
 DVCs include headers from prepares which are:
-- _present_ (in the replica's WAL) and valid
-- _missing_ (never written to the replica's WAL)
-- _corrupt_ (in the replica's WAL)
+- _present_: A valid header, corresponding to a valid prepare in the replica's WAL.
+- _missing_: A valid header, corresponding to a prepare that the replica has not prepared/acked.
+- _corrupt_: A valid header, corresponding to a corrupt prepare in the replica's WAL.
+- _blank_: A placeholder (fake) header, corresponding to a header that the replica has never seen.
+- _fault_: A placeholder (fake) header, corresponding to a header that the replica _may have_ prepared/acked.
 
-These cases are distinguished during [WAL repair](#protocol-repair-wal).
+If the new primary collects a _nack quorum_ of _blank_ headers for a particular possibly-uncommitted op, it truncates the log.
+
+These cases are farther distinguished during [WAL repair](#protocol-repair-wal).
 
 When the primary collects its DVC quorum:
 1. If any DVC in the quorum is ahead of the primary by more than one checkpoint,
@@ -172,7 +176,8 @@ During repair, missing/damaged prepares are requested & repaired chronologically
 In response to a `request_prepare`:
 
 - Reply the `command=prepare` with the requested prepare, if available and valid.
-- Reply `command=nack_prepare` if the request origin is the primary of the ongoing view-change and we never received the prepare. (This enables the primary to truncate uncommitted messages and remain available).
+- Reply `command=nack_prepare` if the request origin is the primary of the ongoing view-change and we never received the prepare.
+  (If the primary collects a _nack quorum_, it truncates uncommitted messages from the logs, improving availability).
 - Otherwise do not reply. (e.g. the corresponding slot in the WAL is corrupt)
 
 Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf), we do not nack corrupt entries, since they _might_ be the prepare being requested.
@@ -207,13 +212,15 @@ TODO (Unimplemented)
 
 - The _replication quorum_ is the minimum number of replicas required to complete a commit.
 - The _view-change quorum_ is the minimum number of replicas required to complete a view-change.
+- The _nack quorum_ is the minimum number of unique nacks required to truncate an uncommitted op.
 
 With the default configuration:
 
-|      **Replica Count** |   1 |  2 |  3 |  4 |  5 |  6 |
-| ---------------------: | --: | -: | -: | -: | -: | -: |
-| **Replication Quorum** |   1 |  2 |  2 |  2 |  3 |  3 |
-| **View-Change Quorum** |   1 |  2 |  2 |  3 |  3 |  4 |
+|      **Replica Count** |   1 |     2 |  3 |  4 |  5 |  6 |
+| ---------------------: | --: | ----: | -: | -: | -: | -: |
+| **Replication Quorum** |   1 |     2 |  2 |  2 |  3 |  3 |
+| **View-Change Quorum** |   1 |     2 |  2 |  3 |  3 |  4 |
+|        **Nack Quorum** |   1 | **1** |  2 |  3 |  3 |  4 |
 
 See also:
 
