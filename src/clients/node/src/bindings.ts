@@ -593,9 +593,9 @@ export type CreateTransfersError = {
 }
 
 export enum Operation {
-  create_accounts = 3,
-  create_transfers = 4,
-  lookup_accounts = 5,
-  lookup_transfers = 6,
+  create_accounts = 128,
+  create_transfers = 129,
+  lookup_accounts = 130,
+  lookup_transfers = 131,
 }
 

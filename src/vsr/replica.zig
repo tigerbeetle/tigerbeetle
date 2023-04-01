@@ -3435,6 +3435,19 @@ pub fn ReplicaType(
                 return true;
             }
 
+            if (!message.header.operation.valid(StateMachine)) {
+                // Some possible causes:
+                // - client bug
+                // - client memory corruption
+                // - client/replica version mismatch
+                log.err("{}: on_request: ignoring invalid operation (client={} operation={})", .{
+                    self.replica,
+                    message.header.client,
+                    @enumToInt(message.header.operation),
+                });
+                return true;
+            }
+
             if (self.ignore_request_message_backup(message)) return true;
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;

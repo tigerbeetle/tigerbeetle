@@ -44,10 +44,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
     return struct {
         const Self = @This();
 
-        pub const StateMachine = StateMachineType(Storage, .{
-            .message_body_size_max = constants.message_body_size_max,
-            .lsm_batch_multiple = constants.lsm_batch_multiple,
-        });
+        pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
