@@ -553,14 +553,16 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 }
             }
 
-            log.info("{[index]: >2} {[event]c} {[role]c} {[statuses]s}" ++
-                "  {[replica]s}  {[pipeline]s}", .{
-                .index = replica.replica,
-                .event = @enumToInt(event),
-                .role = role,
-                .statuses = statuses[0 .. cluster.replica_count + cluster.standby_count],
-                .replica = info,
-                .pipeline = pipeline,
+            // TODO(Zig): Use named format specifiers when we upgrade past 0.9.
+            // In 0.9 the test runner's log implementation does not support the named arguments.
+            log.info("{: >2} {c} {c} {s}" ++
+                "  {s}  {s}", .{
+                replica.replica,
+                @enumToInt(event),
+                role,
+                statuses[0 .. cluster.replica_count + cluster.standby_count],
+                info,
+                pipeline,
             });
         }
     };

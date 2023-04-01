@@ -49,6 +49,8 @@ pub const Path = struct {
     target: u8,
 };
 
+pub const LinkFilter = std.enums.EnumSet(vsr.Command);
+
 /// Determines how the partitions are created. Partitions
 /// are two-way, i.e. if i cannot communicate with j, then
 /// j cannot communicate with i.
@@ -84,8 +86,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         const Link = struct {
             queue: PriorityQueue(LinkPacket, void, Self.order_packets),
-            /// When false, packets sent on the path are not delivered.
-            enabled: bool = true,
+            /// Commands in the set are delivered.
+            /// Commands not in the set are dropped.
+            filter: LinkFilter = LinkFilter.initFull(),
             /// We can arbitrary clog a path until a tick.
             clogged_till: u64 = 0,
         };
@@ -99,7 +102,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         links: []Link,
 
         /// Scratch space for automatically generating partitions.
-        /// The "source of truth" for partitions is links[*].enabled.
+        /// The "source of truth" for partitions is links[*].filter.
         auto_partition: []bool,
         auto_partition_active: bool,
         auto_partition_nodes: []u8,
@@ -151,6 +154,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             allocator.free(self.links);
             allocator.free(self.auto_partition);
             allocator.free(self.auto_partition_nodes);
+        }
+
+        pub fn link_filter(self: *Self, path: Path) *LinkFilter {
+            return &self.links[self.path_index(path)].filter;
         }
 
         fn order_packets(context: void, a: LinkPacket, b: LinkPacket) math.Order {
@@ -263,12 +270,14 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 var to: u8 = 0;
                 while (to < self.process_count()) : (to += 1) {
                     const path = .{ .source = from, .target = to };
-                    self.links[self.path_index(path)].enabled =
+                    const enabled =
                         from >= self.options.node_count or
                         to >= self.options.node_count or
                         partition[from] == partition[to] or
                         (self.options.partition_symmetry == .asymmetric and
                         partition[from] == asymmetric_partition_side);
+                    self.links[self.path_index(path)].filter =
+                        if (enabled) LinkFilter.initFull() else LinkFilter{};
                 }
             }
         }
@@ -284,7 +293,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         self.auto_partition_active = false;
                         self.auto_partition_stability = self.options.unpartition_stability;
                         std.mem.set(bool, self.auto_partition, false);
-                        for (self.links) |*link| link.enabled = true;
+                        for (self.links) |*link| link.filter = LinkFilter.initFull();
                         log.warn("unpartitioned network: partition={d}", .{self.auto_partition});
                     }
                 } else {
@@ -307,7 +316,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         if (link_packet.expiry > self.ticks) break;
                         _ = queue.remove();
 
-                        if (!self.links[self.path_index(path)].enabled) {
+                        if (!self.links[self.path_index(path)].filter.contains(link_packet.packet.command())) {
                             log.warn("dropped packet (different partitions): from={} to={}", .{ from, to });
                             link_packet.packet.deinit();
                             continue;

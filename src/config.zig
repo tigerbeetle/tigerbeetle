@@ -183,12 +183,20 @@ pub const configs = struct {
             .view_change_headers_suffix_max = 4 + 1,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
             .message_size_max = Config.Cluster.message_size_max_min(4),
-            .storage_size_max = 4 * 1024 * 1024 * 1024,
+            .storage_size_max = 200 * 1024 * 1024,
 
             .block_size = sector_size,
             .lsm_batch_multiple = 4,
             .lsm_growth_factor = 4,
         },
+    };
+
+    /// Mostly-minimal configuration, with a higher storage limit to ensure that the fuzzers are
+    /// able to max out the LSM levels.
+    pub const fuzz_min = config: {
+        var base = test_min;
+        base.cluster.storage_size_max = 4 * 1024 * 1024 * 1024;
+        break :config base;
     };
 
     const default = if (@hasDecl(root, "tigerbeetle_config"))
