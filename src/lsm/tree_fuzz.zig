@@ -14,11 +14,7 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = constants.message_body_size_max,
-    .lsm_batch_multiple = constants.lsm_batch_multiple,
-});
-
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const GridType = @import("grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;

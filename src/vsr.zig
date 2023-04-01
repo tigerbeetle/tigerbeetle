@@ -132,7 +132,8 @@ pub const Operation = enum(u8) {
     /// The value 2 is reserved to register a client session with the cluster.
     register = 2,
 
-    /// Operations exported by the state machine (all other values are free):
+    /// Operations <vsr_operations_reserved are reserved for the control plane.
+    /// Operations ≥vsr_operations_reserved are available for the state machine.
     _,
 
     pub fn from(comptime StateMachine: type, op: StateMachine.Operation) Operation {
@@ -142,10 +143,24 @@ pub const Operation = enum(u8) {
 
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
+        assert(self.valid(StateMachine));
         return @intToEnum(StateMachine.Operation, @enumToInt(self));
     }
 
+    pub fn valid(self: Operation, comptime StateMachine: type) bool {
+        check_state_machine_operations(StateMachine.Operation);
+        const operations = comptime std.enums.values(StateMachine.Operation);
+        inline for (operations) |op| {
+            if (@enumToInt(self) == @enumToInt(op)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     fn check_state_machine_operations(comptime Op: type) void {
+        // TODO(Zig) More rigorous assertions here once "unable to evaluate constant expression"
+        // issues are fixed. (Loop over Operation and Op variants).
         if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
             @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
         }
@@ -437,6 +452,9 @@ pub const Header = extern struct {
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
+                if (@enumToInt(self.operation) < constants.vsr_operations_reserved) {
+                    return "operation is reserved";
+                }
                 // Thereafter, the client must provide the session number in the context:
                 // These requests should set `parent` to the `checksum` of the previous reply.
                 if (self.context == 0) return "context == 0";
