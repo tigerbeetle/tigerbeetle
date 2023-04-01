@@ -20,7 +20,7 @@ const Command = vsr.Command;
 const Version = vsr.Version;
 const VSRState = vsr.VSRState;
 
-const log = std.log.scoped(.replica);
+const log = stdx.log.scoped(.replica);
 const tracer = @import("../tracer.zig");
 
 pub const Status = enum {
@@ -429,6 +429,9 @@ pub fn ReplicaType(
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
 
+            // Abort if all slots are faulty, since something is very wrong.
+            if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
+
             const vsr_headers = self.superblock.working.vsr_headers();
             for (vsr_headers.slice) |*header| {
                 if (vsr.Headers.dvc_header_type(header) != .valid) continue;
@@ -511,9 +514,7 @@ pub fn ReplicaType(
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
             if (self.solo()) {
-                if (self.journal.faulty.count > 0) {
-                    @panic("journal is corrupt");
-                }
+                if (self.journal.faulty.count > 0) return error.WALCorrupt;
                 assert(self.op_head_certain());
 
                 // Solo replicas must increment their view after recovery.
@@ -3522,7 +3523,10 @@ pub fn ReplicaType(
                         return true;
                     }
                 } else {
-                    log.err("{}: on_request: ignoring newer request (client bug)", .{self.replica});
+                    // Caused by one of the following:
+                    // - client bug, or
+                    // - this primary is no longer the actual primary
+                    log.err("{}: on_request: ignoring newer request (client|network bug)", .{self.replica});
                     return true;
                 }
             } else if (message.header.operation == .register) {

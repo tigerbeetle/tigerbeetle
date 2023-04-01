@@ -109,7 +109,7 @@ pub fn StateMachineType(
                 .reserved, .root => unreachable,
                 .register => return 0,
                 .echo => {
-                    stdx.copy_disjoint(.exact, u8, output, input);
+                    stdx.copy_disjoint(.inexact, u8, output, input);
                     return input.len;
                 },
             }

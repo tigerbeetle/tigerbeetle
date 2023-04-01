@@ -23,7 +23,7 @@ const TableType = @import("table.zig").TableType;
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 
-pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
+pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 const Key = packed struct {
     id: u64 align(@alignOf(u64)),
