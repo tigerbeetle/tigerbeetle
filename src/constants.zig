@@ -474,12 +474,14 @@ pub const StateMachineConfig = struct {
     message_body_size_max: comptime_int,
     lsm_batch_multiple: comptime_int,
     vsr_operations_reserved: u8,
+    client_request_queue_max: comptime_int,
 };
 
 pub const state_machine_config = StateMachineConfig{
     .message_body_size_max = message_body_size_max,
     .lsm_batch_multiple = lsm_batch_multiple,
     .vsr_operations_reserved = vsr_operations_reserved,
+    .client_request_queue_max = client_request_queue_max,
 };
 
 /// Whether to perform intensive online verification.

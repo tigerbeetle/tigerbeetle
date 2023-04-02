@@ -41,7 +41,7 @@ pub fn StateMachineType(
 
             /// The maximum number of logical batches that may be queued 
             /// on a client (spread across all requests).
-            pub const batch_logical_max = constants_.client_request_queue_max *
+            pub const batch_logical_max = config.client_request_queue_max *
                 blk: {
                 var max: usize = 0;
                 inline for (std.enums.values(Operation)) |operation| {
@@ -228,14 +228,14 @@ pub fn StateMachineType(
             .{
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * math.max(
-                        constants.batch_max.create_accounts,
+                        constants.batch_events_max.create_accounts,
                         // ×2 because creating a transfer will update 2 accounts.
                         2 * constants.batch_events_max.create_transfers,
                     ),
-                    .id = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .user_data = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    .code = config.lsm_batch_multiple * constants.batch_max.create_accounts,
+                    .id = config.lsm_batch_multiple * constants.batch_events_max.create_accounts,
+                    .user_data = config.lsm_batch_multiple * constants.batch_events_max.create_accounts,
+                    .ledger = config.lsm_batch_multiple * constants.batch_events_max.create_accounts,
+                    .code = config.lsm_batch_multiple * constants.batch_events_max.create_accounts,
                 },
                 .ignored = &[_][]const u8{ "flags", "padding" },
                 .derived = .{},
@@ -248,7 +248,7 @@ pub fn StateMachineType(
             .{
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * math.max(
-                        constants.batch_max.create_accounts,
+                        constants.batch_events_max.create_accounts,
                         // ×2 because creating a transfer will update 2 accounts.
                         2 * constants.batch_events_max.create_transfers,
                     ),
@@ -259,20 +259,20 @@ pub fn StateMachineType(
                     //   necessitate an additional ×2 multiplier — the credits of the debit
                     //   account and the debits of the credit account are not modified.
                     .debits_pending = config.lsm_batch_multiple * math.max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
+                        constants.batch_events_max.create_accounts,
+                        2 * constants.batch_events_max.create_transfers,
                     ),
                     .debits_posted = config.lsm_batch_multiple * math.max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
+                        constants.batch_events_max.create_accounts,
+                        2 * constants.batch_events_max.create_transfers,
                     ),
                     .credits_pending = config.lsm_batch_multiple * math.max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
+                        constants.batch_events_max.create_accounts,
+                        2 * constants.batch_events_max.create_transfers,
                     ),
                     .credits_posted = config.lsm_batch_multiple * math.max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
+                        constants.batch_events_max.create_accounts,
+                        2 * constants.batch_events_max.create_transfers,
                     ),
                 },
                 .ignored = &[_][]const u8{"padding"},
@@ -285,16 +285,16 @@ pub fn StateMachineType(
             Transfer,
             .{
                 .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .debit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .credit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .pending_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .timeout = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .amount = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .timestamp = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .id = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .debit_account_id = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .credit_account_id = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .user_data = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .pending_id = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .timeout = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .ledger = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .code = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .amount = config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
                 },
                 .ignored = &[_][]const u8{ "reserved", "flags" },
                 .derived = .{},
@@ -303,7 +303,7 @@ pub fn StateMachineType(
 
         const PostedGroove = @import("lsm/posted_groove.zig").PostedGrooveType(
             Storage,
-            config.lsm_batch_multiple * constants.batch_max.create_transfers,
+            config.lsm_batch_multiple * constants.batch_events_max.create_transfers,
         );
 
         pub const Workload = WorkloadType(StateMachine);
