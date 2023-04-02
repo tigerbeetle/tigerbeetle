@@ -45,12 +45,12 @@ pub fn StateMachineType(
                 blk: {
                 var max: usize = 0;
                 inline for (std.enums.values(Operation)) |operation| {
-                    switch (operation) {
-                        .reserved, .root, .register => continue,
-                        else => if (operation_batch_logical_allowed(operation)) {
-                            const operation_count_max = operation_batch_events_max(operation);
-                            max = std.math.max(max, operation_count_max);
-                        },
+                    if (@enumToInt(operation) < config.vsr_operations_reserved)
+                        continue;
+
+                    if (operation_batch_logical_allowed(operation)) {
+                        const operation_count_max = operation_batch_events_max(operation);
+                        max = std.math.max(max, operation_count_max);
                     }
                 }
 

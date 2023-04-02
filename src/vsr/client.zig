@@ -33,13 +33,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         pub const Batch = struct {
             operation: StateMachine.Operation,
             demux: *BatchDemux,
-            batch_physical: union(enum) {
+            request: union(enum) {
                 new: *Message,
                 append: *Request,
             },
 
             pub fn slice(self: *const @This()) []u8 {
-                var message = switch (self.batch_physical) {
+                const message = switch (self.request) {
                     .new => |value| value,
                     .append => |value| value.message,
                 };
@@ -291,29 +291,27 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             const operation_batch_logical_allowed =
                 blk: inline for (comptime std.enums.values(StateMachine.Operation)) |operation_|
             {
-                switch (operation_) {
-                    .reserved, .root, .register => continue,
-                    else => {
-                        // TODO: Update this code to use inline switch when upgrading Zig version.
-                        // https://github.com/ziglang/zig/issues/7224
-                        if (operation == operation_) {
-                            const event_size = @sizeOf(StateMachine.Event(operation_));
-                            const batch_events_min = StateMachine.constants.operation_batch_events_min(operation_);
-                            const batch_events_max = StateMachine.constants.operation_batch_events_max(operation_);
+                if (@enumToInt(operation_) < constants.vsr_operations_reserved)
+                    continue;
 
-                            if (size % event_size != 0)
-                                return Error.BatchBodySizeInvalid;
+                if (operation == operation_) {
+                    const event_size = @sizeOf(StateMachine.Event(operation_));
+                    const events_min = comptime StateMachine.constants
+                        .operation_batch_events_min(operation_);
+                    const events_max = comptime StateMachine.constants
+                        .operation_batch_events_max(operation_);
 
-                            if (size < batch_events_min * event_size)
-                                return Error.BatchBodySizeInvalid;
+                    if (size % event_size != 0)
+                        return Error.BatchBodySizeInvalid;
 
-                            if (size > batch_events_max * event_size)
-                                return Error.BatchBodySizeExceeded;
+                    if (size < events_min * event_size)
+                        return Error.BatchBodySizeInvalid;
 
-                            break :blk StateMachine.constants
-                                .operation_batch_logical_allowed(operation_);
-                        }
-                    },
+                    if (size > events_max * event_size)
+                        return Error.BatchBodySizeExceeded;
+
+                    break :blk comptime StateMachine.constants
+                        .operation_batch_logical_allowed(operation_);
                 }
             } else unreachable;
 
@@ -345,7 +343,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                             return Batch{
                                 .operation = operation,
                                 .demux = demux,
-                                .batch_physical = .{
+                                .request = .{
                                     .append = ptr,
                                 },
                             };
@@ -375,7 +373,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             return Batch{
                 .operation = operation,
                 .demux = demux,
-                .batch_physical = .{ .new = message },
+                .request = .{ .new = message },
             };
         }
 
@@ -395,7 +393,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .function = callback,
             };
 
-            switch (batch.batch_physical) {
+            switch (batch.request) {
                 .new => |message| {
                     // This function must be called only for the first logical batch
                     assert(batch.demux.offset == 0);
