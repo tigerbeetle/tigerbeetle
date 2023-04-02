@@ -150,7 +150,7 @@ fn test_smallest_interval(bounds: []const i64, smallest_interval: Marzullo.Inter
     try std.testing.expectEqual(smallest_interval, interval);
 }
 
-test {
+test "marzullo" {
     try test_smallest_interval(
         &[_]i64{
             11, 13,

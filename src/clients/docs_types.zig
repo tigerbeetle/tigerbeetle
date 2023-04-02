@@ -21,6 +21,9 @@ pub const Docs = struct {
     // File extension without dot (i.e. js, go, etc.)
     extension: String,
 
+    // For the title of the page on the docs site.
+    proper_name: String,
+
     // Introduction to the client. Links to docs or build badges or
     // whatnot.
     description: Markdown,

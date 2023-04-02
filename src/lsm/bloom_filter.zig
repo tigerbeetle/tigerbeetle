@@ -77,7 +77,7 @@ inline fn block_index(hash: u32, size: usize) u32 {
     return @intCast(u32, (@as(u64, hash) * block_count) >> 32);
 }
 
-test {
+test "bloom filter: refAllDecls" {
     _ = std.testing.refAllDecls(@This());
 }
 

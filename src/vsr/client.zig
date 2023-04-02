@@ -283,11 +283,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         pub fn get_batch(
             self: *Self,
             operation: StateMachine.Operation,
+            message: *Message,
             size: u32,
         ) Error!Batch {
-            assert(operation != .reserved);
-            assert(operation != .root);
-            assert(operation != .register);
+            assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
 
             // Operation validations:
             const operation_batch_logical_allowed =

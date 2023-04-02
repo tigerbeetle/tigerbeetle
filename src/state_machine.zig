@@ -22,11 +22,14 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
 
-pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
-    message_body_size_max: usize,
-    lsm_batch_multiple: usize,
-    client_request_queue_max: usize,
-}) type {
+pub fn StateMachineType(
+    comptime Storage: type,
+    comptime config: @import("constants.zig").StateMachineConfig,
+) type {
+    assert(config.message_body_size_max > 0);
+    assert(config.lsm_batch_multiple > 0);
+    assert(config.vsr_operations_reserved > 0);
+
     return struct {
         const StateMachine = @This();
         const Grid = @import("lsm/grid.zig").GridType(Storage);
@@ -34,7 +37,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
         const ForestType = @import("lsm/forest.zig").ForestType;
 
         pub const constants = struct {
-            pub const message_body_size_max = constants_.message_body_size_max;
+            pub const message_body_size_max = config.message_body_size_max;
 
             /// The maximum number of logical batches that may be queued 
             /// on a client (spread across all requests).
@@ -224,15 +227,15 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             AccountImmutable,
             .{
                 .value_count_max = .{
-                    .timestamp = constants_.lsm_batch_multiple * math.max(
-                        constants.batch_events_max.create_accounts,
+                    .timestamp = config.lsm_batch_multiple * math.max(
+                        constants.batch_max.create_accounts,
                         // ×2 because creating a transfer will update 2 accounts.
                         2 * constants.batch_events_max.create_transfers,
                     ),
-                    .id = constants_.lsm_batch_multiple * constants.batch_events_max.create_accounts,
-                    .user_data = constants_.lsm_batch_multiple * constants.batch_events_max.create_accounts,
-                    .ledger = constants_.lsm_batch_multiple * constants.batch_events_max.create_accounts,
-                    .code = constants_.lsm_batch_multiple * constants.batch_events_max.create_accounts,
+                    .id = config.lsm_batch_multiple * constants.batch_max.create_accounts,
+                    .user_data = config.lsm_batch_multiple * constants.batch_max.create_accounts,
+                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_accounts,
+                    .code = config.lsm_batch_multiple * constants.batch_max.create_accounts,
                 },
                 .ignored = &[_][]const u8{ "flags", "padding" },
                 .derived = .{},
@@ -244,8 +247,8 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             AccountMutable,
             .{
                 .value_count_max = .{
-                    .timestamp = constants_.lsm_batch_multiple * math.max(
-                        constants.batch_events_max.create_accounts,
+                    .timestamp = config.lsm_batch_multiple * math.max(
+                        constants.batch_max.create_accounts,
                         // ×2 because creating a transfer will update 2 accounts.
                         2 * constants.batch_events_max.create_transfers,
                     ),
@@ -255,21 +258,21 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                     // * Each transfer modifies two accounts. However, this does not
                     //   necessitate an additional ×2 multiplier — the credits of the debit
                     //   account and the debits of the credit account are not modified.
-                    .debits_pending = constants_.lsm_batch_multiple * math.max(
-                        constants.batch_events_max.create_accounts,
-                        2 * constants.batch_events_max.create_transfers,
+                    .debits_pending = config.lsm_batch_multiple * math.max(
+                        constants.batch_max.create_accounts,
+                        2 * constants.batch_max.create_transfers,
                     ),
-                    .debits_posted = constants_.lsm_batch_multiple * math.max(
-                        constants.batch_events_max.create_accounts,
-                        2 * constants.batch_events_max.create_transfers,
+                    .debits_posted = config.lsm_batch_multiple * math.max(
+                        constants.batch_max.create_accounts,
+                        2 * constants.batch_max.create_transfers,
                     ),
-                    .credits_pending = constants_.lsm_batch_multiple * math.max(
-                        constants.batch_events_max.create_accounts,
-                        2 * constants.batch_events_max.create_transfers,
+                    .credits_pending = config.lsm_batch_multiple * math.max(
+                        constants.batch_max.create_accounts,
+                        2 * constants.batch_max.create_transfers,
                     ),
-                    .credits_posted = constants_.lsm_batch_multiple * math.max(
-                        constants.batch_events_max.create_accounts,
-                        2 * constants.batch_events_max.create_transfers,
+                    .credits_posted = config.lsm_batch_multiple * math.max(
+                        constants.batch_max.create_accounts,
+                        2 * constants.batch_max.create_transfers,
                     ),
                 },
                 .ignored = &[_][]const u8{"padding"},
@@ -282,16 +285,16 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
             Transfer,
             .{
                 .value_count_max = .{
-                    .timestamp = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .id = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .debit_account_id = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .credit_account_id = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .user_data = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .pending_id = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .timeout = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .ledger = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .code = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
-                    .amount = constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .debit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .credit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .user_data = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .pending_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .timeout = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .amount = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
                 .ignored = &[_][]const u8{ "reserved", "flags" },
                 .derived = .{},
@@ -300,7 +303,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
         const PostedGroove = @import("lsm/posted_groove.zig").PostedGrooveType(
             Storage,
-            constants_.lsm_batch_multiple * constants.batch_events_max.create_transfers,
+            config.lsm_batch_multiple * constants.batch_max.create_transfers,
         );
 
         pub const Workload = WorkloadType(StateMachine);
@@ -314,15 +317,15 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
         pub const Operation = enum(u8) {
             /// Operations reserved by VR protocol (for all state machines):
-            reserved,
-            root,
-            register,
+            reserved = 0,
+            root = 1,
+            register = 2,
 
             /// Operations exported by TigerBeetle:
-            create_accounts,
-            create_transfers,
-            lookup_accounts,
-            lookup_transfers,
+            create_accounts = config.vsr_operations_reserved + 0,
+            create_transfers = config.vsr_operations_reserved + 1,
+            lookup_accounts = config.vsr_operations_reserved + 2,
+            lookup_transfers = config.vsr_operations_reserved + 3,
         };
 
         pub const Options = struct {
@@ -1451,9 +1454,10 @@ const TestContext = struct {
     const Grid = @import("lsm/grid.zig").GridType(Storage);
     const StateMachine = StateMachineType(Storage, .{
         // Overestimate the batch size because the test never compacts.
-        .message_body_size_max = message_body_size_max,
+        .message_body_size_max = TestContext.message_body_size_max,
         .lsm_batch_multiple = 1,
         .client_request_queue_max = 1,
+        .vsr_operations_reserved = 128,
     });
     const message_body_size_max = 32 * @sizeOf(Account);
 
@@ -1654,10 +1658,10 @@ fn check(comptime test_table: []const u8) !void {
     var transfers = std.AutoHashMap(u128, Transfer).init(allocator);
     defer transfers.deinit();
 
-    var request = std.ArrayListAligned(u8, TestContext.message_body_size_max).init(allocator);
+    var request = std.ArrayListAligned(u8, 16).init(allocator);
     defer request.deinit();
 
-    var reply = std.ArrayListAligned(u8, TestContext.message_body_size_max).init(allocator);
+    var reply = std.ArrayListAligned(u8, 16).init(allocator);
     defer reply.deinit();
 
     var operation: ?TestContext.StateMachine.Operation = null;
@@ -2554,6 +2558,7 @@ test "StateMachine: ref all decls" {
         .message_body_size_max = 1000 * @sizeOf(Account),
         .lsm_batch_multiple = 1,
         .client_request_queue_max = 1,
+        .vsr_operations_reserved = 128,
     });
 
     std.testing.refAllDecls(StateMachine);

@@ -16,12 +16,7 @@ const IO = vsr.io.IO;
 const Storage = vsr.storage.Storage;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
-const StateMachine = vsr.state_machine.StateMachineType(Storage, .{
-    .message_body_size_max = constants.message_body_size_max,
-    .lsm_batch_multiple = constants.lsm_batch_multiple,
-    .client_request_queue_max = constants.client_request_queue_max,
-});
-
+const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Header = vsr.Header;
 const Client = vsr.Client(StateMachine, MessageBus);
 

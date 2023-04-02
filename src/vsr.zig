@@ -132,7 +132,8 @@ pub const Operation = enum(u8) {
     /// The value 2 is reserved to register a client session with the cluster.
     register = 2,
 
-    /// Operations exported by the state machine (all other values are free):
+    /// Operations <vsr_operations_reserved are reserved for the control plane.
+    /// Operations ≥vsr_operations_reserved are available for the state machine.
     _,
 
     pub fn from(comptime StateMachine: type, op: StateMachine.Operation) Operation {
@@ -142,10 +143,24 @@ pub const Operation = enum(u8) {
 
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
+        assert(self.valid(StateMachine));
         return @intToEnum(StateMachine.Operation, @enumToInt(self));
     }
 
+    pub fn valid(self: Operation, comptime StateMachine: type) bool {
+        check_state_machine_operations(StateMachine.Operation);
+        const operations = comptime std.enums.values(StateMachine.Operation);
+        inline for (operations) |op| {
+            if (@enumToInt(self) == @enumToInt(op)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     fn check_state_machine_operations(comptime Op: type) void {
+        // TODO(Zig) More rigorous assertions here once "unable to evaluate constant expression"
+        // issues are fixed. (Loop over Operation and Op variants).
         if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
             @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
         }
@@ -437,6 +452,9 @@ pub const Header = extern struct {
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
+                if (@enumToInt(self.operation) < constants.vsr_operations_reserved) {
+                    return "operation is reserved";
+                }
                 // Thereafter, the client must provide the session number in the context:
                 // These requests should set `parent` to the `checksum` of the previous reply.
                 if (self.context == 0) return "context == 0";
@@ -1031,6 +1049,7 @@ pub fn checksum(source: []const u8) u128 {
 pub fn quorums(replica_count: u8) struct {
     replication: u8,
     view_change: u8,
+    nack_prepare: u8,
 } {
     assert(replica_count > 0);
 
@@ -1057,9 +1076,13 @@ pub fn quorums(replica_count: u8) struct {
     assert(quorum_view_change >= @divFloor(replica_count, 2) + 1);
     assert(quorum_view_change + quorum_replication > replica_count);
 
+    const quorum_nack_prepare = replica_count - quorum_replication + 1;
+    assert(quorum_nack_prepare + quorum_replication > replica_count);
+
     return .{
         .replication = quorum_replication,
         .view_change = quorum_view_change,
+        .nack_prepare = quorum_nack_prepare,
     };
 }
 
@@ -1068,11 +1091,21 @@ test "quorums" {
 
     const expect_replication = [_]u8{ 1, 2, 2, 2, 3, 3, 3, 3 };
     const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
+    const expect_nack_prepare = [_]u8{ 1, 1, 2, 3, 3, 4, 5, 6 };
 
     for (expect_replication[0..]) |_, i| {
-        const actual = quorums(@intCast(u8, i) + 1);
+        const replicas = @intCast(u8, i) + 1;
+        const actual = quorums(replicas);
         try std.testing.expectEqual(actual.replication, expect_replication[i]);
         try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
+        try std.testing.expectEqual(actual.nack_prepare, expect_nack_prepare[i]);
+
+        // The nack quorum only differs from the view-change quorum when R=2.
+        if (replicas == 2) {
+            try std.testing.expectEqual(actual.nack_prepare, 1);
+        } else {
+            try std.testing.expectEqual(actual.nack_prepare, actual.view_change);
+        }
     }
 }
 
@@ -1085,33 +1118,92 @@ pub const Headers = struct {
     /// - DVC headers (disjoint chain)
     pub const ViewChangeSlice = ViewChangeHeadersSlice;
     pub const ViewChangeArray = ViewChangeHeadersArray;
+
+    fn dvc_blank(op: u64) Header {
+        return std.mem.zeroInit(Header, .{
+            .command = .reserved,
+            .op = op,
+            .checksum = 0,
+        });
+    }
+
+    fn dvc_fault(op: u64) Header {
+        return std.mem.zeroInit(Header, .{
+            .command = .reserved,
+            .op = op,
+            .checksum = 1,
+        });
+    }
+
+    pub fn dvc_header_type(header: *const Header) enum { blank, fault, valid } {
+        if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
+        if (std.meta.eql(header.*, Headers.dvc_fault(header.op))) return .fault;
+
+        assert(header.command == .prepare);
+        if (constants.verify) assert(header.valid_checksum());
+        return .valid;
+    }
 };
 
+pub const ViewChangeCommand = enum { do_view_change, start_view };
+
 const ViewChangeHeadersSlice = struct {
+    command: ViewChangeCommand,
     /// Headers are ordered from high-to-low op.
     slice: []const Header,
 
-    pub fn init(slice: []const Header) ViewChangeHeadersSlice {
-        ViewChangeHeadersSlice.verify(slice);
-
-        return .{ .slice = slice };
+    pub fn init(command: ViewChangeCommand, slice: []const Header) ViewChangeHeadersSlice {
+        const headers = ViewChangeHeadersSlice{
+            .command = command,
+            .slice = slice,
+        };
+        headers.verify();
+        return headers;
     }
 
-    pub fn verify(slice: []const Header) void {
-        assert(slice.len > 0);
-        assert(slice.len <= constants.view_change_headers_max);
+    pub fn verify(headers: ViewChangeHeadersSlice) void {
+        assert(headers.slice.len > 0);
+        assert(headers.slice.len <= constants.view_change_headers_max);
 
-        var child: ?*const Header = null;
-        for (slice) |*header| {
-            assert(header.valid_checksum());
-            assert(header.command == .prepare);
+        const head = &headers.slice[0];
+        // A DVC's head op is never a gap or faulty.
+        // A SV never includes gaps or faulty headers.
+        assert(Headers.dvc_header_type(head) == .valid);
 
-            if (child) |child_header| {
-                assert(header.op < child_header.op);
-                assert(header.view <= child_header.view);
-                assert((header.op + 1 == child_header.op) ==
-                    (header.checksum == child_header.parent));
-                assert(header.timestamp < child_header.timestamp);
+        if (headers.command == .start_view) {
+            assert(headers.slice.len >= @minimum(
+                constants.view_change_headers_suffix_max,
+                head.op + 1, // +1 to include the head itself.
+            ));
+        }
+
+        var child = head;
+        for (headers.slice[1..]) |*header, i| {
+            const index = i + 1;
+            assert(header.command == .prepare or header.command == .reserved);
+            assert(header.op < child.op);
+
+            // DVC: Ops are consecutive (with explicit blank headers).
+            // SV: The first "pipeline + 1" ops of the SV are consecutive.
+            if (headers.command == .do_view_change or
+                (headers.command == .start_view and
+                index < constants.pipeline_prepare_queue_max + 1))
+            {
+                assert(header.op == head.op - index);
+            }
+
+            switch (Headers.dvc_header_type(header)) {
+                .blank, .fault => {
+                    assert(headers.command == .do_view_change);
+                    continue; // Don't update "child".
+                },
+                .valid => {
+                    assert(header.view <= child.view);
+                    assert(header.timestamp < child.timestamp);
+                    if (header.op + 1 == child.op) {
+                        assert(header.checksum == child.parent);
+                    }
+                },
             }
             child = header;
         }
@@ -1136,19 +1228,41 @@ const ViewChangeHeadersSlice = struct {
     ///   a view prior to the log_view, they would already be part of the headers.
     pub fn view_for_op(headers: ViewChangeHeadersSlice, op: u64, log_view: u32) ViewRange {
         const header_newest = &headers.slice[0];
-        const header_oldest = &headers.slice[headers.slice.len - 1];
+        const header_oldest = blk: {
+            var oldest: ?usize = null;
+            for (headers.slice) |*header, i| {
+                switch (Headers.dvc_header_type(header)) {
+                    .blank => assert(i > 0),
+                    .fault => assert(i > 0),
+                    .valid => oldest = i,
+                }
+            }
+            break :blk &headers.slice[oldest.?];
+        };
+        assert(header_newest.view <= log_view);
+        assert(header_newest.view >= header_oldest.view);
+        assert(header_newest.op >= header_oldest.op);
 
         if (op < header_oldest.op) return .{ .min = 0, .max = header_oldest.view };
         if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
 
         for (headers.slice) |*header| {
-            if (header.op == op) return .{ .min = header.view, .max = header.view };
+            switch (Headers.dvc_header_type(header)) {
+                .blank => {},
+                .fault => {},
+                .valid => if (header.op == op) return .{ .min = header.view, .max = header.view },
+            }
         }
 
-        for (headers.slice[0 .. headers.slice.len - 1]) |*header_next, header_next_index| {
-            const header_prev = headers.slice[header_next_index + 1];
-            if (header_prev.op < op and op < header_next.op) {
-                return .{ .min = header_prev.view, .max = header_next.view };
+        var header_next = &headers.slice[0];
+        assert(Headers.dvc_header_type(header_next) == .valid);
+
+        for (headers.slice[1..]) |*header_prev| {
+            if (Headers.dvc_header_type(header_prev) == .valid) {
+                if (header_prev.op < op and op < header_next.op) {
+                    return .{ .min = header_prev.view, .max = header_next.view };
+                }
+                header_next = header_prev;
             }
         }
         unreachable;
@@ -1157,11 +1271,29 @@ const ViewChangeHeadersSlice = struct {
 
 test "Headers.ViewChangeSlice.view_for_op" {
     var headers_array = [_]Header{
-        std.mem.zeroInit(Header, .{ .op = 9, .view = 10 }),
-        std.mem.zeroInit(Header, .{ .op = 6, .view = 7 }),
+        std.mem.zeroInit(Header, .{
+            .checksum = undefined,
+            .command = .prepare,
+            .op = 9,
+            .view = 10,
+            .timestamp = 11,
+        }),
+        Headers.dvc_blank(8),
+        Headers.dvc_fault(7),
+        std.mem.zeroInit(Header, .{
+            .checksum = undefined,
+            .command = .prepare,
+            .op = 6,
+            .view = 7,
+            .timestamp = 8,
+        }),
+        Headers.dvc_blank(5),
     };
 
-    const headers = Headers.ViewChangeSlice{ .slice = &headers_array };
+    headers_array[0].set_checksum();
+    headers_array[3].set_checksum();
+
+    const headers = Headers.ViewChangeSlice.init(.do_view_change, &headers_array);
     try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(10, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(9, 12), .{ .min = 10, .max = 10 }));
@@ -1174,27 +1306,93 @@ test "Headers.ViewChangeSlice.view_for_op" {
 
 /// The headers of a SV or DVC message.
 const ViewChangeHeadersArray = struct {
+    command: ViewChangeCommand,
     array: Headers.Array,
 
     pub fn root(cluster: u32) ViewChangeHeadersArray {
-        var array = Headers.Array{ .buffer = undefined };
-        array.appendAssumeCapacity(Header.root_prepare(cluster));
-        return ViewChangeHeadersArray.init(array);
+        return ViewChangeHeadersArray.init_from_slice(.start_view, &.{
+            Header.root_prepare(cluster),
+        });
     }
 
-    pub fn init_from_slice(slice: []const Header) ViewChangeHeadersArray {
-        Headers.ViewChangeSlice.verify(slice);
-        return .{ .array = Headers.Array.fromSlice(slice) catch unreachable };
+    pub fn init_from_slice(
+        command: ViewChangeCommand,
+        slice: []const Header,
+    ) ViewChangeHeadersArray {
+        const headers = ViewChangeHeadersArray{
+            .command = command,
+            .array = Headers.Array.fromSlice(slice) catch unreachable,
+        };
+        headers.verify();
+        return headers;
     }
 
-    pub fn replace(headers: *ViewChangeHeadersArray, slice: []const Header) void {
-        Headers.ViewChangeSlice.verify(slice);
+    fn init_from_array(command: ViewChangeCommand, array: Headers.Array) ViewChangeHeadersArray {
+        const headers = ViewChangeHeadersArray{
+            .command = command,
+            .array = array,
+        };
+        headers.verify();
+        return headers;
+    }
+
+    pub fn verify(headers: *const ViewChangeHeadersArray) void {
+        (ViewChangeHeadersSlice{
+            .command = headers.command,
+            .slice = headers.array.constSlice(),
+        }).verify();
+    }
+
+    pub fn start_view_into_do_view_change(headers: *ViewChangeHeadersArray) void {
+        assert(headers.command == .start_view);
+        // This function is only called by a replica that is lagging behind the primary's
+        // checkpoint, so the start_view has a full suffix of headers.
+        assert(headers.array.get(0).op >= constants.journal_slot_count);
+        assert(headers.array.len >= constants.view_change_headers_suffix_max);
+        headers.command = .do_view_change;
+
+        // Remove the "hook" checkpoint trigger(s), since they would create gaps in the ops.
+        // (There are at most 2 hooks).
+        var removed: usize = 0;
+        while (headers.array.get(headers.array.len - 2).op !=
+            headers.array.get(headers.array.len - 1).op + 1) : (removed += 1)
+        {
+            headers.array.len -= 1;
+        }
+
+        assert(removed <= 2);
+        // The remaining headers may be larger than the suffix because the latest hook may chain
+        // with the suffix, so we can keep it.
+        assert(headers.array.len >= constants.view_change_headers_suffix_max);
+        headers.verify();
+    }
+
+    pub fn replace(
+        headers: *ViewChangeHeadersArray,
+        command: ViewChangeCommand,
+        slice: []const Header,
+    ) void {
+        headers.command = command;
         headers.array.len = 0;
         for (slice) |*header| headers.array.appendAssumeCapacity(header.*);
+        headers.verify();
     }
 
-    fn init(array: Headers.Array) ViewChangeHeadersArray {
-        Headers.ViewChangeSlice.verify(array.constSlice());
-        return .{ .array = array };
+    pub fn append(headers: *ViewChangeHeadersArray, header: *const Header) void {
+        // We don't do comprehensive validation here — assume that verify() will be called
+        // after any series of appends.
+        headers.array.appendAssumeCapacity(header.*);
+    }
+
+    pub fn append_blank(headers: *ViewChangeHeadersArray, op: u64) void {
+        assert(headers.command == .do_view_change);
+        assert(headers.array.len > 0);
+        headers.array.appendAssumeCapacity(Headers.dvc_blank(op));
+    }
+
+    pub fn append_fault(headers: *ViewChangeHeadersArray, op: u64) void {
+        assert(headers.command == .do_view_change);
+        assert(headers.array.len > 0);
+        headers.array.appendAssumeCapacity(Headers.dvc_fault(op));
     }
 };
