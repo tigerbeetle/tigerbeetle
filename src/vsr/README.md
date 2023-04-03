@@ -20,7 +20,6 @@
 |    `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                     |
 |    `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                             |
 |            `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                     |
-|       `nack_prepare` |  backup |      primary | [Repair WAL](#protocol-repair-wal)                             |
 |           `eviction` | primary |       client | [Client](#protocol-client)                                     |
 
 ### Recovery
@@ -176,8 +175,6 @@ During repair, missing/damaged prepares are requested & repaired chronologically
 In response to a `request_prepare`:
 
 - Reply the `command=prepare` with the requested prepare, if available and valid.
-- Reply `command=nack_prepare` if the request origin is the primary of the ongoing view-change and we never received the prepare.
-  (If the primary collects a _nack quorum_, it truncates uncommitted messages from the logs, improving availability).
 - Otherwise do not reply. (e.g. the corresponding slot in the WAL is corrupt)
 
 Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf), we do not nack corrupt entries, since they _might_ be the prepare being requested.

@@ -257,15 +257,9 @@ pub fn ReplicaType(
         /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
         do_view_change_from_all_replicas: QuorumMessages = quorum_messages_null,
 
-        /// Unique nack_prepare messages for the same view from OTHER replicas (excluding ourself).
-        nack_prepare_from_other_replicas: QuorumCounter = quorum_counter_null,
-
         /// Whether the primary has received a quorum of do_view_change messages for the view change:
         /// Determines whether the primary may effect repairs according to the CTRL protocol.
         do_view_change_quorum: bool = false,
-
-        /// Whether the primary is expecting to receive a nack_prepare and for which op:
-        nack_prepare_op: ?u64 = null,
 
         /// The number of ticks before a primary or backup broadcasts a ping to other replicas.
         /// TODO Explain why we need this (MessageBus handshaking, leapfrogging faulty replicas,
@@ -920,7 +914,6 @@ pub fn ReplicaType(
                 .request_headers => self.on_request_headers(message),
                 .request_block => unreachable, // TODO
                 .headers => self.on_headers(message),
-                .nack_prepare => self.on_nack_prepare(message),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction, .reply => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
@@ -1318,16 +1311,6 @@ pub fn ReplicaType(
 
             if (self.repair_header(message.header)) {
                 assert(self.journal.has_dirty(message.header));
-
-                if (self.nack_prepare_op) |nack_prepare_op| {
-                    if (nack_prepare_op == message.header.op) {
-                        log.debug("{}: on_repair: repairing uncommitted op={}", .{
-                            self.replica,
-                            message.header.op,
-                        });
-                        self.reset_quorum_nack_prepare();
-                    }
-                }
 
                 log.debug("{}: on_repair: repairing journal", .{self.replica});
                 self.write_prepare(message, .repair);
@@ -1750,43 +1733,6 @@ pub fn ReplicaType(
                     }
                 }
             }
-
-            // Protocol-Aware Recovery's CTRL protocol only runs during the view change, when the
-            // new primary needs to repair its own WAL before starting the new view.
-            //
-            // This branch is only where the backup doesn't have the prepare and could possibly
-            // send a nack as part of the CTRL protocol. Nacks only get sent during a view change
-            // to help the new primary trim uncommitted ops that couldn't otherwise be repaired.
-            // Without doing this, the cluster would become permanently unavailable. So backups
-            // shouldn't respond to the `request_prepare` if the new view has already started,
-            // they should also be in view change status, waiting for the new primary to start
-            // the view.
-            if (self.status == .view_change) {
-                assert(message.header.replica == self.primary_index(self.view));
-
-                if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
-                    assert(self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot));
-                }
-
-                if (self.journal.prepare_inhabited[slot.index]) {
-                    assert(self.journal.prepare_checksums[slot.index] != checksum);
-                }
-
-                log.debug("{}: on_request_prepare: op={} checksum={} nacking", .{
-                    self.replica,
-                    op,
-                    checksum,
-                });
-
-                self.send_header_to_replica(message.header.replica, .{
-                    .command = .nack_prepare,
-                    .context = checksum,
-                    .cluster = self.cluster,
-                    .replica = self.replica,
-                    .view = self.view,
-                    .op = op,
-                });
-            }
         }
 
         fn on_request_prepare_read(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
@@ -1847,104 +1793,6 @@ pub fn ReplicaType(
             response.header.set_checksum();
 
             self.send_message_to_replica(message.header.replica, response);
-        }
-
-        fn on_nack_prepare(self: *Self, message: *Message) void {
-            assert(message.header.command == .nack_prepare);
-            if (self.ignore_repair_message(message)) return;
-
-            assert(self.status == .view_change);
-            assert(message.header.view == self.view);
-            assert(message.header.replica != self.replica);
-            assert(self.primary_index(self.view) == self.replica);
-            assert(self.do_view_change_quorum);
-            assert(self.repairs_allowed());
-
-            if (self.nack_prepare_op == null) {
-                log.debug("{}: on_nack_prepare: ignoring (no longer expected)", .{self.replica});
-                return;
-            }
-
-            const op = self.nack_prepare_op.?;
-            const checksum = self.journal.header_with_op(op).?.checksum;
-            const slot = self.journal.slot_with_op(op).?;
-            assert(op <= self.op);
-
-            if (message.header.op != op) {
-                log.debug("{}: on_nack_prepare: ignoring (repairing another op)", .{self.replica});
-                return;
-            }
-
-            if (message.header.context != checksum) {
-                log.debug("{}: on_nack_prepare: ignoring (repairing another checksum)", .{
-                    self.replica,
-                });
-                return;
-            }
-
-            // backups may not send a `nack_prepare` for a different checksum:
-            // However our op may change in between sending the request and getting the nack.
-            assert(message.header.op == op);
-            assert(message.header.context == checksum);
-
-            // Here are what our nack quorums look like, if we know our op is faulty:
-            // These are for various replication quorums under Flexible Paxos.
-            // We need to have enough nacks to guarantee that `quorum_replication` was not reached,
-            // because if the replication quorum was reached, then it may have been committed.
-            // We add `1` in each case because our op is faulty and may have been counted.
-            //
-            // replica_count=2 - quorum_replication=2 + 1 = 0 + 1 = 1 nacks required
-            // replica_count=3 - quorum_replication=2 + 1 = 1 + 1 = 2 nacks required
-            // replica_count=4 - quorum_replication=2 + 1 = 2 + 1 = 3 nacks required
-            // replica_count=4 - quorum_replication=3 + 1 = 1 + 1 = 2 nacks required
-            // replica_count=5 - quorum_replication=2 + 1 = 3 + 1 = 4 nacks required
-            // replica_count=5 - quorum_replication=3 + 1 = 2 + 1 = 3 nacks required
-            //
-            // Otherwise, if we know we do not have the op, then we can exclude ourselves.
-            assert(!self.solo());
-
-            const threshold = if (self.journal.faulty.bit(slot))
-                self.quorum_nack_prepare
-            else
-                self.quorum_nack_prepare - 1;
-
-            if (threshold == 0) {
-                assert(self.replica_count == 2);
-                assert(!self.journal.faulty.bit(slot));
-
-                // This is a special case for a cluster-of-two, handled in `repair_prepare()`.
-                log.debug("{}: on_nack_prepare: ignoring (cluster-of-two, not faulty)", .{
-                    self.replica,
-                });
-                return;
-            }
-
-            log.debug("{}: on_nack_prepare: quorum_replication={} threshold={} op={}", .{
-                self.replica,
-                self.quorum_replication,
-                threshold,
-                op,
-            });
-
-            // We should never expect to receive a nack from ourselves:
-            // Detect if we ever set `threshold` to `quorum_view_change` for a cluster-of-two again.
-            assert(threshold < self.replica_count);
-
-            // Wait until we have `threshold` messages for quorum:
-            const count = self.count_message_and_receive_quorum_exactly_once(
-                &self.nack_prepare_from_other_replicas,
-                message,
-                threshold,
-            ) orelse return;
-
-            assert(count == threshold);
-            assert(!self.nack_prepare_from_other_replicas.isSet(self.replica));
-            assert(self.op - op < constants.pipeline_prepare_queue_max);
-            log.debug("{}: on_nack_prepare: quorum received op={}", .{ self.replica, op });
-
-            self.primary_discard_uncommitted_ops_from(op, checksum);
-            self.reset_quorum_nack_prepare();
-            self.repair();
         }
 
         fn on_headers(self: *Self, message: *const Message) void {
@@ -2300,15 +2148,6 @@ pub fn ReplicaType(
 
                     assert(self.status == .normal);
                     assert(self.primary());
-                },
-                .nack_prepare => {
-                    assert(!self.solo());
-                    if (self.replica_count == 2) assert(threshold >= 1);
-
-                    assert(self.status == .view_change);
-                    assert(self.primary_index(self.view) == self.replica);
-                    assert(message.header.replica != self.replica);
-                    assert(message.header.op == self.nack_prepare_op.?);
                 },
                 else => unreachable,
             }
@@ -3334,10 +3173,9 @@ pub fn ReplicaType(
             assert(message.header.command == .request_start_view or
                 message.header.command == .request_headers or
                 message.header.command == .request_prepare or
-                message.header.command == .headers or
-                message.header.command == .nack_prepare);
+                message.header.command == .headers);
             switch (message.header.command) {
-                .headers, .nack_prepare => assert(message.header.replica < self.replica_count),
+                .headers => assert(message.header.replica < self.replica_count),
                 else => {},
             }
 
@@ -3382,7 +3220,7 @@ pub fn ReplicaType(
             if (self.standby()) {
                 switch (message.header.command) {
                     .headers => {},
-                    .request_start_view, .request_headers, .request_prepare, .nack_prepare => {
+                    .request_start_view, .request_headers, .request_prepare => {
                         log.warn("{}: on_{s}: misdirected message (standby)", .{ self.replica, command });
                         return true;
                     },
@@ -3393,18 +3231,13 @@ pub fn ReplicaType(
             if (self.primary_index(self.view) != self.replica) {
                 switch (message.header.command) {
                     // Only the primary may receive these messages:
-                    .request_start_view, .nack_prepare => {
+                    .request_start_view => {
                         log.warn("{}: on_{s}: misdirected message (backup)", .{ self.replica, command });
                         return true;
                     },
                     .request_prepare, .headers, .request_headers => {},
                     else => unreachable,
                 }
-            }
-
-            if (message.header.command == .nack_prepare and self.status == .normal) {
-                log.debug("{}: on_{s}: ignoring (view started)", .{ self.replica, command });
-                return true;
             }
             return false;
         }
@@ -3428,7 +3261,7 @@ pub fn ReplicaType(
                         return true;
                     }
                 },
-                .headers, .nack_prepare => {
+                .headers => {
                     if (self.primary_index(self.view) != self.replica) {
                         log.debug("{}: on_{s}: ignoring (view change, received by backup)", .{
                             self.replica,
@@ -4683,20 +4516,9 @@ pub fn ReplicaType(
             while (op <= self.op) : (op += 1) {
                 const slot = self.journal.slot_with_op(op).?;
                 if (self.journal.dirty.bit(slot)) {
-                    // This is an uncommitted op — if we are the primary in `view_change` status,
-                    // then we will `request_prepare` from the cluster, set `nack_prepare_op`,
-                    // and stop repairing any further prepares:
-                    // This will also rebroadcast any `request_prepare` every `repair_timeout` tick.
+                    // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
+                    // Continue to request prepares until our budget is depleted.
                     if (self.repair_prepare(op)) {
-                        if (self.nack_prepare_op) |nack_prepare_op| {
-                            assert(self.status == .view_change);
-                            assert(self.primary_index(self.view) == self.replica);
-                            assert(nack_prepare_op >= op);
-                            assert(nack_prepare_op > self.commit_max);
-                            return;
-                        }
-
-                        // Otherwise, continue to request prepares until our budget is depleted.
                         budget -= 1;
                         if (budget == 0) {
                             log.debug("{}: repair_prepares: request budget used", .{self.replica});
@@ -4742,9 +4564,8 @@ pub fn ReplicaType(
 
         /// During a view change, for uncommitted ops, which are few, we optimize for latency:
         ///
-        /// * request a `prepare` or `nack_prepare` from all backups in parallel,
-        /// * repair as soon as we get a `prepare`, or
-        /// * discard as soon as we get a majority of `nack_prepare` messages for the same checksum.
+        /// * request a `prepare` from all backups in parallel,
+        /// * repair as soon as we get a `prepare`
         ///
         /// For committed ops, which represent the bulk of ops, we optimize for throughput:
         ///
@@ -4834,29 +4655,6 @@ pub fn ReplicaType(
                     },
                 );
 
-                if (self.replica_count == 2 and !self.journal.faulty.bit(slot)) {
-                    // This is required to avoid a liveness issue for a cluster-of-two where a new
-                    // primary learns of an op during a view change but where the op is faulty on
-                    // the old primary. We must immediately roll back the op since it could not have
-                    // been committed by the old primary if we know we do not have it, and because
-                    // the old primary cannot send a nack_prepare for its faulty copy.
-                    // For this to be correct, the recovery protocol must set all headers as faulty,
-                    // not only as dirty.
-                    self.primary_discard_uncommitted_ops_from(op, checksum);
-                    return false;
-                }
-
-                // Initialize the `nack_prepare` quorum counter for this uncommitted op:
-                if (self.nack_prepare_op) |nack_prepare_op| {
-                    // Prepares are repaired chronologically. If we already are already waiting for
-                    // a nack, this must be a retried repair for that same op.
-                    assert(nack_prepare_op == op);
-                } else {
-                    assert(self.nack_prepare_from_other_replicas.count() == 0);
-                    self.nack_prepare_op = op;
-                }
-
-                assert(self.nack_prepare_op.? == op);
                 assert(request_prepare.context == checksum);
                 self.send_header_to_other_replicas(request_prepare);
             } else {
@@ -4870,9 +4668,6 @@ pub fn ReplicaType(
                     reason,
                 });
 
-                // `repair_prepare()` is called in chronological order, and stops when it
-                // encounters an op awaiting nacks.
-                assert(self.nack_prepare_op == null or self.nack_prepare_op.? > op);
                 assert(request_prepare.context == checksum);
                 self.send_header_to_replica(self.choose_any_other_replica(), request_prepare);
             }
@@ -5031,12 +4826,6 @@ pub fn ReplicaType(
         fn reset_quorum_do_view_change(self: *Self) void {
             self.reset_quorum_messages(&self.do_view_change_from_all_replicas, .do_view_change);
             self.do_view_change_quorum = false;
-        }
-
-        fn reset_quorum_nack_prepare(self: *Self) void {
-            assert(self.standby() or !self.nack_prepare_from_other_replicas.isSet(self.replica));
-            self.reset_quorum_counter(&self.nack_prepare_from_other_replicas);
-            self.nack_prepare_op = null;
         }
 
         fn reset_quorum_start_view_change(self: *Self) void {
@@ -5376,14 +5165,6 @@ pub fn ReplicaType(
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
-                },
-                .nack_prepare => {
-                    assert(!self.standby());
-                    assert(self.status == .view_change);
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                    assert(self.primary_index(self.view) == replica);
                 },
                 .eviction => {
                     assert(!self.standby());
@@ -5860,7 +5641,6 @@ pub fn ReplicaType(
             assert(self.commit_max <= self.op);
             assert(self.journal.dirty.count == 0);
             assert(self.journal.faulty.count == 0);
-            assert(self.nack_prepare_op == null);
             assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
             {
@@ -6119,10 +5899,8 @@ pub fn ReplicaType(
             self.heartbeat_timestamp = 0;
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
-            self.reset_quorum_nack_prepare();
 
             assert(self.do_view_change_quorum == false);
-            assert(self.nack_prepare_op == null);
         }
 
         /// A replica i that notices the need for a view change advances its view, sets its status
@@ -6258,10 +6036,8 @@ pub fn ReplicaType(
             self.primary_abdicating = false;
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
-            self.reset_quorum_nack_prepare();
 
             assert(self.do_view_change_quorum == false);
-            assert(self.nack_prepare_op == null);
 
             self.send_do_view_change();
         }
@@ -6897,6 +6673,9 @@ const DVCQuorum = struct {
                 });
             }
 
+            // This is an abbreviated version of Protocol-Aware Recovery's CTRL protocol.
+            // When we can confirm that an op is definitely uncommitted, truncate it to
+            // improve availability.
             if (nacks >= options.quorum_nack_prepare) {
                 // Never nack op_head_min (aka commit_max).
                 assert(op > op_head_min);

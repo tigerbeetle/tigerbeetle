@@ -113,7 +113,6 @@ pub const Command = enum(u8) {
     request_headers,
     request_prepare,
     headers,
-    nack_prepare,
 
     eviction,
 
@@ -227,7 +226,6 @@ pub const Header = extern struct {
     ///   in the message body which it has definitely not prepared (i.e. "missing").
     ///   The corresponding header may be an actual prepare header, or it may be a "blank" header.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
-    /// * A `nack_prepare` sets this to the checksum of the prepare being nacked.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -353,7 +351,6 @@ pub const Header = extern struct {
             .request_prepare => self.invalid_request_prepare(),
             .request_block => null, // TODO
             .headers => self.invalid_headers(),
-            .nack_prepare => self.invalid_nack_prepare(),
             .eviction => self.invalid_eviction(),
             .block => null, // TODO
         };
@@ -648,19 +645,6 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_nack_prepare(self: *const Header) ?[]const u8 {
-        assert(self.command == .nack_prepare);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -1078,6 +1062,8 @@ pub fn quorums(replica_count: u8) struct {
     assert(quorum_view_change >= @divFloor(replica_count, 2) + 1);
     assert(quorum_view_change + quorum_replication > replica_count);
 
+    // We need to have enough nacks to guarantee that `quorum_replication` was not reached,
+    // because if the replication quorum was reached, then it may have been committed.
     const quorum_nack_prepare = replica_count - quorum_replication + 1;
     assert(quorum_nack_prepare + quorum_replication > replica_count);
 
