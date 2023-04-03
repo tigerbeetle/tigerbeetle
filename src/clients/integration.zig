@@ -1,3 +1,13 @@
+//
+// This script wraps ./run_with_tb.zig with setup necessary for the
+// sample code in src/clients/$lang/samples/$sample. It builds and
+// runs one sample, failing if the sample fails. It could have been a
+// bash script except for that it works on Windows as well.
+//
+// Example: (run from the repo root)
+//   ./scripts/build.sh client_integration -- --language java --sample basic
+//
+
 const std = @import("std");
 const builtin = @import("builtin");
 
@@ -118,8 +128,18 @@ fn prepare_go_sample_integration_test(
     sample_dir: []const u8,
     cmds: *std.ArrayList([]const u8),
 ) !void {
-    try std.os.chdir(sample_dir);
+    // Make sure go_client is built, though not necessarily up-to-date.
     const root = try git_root(arena);
+    try std.os.chdir(root);
+    if (!file_or_directory_exists(arena, "src/clients/go/pkg/native")) {
+        try run(arena, &[_][]const u8{
+            try script_filename(arena, &[_][]const u8{ "scripts", "build" }),
+            "go_client",
+        });
+    }
+
+    // Now set up directory for Go project.
+    try std.os.chdir(sample_dir);
 
     const go_mod = try std.fs.cwd().openFile(
         "go.mod",

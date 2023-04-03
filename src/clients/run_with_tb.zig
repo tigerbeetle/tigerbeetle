@@ -1,10 +1,13 @@
 //
-// This script wraps additional commands around a TigerBeetle server
-// running against formatted data in a random temporary directory.
+// This script spins up a TigerBeetle server on the first available
+// TCP port and references a brand new data file. Then it runs the
+// command passed to it and shuts down the server. It cleans up all
+// resources unless told not to. It fails if the command passed to it
+// fails. It could have been a bash script except for that it works on
+// Windows as well.
 //
-// Ex:
-//   zig build-exe run_with_tb.zig
-//   ./run_with_tb bash -c "npm install tigerbeetle-node && node myscript.js"
+// Example: (run from the repo root)
+//   ./scripts/build.sh run_with_tb -- node myscript.js
 //
 
 const std = @import("std");
