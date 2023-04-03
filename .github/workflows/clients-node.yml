@@ -25,18 +25,6 @@ jobs:
           name: node-binaries
           path: src/clients/node/tigerbeetle-node-*.tgz
 
-      # Integration tests depend on dist rather than the .tgz version
-      # since these files refer to a local directory. There's not a
-      # way to refer to a .tgz file in a package.json file with a
-      # wildcard in it. If we hardcoded a version in the .tgz name of
-      # the package.json dependency then it would break every time we
-      # bumped the version.
-      - name: Upload dist
-        uses: actions/upload-artifact@v3
-        with:
-          name: node-dist
-          path: src/clients/node/dist
-
   test_install:
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
@@ -95,6 +83,10 @@ jobs:
         os: [macos-latest, ubuntu-latest]
         sample: [basic, two-phase]
 
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
@@ -102,12 +94,11 @@ jobs:
       - name: Download dist
         uses: actions/download-artifact@v3
         with:
-          name: node-dist
-          path: src/clients/node/dist
+          name: node-binaries
+          path: src/clients/node
 
-      - run: cd ../../../ && ./scripts/install.sh
+      # Grab Zig
+      - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
-      # Set up sample dependencies
-      - run: cd samples/${{ matrix.sample }} && npm install
-
-      - run: cd ../../../ && R_CWD=$(pwd)/src/clients/node/samples/${{ matrix.sample }} ./scripts/build.sh run_with_tb -- node main.js
+      - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
+      - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node --sample ${{ matrix.sample }}
