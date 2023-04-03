@@ -1413,6 +1413,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.verify_manifest_blocks_are_acquired_in_free_set();
 
                 // TODO Repair any impaired copies before we continue.
+                context.copy = 0;
                 superblock.read_client_table(context);
             } else if (copy + 1 == constants.superblock_copies) {
                 @panic("superblock free set lost");
