@@ -2256,7 +2256,8 @@ pub fn ReplicaType(
                     self.message_bus.unref(m);
                     self.do_view_change_from_all_replicas[message.header.replica] = message.ref();
                 } else if (m.header.timestamp != message.header.timestamp or
-                    m.header.commit != message.header.commit)
+                    m.header.commit != message.header.commit or
+                    m.header.context != message.header.context)
                 {
                     log.debug("{}: on_{s}: ignoring (older message replica={})", .{
                         self.replica,
@@ -3092,6 +3093,29 @@ pub fn ReplicaType(
             }
             self.view_headers.verify();
 
+            const BitSet = std.bit_set.IntegerBitSet(128);
+            assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
+
+            var missing = BitSet.initEmpty();
+            if (command == .do_view_change) {
+                for (self.view_headers.array.constSlice()) |*header, i| {
+                    const slot = self.journal.slot_for_op(header.op);
+                    if (self.journal.header_for_op(header.op)) |h| {
+                        if (h.checksum == header.checksum) {
+                            if (self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot)) {
+                                missing.set(i);
+                            }
+                        } else {
+                            missing.set(i);
+                        }
+                    } else {
+                        if (!self.journal.faulty.bit(slot)) {
+                            missing.set(i);
+                        }
+                    }
+                }
+            }
+
             message.header.* = .{
                 .size = @intCast(u32, @sizeOf(Header) * (1 + self.view_headers.array.len)),
                 .command = command,
@@ -3111,6 +3135,8 @@ pub fn ReplicaType(
                 // For command=do_view_change, the new primary uses this op to trust extra headers
                 // from non-canonical DVCs.
                 .commit = self.commit_min,
+                // DVC: Signal which headers correspond to definitely not-prepared messages.
+                .context = missing.mask,
             };
 
             stdx.copy_disjoint(
@@ -5803,20 +5829,19 @@ pub fn ReplicaType(
                         dvc.header.timestamp, // The `op_checkpoint` of the replica.
                     },
                 );
-            }
 
-            const dvcs_canonical = DVCQuorum.dvcs_canonical(self.do_view_change_from_all_replicas);
-            for (dvcs_canonical.constSlice()) |dvc| {
                 const dvc_headers = message_body_as_view_headers(dvc);
-                for (dvc_headers.slice) |*header| {
+                const dvc_missing = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                for (dvc_headers.slice) |*header, i| {
                     log.debug(
-                        "{}: {s}: canonical: replica={} op={} checksum={}",
+                        "{}: {s}: dvc: header: replica={} op={} checksum={} missing={}",
                         .{
                             self.replica,
                             context,
                             dvc.header.replica,
                             header.op,
                             header.checksum,
+                            dvc_missing.isSet(i),
                         },
                     );
                 }
@@ -6173,18 +6198,12 @@ pub fn ReplicaType(
                     if (self.journal.header_with_op(op)) |header| {
                         self.view_headers.append(header);
                     } else {
-                        if (self.journal.faulty.bit(self.journal.slot_for_op(op))) {
-                            self.view_headers.append_fault(op);
-                        } else {
-                            self.view_headers.append_blank(op);
-                        }
+                        self.view_headers.append_blank(op);
                     }
                 }
+
                 assert(op <= self.commit_max);
                 assert(op == self.commit_max or self.commit_max > self.op);
-                // We could safely include any additional chained headers.
-                // However, that can make view-change bugs harder to trigger.
-
                 // If we only recently checkpointed, it is possible that all of the ops in the new
                 // WAL wrap are uncommitted. If so, and the new primary can discern this, it may
                 // start the view despite itself being one checkpoint behind us, by truncating all
@@ -6541,36 +6560,51 @@ pub fn ReplicaType(
 ///   - Canonical headers may be committed or uncommitted.
 ///
 ///
-/// Invariants:
+/// Invariants (for each DVC message):
 ///
-/// For each DVC message:
-///
-/// - Each header in the DVC is one of:
-///   - "valid": The corresponding header is known. The actual message may be:
-///     - prepared (and WAL is valid), or
-///     - prepared (but WAL is corrupt), or
-///     - never prepared.
-///   - "blank": The replica never prepared the corresponding op, and does not have the header.
-///   - "fault": The replica may have prepared the corresponding op, but it does not know the
-///     header and the entry is corrupt.
 /// - The "valid" headers all belong to the same hash chain.
 ///   - Reason: If multiple replicas with the same canonical log_view disagree about an op, the new
 ///     primary could not determine which is correct.
-///   - The DVC-sender is responsible for ensuring blanks/faults do not conceal chain breaks.
+///   - The DVC-sender is responsible for ensuring blanks do not conceal chain breaks.
 ///   - For example,
 ///     - a DVC of 6a,7_,8a is valid (6a/8a belong to the same chain).
 ///     - a DVC of 6b,7_,8a is invalid (the gap at 7 conceal a chain break).
 ///     - a DVC of 6b,7b,8a is invalid (7b/8a is a chain break)..
 /// - All pipeline headers present on the replica must be included in the DVC headers.
 ///   - When `replica.commit_max ≤ replica.op`,
-///     the DVC must include a valid/blank/fault header for every op in that range.
-///   - When `replica.commit_max > replica.op`, only a single header (`replica.op`) is included.
-///   - The DVC will need a valid header corresponding to its `commit_max` to complete, since the
-///     entire pipeline may be truncated, and the new primary still needs a header for its head op.
-/// - The header corresponding to `replica.op` is always "valid", never a "blank"/"fault".
+///     the DVC must include a valid/blank header for every op in that range.
+///   - When `replica.commit_max > replica.op`, only a single header is included
+///     (`replica.commit_max` if available in the SV, otherwise `replica.op`).
+///   - (The DVC will need a valid header corresponding to its `commit_max` to complete, since the
+///     entire pipeline may be truncated, and the new primary still needs a header for its head op.)
+///
+/// Each header in the DVC body is one of:
+///
+/// | Blank | Missing |  Nack | Description
+/// |   yes |     yes |   yes | No header, and replica did not prepare this op during its last view.
+/// |   yes |      no |    no | No header, but the replica may have prepared this op during its last
+/// |       |         |       | view. Since the replica does not know the header, it cannot nack.
+/// |    no |     yes |   yes | Valid header, but the replica has never prepared the message.
+/// |    no |      no | maybe | Valid header, and the replica has prepared the message.
+/// |       |         |       | Counts as a nack iff the header does not match the canonical header
+/// |       |         |       | for this op.
+///
+/// Where:
+///
+/// - Blank:
+///   - Yes: Send a bogus header that indicates that the sender does not know the actual
+///     command=prepare header for that op.
+///   - No: Send the actual header. The corresponding header may be corrupt, prepared, or missing.
+/// - Missing:
+///   - Yes: The corresponding header in the message body was definitely not
+///     prepared in the latest view. (The corresponding header may be blank or ¬blank).
+///   - No: The corresponding header in the message body was either prepared during the latest view,
+///     or _might_ have been prepared, but due to WAL corruption we can't tell.
+/// - Nack: based on Blank/Missing, whether the new primary counts it as a nack.
+/// - The header corresponding to the sender's `replica.op` is always "valid", never a "blank".
 ///   (Otherwise the replica would be in status=recovering_head and unable to participate).
 ///
-/// Across all DVCs in the quorum:
+/// Invariants (across all DVCs in the quorum):
 ///
 /// - The valid headers of every DVC with the same log_view must not conflict.
 ///   - In other words:
@@ -6638,8 +6672,15 @@ const DVCQuorum = struct {
 
         // Ignore the result, init() verifies the headers.
         const headers = message_body_as_view_headers(message);
+        assert(headers.slice.len >= 1);
+        assert(headers.slice.len <= constants.pipeline_prepare_queue_max + 1);
         assert(headers.slice[0].op == message.header.op);
         assert(headers.slice[0].view <= log_view);
+
+        const headers_missing = message.header.context;
+        comptime assert(@TypeOf(headers_missing) == u128);
+        assert(@popCount(u128, headers_missing) <= headers.slice.len);
+        assert(@clz(u128, headers_missing) + headers.slice.len >= @bitSizeOf(u128));
     }
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
@@ -6802,12 +6843,12 @@ const DVCQuorum = struct {
             assert(options.quorum_nack_prepare == options.quorum_view_change);
         }
 
-        const dvcs_total = DVCQuorum.dvcs_all(dvc_quorum).len;
-        if (dvcs_total < options.quorum_view_change) return .awaiting_quorum;
+        const dvcs_all_ = DVCQuorum.dvcs_all(dvc_quorum);
+        if (dvcs_all_.len < options.quorum_view_change) return .awaiting_quorum;
 
-        const dvcs = DVCQuorum.dvcs_canonical(dvc_quorum);
-        assert(dvcs.len > 0);
-        assert(dvcs.len <= dvcs_total);
+        const dvcs_canonical_ = DVCQuorum.dvcs_canonical(dvc_quorum);
+        assert(dvcs_canonical_.len > 0);
+        assert(dvcs_canonical_.len <= dvcs_all_.len);
 
         const op_head_max = DVCQuorum.op_max_canonical(dvc_quorum);
         const op_head_min = DVCQuorum.commit_max(dvc_quorum);
@@ -6815,10 +6856,22 @@ const DVCQuorum = struct {
         // Iterate the highest definitely committed op and all maybe-uncommitted ops.
         var op = op_head_min;
         const op_head = while (op <= op_head_max) : (op += 1) {
-            // Replicas with non-canonical log-views implicitly nack all uncommitted ops.
-            var nacks: usize = dvcs_total - dvcs.len;
+            const found = for (dvcs_canonical_.constSlice()) |dvc| {
+                // This DVC is canonical, but lagging far behind.
+                if (dvc.header.op < op) continue;
 
-            const found = for (dvcs.constSlice()) |dvc| {
+                const headers = message_body_as_view_headers(dvc);
+                const header_index = dvc.header.op - op;
+                assert(header_index <= headers.slice.len);
+
+                const header = &headers.slice[header_index];
+                assert(header.op == op);
+
+                if (vsr.Headers.dvc_header_type(header) == .valid) break header;
+            } else null;
+
+            var nacks: usize = 0;
+            for (dvcs_all_.constSlice()) |dvc| {
                 if (dvc.header.op < op) {
                     nacks += 1;
                     continue;
@@ -6827,32 +6880,36 @@ const DVCQuorum = struct {
                 const headers = message_body_as_view_headers(dvc);
                 const header_index = dvc.header.op - op;
                 if (header_index >= headers.slice.len) {
-                    // This op is definitely committed by the cluster.
-                } else {
-                    const header = &headers.slice[header_index];
-                    assert(header.op == op);
-
-                    switch (vsr.Headers.dvc_header_type(header)) {
-                        .blank => nacks += 1,
-                        .fault => {},
-                        .valid => break true,
-                    }
+                    nacks += 1;
+                    continue;
                 }
-            } else false;
 
-            if (found) {
+                const header = &headers.slice[header_index];
+                assert(header.op == op);
+
+                const dvc_missing = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                nacks += @boolToInt(dvc_missing.isSet(header_index) or
+                    switch (vsr.Headers.dvc_header_type(header)) {
+                    // The replica's prepare is available, but for a different header.
+                    .valid => found != null and found.?.checksum != header.checksum,
+                    // The replica's prepare is faulty, with an unknown header.
+                    .blank => false,
+                });
+            }
+
+            if (nacks >= options.quorum_nack_prepare) {
+                // Never nack op_head_min (aka commit_max).
+                assert(op > op_head_min);
+                break op - 1;
+            }
+
+            if (found) |_| {
                 // This op is eligible to be the view's head.
             } else {
-                if (nacks >= options.quorum_nack_prepare) {
-                    // Never nack op_head_min (aka commit_max).
-                    assert(op > op_head_min);
-                    break op - 1;
+                if (dvcs_all_.len < options.replica_count) {
+                    return .awaiting_repair;
                 } else {
-                    if (dvcs_total < options.replica_count) {
-                        return .awaiting_repair;
-                    } else {
-                        return .complete_invalid;
-                    }
+                    return .complete_invalid;
                 }
             }
         } else op_head_max;
@@ -6860,7 +6917,7 @@ const DVCQuorum = struct {
         assert(op_head <= op_head_max);
 
         return .{ .complete_valid = HeaderIterator{
-            .dvcs = dvcs,
+            .dvcs = dvcs_canonical_,
             .op_max = op_head,
             .op_min = op_head_min,
         } };
@@ -6896,16 +6953,12 @@ const DVCQuorum = struct {
                 if (dvc_header_index >= dvc_headers.slice.len) continue;
 
                 const dvc_header = &dvc_headers.slice[dvc_header_index];
-                switch (vsr.Headers.dvc_header_type(dvc_header)) {
-                    .blank => continue,
-                    .fault => continue,
-                    .valid => {
-                        if (header) |h| {
-                            assert(h.checksum == dvc_header.checksum);
-                        } else {
-                            header = dvc_header;
-                        }
-                    },
+                if (vsr.Headers.dvc_header_type(dvc_header) == .valid) {
+                    if (header) |h| {
+                        assert(h.checksum == dvc_header.checksum);
+                    } else {
+                        header = dvc_header;
+                    }
                 }
             }
 

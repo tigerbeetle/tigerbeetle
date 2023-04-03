@@ -223,6 +223,9 @@ pub const Header = extern struct {
     /// * A `prepare` sets this to the checksum of the client's request.
     /// * A `prepare_ok` sets this to the checksum of the prepare being acked.
     /// * A `commit` sets this to the checksum of the latest committed prepare.
+    /// * A `do_view_change` sets this to a bitset, with set bits indicating headers
+    ///   in the message body which it has definitely not prepared (i.e. "missing").
+    ///   The corresponding header may be an actual prepare header, or it may be a "blank" header.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `nack_prepare` sets this to the checksum of the prepare being nacked.
     ///
@@ -581,7 +584,6 @@ pub const Header = extern struct {
         assert(self.command == .do_view_change);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
@@ -1127,17 +1129,8 @@ pub const Headers = struct {
         });
     }
 
-    fn dvc_fault(op: u64) Header {
-        return std.mem.zeroInit(Header, .{
-            .command = .reserved,
-            .op = op,
-            .checksum = 1,
-        });
-    }
-
-    pub fn dvc_header_type(header: *const Header) enum { blank, fault, valid } {
+    pub fn dvc_header_type(header: *const Header) enum { blank, valid } {
         if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
-        if (std.meta.eql(header.*, Headers.dvc_fault(header.op))) return .fault;
 
         assert(header.command == .prepare);
         if (constants.verify) assert(header.valid_checksum());
@@ -1193,7 +1186,7 @@ const ViewChangeHeadersSlice = struct {
             }
 
             switch (Headers.dvc_header_type(header)) {
-                .blank, .fault => {
+                .blank => {
                     assert(headers.command == .do_view_change);
                     continue; // Don't update "child".
                 },
@@ -1233,7 +1226,6 @@ const ViewChangeHeadersSlice = struct {
             for (headers.slice) |*header, i| {
                 switch (Headers.dvc_header_type(header)) {
                     .blank => assert(i > 0),
-                    .fault => assert(i > 0),
                     .valid => oldest = i,
                 }
             }
@@ -1247,10 +1239,8 @@ const ViewChangeHeadersSlice = struct {
         if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
 
         for (headers.slice) |*header| {
-            switch (Headers.dvc_header_type(header)) {
-                .blank => {},
-                .fault => {},
-                .valid => if (header.op == op) return .{ .min = header.view, .max = header.view },
+            if (Headers.dvc_header_type(header) == .valid and header.op == op) {
+                return .{ .min = header.view, .max = header.view };
             }
         }
 
@@ -1279,7 +1269,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .timestamp = 11,
         }),
         Headers.dvc_blank(8),
-        Headers.dvc_fault(7),
+        Headers.dvc_blank(7),
         std.mem.zeroInit(Header, .{
             .checksum = undefined,
             .command = .prepare,
@@ -1349,21 +1339,26 @@ const ViewChangeHeadersArray = struct {
         // checkpoint, so the start_view has a full suffix of headers.
         assert(headers.array.get(0).op >= constants.journal_slot_count);
         assert(headers.array.len >= constants.view_change_headers_suffix_max);
+
+        const commit_max = std.math.max(
+            headers.array.get(0).op -| constants.pipeline_prepare_queue_max,
+            headers.array.get(0).commit,
+        );
+        const commit_max_header = headers.array.get(headers.array.get(0).op - commit_max);
+        assert(commit_max_header.command == .prepare);
+        assert(commit_max_header.op == commit_max);
+
+        // SVs may include more headers than DVC:
+        // - Remove the SV "hook" checkpoint trigger(s), since they would create gaps in the ops.
+        // - Remove any SV headers that don't fit in the DVC's body.
+        //   (SV headers are determined by view_change_headers_suffix_max,
+        //   but DVC headers must stop at commit_max.)
         headers.command = .do_view_change;
+        headers.array.len = std.math.min(
+            headers.array.len,
+            constants.pipeline_prepare_queue_max + 1,
+        );
 
-        // Remove the "hook" checkpoint trigger(s), since they would create gaps in the ops.
-        // (There are at most 2 hooks).
-        var removed: usize = 0;
-        while (headers.array.get(headers.array.len - 2).op !=
-            headers.array.get(headers.array.len - 1).op + 1) : (removed += 1)
-        {
-            headers.array.len -= 1;
-        }
-
-        assert(removed <= 2);
-        // The remaining headers may be larger than the suffix because the latest hook may chain
-        // with the suffix, so we can keep it.
-        assert(headers.array.len >= constants.view_change_headers_suffix_max);
         headers.verify();
     }
 
@@ -1388,11 +1383,5 @@ const ViewChangeHeadersArray = struct {
         assert(headers.command == .do_view_change);
         assert(headers.array.len > 0);
         headers.array.appendAssumeCapacity(Headers.dvc_blank(op));
-    }
-
-    pub fn append_fault(headers: *ViewChangeHeadersArray, op: u64) void {
-        assert(headers.command == .do_view_change);
-        assert(headers.array.len > 0);
-        headers.array.appendAssumeCapacity(Headers.dvc_fault(op));
     }
 };
