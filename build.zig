@@ -465,11 +465,7 @@ const platforms = .{
     .{ "x86_64-macos", "osx-x64" },
     .{ "aarch64-linux-gnu", "linux-arm64" },
     .{ "aarch64-linux-musl", "linux-musl-arm64" },
-    .{
-        // Works around our build issues with Zig 0.9.1 and Ventura Macs. Can be dropped when we upgrade Zig.
-        if (builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) "native-macos" else "aarch64-macos",
-        "osx-arm64",
-    },
+    .{ "aarch64-macos", "osx-arm64" },
     .{ "x86_64-windows", "win-x64" },
 };
 
