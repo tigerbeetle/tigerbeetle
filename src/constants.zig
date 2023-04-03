@@ -200,6 +200,10 @@ comptime {
     assert(pipeline_prepare_queue_max + pipeline_request_queue_max <= clients_max);
     assert(pipeline_prepare_queue_max > 0);
     assert(pipeline_request_queue_max >= 0);
+
+    // A DVC message uses the `header.context` (u128) field as a bitset to mark whether it has
+    // prepared the corresponding header's message.
+    assert(pipeline_prepare_queue_max + 1 <= @bitSizeOf(u128));
 }
 
 /// Maximum number of headers from the WAL suffix to include in an SV message.
