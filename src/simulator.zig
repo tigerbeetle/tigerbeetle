@@ -425,29 +425,34 @@ pub const Simulator = struct {
         // +1 for the potential request — is there room in the sequencer's queue?
         if (reserved + 1 > simulator.reply_sequence.free()) return;
 
-        var request_message = client.get_message();
-        defer client.unref(request_message);
-
-        const request_metadata = simulator.workload.build_request(
+        const request_metadata = simulator.workload.batch_build(
             client_index,
-            @alignCast(
-                @alignOf(vsr.Header),
-                request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
-            ),
         );
-        assert(request_metadata.size <= constants.message_size_max - @sizeOf(vsr.Header));
+        assert(request_metadata.size <= constants.message_body_size_max);
 
-        simulator.cluster.request(
+        var request_batch = client.get_batch(
+            request_metadata.operation,
+            request_metadata.size,
+        ) catch |err| {
+            std.debug.panic("Unexpected result {}: operation={}, size={}", .{
+                err,
+                request_metadata.operation,
+                request_metadata.size,
+            });
+        };
+        assert(request_batch.slice().len == request_metadata.size);
+        assert(request_batch.operation == request_metadata.operation);
+
+        simulator.workload.batch_fill(
             client_index,
             request_metadata.operation,
-            request_message,
-            request_metadata.size,
+            request_batch.slice(),
         );
-        // Since we already checked the client's request queue for free space, `client.request()`
-        // should always queue the request.
-        assert(request_message == client.request_queue.tail_ptr().?.message);
-        assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
-        assert(request_message.header.operation.cast(StateMachine) == request_metadata.operation);
+
+        simulator.cluster.submit_batch(
+            client_index,
+            request_batch,
+        );
 
         simulator.requests_sent += 1;
         assert(simulator.requests_sent <= simulator.options.requests_max);

@@ -2,17 +2,14 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
-const constants = @import("../constants.zig");
+const constants_ = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.state_machine);
 
 pub fn StateMachineType(
     comptime Storage: type,
-    comptime config: constants.StateMachineConfig,
+    comptime config: constants_.StateMachineConfig,
 ) type {
-    _ = Storage;
-    _ = config;
-
     return struct {
         const StateMachine = @This();
         const Grid = @import("../lsm/grid.zig").GridType(Storage);
@@ -25,7 +22,27 @@ pub fn StateMachineType(
             root,
             register,
 
-            echo,
+            echo = constants_.vsr_operations_reserved + 0,
+        };
+
+        pub const BatchBodyError = error{
+            BatchBodySizeExceeded,
+        };
+
+        pub const constants = struct {
+            pub const batch_logical_max = config.client_request_queue_max;
+
+            pub inline fn operation_batch_logical_allowed(operation: Operation) bool {
+                _ = operation;
+                return false;
+            }
+
+            pub inline fn operation_batch_body_valid(operation: Operation, size: usize) BatchBodyError!void {
+                _ = operation;
+                if (size > constants_.message_body_size_max) {
+                    return BatchBodyError.BatchBodySizeExceeded;
+                }
+            }
         };
 
         pub const Options = struct {};
@@ -42,8 +59,8 @@ pub fn StateMachineType(
         pub fn init(allocator: std.mem.Allocator, grid: *Grid, options: Options) !StateMachine {
             const grid_block = try allocator.alignedAlloc(
                 u8,
-                constants.sector_size,
-                constants.block_size,
+                constants_.sector_size,
+                constants_.block_size,
             );
             errdefer allocator.free(grid_block);
             std.mem.set(u8, grid_block, 0);
@@ -51,7 +68,7 @@ pub fn StateMachineType(
             return StateMachine{
                 .options = options,
                 .grid = grid,
-                .grid_block = grid_block[0..constants.block_size],
+                .grid_block = grid_block[0..constants_.block_size],
             };
         }
 
@@ -101,8 +118,6 @@ pub fn StateMachineType(
             _ = state_machine;
             _ = client;
             _ = timestamp;
-            _ = input;
-            _ = output;
             assert(op != 0);
 
             switch (operation) {
@@ -196,26 +211,33 @@ fn WorkloadType(comptime StateMachine: type) type {
             return workload.requests_sent == workload.requests_delivered;
         }
 
-        pub fn build_request(
+        pub fn batch_build(
             workload: *Workload,
             client_index: usize,
-            body: []align(@alignOf(vsr.Header)) u8,
         ) struct {
             operation: StateMachine.Operation,
-            size: usize,
+            size: u32,
         } {
             _ = client_index;
 
             workload.requests_sent += 1;
 
             // +1 for inclusive limit.
-            const size = workload.random.uintLessThan(usize, constants.message_body_size_max + 1);
-            workload.random.bytes(body[0..size]);
+            const size = workload.random.uintLessThan(u32, constants_.message_body_size_max + 1);
 
             return .{
                 .operation = .echo,
                 .size = size,
             };
+        }
+
+        pub fn batch_fill(
+            workload: *Workload,
+            client_index: usize,
+            body: []align(@alignOf(vsr.Header)) u8,
+        ) void {
+            _ = client_index;
+            workload.random.bytes(body);
         }
 
         pub fn on_reply(
@@ -226,7 +248,6 @@ fn WorkloadType(comptime StateMachine: type) type {
             request_body: []align(@alignOf(vsr.Header)) const u8,
             reply_body: []align(@alignOf(vsr.Header)) const u8,
         ) void {
-            _ = workload;
             _ = client_index;
             _ = timestamp;
 

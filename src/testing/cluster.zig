@@ -186,7 +186,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     client_id_permutation.encode(i + client_id_permutation_shift),
                     options.cluster_id,
                     options.replica_count,
-                    constants.client_batch_logical_max,
+                    StateMachine.constants.batch_logical_max,
                     &client_pools[i],
                     .{ .network = network },
                 );
@@ -377,19 +377,15 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
         }
 
-        pub fn request(
+        pub fn submit_batch(
             cluster: *Self,
             client_index: usize,
-            request_operation: StateMachine.Operation,
-            request_message: *Message,
-            request_body_size: usize,
+            batch: Client.Batch,
         ) void {
-            cluster.clients[client_index].request(
+            cluster.clients[client_index].submit_batch(
                 undefined,
                 request_callback,
-                request_operation,
-                request_message,
-                request_body_size,
+                batch,
             );
         }
 
@@ -403,13 +399,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         fn request_callback(
             user_data: u128,
             operation: StateMachine.Operation,
-            result: Client.Error![]const u8,
+            result: []const u8,
         ) void {
             _ = user_data;
             _ = operation;
-            _ = result catch |err| switch (err) {
-                error.TooManyOutstandingRequests => unreachable,
-            };
+            _ = result;
         }
 
         fn client_on_reply(client: *Client, request_message: *Message, reply_message: *Message) void {

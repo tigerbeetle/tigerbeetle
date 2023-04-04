@@ -36,6 +36,11 @@ pub fn StateMachineType(
         const GrooveType = @import("lsm/groove.zig").GrooveType;
         const ForestType = @import("lsm/forest.zig").ForestType;
 
+        pub const BatchBodyError = error{
+            BatchBodySizeInvalid,
+            BatchBodySizeExceeded,
+        };
+
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
 
@@ -49,8 +54,8 @@ pub fn StateMachineType(
                         continue;
 
                     if (operation_batch_logical_allowed(operation)) {
-                        const operation_count_max = operation_batch_events_max(operation);
-                        max = std.math.max(max, operation_count_max);
+                        const events_max = operation_batch_events_max(operation);
+                        max = std.math.max(max, events_max);
                     }
                 }
 
@@ -73,8 +78,8 @@ pub fn StateMachineType(
                 }
             };
 
-            /// Operations that allow multiple logical batches in a single request.
-            pub fn operation_batch_logical_allowed(comptime operation: Operation) bool {
+            /// Checks if an operation allows multiple logical batches in a single request.
+            pub inline fn operation_batch_logical_allowed(operation: Operation) bool {
                 return switch (operation) {
                     .create_accounts => true,
                     .create_transfers => true,
@@ -84,14 +89,37 @@ pub fn StateMachineType(
                 };
             }
 
-            pub fn operation_batch_events_max(comptime operation: Operation) usize {
+            /// Checks if the message size is valid for an operation.
+            pub inline fn operation_batch_body_valid(operation: Operation, body_size: usize) BatchBodyError!void {
+                inline for (comptime std.enums.values(StateMachine.Operation)) |operation_| {
+                    if (@enumToInt(operation_) < @import("constants.zig").vsr_operations_reserved)
+                        continue;
+
+                    if (operation == operation_) {
+                        const event_size = @sizeOf(Event(operation_));
+                        const events_min = operation_batch_events_min(operation_);
+                        const events_max = operation_batch_events_max(operation_);
+
+                        if (body_size % event_size != 0)
+                            return BatchBodyError.BatchBodySizeInvalid;
+
+                        if (body_size < events_min * event_size)
+                            return BatchBodyError.BatchBodySizeInvalid;
+
+                        if (body_size > events_max * event_size)
+                            return BatchBodyError.BatchBodySizeExceeded;
+                    }
+                }
+            }
+
+            inline fn operation_batch_events_max(comptime operation: Operation) usize {
                 return @divFloor(message_body_size_max, std.math.max(
                     @sizeOf(Event(operation)),
                     @sizeOf(Result(operation)),
                 ));
             }
 
-            pub fn operation_batch_events_min(comptime operation: Operation) usize {
+            inline fn operation_batch_events_min(comptime operation: Operation) usize {
                 return switch (operation) {
                     .create_accounts,
                     .create_transfers,
@@ -2495,6 +2523,7 @@ fn test_demux(
         .message_body_size_max = 32 * @sizeOf(Account),
         .lsm_batch_multiple = 1,
         .client_request_queue_max = 1,
+        .vsr_operations_reserved = 128,
     });
 
     inline for (comptime std.enums.values(StateMachine.Operation)) |operation| {

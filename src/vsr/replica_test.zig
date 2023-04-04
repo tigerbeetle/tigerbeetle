@@ -918,12 +918,11 @@ const TestClients = struct {
                 if (client.request_queue.empty() and
                     t.context.client_requests[c] > client.request_number)
                 {
-                    const message = client.get_message();
-                    defer client.unref(message);
-
                     const size = 123;
-                    std.mem.set(u8, message.buffer[@sizeOf(vsr.Header)..][0..size], 42);
-                    t.cluster.request(c, .echo, message, size);
+                    const batch = client.get_batch(.echo, size) catch unreachable;
+
+                    std.mem.set(u8, batch.slice(), 42);
+                    t.cluster.submit_batch(c, batch);
                 }
             }
         }

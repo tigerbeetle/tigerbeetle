@@ -18,9 +18,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub const StateMachine = StateMachine_;
 
-        pub const Error = error{
-            BatchBodySizeInvalid,
-            BatchBodySizeExceeded,
+        pub const Error = StateMachine.BatchBodyError || error{
             BatchTooManyOutstanding,
         };
 
@@ -38,7 +36,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 append: *Request,
             },
 
-            pub fn slice(self: *const @This()) []u8 {
+            pub fn slice(self: *const @This()) []align(@alignOf(vsr.Header)) u8 {
                 const message = switch (self.request) {
                     .new => |value| value,
                     .append => |value| value.message,
@@ -287,37 +285,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         ) Error!Batch {
             assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
 
-            // Operation validations:
-            const operation_batch_logical_allowed =
-                blk: inline for (comptime std.enums.values(StateMachine.Operation)) |operation_|
-            {
-                if (@enumToInt(operation_) < constants.vsr_operations_reserved)
-                    continue;
-
-                if (operation == operation_) {
-                    const event_size = @sizeOf(StateMachine.Event(operation_));
-                    const events_min = comptime StateMachine.constants
-                        .operation_batch_events_min(operation_);
-                    const events_max = comptime StateMachine.constants
-                        .operation_batch_events_max(operation_);
-
-                    if (size % event_size != 0)
-                        return Error.BatchBodySizeInvalid;
-
-                    if (size < events_min * event_size)
-                        return Error.BatchBodySizeInvalid;
-
-                    if (size > events_max * event_size)
-                        return Error.BatchBodySizeExceeded;
-
-                    break :blk comptime StateMachine.constants
-                        .operation_batch_logical_allowed(operation_);
-                }
-            } else unreachable;
+            // We must validate the message size before trying to acquire a batch/message.
+            try StateMachine.constants.operation_batch_body_valid(operation, size);
 
             // Find a physical batch in the queue with a matching operation
             // that has room for the entire logical batch.
-            if (operation_batch_logical_allowed and
+            if (StateMachine.constants.operation_batch_logical_allowed(operation) and
                 self.request_queue.count > 1 and
                 size > 0)
             {

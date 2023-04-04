@@ -217,10 +217,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(options.linked_invalid_probability <= 100);
 
             assert(options.accounts_batch_size_span + options.accounts_batch_size_min <=
-                AccountingStateMachine.constants.batch_max.create_accounts);
+                AccountingStateMachine.constants.batch_events_max.create_accounts);
             assert(options.accounts_batch_size_span >= 1);
             assert(options.transfers_batch_size_span + options.transfers_batch_size_min <=
-                AccountingStateMachine.constants.batch_max.create_transfers);
+                AccountingStateMachine.constants.batch_events_max.create_transfers);
             assert(options.transfers_batch_size_span >= 1);
 
             var auditor = try Auditor.init(allocator, random, options.auditor_options);
@@ -265,17 +265,15 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return self.auditor.done();
         }
 
-        /// A client may build multiple requests to queue up while another is in-flight.
-        pub fn build_request(
+        /// A client may build multiple batches to queue up while another is in-flight.
+        pub fn batch_build(
             self: *Self,
             client_index: usize,
-            body: []align(@alignOf(vsr.Header)) u8,
         ) struct {
             operation: Operation,
-            size: usize,
+            size: u32,
         } {
             assert(client_index < self.auditor.options.client_count);
-            assert(body.len == constants.message_size_max - @sizeOf(vsr.Header));
 
             const action = action: {
                 if (!self.accounts_sent and self.random.boolean()) {
@@ -293,21 +291,45 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             };
 
             const size = switch (action) {
-                .create_accounts => @sizeOf(tb.Account) *
-                    self.build_create_accounts(client_index, self.batch(tb.Account, action, body)),
-                .create_transfers => @sizeOf(tb.Transfer) *
-                    self.build_create_transfers(client_index, self.batch(tb.Transfer, action, body)),
-                .lookup_accounts => @sizeOf(u128) *
-                    self.build_lookup_accounts(self.batch(u128, action, body)),
-                .lookup_transfers => @sizeOf(u128) *
-                    self.build_lookup_transfers(self.batch(u128, action, body)),
+                .create_accounts => @sizeOf(tb.Account) * self.batch_size(action),
+                .create_transfers => @sizeOf(tb.Transfer) * self.batch_size(action),
+                .lookup_accounts => @sizeOf(u128) * self.batch_size(action),
+                .lookup_transfers => @sizeOf(u128) * self.batch_size(action),
             };
-            assert(size <= body.len);
+            assert(size <= constants.message_body_size_max);
 
             return .{
                 .operation = @intToEnum(Operation, @enumToInt(action)),
-                .size = size,
+                .size = @intCast(u32, size),
             };
+        }
+
+        pub fn batch_fill(
+            self: *Self,
+            client_index: usize,
+            operation: Operation,
+            body: []align(@alignOf(vsr.Header)) u8,
+        ) void {
+            assert(client_index < self.auditor.options.client_count);
+            assert(body.len <= constants.message_size_max - @sizeOf(vsr.Header));
+
+            switch (operation) {
+                .create_accounts => self.build_create_accounts(
+                    client_index,
+                    std.mem.bytesAsSlice(tb.Account, body),
+                ),
+                .create_transfers => self.build_create_transfers(
+                    client_index,
+                    std.mem.bytesAsSlice(tb.Transfer, body),
+                ),
+                .lookup_accounts => self.build_lookup_accounts(
+                    std.mem.bytesAsSlice(u128, body),
+                ),
+                .lookup_transfers => self.build_lookup_transfers(
+                    std.mem.bytesAsSlice(u128, body),
+                ),
+                else => unreachable,
+            }
         }
 
         /// `on_reply` is called for replies in commit order.
@@ -352,7 +374,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }
 
-        fn build_create_accounts(self: *Self, client_index: usize, accounts: []tb.Account) usize {
+        fn build_create_accounts(self: *Self, client_index: usize, accounts: []tb.Account) void {
             const results = self.auditor.expect_create_accounts(client_index);
             for (accounts) |*account, i| {
                 const account_index = self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
@@ -376,10 +398,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
                 assert(results[i].count() > 0);
             }
-            return accounts.len;
         }
 
-        fn build_create_transfers(self: *Self, client_index: usize, transfers: []tb.Transfer) usize {
+        fn build_create_transfers(self: *Self, client_index: usize, transfers: []tb.Transfer) void {
             const results = self.auditor.expect_create_transfers(client_index);
             var transfers_count: usize = transfers.len;
             var i: usize = 0;
@@ -440,10 +461,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
             assert(transfers_count == i);
             assert(transfers_count <= transfers.len);
-            return transfers_count;
         }
 
-        fn build_lookup_accounts(self: *Self, lookup_ids: []u128) usize {
+        fn build_lookup_accounts(self: *Self, lookup_ids: []u128) void {
             for (lookup_ids) |*id| {
                 if (chance(self.random, self.options.lookup_account_invalid_probability)) {
                     // Pick an account with valid index (rather than "random.int(u128)") because the
@@ -453,10 +473,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     id.* = self.auditor.accounts[self.random.uintLessThanBiased(usize, self.auditor.accounts.len)].id;
                 }
             }
-            return lookup_ids.len;
         }
 
-        fn build_lookup_transfers(self: *const Self, lookup_ids: []u128) usize {
+        fn build_lookup_transfers(self: *const Self, lookup_ids: []u128) void {
             const delivered = self.transfers_delivered_past;
             const lookup_window = sample_distribution(self.random, self.options.lookup_transfer);
             const lookup_window_start = switch (lookup_window) {
@@ -479,14 +498,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 ),
                 self.transfers_sent - lookup_window_start,
             );
-            if (lookup_window_size == 0) return 0;
+            if (lookup_window_size == 0) return;
 
             for (lookup_ids) |*lookup_id| {
                 lookup_id.* = self.transfer_index_to_id(
                     lookup_window_start + self.random.uintLessThanBiased(usize, lookup_window_size),
                 );
             }
-            return lookup_ids.len;
         }
 
         /// The transfer built is guaranteed to match the TransferPlan's outcome.
@@ -612,7 +630,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return transfer_template.result;
         }
 
-        fn batch(self: *const Self, comptime T: type, action: Action, body: []align(@alignOf(vsr.Header)) u8) []T {
+        fn batch_size(self: *const Self, action: Action) usize {
             const batch_min = switch (action) {
                 .create_accounts, .lookup_accounts => self.options.accounts_batch_size_min,
                 .create_transfers, .lookup_transfers => self.options.transfers_batch_size_min,
@@ -623,8 +641,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             };
 
             // +1 because the span is inclusive.
-            const batch_size = batch_min + self.random.uintLessThanBiased(usize, batch_span + 1);
-            return std.mem.bytesAsSlice(T, body)[0..batch_size];
+            return batch_min + self.random.uintLessThanBiased(usize, batch_span + 1);
         }
 
         fn transfer_id_to_index(self: *const Self, id: u128) usize {
@@ -837,15 +854,15 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 // (commented out) value so that timeouts can actually trigger.
                 .pending_timeout_mean = std.math.maxInt(u64) / 2,
                 // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
-                .accounts_batch_size_min = 0,
+                .accounts_batch_size_min = 1,
                 .accounts_batch_size_span = 1 + random.uintLessThan(
                     usize,
-                    StateMachine.constants.batch_max.create_accounts,
+                    StateMachine.constants.batch_events_max.create_accounts,
                 ),
-                .transfers_batch_size_min = 0,
+                .transfers_batch_size_min = 1,
                 .transfers_batch_size_span = 1 + random.uintLessThan(
                     usize,
-                    StateMachine.constants.batch_max.create_transfers,
+                    StateMachine.constants.batch_events_max.create_transfers,
                 ),
             };
         }
