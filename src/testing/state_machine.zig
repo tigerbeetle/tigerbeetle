@@ -234,9 +234,11 @@ fn WorkloadType(comptime StateMachine: type) type {
         pub fn batch_fill(
             workload: *Workload,
             client_index: usize,
+            operation: StateMachine.Operation,
             body: []align(@alignOf(vsr.Header)) u8,
         ) void {
             _ = client_index;
+            _ = operation;
             workload.random.bytes(body);
         }
 
