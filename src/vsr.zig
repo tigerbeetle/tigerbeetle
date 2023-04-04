@@ -223,7 +223,7 @@ pub const Header = extern struct {
     /// * A `prepare_ok` sets this to the checksum of the prepare being acked.
     /// * A `commit` sets this to the checksum of the latest committed prepare.
     /// * A `do_view_change` sets this to a bitset, with set bits indicating headers
-    ///   in the message body which it has definitely not prepared (i.e. "missing").
+    ///   in the message body which it has definitely not prepared (i.e. "nack").
     ///   The corresponding header may be an actual prepare header, or it may be a "blank" header.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     ///

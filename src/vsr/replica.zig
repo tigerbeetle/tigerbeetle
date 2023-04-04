@@ -2933,24 +2933,31 @@ pub fn ReplicaType(
             self.view_headers.verify();
 
             const BitSet = std.bit_set.IntegerBitSet(128);
-            assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
+            comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
 
-            var missing = BitSet.initEmpty();
+            var nacks = BitSet.initEmpty();
             if (command == .do_view_change) {
                 for (self.view_headers.array.constSlice()) |*header, i| {
                     const slot = self.journal.slot_for_op(header.op);
-                    if (self.journal.header_for_op(header.op)) |h| {
-                        if (h.checksum == header.checksum) {
-                            if (self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot)) {
-                                missing.set(i);
-                            }
-                        } else {
-                            missing.set(i);
-                        }
-                    } else {
-                        if (!self.journal.faulty.bit(slot)) {
-                            missing.set(i);
-                        }
+                    const journal_header = self.journal.header_for_op(header.op);
+                    const dirty = self.journal.dirty.bit(slot);
+                    const faulty = self.journal.faulty.bit(slot);
+
+                    // Case 1: We have this header in memory, but haven't persisted it to disk yet.
+                    if (journal_header != null and journal_header.?.checksum == header.checksum and
+                        dirty and !faulty)
+                    {
+                        nacks.set(i);
+                    }
+
+                    // Case 2: We have a _different_ prepare — safe to nack even if it is faulty.
+                    if (journal_header != null and journal_header.?.checksum != header.checksum) {
+                        nacks.set(i);
+                    }
+
+                    // Case 3: We don't have a prepare at all, and that's not due to a fault.
+                    if (journal_header == null and !faulty) {
+                        nacks.set(i);
                     }
                 }
             }
@@ -2975,7 +2982,7 @@ pub fn ReplicaType(
                 // from non-canonical DVCs.
                 .commit = self.commit_min,
                 // DVC: Signal which headers correspond to definitely not-prepared messages.
-                .context = missing.mask,
+                .context = nacks.mask,
             };
 
             stdx.copy_disjoint(
@@ -3983,7 +3990,6 @@ pub fn ReplicaType(
         ///    op_repair_max.
         ///    A header is disconnected if it breaks the chain with its newer neighbor to the right.
         /// 4. Repair missing or corrupt prepares in chronological order.
-        ///    If we are the primary, this may result in nack/truncation before we start the view.
         /// 5. Commit up to op_repair_max. If committing triggers a checkpoint, op_repair_max
         ///    increases, so go to step 1 and repeat.
         fn repair(self: *Self) void {
@@ -5612,17 +5618,17 @@ pub fn ReplicaType(
                 );
 
                 const dvc_headers = message_body_as_view_headers(dvc);
-                const dvc_missing = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                const dvc_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
                 for (dvc_headers.slice) |*header, i| {
                     log.debug(
-                        "{}: {s}: dvc: header: replica={} op={} checksum={} missing={}",
+                        "{}: {s}: dvc: header: replica={} op={} checksum={} nack={}",
                         .{
                             self.replica,
                             context,
                             dvc.header.replica,
                             header.op,
                             header.checksum,
-                            dvc_missing.isSet(i),
+                            dvc_nacks.isSet(i),
                         },
                     );
                 }
@@ -6356,27 +6362,29 @@ pub fn ReplicaType(
 ///
 /// Each header in the DVC body is one of:
 ///
-/// | Blank | Missing |  Nack | Description
-/// |   yes |     yes |   yes | No header, and replica did not prepare this op during its last view.
-/// |   yes |      no |    no | No header, but the replica may have prepared this op during its last
-/// |       |         |       | view. Since the replica does not know the header, it cannot nack.
-/// |    no |     yes |   yes | Valid header, but the replica has never prepared the message.
-/// |    no |      no | maybe | Valid header, and the replica has prepared the message.
-/// |       |         |       | Counts as a nack iff the header does not match the canonical header
-/// |       |         |       | for this op.
+/// | Header State || Derived Information
+/// | Blank | Nack ||  Nack | Description
+/// |-------|------||-------|-------------
+/// |   yes |  yes ||   yes | No header, and replica did not prepare this op during its last view.
+/// |   yes |   no ||    no | No header, but the replica may have prepared this op during its last
+/// |       |      ||       | view. Since the replica does not know the header, it cannot nack.
+/// |    no |  yes ||   yes | Valid header, but the replica has never prepared the message.
+/// |    no |   no || maybe | Valid header, and the replica has prepared the message.
+/// |       |      ||       | Counts as a nack iff the header does not match the canonical header
+/// |       |      ||       | for this op.
 ///
 /// Where:
 ///
 /// - Blank:
 ///   - Yes: Send a bogus header that indicates that the sender does not know the actual
 ///     command=prepare header for that op.
-///   - No: Send the actual header. The corresponding header may be corrupt, prepared, or missing.
-/// - Missing:
+///   - No: Send the actual header. The corresponding header may be corrupt, prepared, or nacked.
+/// - Nack (header state):
 ///   - Yes: The corresponding header in the message body was definitely not
 ///     prepared in the latest view. (The corresponding header may be blank or ¬blank).
 ///   - No: The corresponding header in the message body was either prepared during the latest view,
 ///     or _might_ have been prepared, but due to WAL corruption we can't tell.
-/// - Nack: based on Blank/Missing, whether the new primary counts it as a nack.
+/// - Nack (derived): based on Blank/Nack, whether the new primary counts it as a nack.
 /// - The header corresponding to the sender's `replica.op` is always "valid", never a "blank".
 ///   (Otherwise the replica would be in status=recovering_head and unable to participate).
 ///
@@ -6388,6 +6396,7 @@ pub fn ReplicaType(
 ///     dvc₁.headers[i].checksum == dvc₂.headers[j].checksum.
 ///   - Reason: the headers bundled with the DVC(s) with the highest log_view will be
 ///     loaded into the new primary with `replace_header()`, not `repair_header()`.
+/// - Any pipeline message which could have been committed is included in some canonical DVC.
 ///
 /// Perhaps unintuitively, it is safe to advertise a header before its message is prepared
 /// (e.g. the write is still queued, or the prepare has not arrived). The header is either:
@@ -6453,10 +6462,10 @@ const DVCQuorum = struct {
         assert(headers.slice[0].op == message.header.op);
         assert(headers.slice[0].view <= log_view);
 
-        const headers_missing = message.header.context;
-        comptime assert(@TypeOf(headers_missing) == u128);
-        assert(@popCount(u128, headers_missing) <= headers.slice.len);
-        assert(@clz(u128, headers_missing) + headers.slice.len >= @bitSizeOf(u128));
+        const nacks = message.header.context;
+        comptime assert(@TypeOf(nacks) == u128);
+        assert(@popCount(u128, nacks) <= headers.slice.len);
+        assert(@clz(u128, nacks) + headers.slice.len >= @bitSizeOf(u128));
     }
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
