@@ -18,9 +18,9 @@ pub fn StateMachineType(
 
         pub const Operation = enum(u8) {
             /// Operations reserved by VR protocol (for all state machines):
-            reserved,
-            root,
-            register,
+            reserved = 0,
+            root = 1,
+            register = 2,
 
             echo = constants_.vsr_operations_reserved + 0,
         };
