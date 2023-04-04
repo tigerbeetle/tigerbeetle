@@ -1325,6 +1325,7 @@ const ViewChangeHeadersArray = struct {
         // checkpoint, so the start_view has a full suffix of headers.
         assert(headers.array.get(0).op >= constants.journal_slot_count);
         assert(headers.array.len >= constants.view_change_headers_suffix_max);
+        assert(headers.array.len >= constants.pipeline_prepare_queue_max + 1);
 
         const commit_max = std.math.max(
             headers.array.get(0).op -| constants.pipeline_prepare_queue_max,
@@ -1340,10 +1341,7 @@ const ViewChangeHeadersArray = struct {
         //   (SV headers are determined by view_change_headers_suffix_max,
         //   but DVC headers must stop at commit_max.)
         headers.command = .do_view_change;
-        headers.array.len = std.math.min(
-            headers.array.len,
-            constants.pipeline_prepare_queue_max + 1,
-        );
+        headers.array.len = constants.pipeline_prepare_queue_max + 1;
 
         headers.verify();
     }
