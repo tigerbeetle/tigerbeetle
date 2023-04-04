@@ -136,6 +136,11 @@ pub const IO = struct {
             while (copy.pop()) |completion| self.enqueue(completion);
         }
 
+        tracer.end(
+            &self.flush_tracer_slot,
+            .io_flush,
+        );
+
         // Run completions only after all completions have been flushed:
         // Loop until all completions are processed. Calls to complete() may queue more work
         // and extend the duration of the loop, but this is fine as it 1) executes completions
@@ -146,11 +151,6 @@ pub const IO = struct {
         // At this point, unqueued could have completions either by 1) those who didn't get an SQE
         // during the popping of unqueued or 2) completion.complete() which start new IO. These
         // unqueued completions will get priority to acquiring SQEs on the next flush().
-
-        tracer.end(
-            &self.flush_tracer_slot,
-            .io_flush,
-        );
     }
 
     fn flush_completions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
