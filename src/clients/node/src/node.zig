@@ -159,6 +159,72 @@ const Context = struct {
 
         return try translate.create_external(env, context);
     }
+
+    pub fn decode_events(
+        self: *Context,
+        env: c.napi_env,
+        array: c.napi_value,
+        operation: Operation,
+    ) !Client.Batch {
+        return switch (operation) {
+            .create_accounts => try self.decode_events_from_array(Account, env, array, operation),
+            .create_transfers => try self.decode_events_from_array(Transfer, env, array, operation),
+            .lookup_accounts => try self.decode_events_from_array(u128, env, array, operation),
+            .lookup_transfers => try self.decode_events_from_array(u128, env, array, operation),
+            else => unreachable,
+        };
+    }
+
+    pub fn decode_raw_buffer(
+        self: *Context,
+        env: c.napi_env,
+        raw_buffer: c.napi_value,
+        operation: Operation,
+    ) !Client.Batch {
+        const slice = try translate.slice_from_value(env, raw_buffer, "raw_batch");
+        const batch = try self.get_batch(env, operation, @intCast(u32, slice.len));
+        std.mem.copy(u8, batch.slice(), slice);
+        return batch;
+    }
+
+    fn decode_events_from_array(
+        self: *Context,
+        comptime T: type,
+        env: c.napi_env,
+        array: c.napi_value,
+        operation: Operation,
+    ) !Client.Batch {
+        const array_length = try translate.array_length(env, array);
+        if (array_length < 1) return translate.throw(env, "Batch must contain at least one event.");
+
+        const body_length = @sizeOf(T) * array_length;
+        const batch = try self.get_batch(env, operation, body_length);
+
+        // We take a slice on `output` to ensure that its length is a multiple of @sizeOf(T) to prevent
+        // a safety-checked runtime panic from `bytesAsSlice` for non-multiple sizes.
+        var results = std.mem.bytesAsSlice(T, batch.slice());
+
+        var i: u32 = 0;
+        while (i < array_length) : (i += 1) {
+            const entry = try translate.array_element(env, array, i);
+            results[i] = try decode_from_object(T, env, entry);
+        }
+
+        return batch;
+    }
+
+    fn get_batch(
+        self: *Context,
+        env: c.napi_env,
+        operation: Operation,
+        size: u32,
+    ) !Client.Batch {
+        return self.client.get_batch(operation, size) catch |err| switch (err) {
+            error.BatchBodySizeInvalid => return translate.throw(env, "Batch is not a valid message."),
+            error.BatchBodySizeExceeded => return translate.throw(env, "Batch is larger than the maximum message size."),
+            error.BatchTooManyOutstanding => return translate.throw(env, "Batch is larger than the maximum message size."),
+        };
+    }
 };
 
 fn contextCast(context_raw: *anyopaque) !*Context {
@@ -209,48 +275,6 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
         u128 => try translate.u128_from_value(env, object, "lookup"),
         else => unreachable,
     };
-}
-
-pub fn decode_events(
-    env: c.napi_env,
-    array: c.napi_value,
-    operation: Operation,
-    output: []u8,
-) !usize {
-    return switch (operation) {
-        .create_accounts => try decode_events_from_array(env, array, Account, output),
-        .create_transfers => try decode_events_from_array(env, array, Transfer, output),
-        .lookup_accounts => try decode_events_from_array(env, array, u128, output),
-        .lookup_transfers => try decode_events_from_array(env, array, u128, output),
-        else => unreachable,
-    };
-}
-
-fn decode_events_from_array(
-    env: c.napi_env,
-    array: c.napi_value,
-    comptime T: type,
-    output: []u8,
-) !usize {
-    const array_length = try translate.array_length(env, array);
-    if (array_length < 1) return translate.throw(env, "Batch must contain at least one event.");
-
-    const body_length = @sizeOf(T) * array_length;
-    if (@sizeOf(Header) + body_length > constants.message_size_max) {
-        return translate.throw(env, "Batch is larger than the maximum message size.");
-    }
-
-    // We take a slice on `output` to ensure that its length is a multiple of @sizeOf(T) to prevent
-    // a safety-checked runtime panic from `bytesAsSlice` for non-multiple sizes.
-    var results = std.mem.bytesAsSlice(T, output[0..body_length]);
-
-    var i: u32 = 0;
-    while (i < array_length) : (i += 1) {
-        const entry = try translate.array_element(env, array, i);
-        results[i] = try decode_from_object(T, env, entry);
-    }
-
-    return body_length;
 }
 
 fn encode_napi_results_array(
@@ -580,29 +604,27 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
 
-    if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
+    if (!@intToEnum(vsr.Operation, operation_int).valid(StateMachine)) {
         translate.throw(env, "Unknown operation.") catch return null;
     }
 
-    const message = context.client.get_message();
-    defer context.client.unref(message);
+    // This will create a reference (in V8) to the user's JS callback that we must eventually also
+    // free in order to avoid a leak.
+    const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
 
     const operation = @intToEnum(Operation, @intCast(u8, operation_int));
-    const body_length = decode_events(
+    const batch = context.decode_events(
         env,
         argv[2],
         operation,
-        message.buffer[@sizeOf(Header)..],
-    ) catch |err| switch (err) {
-        error.ExceptionThrown => return null,
+    ) catch |err| {
+        translate.delete_reference(env, user_data.callback_reference) catch return null;
+        return switch (err) {
+            error.ExceptionThrown => null,
+        };
     };
 
-    // This will create a reference (in V8) to the user's JS callback that we must eventually also
-    // free in order to avoid a leak. We therefore do this last to ensure we cannot fail after
-    // taking this reference.
-    const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
-    context.client.request(@bitCast(u128, user_data), on_result, operation, message, body_length);
-
+    context.client.submit_batch(@bitCast(u128, user_data), on_result, batch);
     return null;
 }
 
@@ -629,29 +651,27 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
 
-    if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
+    if (!@intToEnum(vsr.Operation, operation_int).valid(StateMachine)) {
         translate.throw(env, "Unknown operation.") catch return null;
     }
-    const operation = @intToEnum(Operation, @intCast(u8, operation_int));
-
-    const message = context.client.get_message();
-    defer context.client.unref(message);
-
-    const body_length = translate.bytes_from_buffer(
-        env,
-        argv[2],
-        message.buffer[@sizeOf(Header)..],
-        "raw_batch",
-    ) catch |err| switch (err) {
-        error.ExceptionThrown => return null,
-    };
 
     // This will create a reference (in V8) to the user's JS callback that we must eventually also
-    // free in order to avoid a leak. We therefore do this last to ensure we cannot fail after
-    // taking this reference.
+    // free in order to avoid a leak.
     const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
-    context.client.request(@bitCast(u128, user_data), on_result, operation, message, body_length);
 
+    const operation = @intToEnum(Operation, @intCast(u8, operation_int));
+    const batch = context.decode_raw_buffer(
+        env,
+        argv[2],
+        operation,
+    ) catch |err| {
+        translate.delete_reference(env, user_data.callback_reference) catch return null;
+        return switch (err) {
+            error.ExceptionThrown => null,
+        };
+    };
+
+    context.client.submit_batch(@bitCast(u128, user_data), on_result, batch);
     return null;
 }
 
@@ -664,7 +684,7 @@ fn create_client_error(env: c.napi_env, client_error: Client.Error) !c.napi_valu
     };
 }
 
-fn on_result(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
+fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
     // A reference to the user's JS callback was made in `request` or `raw_request`. This MUST be
     // cleaned up regardless of the result of this function.
     const env = @bitCast(translate.UserData, user_data).env;
@@ -687,34 +707,27 @@ fn on_result(user_data: u128, operation: Operation, results: Client.Error![]cons
     const argc: usize = 2;
     var argv: [argc]c.napi_value = undefined;
 
-    if (results) |value| {
-        const napi_results = switch (operation) {
-            .reserved, .root, .register => {
-                translate.throw(env, "Reserved operation.") catch return;
-            },
-            .create_accounts => encode_napi_results_array(
-                CreateAccountsResult,
-                env,
-                value,
-            ) catch return,
-            .create_transfers => encode_napi_results_array(
-                CreateTransfersResult,
-                env,
-                value,
-            ) catch return,
-            .lookup_accounts => encode_napi_results_array(Account, env, value) catch return,
-            .lookup_transfers => encode_napi_results_array(Transfer, env, value) catch return,
-        };
+    const napi_results = switch (operation) {
+        .reserved, .root, .register => {
+            translate.throw(env, "Reserved operation.") catch return;
+        },
+        .create_accounts => encode_napi_results_array(
+            CreateAccountsResult,
+            env,
+            results,
+        ) catch return,
+        .create_transfers => encode_napi_results_array(
+            CreateTransfersResult,
+            env,
+            results,
+        ) catch return,
+        .lookup_accounts => encode_napi_results_array(Account, env, results) catch return,
+        .lookup_transfers => encode_napi_results_array(Transfer, env, results) catch return,
+    };
 
-        argv[0] = globals.napi_undefined;
-        argv[1] = napi_results;
-    } else |err| {
-        argv[0] = create_client_error(env, err) catch {
-            translate.throw(env, "Failed to create Node Error.") catch return;
-        };
-        argv[1] = globals.napi_undefined;
-    }
-
+    argv[0] = globals.napi_undefined;
+    argv[1] = napi_results;
+    
     translate.call_function(env, scope, napi_callback, argc, argv[0..]) catch {
         translate.throw(env, "Failed to call JS results callback.") catch return;
     };
