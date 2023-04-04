@@ -76,14 +76,24 @@ Get the pending transfer for a transfer, or vice-versa:
 
 ``` sql
 select transfer.*
+from transfer
 where transfer.pending_id = ?
 ```
 
 ``` sql
 select transfer.pending_id
+from transfer
 where transfer.id = ?
 ```
 
+Get accounts/transfer(s) with id/user_data matching a given prefix.
+
+``` sql
+select transfer.*
+from transfer
+where 2000 <= transfer.user_data < 2000
+limit 1
+```
 
 TODO other uses.
 
