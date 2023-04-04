@@ -257,15 +257,9 @@ pub fn ReplicaType(
         /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
         do_view_change_from_all_replicas: QuorumMessages = quorum_messages_null,
 
-        /// Unique nack_prepare messages for the same view from OTHER replicas (excluding ourself).
-        nack_prepare_from_other_replicas: QuorumCounter = quorum_counter_null,
-
         /// Whether the primary has received a quorum of do_view_change messages for the view change:
         /// Determines whether the primary may effect repairs according to the CTRL protocol.
         do_view_change_quorum: bool = false,
-
-        /// Whether the primary is expecting to receive a nack_prepare and for which op:
-        nack_prepare_op: ?u64 = null,
 
         /// The number of ticks before a primary or backup broadcasts a ping to other replicas.
         /// TODO Explain why we need this (MessageBus handshaking, leapfrogging faulty replicas,
@@ -920,7 +914,6 @@ pub fn ReplicaType(
                 .request_headers => self.on_request_headers(message),
                 .request_block => unreachable, // TODO
                 .headers => self.on_headers(message),
-                .nack_prepare => self.on_nack_prepare(message),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction, .reply => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
@@ -1318,16 +1311,6 @@ pub fn ReplicaType(
 
             if (self.repair_header(message.header)) {
                 assert(self.journal.has_dirty(message.header));
-
-                if (self.nack_prepare_op) |nack_prepare_op| {
-                    if (nack_prepare_op == message.header.op) {
-                        log.debug("{}: on_repair: repairing uncommitted op={}", .{
-                            self.replica,
-                            message.header.op,
-                        });
-                        self.reset_quorum_nack_prepare();
-                    }
-                }
 
                 log.debug("{}: on_repair: repairing journal", .{self.replica});
                 self.write_prepare(message, .repair);
@@ -1750,43 +1733,6 @@ pub fn ReplicaType(
                     }
                 }
             }
-
-            // Protocol-Aware Recovery's CTRL protocol only runs during the view change, when the
-            // new primary needs to repair its own WAL before starting the new view.
-            //
-            // This branch is only where the backup doesn't have the prepare and could possibly
-            // send a nack as part of the CTRL protocol. Nacks only get sent during a view change
-            // to help the new primary trim uncommitted ops that couldn't otherwise be repaired.
-            // Without doing this, the cluster would become permanently unavailable. So backups
-            // shouldn't respond to the `request_prepare` if the new view has already started,
-            // they should also be in view change status, waiting for the new primary to start
-            // the view.
-            if (self.status == .view_change) {
-                assert(message.header.replica == self.primary_index(self.view));
-
-                if (self.journal.header_with_op_and_checksum(op, checksum)) |_| {
-                    assert(self.journal.dirty.bit(slot) and !self.journal.faulty.bit(slot));
-                }
-
-                if (self.journal.prepare_inhabited[slot.index]) {
-                    assert(self.journal.prepare_checksums[slot.index] != checksum);
-                }
-
-                log.debug("{}: on_request_prepare: op={} checksum={} nacking", .{
-                    self.replica,
-                    op,
-                    checksum,
-                });
-
-                self.send_header_to_replica(message.header.replica, .{
-                    .command = .nack_prepare,
-                    .context = checksum,
-                    .cluster = self.cluster,
-                    .replica = self.replica,
-                    .view = self.view,
-                    .op = op,
-                });
-            }
         }
 
         fn on_request_prepare_read(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
@@ -1847,104 +1793,6 @@ pub fn ReplicaType(
             response.header.set_checksum();
 
             self.send_message_to_replica(message.header.replica, response);
-        }
-
-        fn on_nack_prepare(self: *Self, message: *Message) void {
-            assert(message.header.command == .nack_prepare);
-            if (self.ignore_repair_message(message)) return;
-
-            assert(self.status == .view_change);
-            assert(message.header.view == self.view);
-            assert(message.header.replica != self.replica);
-            assert(self.primary_index(self.view) == self.replica);
-            assert(self.do_view_change_quorum);
-            assert(self.repairs_allowed());
-
-            if (self.nack_prepare_op == null) {
-                log.debug("{}: on_nack_prepare: ignoring (no longer expected)", .{self.replica});
-                return;
-            }
-
-            const op = self.nack_prepare_op.?;
-            const checksum = self.journal.header_with_op(op).?.checksum;
-            const slot = self.journal.slot_with_op(op).?;
-            assert(op <= self.op);
-
-            if (message.header.op != op) {
-                log.debug("{}: on_nack_prepare: ignoring (repairing another op)", .{self.replica});
-                return;
-            }
-
-            if (message.header.context != checksum) {
-                log.debug("{}: on_nack_prepare: ignoring (repairing another checksum)", .{
-                    self.replica,
-                });
-                return;
-            }
-
-            // backups may not send a `nack_prepare` for a different checksum:
-            // However our op may change in between sending the request and getting the nack.
-            assert(message.header.op == op);
-            assert(message.header.context == checksum);
-
-            // Here are what our nack quorums look like, if we know our op is faulty:
-            // These are for various replication quorums under Flexible Paxos.
-            // We need to have enough nacks to guarantee that `quorum_replication` was not reached,
-            // because if the replication quorum was reached, then it may have been committed.
-            // We add `1` in each case because our op is faulty and may have been counted.
-            //
-            // replica_count=2 - quorum_replication=2 + 1 = 0 + 1 = 1 nacks required
-            // replica_count=3 - quorum_replication=2 + 1 = 1 + 1 = 2 nacks required
-            // replica_count=4 - quorum_replication=2 + 1 = 2 + 1 = 3 nacks required
-            // replica_count=4 - quorum_replication=3 + 1 = 1 + 1 = 2 nacks required
-            // replica_count=5 - quorum_replication=2 + 1 = 3 + 1 = 4 nacks required
-            // replica_count=5 - quorum_replication=3 + 1 = 2 + 1 = 3 nacks required
-            //
-            // Otherwise, if we know we do not have the op, then we can exclude ourselves.
-            assert(!self.solo());
-
-            const threshold = if (self.journal.faulty.bit(slot))
-                self.quorum_nack_prepare
-            else
-                self.quorum_nack_prepare - 1;
-
-            if (threshold == 0) {
-                assert(self.replica_count == 2);
-                assert(!self.journal.faulty.bit(slot));
-
-                // This is a special case for a cluster-of-two, handled in `repair_prepare()`.
-                log.debug("{}: on_nack_prepare: ignoring (cluster-of-two, not faulty)", .{
-                    self.replica,
-                });
-                return;
-            }
-
-            log.debug("{}: on_nack_prepare: quorum_replication={} threshold={} op={}", .{
-                self.replica,
-                self.quorum_replication,
-                threshold,
-                op,
-            });
-
-            // We should never expect to receive a nack from ourselves:
-            // Detect if we ever set `threshold` to `quorum_view_change` for a cluster-of-two again.
-            assert(threshold < self.replica_count);
-
-            // Wait until we have `threshold` messages for quorum:
-            const count = self.count_message_and_receive_quorum_exactly_once(
-                &self.nack_prepare_from_other_replicas,
-                message,
-                threshold,
-            ) orelse return;
-
-            assert(count == threshold);
-            assert(!self.nack_prepare_from_other_replicas.isSet(self.replica));
-            assert(self.op - op < constants.pipeline_prepare_queue_max);
-            log.debug("{}: on_nack_prepare: quorum received op={}", .{ self.replica, op });
-
-            self.primary_discard_uncommitted_ops_from(op, checksum);
-            self.reset_quorum_nack_prepare();
-            self.repair();
         }
 
         fn on_headers(self: *Self, message: *const Message) void {
@@ -2256,7 +2104,8 @@ pub fn ReplicaType(
                     self.message_bus.unref(m);
                     self.do_view_change_from_all_replicas[message.header.replica] = message.ref();
                 } else if (m.header.timestamp != message.header.timestamp or
-                    m.header.commit != message.header.commit)
+                    m.header.commit != message.header.commit or
+                    m.header.context != message.header.context)
                 {
                     log.debug("{}: on_{s}: ignoring (older message replica={})", .{
                         self.replica,
@@ -2299,15 +2148,6 @@ pub fn ReplicaType(
 
                     assert(self.status == .normal);
                     assert(self.primary());
-                },
-                .nack_prepare => {
-                    assert(!self.solo());
-                    if (self.replica_count == 2) assert(threshold >= 1);
-
-                    assert(self.status == .view_change);
-                    assert(self.primary_index(self.view) == self.replica);
-                    assert(message.header.replica != self.replica);
-                    assert(message.header.op == self.nack_prepare_op.?);
                 },
                 else => unreachable,
             }
@@ -3092,6 +2932,36 @@ pub fn ReplicaType(
             }
             self.view_headers.verify();
 
+            const BitSet = std.bit_set.IntegerBitSet(128);
+            comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
+
+            var nacks = BitSet.initEmpty();
+            if (command == .do_view_change) {
+                for (self.view_headers.array.constSlice()) |*header, i| {
+                    const slot = self.journal.slot_for_op(header.op);
+                    const journal_header = self.journal.header_for_op(header.op);
+                    const dirty = self.journal.dirty.bit(slot);
+                    const faulty = self.journal.faulty.bit(slot);
+
+                    // Case 1: We have this header in memory, but haven't persisted it to disk yet.
+                    if (journal_header != null and journal_header.?.checksum == header.checksum and
+                        dirty and !faulty)
+                    {
+                        nacks.set(i);
+                    }
+
+                    // Case 2: We have a _different_ prepare — safe to nack even if it is faulty.
+                    if (journal_header != null and journal_header.?.checksum != header.checksum) {
+                        nacks.set(i);
+                    }
+
+                    // Case 3: We don't have a prepare at all, and that's not due to a fault.
+                    if (journal_header == null and !faulty) {
+                        nacks.set(i);
+                    }
+                }
+            }
+
             message.header.* = .{
                 .size = @intCast(u32, @sizeOf(Header) * (1 + self.view_headers.array.len)),
                 .command = command,
@@ -3111,6 +2981,8 @@ pub fn ReplicaType(
                 // For command=do_view_change, the new primary uses this op to trust extra headers
                 // from non-canonical DVCs.
                 .commit = self.commit_min,
+                // DVC: Signal which headers correspond to definitely not-prepared messages.
+                .context = nacks.mask,
             };
 
             stdx.copy_disjoint(
@@ -3308,10 +3180,9 @@ pub fn ReplicaType(
             assert(message.header.command == .request_start_view or
                 message.header.command == .request_headers or
                 message.header.command == .request_prepare or
-                message.header.command == .headers or
-                message.header.command == .nack_prepare);
+                message.header.command == .headers);
             switch (message.header.command) {
-                .headers, .nack_prepare => assert(message.header.replica < self.replica_count),
+                .headers => assert(message.header.replica < self.replica_count),
                 else => {},
             }
 
@@ -3356,7 +3227,7 @@ pub fn ReplicaType(
             if (self.standby()) {
                 switch (message.header.command) {
                     .headers => {},
-                    .request_start_view, .request_headers, .request_prepare, .nack_prepare => {
+                    .request_start_view, .request_headers, .request_prepare => {
                         log.warn("{}: on_{s}: misdirected message (standby)", .{ self.replica, command });
                         return true;
                     },
@@ -3367,18 +3238,13 @@ pub fn ReplicaType(
             if (self.primary_index(self.view) != self.replica) {
                 switch (message.header.command) {
                     // Only the primary may receive these messages:
-                    .request_start_view, .nack_prepare => {
+                    .request_start_view => {
                         log.warn("{}: on_{s}: misdirected message (backup)", .{ self.replica, command });
                         return true;
                     },
                     .request_prepare, .headers, .request_headers => {},
                     else => unreachable,
                 }
-            }
-
-            if (message.header.command == .nack_prepare and self.status == .normal) {
-                log.debug("{}: on_{s}: ignoring (view started)", .{ self.replica, command });
-                return true;
             }
             return false;
         }
@@ -3402,7 +3268,7 @@ pub fn ReplicaType(
                         return true;
                     }
                 },
-                .headers, .nack_prepare => {
+                .headers => {
                     if (self.primary_index(self.view) != self.replica) {
                         log.debug("{}: on_{s}: ignoring (view change, received by backup)", .{
                             self.replica,
@@ -4124,7 +3990,6 @@ pub fn ReplicaType(
         ///    op_repair_max.
         ///    A header is disconnected if it breaks the chain with its newer neighbor to the right.
         /// 4. Repair missing or corrupt prepares in chronological order.
-        ///    If we are the primary, this may result in nack/truncation before we start the view.
         /// 5. Commit up to op_repair_max. If committing triggers a checkpoint, op_repair_max
         ///    increases, so go to step 1 and repeat.
         fn repair(self: *Self) void {
@@ -4657,20 +4522,9 @@ pub fn ReplicaType(
             while (op <= self.op) : (op += 1) {
                 const slot = self.journal.slot_with_op(op).?;
                 if (self.journal.dirty.bit(slot)) {
-                    // This is an uncommitted op — if we are the primary in `view_change` status,
-                    // then we will `request_prepare` from the cluster, set `nack_prepare_op`,
-                    // and stop repairing any further prepares:
-                    // This will also rebroadcast any `request_prepare` every `repair_timeout` tick.
+                    // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
+                    // Continue to request prepares until our budget is depleted.
                     if (self.repair_prepare(op)) {
-                        if (self.nack_prepare_op) |nack_prepare_op| {
-                            assert(self.status == .view_change);
-                            assert(self.primary_index(self.view) == self.replica);
-                            assert(nack_prepare_op >= op);
-                            assert(nack_prepare_op > self.commit_max);
-                            return;
-                        }
-
-                        // Otherwise, continue to request prepares until our budget is depleted.
                         budget -= 1;
                         if (budget == 0) {
                             log.debug("{}: repair_prepares: request budget used", .{self.replica});
@@ -4716,9 +4570,8 @@ pub fn ReplicaType(
 
         /// During a view change, for uncommitted ops, which are few, we optimize for latency:
         ///
-        /// * request a `prepare` or `nack_prepare` from all backups in parallel,
-        /// * repair as soon as we get a `prepare`, or
-        /// * discard as soon as we get a majority of `nack_prepare` messages for the same checksum.
+        /// * request a `prepare` from all backups in parallel,
+        /// * repair as soon as we get a `prepare`
         ///
         /// For committed ops, which represent the bulk of ops, we optimize for throughput:
         ///
@@ -4808,29 +4661,6 @@ pub fn ReplicaType(
                     },
                 );
 
-                if (self.replica_count == 2 and !self.journal.faulty.bit(slot)) {
-                    // This is required to avoid a liveness issue for a cluster-of-two where a new
-                    // primary learns of an op during a view change but where the op is faulty on
-                    // the old primary. We must immediately roll back the op since it could not have
-                    // been committed by the old primary if we know we do not have it, and because
-                    // the old primary cannot send a nack_prepare for its faulty copy.
-                    // For this to be correct, the recovery protocol must set all headers as faulty,
-                    // not only as dirty.
-                    self.primary_discard_uncommitted_ops_from(op, checksum);
-                    return false;
-                }
-
-                // Initialize the `nack_prepare` quorum counter for this uncommitted op:
-                if (self.nack_prepare_op) |nack_prepare_op| {
-                    // Prepares are repaired chronologically. If we already are already waiting for
-                    // a nack, this must be a retried repair for that same op.
-                    assert(nack_prepare_op == op);
-                } else {
-                    assert(self.nack_prepare_from_other_replicas.count() == 0);
-                    self.nack_prepare_op = op;
-                }
-
-                assert(self.nack_prepare_op.? == op);
                 assert(request_prepare.context == checksum);
                 self.send_header_to_other_replicas(request_prepare);
             } else {
@@ -4844,9 +4674,6 @@ pub fn ReplicaType(
                     reason,
                 });
 
-                // `repair_prepare()` is called in chronological order, and stops when it
-                // encounters an op awaiting nacks.
-                assert(self.nack_prepare_op == null or self.nack_prepare_op.? > op);
                 assert(request_prepare.context == checksum);
                 self.send_header_to_replica(self.choose_any_other_replica(), request_prepare);
             }
@@ -5005,12 +4832,6 @@ pub fn ReplicaType(
         fn reset_quorum_do_view_change(self: *Self) void {
             self.reset_quorum_messages(&self.do_view_change_from_all_replicas, .do_view_change);
             self.do_view_change_quorum = false;
-        }
-
-        fn reset_quorum_nack_prepare(self: *Self) void {
-            assert(self.standby() or !self.nack_prepare_from_other_replicas.isSet(self.replica));
-            self.reset_quorum_counter(&self.nack_prepare_from_other_replicas);
-            self.nack_prepare_op = null;
         }
 
         fn reset_quorum_start_view_change(self: *Self) void {
@@ -5350,14 +5171,6 @@ pub fn ReplicaType(
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
-                },
-                .nack_prepare => {
-                    assert(!self.standby());
-                    assert(self.status == .view_change);
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                    assert(self.primary_index(self.view) == replica);
                 },
                 .eviction => {
                     assert(!self.standby());
@@ -5803,20 +5616,19 @@ pub fn ReplicaType(
                         dvc.header.timestamp, // The `op_checkpoint` of the replica.
                     },
                 );
-            }
 
-            const dvcs_canonical = DVCQuorum.dvcs_canonical(self.do_view_change_from_all_replicas);
-            for (dvcs_canonical.constSlice()) |dvc| {
                 const dvc_headers = message_body_as_view_headers(dvc);
-                for (dvc_headers.slice) |*header| {
+                const dvc_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                for (dvc_headers.slice) |*header, i| {
                     log.debug(
-                        "{}: {s}: canonical: replica={} op={} checksum={}",
+                        "{}: {s}: dvc: header: replica={} op={} checksum={} nack={}",
                         .{
                             self.replica,
                             context,
                             dvc.header.replica,
                             header.op,
                             header.checksum,
+                            dvc_nacks.isSet(i),
                         },
                     );
                 }
@@ -5835,7 +5647,6 @@ pub fn ReplicaType(
             assert(self.commit_max <= self.op);
             assert(self.journal.dirty.count == 0);
             assert(self.journal.faulty.count == 0);
-            assert(self.nack_prepare_op == null);
             assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
             {
@@ -6094,10 +5905,8 @@ pub fn ReplicaType(
             self.heartbeat_timestamp = 0;
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
-            self.reset_quorum_nack_prepare();
 
             assert(self.do_view_change_quorum == false);
-            assert(self.nack_prepare_op == null);
         }
 
         /// A replica i that notices the need for a view change advances its view, sets its status
@@ -6173,18 +5982,12 @@ pub fn ReplicaType(
                     if (self.journal.header_with_op(op)) |header| {
                         self.view_headers.append(header);
                     } else {
-                        if (self.journal.faulty.bit(self.journal.slot_for_op(op))) {
-                            self.view_headers.append_fault(op);
-                        } else {
-                            self.view_headers.append_blank(op);
-                        }
+                        self.view_headers.append_blank(op);
                     }
                 }
+
                 assert(op <= self.commit_max);
                 assert(op == self.commit_max or self.commit_max > self.op);
-                // We could safely include any additional chained headers.
-                // However, that can make view-change bugs harder to trigger.
-
                 // If we only recently checkpointed, it is possible that all of the ops in the new
                 // WAL wrap are uncommitted. If so, and the new primary can discern this, it may
                 // start the view despite itself being one checkpoint behind us, by truncating all
@@ -6239,10 +6042,8 @@ pub fn ReplicaType(
             self.primary_abdicating = false;
             self.reset_quorum_start_view_change();
             self.reset_quorum_do_view_change();
-            self.reset_quorum_nack_prepare();
 
             assert(self.do_view_change_quorum == false);
-            assert(self.nack_prepare_op == null);
 
             self.send_do_view_change();
         }
@@ -6541,36 +6342,53 @@ pub fn ReplicaType(
 ///   - Canonical headers may be committed or uncommitted.
 ///
 ///
-/// Invariants:
+/// Invariants (for each DVC message):
 ///
-/// For each DVC message:
-///
-/// - Each header in the DVC is one of:
-///   - "valid": The corresponding header is known. The actual message may be:
-///     - prepared (and WAL is valid), or
-///     - prepared (but WAL is corrupt), or
-///     - never prepared.
-///   - "blank": The replica never prepared the corresponding op, and does not have the header.
-///   - "fault": The replica may have prepared the corresponding op, but it does not know the
-///     header and the entry is corrupt.
 /// - The "valid" headers all belong to the same hash chain.
 ///   - Reason: If multiple replicas with the same canonical log_view disagree about an op, the new
 ///     primary could not determine which is correct.
-///   - The DVC-sender is responsible for ensuring blanks/faults do not conceal chain breaks.
+///   - The DVC-sender is responsible for ensuring blanks do not conceal chain breaks.
 ///   - For example,
 ///     - a DVC of 6a,7_,8a is valid (6a/8a belong to the same chain).
 ///     - a DVC of 6b,7_,8a is invalid (the gap at 7 conceal a chain break).
 ///     - a DVC of 6b,7b,8a is invalid (7b/8a is a chain break)..
 /// - All pipeline headers present on the replica must be included in the DVC headers.
 ///   - When `replica.commit_max ≤ replica.op`,
-///     the DVC must include a valid/blank/fault header for every op in that range.
-///   - When `replica.commit_max > replica.op`, only a single header (`replica.op`) is included.
-///   - The DVC will need a valid header corresponding to its `commit_max` to complete, since the
-///     entire pipeline may be truncated, and the new primary still needs a header for its head op.
-/// - The header corresponding to `replica.op` is always "valid", never a "blank"/"fault".
+///     the DVC must include a valid/blank header for every op in that range.
+///   - When `replica.commit_max > replica.op`, only a single header is included
+///     (`replica.commit_max` if available in the SV, otherwise `replica.op`).
+///   - (The DVC will need a valid header corresponding to its `commit_max` to complete, since the
+///     entire pipeline may be truncated, and the new primary still needs a header for its head op.)
+///
+/// Each header in the DVC body is one of:
+///
+/// | Header State || Derived Information
+/// | Blank | Nack ||  Nack | Description
+/// |-------|------||-------|-------------
+/// |   yes |  yes ||   yes | No header, and replica did not prepare this op during its last view.
+/// |   yes |   no ||    no | No header, but the replica may have prepared this op during its last
+/// |       |      ||       | view. Since the replica does not know the header, it cannot nack.
+/// |    no |  yes ||   yes | Valid header, but the replica has never prepared the message.
+/// |    no |   no || maybe | Valid header, and the replica has prepared the message.
+/// |       |      ||       | Counts as a nack iff the header does not match the canonical header
+/// |       |      ||       | for this op.
+///
+/// Where:
+///
+/// - Blank:
+///   - Yes: Send a bogus header that indicates that the sender does not know the actual
+///     command=prepare header for that op.
+///   - No: Send the actual header. The corresponding header may be corrupt, prepared, or nacked.
+/// - Nack (header state):
+///   - Yes: The corresponding header in the message body was definitely not
+///     prepared in the latest view. (The corresponding header may be blank or ¬blank).
+///   - No: The corresponding header in the message body was either prepared during the latest view,
+///     or _might_ have been prepared, but due to WAL corruption we can't tell.
+/// - Nack (derived): based on Blank/Nack, whether the new primary counts it as a nack.
+/// - The header corresponding to the sender's `replica.op` is always "valid", never a "blank".
 ///   (Otherwise the replica would be in status=recovering_head and unable to participate).
 ///
-/// Across all DVCs in the quorum:
+/// Invariants (across all DVCs in the quorum):
 ///
 /// - The valid headers of every DVC with the same log_view must not conflict.
 ///   - In other words:
@@ -6578,6 +6396,7 @@ pub fn ReplicaType(
 ///     dvc₁.headers[i].checksum == dvc₂.headers[j].checksum.
 ///   - Reason: the headers bundled with the DVC(s) with the highest log_view will be
 ///     loaded into the new primary with `replace_header()`, not `repair_header()`.
+/// - Any pipeline message which could have been committed is included in some canonical DVC.
 ///
 /// Perhaps unintuitively, it is safe to advertise a header before its message is prepared
 /// (e.g. the write is still queued, or the prepare has not arrived). The header is either:
@@ -6638,8 +6457,15 @@ const DVCQuorum = struct {
 
         // Ignore the result, init() verifies the headers.
         const headers = message_body_as_view_headers(message);
+        assert(headers.slice.len >= 1);
+        assert(headers.slice.len <= constants.pipeline_prepare_queue_max + 1);
         assert(headers.slice[0].op == message.header.op);
         assert(headers.slice[0].view <= log_view);
+
+        const nacks = message.header.context;
+        comptime assert(@TypeOf(nacks) == u128);
+        assert(@popCount(u128, nacks) <= headers.slice.len);
+        assert(@clz(u128, nacks) + headers.slice.len >= @bitSizeOf(u128));
     }
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
@@ -6802,12 +6628,12 @@ const DVCQuorum = struct {
             assert(options.quorum_nack_prepare == options.quorum_view_change);
         }
 
-        const dvcs_total = DVCQuorum.dvcs_all(dvc_quorum).len;
-        if (dvcs_total < options.quorum_view_change) return .awaiting_quorum;
+        const dvcs_all_ = DVCQuorum.dvcs_all(dvc_quorum);
+        if (dvcs_all_.len < options.quorum_view_change) return .awaiting_quorum;
 
-        const dvcs = DVCQuorum.dvcs_canonical(dvc_quorum);
-        assert(dvcs.len > 0);
-        assert(dvcs.len <= dvcs_total);
+        const dvcs_canonical_ = DVCQuorum.dvcs_canonical(dvc_quorum);
+        assert(dvcs_canonical_.len > 0);
+        assert(dvcs_canonical_.len <= dvcs_all_.len);
 
         const op_head_max = DVCQuorum.op_max_canonical(dvc_quorum);
         const op_head_min = DVCQuorum.commit_max(dvc_quorum);
@@ -6815,10 +6641,23 @@ const DVCQuorum = struct {
         // Iterate the highest definitely committed op and all maybe-uncommitted ops.
         var op = op_head_min;
         const op_head = while (op <= op_head_max) : (op += 1) {
-            // Replicas with non-canonical log-views implicitly nack all uncommitted ops.
-            var nacks: usize = dvcs_total - dvcs.len;
+            const header_canonical = for (dvcs_canonical_.constSlice()) |dvc| {
+                // This DVC is canonical, but lagging far behind.
+                if (dvc.header.op < op) continue;
 
-            const found = for (dvcs.constSlice()) |dvc| {
+                const headers = message_body_as_view_headers(dvc);
+                const header_index = dvc.header.op - op;
+                assert(header_index <= headers.slice.len);
+
+                const header = &headers.slice[header_index];
+                assert(header.op == op);
+
+                if (vsr.Headers.dvc_header_type(header) == .valid) break header;
+            } else null;
+
+            var copies: usize = 0;
+            var nacks: usize = 0;
+            for (dvcs_all_.constSlice()) |dvc| {
                 if (dvc.header.op < op) {
                     nacks += 1;
                     continue;
@@ -6827,40 +6666,56 @@ const DVCQuorum = struct {
                 const headers = message_body_as_view_headers(dvc);
                 const header_index = dvc.header.op - op;
                 if (header_index >= headers.slice.len) {
-                    // This op is definitely committed by the cluster.
-                } else {
-                    const header = &headers.slice[header_index];
-                    assert(header.op == op);
-
-                    switch (vsr.Headers.dvc_header_type(header)) {
-                        .blank => nacks += 1,
-                        .fault => {},
-                        .valid => break true,
-                    }
+                    nacks += 1;
+                    continue;
                 }
-            } else false;
 
-            if (found) {
-                // This op is eligible to be the view's head.
-            } else {
-                if (nacks >= options.quorum_nack_prepare) {
-                    // Never nack op_head_min (aka commit_max).
-                    assert(op > op_head_min);
-                    break op - 1;
-                } else {
-                    if (dvcs_total < options.replica_count) {
-                        return .awaiting_repair;
+                const header = &headers.slice[header_index];
+                assert(header.op == op);
+
+                const header_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                if (header_nacks.isSet(header_index)) {
+                    nacks += 1;
+                } else if (header_canonical) |expect| {
+                    if (vsr.Headers.dvc_header_type(header) == .valid) {
+                        if (expect.checksum == header.checksum) {
+                            copies += 1;
+                        } else {
+                            // The replica's prepare is available, but for a different header.
+                            nacks += 1;
+                        }
                     } else {
-                        return .complete_invalid;
+                        // The replica's prepare is faulty, with an unknown header.
                     }
                 }
+            }
+
+            // This is an abbreviated version of Protocol-Aware Recovery's CTRL protocol.
+            // When we can confirm that an op is definitely uncommitted, truncate it to
+            // improve availability.
+            if (nacks >= options.quorum_nack_prepare) {
+                // Never nack op_head_min (aka commit_max).
+                assert(op > op_head_min);
+                break op - 1;
+            }
+
+            if (header_canonical == null or
+                (header_canonical != null and copies == 0))
+            {
+                if (dvcs_all_.len < options.replica_count) {
+                    return .awaiting_repair;
+                } else {
+                    return .complete_invalid;
+                }
+            } else {
+                // This op is eligible to be the view's head.
             }
         } else op_head_max;
         assert(op_head >= op_head_min);
         assert(op_head <= op_head_max);
 
         return .{ .complete_valid = HeaderIterator{
-            .dvcs = dvcs,
+            .dvcs = dvcs_canonical_,
             .op_max = op_head,
             .op_min = op_head_min,
         } };
@@ -6896,16 +6751,12 @@ const DVCQuorum = struct {
                 if (dvc_header_index >= dvc_headers.slice.len) continue;
 
                 const dvc_header = &dvc_headers.slice[dvc_header_index];
-                switch (vsr.Headers.dvc_header_type(dvc_header)) {
-                    .blank => continue,
-                    .fault => continue,
-                    .valid => {
-                        if (header) |h| {
-                            assert(h.checksum == dvc_header.checksum);
-                        } else {
-                            header = dvc_header;
-                        }
-                    },
+                if (vsr.Headers.dvc_header_type(dvc_header) == .valid) {
+                    if (header) |h| {
+                        assert(h.checksum == dvc_header.checksum);
+                    } else {
+                        header = dvc_header;
+                    }
                 }
             }
 
