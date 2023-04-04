@@ -727,7 +727,7 @@ fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
 
     argv[0] = globals.napi_undefined;
     argv[1] = napi_results;
-    
+
     translate.call_function(env, scope, napi_callback, argc, argv[0..]) catch {
         translate.throw(env, "Failed to call JS results callback.") catch return;
     };
