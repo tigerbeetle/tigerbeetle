@@ -6632,7 +6632,7 @@ const DVCQuorum = struct {
         // Iterate the highest definitely committed op and all maybe-uncommitted ops.
         var op = op_head_min;
         const op_head = while (op <= op_head_max) : (op += 1) {
-            const found = for (dvcs_canonical_.constSlice()) |dvc| {
+            const header_canonical = for (dvcs_canonical_.constSlice()) |dvc| {
                 // This DVC is canonical, but lagging far behind.
                 if (dvc.header.op < op) continue;
 
@@ -6646,6 +6646,7 @@ const DVCQuorum = struct {
                 if (vsr.Headers.dvc_header_type(header) == .valid) break header;
             } else null;
 
+            var copies: usize = 0;
             var nacks: usize = 0;
             for (dvcs_all_.constSlice()) |dvc| {
                 if (dvc.header.op < op) {
@@ -6663,14 +6664,21 @@ const DVCQuorum = struct {
                 const header = &headers.slice[header_index];
                 assert(header.op == op);
 
-                const dvc_missing = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
-                nacks += @boolToInt(dvc_missing.isSet(header_index) or
-                    switch (vsr.Headers.dvc_header_type(header)) {
-                    // The replica's prepare is available, but for a different header.
-                    .valid => found != null and found.?.checksum != header.checksum,
-                    // The replica's prepare is faulty, with an unknown header.
-                    .blank => false,
-                });
+                const header_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                if (header_nacks.isSet(header_index)) {
+                    nacks += 1;
+                } else if (header_canonical) |expect| {
+                    if (vsr.Headers.dvc_header_type(header) == .valid) {
+                        if (expect.checksum == header.checksum) {
+                            copies += 1;
+                        } else {
+                            // The replica's prepare is available, but for a different header.
+                            nacks += 1;
+                        }
+                    } else {
+                        // The replica's prepare is faulty, with an unknown header.
+                    }
+                }
             }
 
             // This is an abbreviated version of Protocol-Aware Recovery's CTRL protocol.
@@ -6682,14 +6690,16 @@ const DVCQuorum = struct {
                 break op - 1;
             }
 
-            if (found) |_| {
-                // This op is eligible to be the view's head.
-            } else {
+            if (header_canonical == null or
+                (header_canonical != null and copies == 0))
+            {
                 if (dvcs_all_.len < options.replica_count) {
                     return .awaiting_repair;
                 } else {
                     return .complete_invalid;
                 }
+            } else {
+                // This op is eligible to be the view's head.
             }
         } else op_head_max;
         assert(op_head >= op_head_min);
