@@ -194,7 +194,39 @@ pub fn main() !void {
         \\          restart_probability={d}%
         \\          restart_stability={} ticks
         \\          aof={}
-    , .{ seed, cluster_options.replica_count, cluster_options.standby_count, cluster_options.client_count, simulator_options.request_probability, simulator_options.request_idle_on_probability, simulator_options.request_idle_off_probability, cluster_options.network.one_way_delay_mean, cluster_options.network.one_way_delay_min, cluster_options.network.packet_loss_probability, cluster_options.network.path_maximum_capacity, cluster_options.network.path_clog_duration_mean, cluster_options.network.path_clog_probability, cluster_options.network.packet_replay_probability, cluster_options.network.partition_mode, cluster_options.network.partition_symmetry, cluster_options.network.partition_probability, cluster_options.network.unpartition_probability, cluster_options.network.partition_stability, cluster_options.network.unpartition_stability, cluster_options.storage.read_latency_min, cluster_options.storage.read_latency_mean, cluster_options.storage.write_latency_min, cluster_options.storage.write_latency_mean, cluster_options.storage.read_fault_probability, cluster_options.storage.write_fault_probability, simulator_options.replica_crash_probability, simulator_options.replica_crash_stability, simulator_options.replica_restart_probability, simulator_options.replica_restart_stability, cluster_options.aof });
+    , .{
+        seed,
+        cluster_options.replica_count,
+        cluster_options.standby_count,
+        cluster_options.client_count,
+        simulator_options.request_probability,
+        simulator_options.request_idle_on_probability,
+        simulator_options.request_idle_off_probability,
+        cluster_options.network.one_way_delay_mean,
+        cluster_options.network.one_way_delay_min,
+        cluster_options.network.packet_loss_probability,
+        cluster_options.network.path_maximum_capacity,
+        cluster_options.network.path_clog_duration_mean,
+        cluster_options.network.path_clog_probability,
+        cluster_options.network.packet_replay_probability,
+        cluster_options.network.partition_mode,
+        cluster_options.network.partition_symmetry,
+        cluster_options.network.partition_probability,
+        cluster_options.network.unpartition_probability,
+        cluster_options.network.partition_stability,
+        cluster_options.network.unpartition_stability,
+        cluster_options.storage.read_latency_min,
+        cluster_options.storage.read_latency_mean,
+        cluster_options.storage.write_latency_min,
+        cluster_options.storage.write_latency_mean,
+        cluster_options.storage.read_fault_probability,
+        cluster_options.storage.write_fault_probability,
+        simulator_options.replica_crash_probability,
+        simulator_options.replica_crash_stability,
+        simulator_options.replica_restart_probability,
+        simulator_options.replica_restart_stability,
+        cluster_options.aof,
+    });
 
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
