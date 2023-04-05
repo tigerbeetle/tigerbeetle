@@ -19,6 +19,7 @@ pub const tracer = @import("tracer.zig");
 pub const config = @import("config.zig");
 pub const stdx = @import("stdx.zig");
 pub const superblock = @import("vsr/superblock.zig");
+pub const aof = @import("aof.zig");
 pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .grid = @import("lsm/grid.zig"),

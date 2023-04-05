@@ -19,6 +19,7 @@ const fatal = cli.fatal;
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const Storage = vsr.storage.Storage;
+const AOF = vsr.aof.AOF;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
@@ -27,7 +28,7 @@ const StateMachine = vsr.state_machine.StateMachineType(Storage, .{
     .lsm_batch_multiple = constants.lsm_batch_multiple,
 });
 
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
 
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
@@ -143,11 +144,14 @@ const Command = struct {
         try command.init(allocator, args.path, false);
         defer command.deinit(allocator);
 
+        var aof = &(try AOF.from_absolute_path(constants.aof_path));
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(u8, args.addresses.len),
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
+            .aof = aof,
             .message_pool = &command.message_pool,
             .time = .{},
             .state_machine_options = .{
@@ -192,7 +196,7 @@ const Command = struct {
 
         if (constants.aof_recovery) {
             log_main.warn("{}: started in AOF recovery mode. This is potentially dangerous - " ++
-                "if it's unexpected, please exit tigerbeetle and change config.zig immediately.", .{replica.replica});
+                "if it's unexpected, please exit tigerbeetle and change config.zig.", .{replica.replica});
         }
 
         while (true) {

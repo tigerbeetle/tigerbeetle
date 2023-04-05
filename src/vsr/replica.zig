@@ -12,7 +12,6 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientTable = @import("superblock_client_table.zig").ClientTable;
-const AOF = @import("../aof.zig").AOF;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -69,6 +68,7 @@ pub fn ReplicaType(
     comptime MessageBus: type,
     comptime Storage: type,
     comptime Time: type,
+    comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
     const SuperBlock = vsr.SuperBlockType(Storage);
@@ -347,7 +347,7 @@ pub fn ReplicaType(
         tracer_slot_commit: ?tracer.SpanStart = null,
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
-        aof: ?AOF = null,
+        aof: ?*AOF = null,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -355,6 +355,7 @@ pub fn ReplicaType(
             storage: *Storage,
             message_pool: *MessagePool,
             time: Time,
+            aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
         };
@@ -404,6 +405,7 @@ pub fn ReplicaType(
                 .replica_count = replica_count,
                 .standby_count = options.node_count - replica_count,
                 .storage = options.storage,
+                .aof = options.aof,
                 .time = options.time,
                 .message_pool = options.message_pool,
                 .state_machine_options = options.state_machine_options,
@@ -565,6 +567,7 @@ pub fn ReplicaType(
             replica_index: u8,
             time: Time,
             storage: *Storage,
+            aof: ?*AOF,
             message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
@@ -735,7 +738,7 @@ pub fn ReplicaType(
                 },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
-                .aof = if (constants.aof) try AOF.from_absolute_path(constants.aof_path) else null,
+                .aof = options.aof,
             };
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{
@@ -2859,7 +2862,7 @@ pub fn ReplicaType(
             assert(self.state_machine.commit_timestamp < prepare.header.timestamp);
 
             // Synchronously record this request in our AOF. This can be used for disaster recovery
-            // in the case of catestrophic storage failure. Internally, write() will only return
+            // in the case of catastrophic storage failure. Internally, write() will only return
             // once the data has been written to disk with O_DIRECT and O_SYNC.
             //
             // We run this here, instead of in state_machine, so we can have full access to the VSR
@@ -2873,11 +2876,8 @@ pub fn ReplicaType(
             //
             // It should be impossible for a client to receive a response without the request having
             // being logged, however.
-            //
-            // TODO: Do we need to record replies...? For safety?
-            // TODO: Is checking for !recovering the right thing to do?
-            if (constants.aof and @enumToInt(prepare.header.operation) > 2 and self.status != .recovering) {
-                self.aof.?.write(prepare, self.replica, self.primary_index(self.view)) catch @panic("aof failure");
+            if (self.aof != null and self.status != .recovering) {
+                self.aof.?.write(prepare, .{ .replica = self.replica, .primary = self.primary_index(self.view) }) catch @panic("aof failure");
             }
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
