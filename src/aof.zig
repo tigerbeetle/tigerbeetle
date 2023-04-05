@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 const os = std.os;
 
 const constants = @import("constants.zig");
-// const demo = @import("demo.zig");
 const vsr = @import("vsr.zig");
 const tb = @import("tigerbeetle.zig");
 
@@ -13,10 +12,7 @@ const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = @import("message_pool.zig").MessagePool.Message;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const Storage = @import("storage.zig").Storage;
-const StateMachine = @import("state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = constants.message_body_size_max,
-    .lsm_batch_multiple = constants.lsm_batch_multiple,
-});
+const StateMachine = @import("state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 
 const Header = vsr.Header;
 const Account = tb.Account;
