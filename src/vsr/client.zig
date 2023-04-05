@@ -325,7 +325,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 }
             }
 
-            // Creating a new request for this batch:
+            // Checking if there is room for a new request/batch:
             if (self.request_queue.full()) return Error.BatchTooManyOutstanding;
             var demux = self.batch_demux_pool.acquire(
                 0,
@@ -495,9 +495,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             const inflight = self.request_queue.pop().?;
             defer self.message_bus.unref(inflight.message);
 
-            log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
+            log.debug("{}: on_reply: request={} size={} {s}", .{
                 self.id,
-                0, //PENDING:: Adjust logs.
                 reply.header.request,
                 reply.header.size,
                 @tagName(reply.header.operation.cast(StateMachine)),
