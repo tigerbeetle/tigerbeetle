@@ -69,16 +69,12 @@ pub const Storage = struct {
     };
 
     pub const NextTick = struct {
-        next: ?*NextTick = null,
+        completion: IO.Completion,
         callback: fn (next_tick: *NextTick) void,
     };
 
     io: *IO,
     fd: os.fd_t,
-
-    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
-    next_tick_completion_scheduled: bool = false,
-    next_tick_completion: IO.Completion = undefined,
 
     pub fn init(io: *IO, fd: os.fd_t) !Storage {
         return Storage{
@@ -88,7 +84,6 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage) void {
-        assert(storage.next_tick_queue.empty());
         assert(storage.fd != IO.INVALID_FILE);
         storage.fd = IO.INVALID_FILE;
     }
@@ -105,42 +100,24 @@ pub const Storage = struct {
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
-        next_tick.* = .{ .callback = callback };
-        storage.next_tick_queue.push(next_tick);
+        next_tick.* = .{
+            .callback = callback,
+            .completion = undefined,
+        };
 
-        if (!storage.next_tick_completion_scheduled) {
-            storage.next_tick_completion_scheduled = true;
-            storage.io.timeout(
-                *Storage,
-                storage,
-                timeout_callback,
-                &storage.next_tick_completion,
-                0, // 0ns timeout means to resolve as soon as possible - like a yield
-            );
-        }
+        // Uses timeout(0ns) as a yield to the IO layer.
+        storage.io.timeout(*Storage, storage, timeout_callback, &next_tick.completion, 0);
     }
 
-    fn timeout_callback(
-        storage: *Storage,
-        completion: *IO.Completion,
-        result: IO.TimeoutError!void,
-    ) void {
-        assert(completion == &storage.next_tick_completion);
+    fn timeout_callback(_: *Storage, completion: *IO.Completion, result: IO.TimeoutError!void) void {
+        // 0ns timeouts should not fail.
         _ = result catch |e| switch (e) {
             error.Canceled => unreachable,
             error.Unexpected => unreachable,
         };
 
-        // Reset the scheduled flag after processing all tick entries
-        assert(storage.next_tick_completion_scheduled);
-        defer {
-            assert(storage.next_tick_completion_scheduled);
-            storage.next_tick_completion_scheduled = false;
-        }
-
-        while (storage.next_tick_queue.pop()) |next_tick| {
-            next_tick.callback(next_tick);
-        }
+        const next_tick = @fieldParentPtr(Storage.NextTick, "completion", completion);
+        next_tick.callback(next_tick);
     }
 
     pub fn read_sectors(
