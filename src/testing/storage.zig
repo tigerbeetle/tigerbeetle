@@ -275,11 +275,24 @@ pub const Storage = struct {
         }
     }
 
+    pub const NextTickIntent = enum {
+        yield,
+        cpu_work,
+        cpu_inject,
+    };
+
     pub fn on_next_tick(
         storage: *Storage,
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
+        intent: NextTickIntent,
     ) void {
+        // All on_next_tick requests are fullened through next_tick_queue for determinism.
+        // `yield` - This already goes through next_tick_queue.
+        // `cpu_work` - Avoid multi-threading and go through next_tick_queue.
+        // `cpu_inject` - `cpu_work` goes through next_tick_queue so this does as well.
+        _ = intent;
+
         next_tick.* = .{ .callback = callback };
         storage.next_tick_queue.push(next_tick);
     }
