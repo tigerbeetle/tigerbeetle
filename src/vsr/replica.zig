@@ -2665,7 +2665,7 @@ pub fn ReplicaType(
                 self.state_machine.commit_timestamp,
                 prepare.header.timestamp,
             });
-            assert(self.state_machine.commit_timestamp < prepare.header.timestamp);
+            assert(self.state_machine.commit_timestamp < prepare.header.timestamp or constants.aof_recovery);
 
             // Synchronously record this request in our AOF. This can be used for disaster recovery
             // in the case of catastrophic storage failure. Internally, write() will only return
@@ -2695,7 +2695,7 @@ pub fn ReplicaType(
                 reply.buffer[@sizeOf(Header)..],
             ));
 
-            assert(self.state_machine.commit_timestamp <= prepare.header.timestamp);
+            assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or constants.aof_recovery);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
 
             self.commit_min += 1;
@@ -3949,7 +3949,16 @@ pub fn ReplicaType(
             message.header.view = self.view;
             message.header.op = self.op + 1;
             message.header.commit = self.commit_max;
-            message.header.timestamp = prepare_timestamp;
+
+            // When running in AOF recovery mode, we allow clients to set a timestamp explicitly, but
+            // they can still pass in 0.
+            if (constants.aof_recovery) {
+                if (message.header.timestamp == 0) {
+                    message.header.timestamp = prepare_timestamp;
+                }
+            } else {
+                message.header.timestamp = prepare_timestamp;
+            }
             message.header.replica = self.replica;
             message.header.command = .prepare;
 

@@ -122,7 +122,6 @@ pub fn main() !void {
             .write_fault_probability = random.uintLessThan(u8, 10),
             .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
         },
-        .aof = true, // TODO
         .storage_fault_atlas = .{
             .faulty_superblock = true,
             .faulty_wal_headers = replica_count > 1,
@@ -193,7 +192,6 @@ pub fn main() !void {
         \\          crash_stability={} ticks
         \\          restart_probability={d}%
         \\          restart_stability={} ticks
-        \\          aof={}
     , .{
         seed,
         cluster_options.replica_count,
@@ -225,7 +223,6 @@ pub fn main() !void {
         simulator_options.replica_crash_stability,
         simulator_options.replica_restart_probability,
         simulator_options.replica_restart_stability,
-        cluster_options.aof,
     });
 
     var simulator = try Simulator.init(allocator, random, simulator_options);

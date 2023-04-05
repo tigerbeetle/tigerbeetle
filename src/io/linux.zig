@@ -990,7 +990,6 @@ pub const IO = struct {
         must_create: bool,
     ) !os.fd_t {
         assert(relative_path.len > 0);
-        assert(size == 0 or size >= constants.sector_size);
         assert(size % constants.sector_size == 0);
 
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
@@ -1017,12 +1016,14 @@ pub const IO = struct {
         }
 
         if (must_create) {
-            log.info("creating \"{s}\"...", .{relative_path});
             flags |= os.O.CREAT;
 
             // Use (must_create and size == 0) as a proxy for opening a file best effort
             if (size != 0) {
                 flags |= os.O.EXCL;
+                log.info("creating \"{s}\"...", .{relative_path});
+            } else {
+                log.info("opening / creating \"{s}\"...", .{relative_path});
             }
             mode = 0o666;
         } else {

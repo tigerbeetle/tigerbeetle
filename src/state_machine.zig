@@ -589,7 +589,7 @@ pub fn StateMachineType(
         ) usize {
             _ = client;
             assert(op != 0);
-            assert(timestamp > self.commit_timestamp);
+            assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             tracer.start(
                 &self.tracer_slot,
@@ -814,7 +814,7 @@ pub fn StateMachineType(
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
-            assert(global_constants.aof_recovery or a.timestamp > self.commit_timestamp);
+            assert(a.timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             if (a.flags.padding != 0) return .reserved_flag;
             if (!zeroed_48_bytes(a.reserved)) return .reserved_field;
@@ -863,7 +863,7 @@ pub fn StateMachineType(
         }
 
         fn create_transfer(self: *StateMachine, t: *const Transfer) CreateTransferResult {
-            assert(global_constants.aof_recovery or t.timestamp > self.commit_timestamp);
+            assert(t.timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             if (t.flags.padding != 0) return .reserved_flag;
             if (t.reserved != 0) return .reserved_field;

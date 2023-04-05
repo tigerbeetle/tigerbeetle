@@ -76,8 +76,9 @@ pub const AOFEntry = extern struct {
 };
 
 /// The AOF itself is simple and deterministic - but it logs data like the client's id
-/// which make things trickier. We could take a checksum of all checksum_body that
-/// constitute one AOF log, and that would be comparable between runs.
+/// which make things trickier. If you want to compare AOFs between runs, the `debug`
+/// CLI command does it by hashing together all checksum_body, operation and timestamp
+/// fields.
 pub const AOF = struct {
     fd: os.fd_t,
     last_checksum: ?u128 = null,
@@ -266,7 +267,7 @@ pub const AOFReplayClient = struct {
         var client = try allocator.create(Client);
 
         io.* = try IO.init(32, 0);
-        message_pool.* = try MessagePool.init_capacity(allocator, 4);
+        message_pool.* = try MessagePool.init(allocator, .client);
 
         client.* = try Client.init(
             allocator,
@@ -306,14 +307,22 @@ pub const AOFReplayClient = struct {
                 .reserved, .root, .register => {},
 
                 else => {
-                    std.log.info("helllooo getting message...", .{});
                     const message = self.client.get_message();
                     self.inflight_message = message;
 
                     entry.to_message(message);
                     const operation = entry.metadata.vsr_header.operation.cast(StateMachine);
 
-                    self.client.request(
+                    message.header.* = .{
+                        .client = self.client.id,
+                        .cluster = self.client.cluster,
+                        .command = .request,
+                        .operation = vsr.Operation.from(StateMachine, operation),
+                        .size = @intCast(u32, @sizeOf(Header) + entry.body_size),
+                        .timestamp = message.header.timestamp,
+                    };
+
+                    self.client.raw_request(
                         @ptrToInt(self),
                         AOFReplayClient.on_replay_callback,
                         operation,
@@ -343,8 +352,6 @@ pub const AOFReplayClient = struct {
 
         self.client.unref(self.inflight_message.?);
         self.inflight_message = null;
-
-        std.log.info("helllooo here...", .{});
     }
 };
 
@@ -566,7 +573,7 @@ const usage =
     \\  debug    Print all entries that have been recoreded in the AOF file at <path>
     \\           to stdout. Checksums are verified, and aof will panic if an invalid
     \\           checksum is encountered, so this can be used to check the validity
-    \\           of an AOF file.
+    \\           of an AOF file. Prints a final hash of all data entries in the AOF.
     \\
     \\  prepare  Walk through multiple AOF files, extracting entries from each one
     \\           that pass validation, and build a single valid AOF. The first entry
@@ -605,8 +612,8 @@ pub fn main() !void {
             paths[0] = arg;
         } else if (count == 3 and std.mem.eql(u8, action.?, "recover")) {
             paths[0] = arg;
-        } else if (count >= 3 and std.mem.eql(u8, action.?, "prepare")) {
-            paths[count - 3] = arg;
+        } else if (count >= 2 and std.mem.eql(u8, action.?, "prepare")) {
+            paths[count - 2] = arg;
         }
 
         count += 1;
@@ -627,18 +634,25 @@ pub fn main() !void {
         var it = try AOF.iterator(paths[0]);
         defer it.close();
 
-        var body_checksum: [32]u8 = undefined;
+        var data_checksum: [32]u8 = undefined;
         var blake3 = std.crypto.hash.Blake3.init(.{});
 
         const stdout = std.io.getStdOut().writer();
         while (try it.next(target)) |entry| {
             try stdout.print("{}\n", .{entry.metadata});
-            blake3.update(std.mem.asBytes(&entry.metadata.vsr_header.checksum_body));
+
+            // The body isn't the only important information, there's also the operation
+            // and the timestamp which are in the header. Include those in our hash too.
+            if (@enumToInt(entry.metadata.vsr_header.operation) > constants.vsr_operations_reserved) {
+                blake3.update(std.mem.asBytes(&entry.metadata.vsr_header.checksum_body));
+                blake3.update(std.mem.asBytes(&entry.metadata.vsr_header.timestamp));
+                blake3.update(std.mem.asBytes(&entry.metadata.vsr_header.operation));
+            }
         }
-        blake3.final(body_checksum[0..]);
-        try stdout.print("\nBody checksum chain: {}\n", .{@bitCast(u128, body_checksum[0..@sizeOf(u128)].*)});
-    } else if (action != null and std.mem.eql(u8, action.?, "prepare") and count >= 3) {
-        try aof_prepare(allocator, paths[0 .. count - 3], "prepared.aof");
+        blake3.final(data_checksum[0..]);
+        try stdout.print("\nData checksum chain: {}\n", .{@bitCast(u128, data_checksum[0..@sizeOf(u128)].*)});
+    } else if (action != null and std.mem.eql(u8, action.?, "prepare") and count >= 2) {
+        try aof_prepare(allocator, paths[0 .. count - 2], "prepared.aof");
     } else {
         std.io.getStdOut().writeAll(usage) catch os.exit(1);
         os.exit(1);

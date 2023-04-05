@@ -33,10 +33,10 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
-    const aof_override = b.option(bool, "aof", "Override AOF mode.");
-    const aof_recovery_override = b.option(bool, "aof_recovery", "Override AOF Recovery mode.");
-    options.addOption(?bool, "aof", aof_override);
-    options.addOption(?bool, "aof_recovery", aof_recovery_override);
+    const aof_override = b.option(bool, "config-aof", "Override AOF mode.");
+    const aof_recovery_override = b.option(bool, "config-aof-recovery", "Override AOF Recovery mode.");
+    options.addOption(?bool, "config_aof", aof_override);
+    options.addOption(?bool, "config_aof_recovery", aof_recovery_override);
 
     const hash_log_mode = b.option(
         config.HashLogMode,
@@ -105,7 +105,7 @@ pub fn build(b: *std.build.Builder) void {
         const run_cmd = aof.run();
         if (b.args) |args| run_cmd.addArgs(args);
 
-        const run_step = b.step("aof", "Run TigerBeetle AOF");
+        const run_step = b.step("aof", "Run TigerBeetle AOF Utility");
         run_step.dependOn(&run_cmd.step);
     }
 

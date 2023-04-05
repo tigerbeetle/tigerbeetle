@@ -140,14 +140,20 @@ const Command = struct {
         try command.init(allocator, args.path, false);
         defer command.deinit(allocator);
 
-        var aof = &(try AOF.from_absolute_path(constants.aof_path));
+        var aof: ?AOF = null;
+        if (constants.aof) {
+            var aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
+            defer allocator.free(aof_path);
+
+            aof = try AOF.from_absolute_path(aof_path);
+        }
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(u8, args.addresses.len),
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
-            .aof = aof,
+            .aof = if (aof != null) &(aof.?) else null,
             .message_pool = &command.message_pool,
             .time = .{},
             .state_machine_options = .{
