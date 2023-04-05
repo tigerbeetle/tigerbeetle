@@ -4,8 +4,9 @@ setlocal enabledelayedexpansion
 git submodule init
 git submodule update
 
-cd ..\..\.. 
+pushd ..\..\..
 call .\scripts\install.bat
+popd
 
 echo "Building TigerBeetle Java Client..."
 mvn -B package -Dmaven.test.skip -Djacoco.skip --quiet

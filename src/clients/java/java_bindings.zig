@@ -5,6 +5,8 @@ const tb_client = @import("../c/tb_client.zig");
 const trait = std.meta.trait;
 const assert = std.debug.assert;
 
+const output_path = "src/clients/java/src/main/java/com/tigerbeetle/";
+
 const TypeMapping = struct {
     name: []const u8,
     private_fields: []const []const u8 = &.{},
@@ -150,7 +152,7 @@ fn to_case(
 
 fn emit_enum(
     buffer: *std.ArrayList(u8),
-    comptime type_info: anytype,
+    comptime Type: type,
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
 ) !void {
@@ -165,6 +167,7 @@ fn emit_enum(
         .name = mapping.name,
     });
 
+    const type_info = @typeInfo(Type).Enum;
     inline for (type_info.fields) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
 
@@ -187,7 +190,7 @@ fn emit_enum(
         , .{
             .enum_name = to_case(field.name, .pascal),
             .int_type = int_type,
-            .value = i,
+            .value = @enumToInt(@field(Type, field.name)),
             .separator = if (i == type_info.fields.len - 1) ';' else ',',
         });
     }
@@ -743,9 +746,9 @@ pub fn generate_bindings(
                 @sizeOf(ZigType),
             ),
         },
-        .Enum => |info| try emit_enum(
+        .Enum => try emit_enum(
             buffer,
-            info,
+            ZigType,
             mapping,
             comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
         ),
@@ -767,7 +770,7 @@ pub fn main() !void {
         try generate_bindings(ZigType, mapping, &buffer);
 
         try std.fs.cwd().writeFile(
-            "src/clients/java/src/main/java/com/tigerbeetle/" ++ mapping.name ++ ".java",
+            output_path ++ mapping.name ++ ".java",
             buffer.items,
         );
     }
@@ -788,7 +791,7 @@ test "bindings java" {
 
         const current = try std.fs.cwd().readFileAlloc(
             testing.allocator,
-            "src/clients/java/src/main/java/com/tigerbeetle/" ++ mapping.name ++ ".java",
+            output_path ++ mapping.name ++ ".java",
             std.math.maxInt(usize),
         );
         defer testing.allocator.free(current);

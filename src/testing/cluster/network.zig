@@ -20,6 +20,7 @@ const PacketSimulatorPath = @import("../packet_simulator.zig").Path;
 const log = std.log.scoped(.network);
 
 pub const NetworkOptions = PacketSimulatorOptions;
+pub const LinkFilter = @import("../packet_simulator.zig").LinkFilter;
 
 pub const Network = struct {
     pub const Packet = struct {
@@ -28,6 +29,10 @@ pub const Network = struct {
 
         pub fn deinit(packet: *const Packet) void {
             packet.network.message_pool.unref(packet.message);
+        }
+
+        pub fn command(packet: *const Packet) vsr.Command {
+            return packet.message.header.command;
         }
     };
 
@@ -148,6 +153,13 @@ pub const Network = struct {
     pub fn process_disable(network: *Network, process: Process) void {
         assert(network.buses_enabled.items[network.process_to_address(process)]);
         network.buses_enabled.items[network.process_to_address(process)] = false;
+    }
+
+    pub fn link_filter(network: *Network, path: Path) *LinkFilter {
+        return network.packet_simulator.link_filter(.{
+            .source = network.process_to_address(path.source),
+            .target = network.process_to_address(path.target),
+        });
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {

@@ -82,25 +82,14 @@ data and a mission critical database to store it.
 
 ## What is a two-phase transfer?
 
-This is a reference to the [two-phase commit protocol for distributed
-transactions](https://en.wikipedia.org/wiki/Two-phase_commit_protocol).
-
 Single-phase transfers post funds to accounts immediately when they
 are created.
 
 In contrast to single-phase transfers, a two-phase transfer moves
-funds in stages:
+funds in stages.
 
-1. First, the pending transfer reserves funds. While reserved,
-they cannot be used by either the payer or payee.
-
-2. Later (in a future "commit", i.e. a separate request), the
-application creates another transfer — either a post-pending transfer
-or a void-pending transfer. The former moves all (or part) of the
-reserved funds to the destination; the latter reverts them to the
-original account. The pending transfer's amount is reserved in a way
-that this second step will never cause the account's configured
-balance invariants (e.g. debits < credits) to be broken.
+See [Two-phase Transfer](./usage/two-phase-transfer.md) for more
+detail.
 
 ## How does TigerBeetle fit into my architecture?
 

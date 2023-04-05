@@ -298,6 +298,10 @@ pub const SuperBlockHeader = extern struct {
 
     pub fn vsr_headers(superblock: *const SuperBlockHeader) vsr.Headers.ViewChangeSlice {
         return vsr.Headers.ViewChangeSlice.init(
+            if (superblock.vsr_state.log_view < superblock.vsr_state.view)
+                .do_view_change
+            else
+                .start_view,
             superblock.vsr_headers_all[0..superblock.vsr_headers_count],
         );
     }
@@ -772,7 +776,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.vsr_state.log_view < update.log_view or
                 superblock.staging.vsr_state.view < update.view);
 
-            vsr.Headers.ViewChangeSlice.verify(update.headers.array.constSlice());
+            update.headers.verify();
             assert(update.view >= update.log_view);
 
             const vsr_state = SuperBlockHeader.VSRState{
@@ -1409,6 +1413,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.verify_manifest_blocks_are_acquired_in_free_set();
 
                 // TODO Repair any impaired copies before we continue.
+                context.copy = 0;
                 superblock.read_client_table(context);
             } else if (copy + 1 == constants.superblock_copies) {
                 @panic("superblock free set lost");

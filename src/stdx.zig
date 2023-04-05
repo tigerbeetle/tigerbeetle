@@ -1,6 +1,7 @@
 //! Extensions to the standard library -- things which could have been in std, but aren't.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
@@ -184,3 +185,20 @@ const TimeIt = struct {
         );
     }
 };
+
+pub const log = if (builtin.is_test)
+    // Downgrade `err` to `warn` for tests.
+    // Zig fails any test that does `log.err`, but we want to test those code paths here.
+    struct {
+        pub fn scoped(comptime scope: @Type(.EnumLiteral)) type {
+            const base = std.log.scoped(scope);
+            return struct {
+                pub const err = warn;
+                pub const warn = base.warn;
+                pub const info = base.info;
+                pub const debug = base.debug;
+            };
+        }
+    }
+else
+    std.log;

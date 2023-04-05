@@ -6,12 +6,12 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.state_machine);
 
-pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
-    message_body_size_max: usize,
-    lsm_batch_multiple: usize,
-}) type {
+pub fn StateMachineType(
+    comptime Storage: type,
+    comptime config: constants.StateMachineConfig,
+) type {
     _ = Storage;
-    _ = constants_;
+    _ = config;
 
     return struct {
         const StateMachine = @This();
@@ -21,11 +21,11 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
 
         pub const Operation = enum(u8) {
             /// Operations reserved by VR protocol (for all state machines):
-            reserved,
-            root,
-            register,
+            reserved = 0,
+            root = 1,
+            register = 2,
 
-            echo,
+            echo = config.vsr_operations_reserved + 0,
         };
 
         pub const Options = struct {};
@@ -109,7 +109,7 @@ pub fn StateMachineType(comptime Storage: type, comptime constants_: struct {
                 .reserved, .root => unreachable,
                 .register => return 0,
                 .echo => {
-                    stdx.copy_disjoint(.exact, u8, output, input);
+                    stdx.copy_disjoint(.inexact, u8, output, input);
                     return input.len;
                 },
             }

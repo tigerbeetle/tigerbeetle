@@ -7,9 +7,10 @@ test {
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
-    _ = @import("clients/dotnet/dotnet_bindings_test.zig");
-    _ = @import("clients/go/go_bindings_test.zig");
+    _ = @import("clients/dotnet/dotnet_bindings.zig");
+    _ = @import("clients/go/go_bindings.zig");
     _ = @import("clients/java/java_bindings.zig");
+    _ = @import("clients/node/node_bindings.zig");
 
     // TODO Add remaining unit tests from lsm namespace.
     _ = @import("lsm/forest.zig");
@@ -32,6 +33,7 @@ test {
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
     _ = @import("vsr/replica_format.zig");
+    _ = @import("vsr/replica_test.zig");
     _ = @import("vsr/superblock.zig");
     _ = @import("vsr/superblock_free_set.zig");
     _ = @import("vsr/superblock_manifest.zig");

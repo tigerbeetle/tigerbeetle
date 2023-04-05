@@ -88,6 +88,14 @@ type Account struct {
 	Timestamp      uint64
 }
 
+func (o Account) AccountFlags() AccountFlags {
+	var f AccountFlags
+	f.Linked = ((o.Flags >> 0) & 0x1) == 1
+	f.DebitsMustNotExceedCredits = ((o.Flags >> 1) & 0x1) == 1
+	f.CreditsMustNotExceedDebits = ((o.Flags >> 2) & 0x1) == 1
+	return f
+}
+
 type Transfer struct {
 	ID              Uint128
 	DebitAccountID  Uint128
@@ -101,6 +109,17 @@ type Transfer struct {
 	Flags           uint16
 	Amount          uint64
 	Timestamp       uint64
+}
+
+func (o Transfer) TransferFlags() TransferFlags {
+	var f TransferFlags
+	f.Linked = ((o.Flags >> 0) & 0x1) == 1
+	f.Pending = ((o.Flags >> 1) & 0x1) == 1
+	f.PostPendingTransfer = ((o.Flags >> 2) & 0x1) == 1
+	f.VoidPendingTransfer = ((o.Flags >> 3) & 0x1) == 1
+	f.BalancingDebit = ((o.Flags >> 4) & 0x1) == 1
+	f.BalancingCredit = ((o.Flags >> 5) & 0x1) == 1
+	return f
 }
 
 type CreateAccountResult uint32

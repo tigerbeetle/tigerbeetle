@@ -28,7 +28,7 @@ const BlockType = @import("grid.zig").BlockType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage, TableInfo);
 const fuzz = @import("../testing/fuzz.zig");
 
-pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
+pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 const entries_max_block = ManifestLog.Block.entry_count_max;
 const entries_max_buffered = entries_max_block *

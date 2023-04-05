@@ -193,9 +193,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message: *Message,
             message_body_size: usize,
         ) void {
-            assert(operation != .reserved);
-            assert(operation != .root);
-            assert(operation != .register);
+            assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
 
             self.register();
             assert(self.request_number > 0);

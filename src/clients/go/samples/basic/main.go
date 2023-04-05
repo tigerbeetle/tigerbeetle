@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"reflect"
 
 	tb "github.com/tigerbeetledb/tigerbeetle-go"
 	tb_types "github.com/tigerbeetledb/tigerbeetle-go/pkg/types"
@@ -16,11 +18,23 @@ func uint128(value string) tb_types.Uint128 {
 	return x
 }
 
+// Since we only require Go 1.17 we can't do this as a generic function
+// even though that would be fine. So do the dynamic approach for now.
+func assert(a, b interface{}, field string) {
+	if !reflect.DeepEqual(a, b) {
+		log.Fatalf("Expected %s to be [%+v (%T)], got: [%+v (%T)]", field, b, b, a, a)
+	}
+}
+
 func main() {
-	client, err := tb.NewClient(0, []string{"3000"}, 1)
+	port := os.Getenv("TB_PORT")
+	if port == "" {
+		port = "3000"
+	}
+
+	client, err := tb.NewClient(0, []string{port}, 1)
 	if err != nil {
-		log.Printf("Error creating client: %s", err)
-		return
+		log.Fatalf("Error creating client: %s", err)
 	}
 	defer client.Close()
 
@@ -38,63 +52,49 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Printf("Error creating accounts: %s", err)
-		return
+		log.Fatalf("Error creating accounts: %s", err)
 	}
 
 	for _, err := range res {
-		log.Printf("Error creating account %d: %s", err.Index, err.Result)
-		return
+		log.Fatalf("Error creating account %d: %s", err.Index, err.Result)
 	}
 
-	// Send money from one account to another
-	SAMPLES := 1_000_000
-	BATCH_SIZE := 8191
-	batch := make([]tb_types.Transfer, BATCH_SIZE)
-	for i := 0; i < SAMPLES; i += BATCH_SIZE {
-		for j := 0; (j < BATCH_SIZE) && (i+j < SAMPLES); j++ {
-			batch[j] = tb_types.Transfer{
-				ID:              uint128(fmt.Sprintf("%d", i+j+1)),
-				DebitAccountID:  uint128("1"),
-				CreditAccountID: uint128("2"),
-				Ledger:          1,
-				Code:            1,
-				Amount:          10,
-			}
-		}
+	transferRes, err := client.CreateTransfers([]tb_types.Transfer{
+		{
+			ID:              uint128("1"),
+			DebitAccountID:  uint128("1"),
+			CreditAccountID: uint128("2"),
+			Ledger:          1,
+			Code:            1,
+			Amount:          10,
+		},
+	})
+	if err != nil {
+		log.Fatalf("Error creating transfer: %s", err)
+	}
 
-		res, err := client.CreateTransfers(batch)
-		if err != nil {
-			log.Printf("Error creating transfer batch %d: %s", i, err)
-			return
-		}
-
-		for _, err := range res {
-			id := int(err.Index) + i
-			if id < SAMPLES {
-				log.Printf("Error creating transfer %d: %s", id, err.Result)
-			}
-			return
-		}
+	for _, err := range transferRes {
+		log.Fatalf("Error creating transfer: %s", err.Result)
 	}
 
 	// Check the sums for both accounts
 	accounts, err := client.LookupAccounts([]tb_types.Uint128{uint128("1"), uint128("2")})
 	if err != nil {
-		log.Printf("Could not fetch accounts: %s", err)
-		return
+		log.Fatalf("Could not fetch accounts: %s", err)
 	}
+	assert(len(accounts), 2, "accounts")
 
-	total := uint64(10 * SAMPLES)
 	for _, account := range accounts {
 		if account.ID == uint128("1") {
-			if account.DebitsPosted != total {
-				panic(fmt.Sprintf("Expected debits to be %d, got %d", total, account.DebitsPosted))
-			}
+			assert(account.DebitsPosted, uint64(10), "account 1 debits")
+			assert(account.CreditsPosted, uint64(0), "account 1 credits")
+		} else if account.ID == uint128("2") {
+			assert(account.DebitsPosted, uint64(0), "account 2 debits")
+			assert(account.CreditsPosted, uint64(10), "account 2 credits")
 		} else {
-			if account.CreditsPosted != total {
-				panic(fmt.Sprintf("Expected credits to be %d, got %d", total, account.CreditsPosted))
-			}
-		}
+			log.Fatalf("Unexpected account")
+		}		
 	}
+
+	fmt.Println("ok")
 }

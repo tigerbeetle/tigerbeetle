@@ -301,6 +301,12 @@ In the default configuration, the batch sizes are:
 Presently the client application is responsible for batching events, but only as a stopgap
 because this has not yet been implemented within the clients themselves.
 
+Read more about how two-phase transfers work with each client.
+
+* [Node](/src/clients/node/README.md#batching)
+* [Go](/src/clients/go/README.md#batching)
+* [Java](/src/clients/java/README.md#batching)
+
 #### API Layer Architecture
 
 In some application architectures, the number of services that need to query TigerBeetle may:
@@ -335,3 +341,11 @@ flowchart LR
     API1 <--> Cluster
     API2 <--> Cluster
 ```
+
+#### Queues and Workers
+
+If you are making requests to TigerBeetle from workers
+pulling jobs from a queue, you can batch requests to
+TigerBeetle by having the worker act on multiple jobs from
+the queue at once rather than one at a time. i.e. pulling
+multiple jobs from the queue rather than just one.
