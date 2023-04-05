@@ -117,7 +117,7 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
                 );
             } else {
                 it.callback = .{ .next_tick = callback };
-                it.context.grid.on_next_tick(on_next_tick, &it.next_tick);
+                it.context.grid.on_next_tick(on_next_tick, &it.next_tick, .yield);
             }
         }
 

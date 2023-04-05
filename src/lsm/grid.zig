@@ -206,12 +206,15 @@ pub fn GridType(comptime Storage: type) type {
             grid.* = undefined;
         }
 
+        pub const NextTickIntent = Storage.NextTickIntent;
+
         pub fn on_next_tick(
             grid: *Grid,
             callback: fn (*Grid.NextTick) void,
             next_tick: *Grid.NextTick,
+            intent: NextTickIntent,
         ) void {
-            grid.superblock.storage.on_next_tick(callback, next_tick);
+            grid.superblock.storage.on_next_tick(callback, next_tick, intent);
         }
 
         /// Returning null indicates that there are not enough free blocks to fill the reservation.
@@ -434,7 +437,7 @@ pub fn GridType(comptime Storage: type) type {
             // Become the "root" read thats fetching the block for the given address.
             // The fetch happens asynchronously to avoid stack-overflow and nested cache invalidation.
             grid.read_queue.push(read);
-            grid.on_next_tick(read_block_tick_callback, &read.next_tick);
+            grid.on_next_tick(read_block_tick_callback, &read.next_tick, .yield);
         }
 
         fn read_block_tick_callback(next_tick: *Storage.NextTick) void {

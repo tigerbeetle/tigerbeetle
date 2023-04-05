@@ -91,7 +91,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                 it.context.grid.read_block(on_read, &it.read, address, checksum, .data);
             } else {
                 it.callback = .{ .next_tick = callback };
-                it.context.grid.on_next_tick(on_next_tick, &it.next_tick);
+                it.context.grid.on_next_tick(on_next_tick, &it.next_tick, .yield);
             }
         }
 

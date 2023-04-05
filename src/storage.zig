@@ -95,21 +95,38 @@ pub const Storage = struct {
         };
     }
 
+    pub const NextTickIntent = enum {
+        yield,
+        cpu_work,
+        cpu_inject,
+    };
+
     pub fn on_next_tick(
         storage: *Storage,
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
+        intent: NextTickIntent,
     ) void {
         next_tick.* = .{
             .callback = callback,
             .completion = undefined,
         };
 
-        // Uses timeout(0ns) as a yield to the IO layer.
-        storage.io.timeout(*Storage, storage, timeout_callback, &next_tick.completion, 0);
+        switch (intent) {
+            .yield => {
+                // Uses timeout(0ns) as a way to yield execution back to IO / event loop.
+                storage.io.timeout(*Storage, storage, yield_callback, &next_tick.completion, 0);
+            },
+            .cpu_work => {
+                @panic("TODO");
+            },
+            .cpu_inject => {
+                @panic("TODO");
+            },
+        }
     }
 
-    fn timeout_callback(_: *Storage, completion: *IO.Completion, result: IO.TimeoutError!void) void {
+    fn yield_callback(_: *Storage, completion: *IO.Completion, result: IO.TimeoutError!void) void {
         // 0ns timeouts should not fail.
         _ = result catch |e| switch (e) {
             error.Canceled => unreachable,

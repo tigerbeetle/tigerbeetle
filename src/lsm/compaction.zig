@@ -296,7 +296,7 @@ pub fn CompactionType(
                 context.tree.manifest.move_table(level_a, level_b, table_a);
 
                 compaction.state = .next_tick;
-                compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
+                compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick, .yield);
             } else {
                 // Otherwise, start merging.
 
@@ -743,7 +743,7 @@ pub fn CompactionType(
             switch (compaction.input_state) {
                 .remaining => {
                     compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick);
+                    compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick, .yield);
                 },
                 .exhausted => {
                     // Mark the level_a table as invisible if it was provided;
@@ -767,7 +767,7 @@ pub fn CompactionType(
                     }
 
                     compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
+                    compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick, .yield);
                 },
             }
         }

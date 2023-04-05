@@ -553,7 +553,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 }
 
                 tree.compaction_callback = .{ .next_tick = callback };
-                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
+                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .yield);
                 return;
             }
 
@@ -572,7 +572,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 }
 
                 tree.compaction_callback = .{ .next_tick = callback };
-                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
+                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .yield);
                 return;
             }
             assert(op == tree.lookup_snapshot_max);
@@ -624,13 +624,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     tree.lookup_snapshot_max = tree.compaction_op + 1;
 
                     tree.compaction_callback = .{ .next_tick = callback };
-                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
+                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .yield);
                 },
                 .half_bar_middle => {
                     tree.lookup_snapshot_max = tree.compaction_op + 1;
 
                     tree.compaction_callback = .{ .next_tick = callback };
-                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
+                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .yield);
                 },
                 .half_bar_end => {
                     // At the end of a half-bar, we have to wait for all compactions to finish.
