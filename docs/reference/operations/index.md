@@ -16,8 +16,8 @@ Each operation has a corresponding _event_ and _result_ type.
 - The client sends events to the cluster.
 - The client receives results from the cluster (1:1 for each event sent).
 - Events and results for the same operation are
-  [batched](../../usage/integration.md#batching-events) for throughput.
-- A batch of an operation's events is called a [_request_](../../usage/integration.md#client-requests).
+  [batched](../../design/client-requests.md#batching-events) for throughput.
+- A batch of an operation's events is called a [_request_](../../design/client-requests.md).
 - A batch of an operation's results is called a _reply_.
 
 Client implementations provide an API for sending batched events and decoding the corresponding

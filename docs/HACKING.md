@@ -87,3 +87,24 @@ zig/zig build vopr -- --help
 Beyond being a deterministic simulator, *The VOPR* also features [a state checker](../src/test/state_checker.zig) that can hook into all the replicas, and check all their state transitions the instant they take place, using cryptographic hash chaining to prove causality and check that all interim state transitions are valid, based on any of the set of inflight client requests at the time, without divergent states, and then check for convergence to the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.
 
 Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr) bug bounty challenge repository for more details on how to run *The VOPR* and interpret its output.
+
+## Hacking on clients
+
+Detailed instructions for each client are in their respective README:
+
+* [Java Development Setup](/src/clients/java#development-setup)
+* [Go Development Setup](/src/clients/go#development-setup)
+* [Node.js Development Setup](/src/clients/node#development-setup)
+
+### Running client integration tests
+
+The `client_integration` target in build.zig helps with running the
+sample programs for each client as an integration test.
+
+```bash
+./scripts/build.sh client_integration -- --language go --sample basic
+```
+
+See [the src/clients/README.md
+section](/src/clients#integationzig--client_integration) on this
+script for details.

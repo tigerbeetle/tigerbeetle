@@ -4,10 +4,6 @@ Create one or more [`Transfer`](../transfers.md)s. A successfully created transf
 amount fields of its [debit](../transfers.md#debit_account_id) and
 [credit](../transfers.md#credit_account_id) accounts.
 
-## Examples
-
-- [Currency Exchange](../../recipes/currency-exchange.md)
-
 ## Event
 
 The transfer to create. See [`Transfer`](../transfers.md) for constraints.
@@ -41,7 +37,7 @@ The cluster is responsible for setting this field.
 
 ### `reserved_flag`
 The transfer was not created.
-[`Transfer.flags.reserved`](../transfers.md#flagsreserved) is nonzero, but must be zero.
+`Transfer.flags.reserved` is nonzero, but must be zero.
 
 ### `reserved_field`
 The transfer was not created.
@@ -290,7 +286,7 @@ to the actual amount transferred, not the original (possibly higher) balancing a
 A transfer with the same `id` already exists, and is identical to the transfer in the request.
 
 To correctly recover from application crashes
-[many applications](../../usage/integration.md#conistency-with-foreign-databases) should handle
+[many applications](../../design/consistency.md#consistency-with-foreign-databases) should handle
 `exists` exactly as [`ok`](#ok).
 
 ### `overflows_debits_pending`
@@ -334,7 +330,7 @@ If [`flags.balancing_debit`](../transfers.md#flagsbalancing_debit) is set, then
 `debit_account.credits_posted`.
 
 Otherwise, the [debit account](../transfers.md#debit_account_id) has
-[`flags.debits_must_not_exceed_credits`](../transfers.md#flagsdebits_must_not_exceed_credits)
+[`flags.debits_must_not_exceed_credits`](../accounts.md#flagsdebits_must_not_exceed_credits)
 set, but `debit_account.debits_pending + debit_account.debits_posted + transfer.amount`
 would exceed `debit_account.credits_posted`.
 
@@ -346,7 +342,21 @@ If [`flags.balancing_credit`](../transfers.md#flagsbalancing_credit) is set, the
 `credit_account.debits_posted`.
 
 Otherwise, the [credit account](../transfers.md#credit_account_id) has
-[`flags.credits_must_not_exceed_debits`](../transfers.md#flagscredits_must_not_exceed_debits)
+[`flags.credits_must_not_exceed_debits`](../accounts.md#flagscredits_must_not_exceed_debits)
 set, but `credit_account.credits_pending + credit_account.credits_posted + transfer.amount`
 would exceed `credit_account.debits_posted`.
 
+## Client libraries
+
+For language-specific docs see:
+
+* [Creating transfers using the Java library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/java#creating-transfers)
+* [Creating transfers using the Go library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/go#creating-transfers)
+* [Creating transfers using the Node.js library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/node#creating-transfers)
+
+## Internals
+
+If you're curious and want to learn more, you can find the source code
+for creating an transfer in
+[src/state_machine.zig](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/state_machine.zig). Search
+for `fn create_transfer(` and `fn execute(`.

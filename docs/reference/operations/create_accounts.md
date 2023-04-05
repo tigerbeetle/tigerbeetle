@@ -35,7 +35,7 @@ The cluster is responsible for setting this field.
 
 ### `reserved_flag`
 The account was not created.
-[`Account.flags.reserved`](../accounts.md#flagsreserved) is nonzero, but must be zero.
+`Account.flags.reserved` is nonzero, but must be zero.
 
 ### `reserved_field`
 The account was not created.
@@ -114,5 +114,20 @@ account in the request:
 - `credits_posted`
 
 To correctly recover from application crashes
-[many applications](../../usage/integration.md#conistency-with-foreign-databases) should handle
+[many applications](../../design/consistency.md#consistency-with-foreign-databases) should handle
 `exists` exactly as [`ok`](#ok).
+
+## Client libraries
+
+For language-specific docs see:
+
+* [Creating accounts using the Java library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/java#creating-accounts)
+* [Creating accounts using the Go library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/go#creating-accounts)
+* [Creating accounts using the Node.js library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/node#creating-accounts)
+
+## Internals
+
+If you're curious and want to learn more, you can find the source code
+for creating an account in
+[src/state_machine.zig](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/state_machine.zig). Search
+for `fn create_account(` and `fn execute(`.

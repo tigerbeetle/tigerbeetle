@@ -14,7 +14,6 @@ the latter term is heavily overloaded in the context of databases.
 
 Transfers *cannot be modified* after creation.
 
-
 ## Modes
 
 Fields used by each mode of transfer:
@@ -42,100 +41,38 @@ TigerBeetle uses the same data structures internally and
 externally. This means that sometimes you need to set temporary values
 for fields that TigerBeetle, not you (the user), are responsible.
 
-### Single-Phase Transfer
+### Single-phase transfer
 
 Single-phase transfers post funds to accounts immediately when they are created.
 
-### Two-Phase Transfer
+### Two-phase transfer
 
 A pending transfer followed by a post-pending transfer, void-pending transfer, or a timeout is
 called a "two-phase transfer". Unlike a single-phase transfer, a two-phase transfer moves funds in
 stages:
 
-1. [Reserve funds](#pending-transfer).
-2. Resolve funds (post, void, or timeout).
+1. Reserve funds
+2. Resolve funds (post, void, or timeout)
 
-Pending amounts (the pending transfer's [`amount`](#amount)) cannot be spent by either the payer or
-payee until the pending transfer is _resolved_ — that is, until the first of the following events
-occur:
-
-* If a corresponding [`post_pending_transfer`](#post-pending-transfer) is
-  committed, some or all of the pending transfer's reserved funds are
-  posted, and the remainder (if any) is restored to the original
-  accounts.
-* If a corresponding [`void_pending_transfer`](#void-pending-transfer) is
-  committed, the pending transfer's reserved funds are restored to
-  their original accounts.
-* If the pending transfer has a timeout and the timeout expires, the pending
-  transfer's reserved funds are restored to their original accounts.
-
-A pending transfer resolves at most once.
-Attempting to resolve a pending transfer more than once will return the applicable error result:
-- [`pending_transfer_already_posted`](./operations/create_transfers.md#pending_transfer_already_posted)
-- [`pending_transfer_already_voided`](./operations/create_transfers.md#pending_transfer_already_voided)
-- [`pending_transfer_expired`](./operations/create_transfers.md#pending_transfer_expired)
-
-#### Pending Transfer
+#### Pending transfer
 
 A pending transfer, denoted by [`flags.pending`](#flagspending),
 reserves its `amount` in the debit/credit accounts'
 [`debits_pending`](./accounts.md#debits_pending)/[`credits_pending`](./accounts.md#credits_pending)
 fields respectively, leaving `debits_posted`/`credits_posted` unmodified.
 
-#### Post-Pending Transfer
+#### Post-pending transfer
 
 A post-pending transfer, denoted by [`flags.post_pending_transfer`](#flagspost_pending_transfer),
 causes the corresponding pending transfer (referenced by [`pending_id`](#pending_id)) to "post",
 transferring some or all of the pending transfer's reserved amount to its destination, and restoring
 (voiding) the remainder (if any) to its origin accounts.
 
-* If the posted `amount` is 0, the full pending transfer's amount is
-  posted.
-* If the posted `amount` is nonzero, then only this amount is posted,
-  and the remainder is restored to its original accounts. It must be
-  less than or equal to the pending transfer's amount.
-
-Additionally, when `flags.post_pending_transfer` is set:
-
-* `pending_id` must reference a [pending transfer](#pending-transfer).
-* `flags.void_pending_transfer` must not be set.
-
-And the following fields may either be zero, otherwise must match the
-value of the pending transfer's field:
-
-* `debit_account_id`
-* `credit_account_id`
-* `ledger`
-* `code`
-
-##### Examples
-
-###### Post Full Pending Amount
-
-| Account `A` |            | Account `B`   |            | Transfers |        |            |                         |
-| ----------: | ---------: | ------------: | ---------: | :-------- | :----- | ---------: | :---------------------- |
-| **debits**  |            |   **credits** |            |           |        |            |                         |
-| **pending** | **posted** |   **pending** | **posted** | **DR**    | **CR** | **amount** | **flags**               |
-|         `w` |        `x` |           `y` |        `z` | -         | -      |          - | -                       |
-|   123 + `w` |        `x` |     123 + `y` |        `z` | `A`       | `B`    |        123 | `pending`               |
-|         `w` |  123 + `x` |           `y` |  123 + `z` | `A`       | `B`    |        123 | `post_pending_transfer` |
-
-###### Post Partial Pending Amount
-
-| Account `A` |            | Account `B`   |            | Transfers |        |            |                         |
-| ----------: | ---------: | ------------: | ---------: | :-------- | :----- | ---------: | :---------------------- |
-| **debits**  |            |   **credits** |            |           |        |            |                         |
-| **pending** | **posted** |   **pending** | **posted** | **DR**    | **CR** | **amount** | **flags**               |
-|         `w` |        `x` |           `y` |        `z` | -         | -      |          - | -                       |
-|   123 + `w` |        `x` |     123 + `y` |        `z` | `A`       | `B`    |        123 | `pending`               |
-|         `w` |  100 + `x` |           `y` |  100 + `z` | `A`       | `B`    |        100 | `post_pending_transfer` |
-
-#### Void-Pending Transfer
+#### Void-pending transfer
 
 A void-pending transfer, denoted by [`flags.void_pending_transfer`](#flagsvoid_pending_transfer),
 causes the pending transfer (referenced by [`pending_id`](#pending_id)) to void. The pending amount
 is restored to its original accounts.
-
 Additionally, when this field is set:
 
 * `pending_id` must reference a [pending transfer](#pending-transfer).
@@ -150,16 +87,10 @@ value of the pending transfer's field:
 * `code`
 * `amount`
 
-###### Example
+#### Read more
 
-| Account `A` |            | Account `B`   |            | Transfers |        |            |                         |
-| ----------: | ---------: | ------------: | ---------: | :-------- | :----- | ---------: | :---------------------- |
-| **debits**  |            |   **credits** |            |           |        |            |                         |
-| **pending** | **posted** |   **pending** | **posted** | **DR**    | **CR** | **amount** | **flags**               |
-|         `w` |        `x` |           `y` |        `z` | -         | -      |          - | -                       |
-|   123 + `w` |        `x` |     123 + `y` |        `z` | `A`       | `B`    |        123 | `pending`               |
-|         `w` |        `x` |           `y` |        `z` | `A`       | `B`    |        123 | `void_pending_transfer` |
-
+See the [Two-phase transfers](../design/two-phase-transfers.md) guide
+for details, examples, and sample code.
 
 ## Fields
 
@@ -167,7 +98,7 @@ value of the pending transfer's field:
 
 This is a unique identifier for the transaction.
 
-As an example, you might generate a [random id](../usage/data-modeling.md#random-identifer) to
+As an example, you might generate a [random id](../design/data-modeling.md#random-identifier) to
 identify each transaction.
 
 Constraints:
@@ -213,10 +144,10 @@ Constraints:
 This is an optional secondary identifier to link this transfer to an
 external entity.
 
-As an example, you might use a [random id](../usage/data-modeling.md#random-identifer) that ties
+As an example, you might use a [random id](../design/data-modeling.md#random-identifier) that ties
 together a group of transfers.
 
-For more information, see [Data Modeling](../usage/data-modeling.md#user_data).
+For more information, see [Data Modeling](../design/data-modeling.md#user_data).
 
 Constraints:
 
@@ -350,7 +281,7 @@ and each other.
 
 After the link has executed, the association of each event is lost.
 To save the association, it must be
-[encoded into the data model](../usage/data-modeling.md).
+[encoded into the data model](../design/data-modeling.md).
 
 ##### Examples
 
@@ -368,7 +299,7 @@ Mark the transfer as a [post-pending transfer](#post-pending-transfer).
 
 Mark the transfer as a [void-pending transfer](#void-pending-transfer).
 
-### `flags.balancing_debit`
+#### `flags.balancing_debit`
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
 such that `debit_account.debits_pending + debit_account.debits_posted ≤ debit_account.credits_posted`.
@@ -393,7 +324,7 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 
 - [Close Account](../recipes/close-account.md)
 
-### `flags.balancing_credit`
+#### `flags.balancing_credit`
 
 Transfer at most [`amount`](#amount) — automatically transferring less than `amount` as necessary
 such that `credit_account.credits_pending + credit_account.credits_posted ≤ credit_account.debits_posted`.

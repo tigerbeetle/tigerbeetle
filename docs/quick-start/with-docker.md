@@ -1,5 +1,5 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 ---
 
 # Single-node cluster with Docker
@@ -24,7 +24,7 @@ info(main): 0: cluster=0: listening on 0.0.0.0:3000
 
 Now you can connect to the running server with any client. For a quick
 start, try [creating accounts and transfers in the Node
-CLI](../usage/node-cli).
+CLI](./node-cli.md).
 
 ## `error: SystemResources` on macOS
 
