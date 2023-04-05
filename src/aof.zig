@@ -58,13 +58,8 @@ pub const AOFEntry = extern struct {
     /// exclude the reserved padding at the end, as we use this in case of large messages.
     pub fn calculate_padded_size(self: *AOFEntry) u64 {
         const unpadded_size = @sizeOf(AOFEntry) - constants.message_size_max - constants.sector_size + self.body_size;
-        const padding = (constants.sector_size - unpadded_size % constants.sector_size) % constants.sector_size;
-        const padded_size = unpadded_size + padding;
 
-        assert(padding < constants.sector_size);
-        assert(padded_size % constants.sector_size == 0);
-
-        return padded_size;
+        return vsr.sector_ceil(unpadded_size);
     }
 
     /// Turn an AOFEntry back into a Message.
