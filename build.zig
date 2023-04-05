@@ -38,17 +38,6 @@ pub fn build(b: *std.build.Builder) void {
     options.addOption(?bool, "aof", aof_override);
     options.addOption(?bool, "aof_recovery", aof_recovery_override);
 
-    {
-        const tigerbeetle = b.addExecutable("tigerbeetle", "src/main.zig");
-        tigerbeetle.setTarget(target);
-        tigerbeetle.setBuildMode(mode);
-        tigerbeetle.install();
-        // Ensure that we get stack traces even in release builds.
-        tigerbeetle.omit_frame_pointer = false;
-        tigerbeetle.addOptions("tigerbeetle_build_options", options);
-        link_tracer_backend(tigerbeetle, tracer_backend, target);
-    }
-
     const hash_log_mode = b.option(
         config.HashLogMode,
         "hash-log-mode",
@@ -110,7 +99,7 @@ pub fn build(b: *std.build.Builder) void {
         aof.setTarget(target);
         aof.setBuildMode(mode);
         aof.install();
-        aof.addOptions("tigerbeetle_build_options", options);
+        aof.addOptions("vsr_options", options);
         link_tracer_backend(aof, tracer_backend, target);
 
         const run_cmd = aof.run();
