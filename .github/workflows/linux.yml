@@ -131,7 +131,9 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           flavor: |
-            latest=${{ github.ref == 'refs/heads/main' }}
+            latest=${{ github.ref == 'refs/heads/main' && matrix.debug == 'production' }}
+          tags: |
+            ${{ github.ref == 'refs/heads/main' && matrix.debug == 'debug' && 'debug' || '' }}
 
       - name: 'Build Docker Container'
         uses: docker/build-push-action@v4

@@ -2,8 +2,10 @@ const Docs = @import("../docs_types.zig").Docs;
 
 pub const NodeDocs = Docs{
     .readme = "node/README.md",
+
     .markdown_name = "javascript",
     .extension = "js",
+    .proper_name = "Node.js",
 
     // Phil: While installing TigerBeetle on Node 14 works, building
     // (`npm install --include dev`) seems to require a newer Node
@@ -18,8 +20,6 @@ pub const NodeDocs = Docs{
     ,
     .prerequisites = 
     \\* NodeJS >= `14`
-    \\
-    \\> Windows support is not yet available for the Node client.
     ,
 
     .project_file = "",
@@ -53,7 +53,8 @@ pub const NodeDocs = Docs{
     \\* [Fedora](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_fedora.sh)
     \\* [Ubuntu](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_ubuntu.sh)
     \\* [RHEL](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/scripts/test_install_on_rhelubi.sh)
-    \\
+    ,
+    .examples = 
     \\### Sidenote: `BigInt`
     \\TigerBeetle uses 64-bit integers for many fields while JavaScript's
     \\builtin `Number` maximum value is `2^53-1`. The `n` suffix in JavaScript
@@ -62,7 +63,6 @@ pub const NodeDocs = Docs{
     \\constructor to get a `BigInt` from it. For example, `1n` is the same as
     \\`BigInt(1)`.
     ,
-    .examples = "",
 
     .client_object_example = 
     \\const client = createClient({

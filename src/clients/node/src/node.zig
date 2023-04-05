@@ -13,10 +13,7 @@ const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
 
 const Storage = @import("../../../storage.zig").Storage;
-const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, .{
-    .message_body_size_max = constants.message_body_size_max,
-    .lsm_batch_multiple = constants.lsm_batch_multiple,
-});
+const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 const MessageBus = @import("../../../message_bus.zig").MessageBusClient;
 const MessagePool = @import("../../../message_pool.zig").MessagePool;
@@ -26,11 +23,6 @@ const constants = @import("../../../constants.zig");
 const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 const Client = vsr.Client(StateMachine, MessageBus);
-
-// TODO(jamii)
-// This is a hack used to work around the absence of tigerbeetle_build_options.
-// This should be removed once the node client is built using `zig build`.
-pub const tracer_backend: @import("../../../config.zig").TracerBackend = .none;
 
 // Since this is running in application space, log only critical messages to reduce noise.
 pub const log_level: std.log.Level = .err;

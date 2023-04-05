@@ -23,13 +23,9 @@ const AOF = vsr.aof.AOF;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
-const StateMachine = vsr.state_machine.StateMachineType(Storage, .{
-    .message_body_size_max = constants.message_body_size_max,
-    .lsm_batch_multiple = constants.lsm_batch_multiple,
-});
+const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
-
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;

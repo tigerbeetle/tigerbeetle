@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
+const log = std.log.scoped(.cluster);
 
 const constants = @import("../constants.zig");
 const message_pool = @import("../message_pool.zig");
@@ -44,10 +45,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
     return struct {
         const Self = @This();
 
-        pub const StateMachine = StateMachineType(Storage, .{
-            .message_body_size_max = constants.message_body_size_max,
-            .lsm_batch_multiple = constants.lsm_batch_multiple,
-        });
+        pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
@@ -313,12 +311,16 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             for (cluster.storages) |*storage| storage.tick();
             for (cluster.replicas) |*replica, i| {
                 switch (cluster.replica_health[i]) {
-                    .up => replica.tick(),
+                    .up => {
+                        replica.tick();
+                        cluster.state_checker.check_state(replica.replica) catch |err| {
+                            fatal(.correctness, "state checker error: {}", .{err});
+                        };
+                    },
                     // Keep ticking the time so that it won't have diverged too far to synchronize
                     // when the replica restarts.
                     .down => replica.clock.time.tick(),
                 }
-                on_replica_change_state(replica);
             }
         }
 
@@ -333,6 +335,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             try cluster.open_replica(replica_index, time);
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
+            cluster.log_replica(.recover, replica_index);
         }
 
         /// Reset a replica to its initial state, simulating a random crash/panic.
@@ -347,6 +350,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             cluster.replicas[replica_index].deinit(cluster.allocator);
             cluster.network.process_disable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .down;
+            cluster.log_replica(.crash, replica_index);
 
             // Ensure that none of the replica's messages leaked when it was deinitialized.
             var messages_in_pool: usize = 0;
@@ -380,9 +384,10 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             assert(replica.standby_count == cluster.standby_count);
 
             replica.context = cluster;
-            replica.on_change_state = on_replica_change_state;
+            replica.on_change_state = on_replica_commit;
             replica.on_compact = on_replica_compact;
-            replica.on_checkpoint = on_replica_checkpoint;
+            replica.on_checkpoint_start = on_replica_checkpoint_start;
+            replica.on_checkpoint_done = on_replica_checkpoint_done;
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
         }
 
@@ -437,10 +442,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             cluster.on_client_reply(cluster, client_index, request_message, reply_message);
         }
 
-        fn on_replica_change_state(replica: *const Replica) void {
+        fn on_replica_commit(replica: *const Replica) void {
             const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
-            if (cluster.replica_health[replica.replica] == .down) return;
+            assert(cluster.replica_health[replica.replica] == .up);
 
+            cluster.log_replica(.commit, replica.replica);
             cluster.state_checker.check_state(replica.replica) catch |err| {
                 fatal(.correctness, "state checker error: {}", .{err});
             };
@@ -448,13 +454,24 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
         fn on_replica_compact(replica: *const Replica) void {
             const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
+            assert(cluster.replica_health[replica.replica] == .up);
             cluster.storage_checker.replica_compact(replica) catch |err| {
                 fatal(.correctness, "storage checker error: {}", .{err});
             };
         }
 
-        fn on_replica_checkpoint(replica: *const Replica) void {
+        fn on_replica_checkpoint_start(replica: *const Replica) void {
             const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
+            assert(cluster.replica_health[replica.replica] == .up);
+
+            cluster.log_replica(.checkpoint_start, replica.replica);
+        }
+
+        fn on_replica_checkpoint_done(replica: *const Replica) void {
+            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
+            assert(cluster.replica_health[replica.replica] == .up);
+
+            cluster.log_replica(.checkpoint_done, replica.replica);
             cluster.storage_checker.replica_checkpoint(replica) catch |err| {
                 fatal(.correctness, "storage checker error: {}", .{err});
             };
@@ -464,6 +481,104 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
             std.log.scoped(.state_checker).err(fmt_string, args);
             std.os.exit(@enumToInt(failure));
+        }
+
+        fn log_replica(
+            cluster: *const Self,
+            event: enum(u8) {
+                crash = '$',
+                recover = '^',
+                commit = ' ',
+                checkpoint_start = '[',
+                checkpoint_done = ']',
+            },
+            replica_index: u8,
+        ) void {
+            const replica = &cluster.replicas[replica_index];
+
+            var statuses = [_]u8{' '} ** constants.nodes_max;
+            if (cluster.replica_health[replica_index] == .down) {
+                statuses[replica_index] = '#';
+            } else {
+                statuses[replica_index] = switch (replica.status) {
+                    .normal => @as(u8, '.'),
+                    .view_change => @as(u8, 'v'),
+                    .recovering => @as(u8, 'r'),
+                    .recovering_head => @as(u8, 'h'),
+                };
+            }
+
+            const role: u8 = role: {
+                if (cluster.replica_health[replica_index] == .down) break :role '#';
+                if (replica.standby()) break :role '|';
+                if (replica.primary_index(replica.view) == replica.replica) break :role '/';
+                break :role '\\';
+            };
+
+            var info_buffer: [64]u8 = undefined;
+            var info: []u8 = "";
+            var pipeline_buffer: [16]u8 = undefined;
+            var pipeline: []u8 = "";
+
+            if (cluster.replica_health[replica_index] == .up) {
+                var journal_op_min: u64 = std.math.maxInt(u64);
+                var journal_op_max: u64 = 0;
+                for (replica.journal.headers) |*header| {
+                    if (header.command == .prepare) {
+                        if (journal_op_min > header.op) journal_op_min = header.op;
+                        if (journal_op_max < header.op) journal_op_max = header.op;
+                    }
+                }
+
+                var wal_op_min: u64 = std.math.maxInt(u64);
+                var wal_op_max: u64 = 0;
+                for (cluster.storages[replica_index].wal_prepares()) |*prepare| {
+                    if (prepare.header.valid_checksum() and prepare.header.command == .prepare) {
+                        if (wal_op_min > prepare.header.op) wal_op_min = prepare.header.op;
+                        if (wal_op_max < prepare.header.op) wal_op_max = prepare.header.op;
+                    }
+                }
+
+                info = std.fmt.bufPrint(&info_buffer, "" ++
+                    "{[view]:>4}V " ++
+                    "{[commit_min]:>3}/{[commit_max]:_>3}C " ++
+                    "{[journal_op_min]:>3}:{[journal_op_max]:_>3}Jo " ++
+                    "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
+                    "{[wal_op_min]:>3}:{[wal_op_max]:>3}Wo " ++
+                    "{[grid_blocks_free]:>7}Gf", .{
+                    .view = replica.view,
+                    .commit_min = replica.commit_min,
+                    .commit_max = replica.commit_max,
+                    .journal_op_min = journal_op_min,
+                    .journal_op_max = journal_op_max,
+                    .journal_dirty = replica.journal.dirty.count,
+                    .journal_faulty = replica.journal.faulty.count,
+                    .wal_op_min = wal_op_min,
+                    .wal_op_max = wal_op_max,
+                    .grid_blocks_free = replica.superblock.free_set.count_free(),
+                }) catch unreachable;
+
+                if (replica.pipeline == .queue) {
+                    pipeline = std.fmt.bufPrint(&pipeline_buffer, "{:>2}/{}Pp {:>2}/{}Pq", .{
+                        replica.pipeline.queue.prepare_queue.count,
+                        constants.pipeline_prepare_queue_max,
+                        replica.pipeline.queue.request_queue.count,
+                        constants.pipeline_request_queue_max,
+                    }) catch unreachable;
+                }
+            }
+
+            // TODO(Zig): Use named format specifiers when we upgrade past 0.9.
+            // In 0.9 the test runner's log implementation does not support the named arguments.
+            log.info("{: >2} {c} {c} {s}" ++
+                "  {s}  {s}", .{
+                replica.replica,
+                @enumToInt(event),
+                role,
+                statuses[0 .. cluster.replica_count + cluster.standby_count],
+                info,
+                pipeline,
+            });
         }
     };
 }

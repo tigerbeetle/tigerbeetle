@@ -113,13 +113,132 @@ const MarkdownWriter = struct {
         );
         defer file.close();
 
+        // First truncate(0) the file.
         try file.setEndPos(0);
+
+        // Then write what we need.
         try file.writeAll(mw.buf.items);
     }
 };
 
+pub fn exec(
+    arena: *std.heap.ArenaAllocator,
+    cmd: []const []const u8,
+) !std.ChildProcess.ExecResult {
+    var res = try std.ChildProcess.exec(.{
+        .allocator = arena.allocator(),
+        .argv = cmd,
+    });
+    switch (res.term) {
+        .Exited => |code| {
+            if (code != 0) {
+                return error.ExecCommandFailed;
+            }
+        },
+
+        else => return error.UnknownCase,
+    }
+
+    return res;
+}
+
+pub fn run_with_env(
+    arena: *std.heap.ArenaAllocator,
+    cmd: []const []const u8,
+    env: []const []const u8,
+) !void {
+    std.debug.print("Running:", .{});
+    var i: u32 = 0;
+    while (i < env.len) : (i += 2) {
+        std.debug.print(" {s}={s}", .{ env[i], env[i + 1] });
+    }
+    for (cmd) |c| {
+        std.debug.print(" {s}", .{c});
+    }
+    std.debug.print("\n", .{});
+
+    var cp = try std.ChildProcess.init(cmd, arena.allocator());
+    var env_map = try std.process.getEnvMap(arena.allocator());
+
+    i = 0;
+    while (i < env.len) : (i += 2) {
+        try env_map.put(env[i], env[i + 1]);
+    }
+    cp.env_map = &env_map;
+
+    var res = try cp.spawnAndWait();
+    switch (res) {
+        .Exited => |code| {
+            if (code != 0) {
+                return error.RunCommandFailed;
+            }
+        },
+
+        else => return error.UnknownCase,
+    }
+}
+
+pub fn run(
+    arena: *std.heap.ArenaAllocator,
+    cmd: []const []const u8,
+) !void {
+    try run_with_env(arena, cmd, &.{});
+}
+
+pub const TmpDir = struct {
+    dir: std.testing.TmpDir,
+    path: []const u8,
+
+    pub fn init(arena: *std.heap.ArenaAllocator) !TmpDir {
+        var tmp_dir = std.testing.tmpDir(.{});
+        return TmpDir{
+            .dir = tmp_dir,
+            .path = try tmp_dir.dir.realpathAlloc(arena.allocator(), "."),
+        };
+    }
+
+    pub fn deinit(self: *TmpDir) void {
+        self.dir.cleanup();
+    }
+};
+
+pub fn git_root(arena: *std.heap.ArenaAllocator) ![]const u8 {
+    var prefix: []const u8 = "";
+    var tries: i32 = 0;
+    while (tries < 100) {
+        var dir = std.fs.cwd().openDir(
+            try std.fmt.allocPrint(
+                arena.allocator(),
+                "{s}.git",
+                .{prefix},
+            ),
+            .{},
+        ) catch {
+            prefix = try std.fmt.allocPrint(
+                arena.allocator(),
+                "../{s}",
+                .{prefix},
+            );
+            tries += 1;
+            continue;
+        };
+
+        // When looking up realpathAlloc, it can't be an empty string.
+        if (prefix.len == 0) {
+            prefix = ".";
+        }
+
+        const path = try std.fs.cwd().realpathAlloc(arena.allocator(), prefix);
+        dir.close();
+        return path;
+    }
+
+    std.debug.print("Failed to find .git root of TigerBeetle repo.\n", .{});
+    return error.CouldNotFindGitRoot;
+}
+
 const Generator = struct {
-    allocator: std.mem.Allocator,
+    arena: *std.heap.ArenaAllocator,
     language: Docs,
     test_file_name: []const u8,
 
@@ -132,7 +251,7 @@ const Generator = struct {
     const docker_mount_path = "/tmp/wrk";
 
     fn init(
-        allocator: std.mem.Allocator,
+        arena: *std.heap.ArenaAllocator,
         language: Docs,
     ) !Generator {
         var test_file_name = language.test_file_name;
@@ -141,62 +260,10 @@ const Generator = struct {
         }
 
         return Generator{
-            .allocator = allocator,
+            .arena = arena,
             .language = language,
             .test_file_name = test_file_name,
         };
-    }
-
-    const TmpDir = struct {
-        dir: std.testing.TmpDir,
-        path: []const u8,
-
-        fn init(allocator: std.mem.Allocator) !TmpDir {
-            var tmp_dir = std.testing.tmpDir(.{});
-            return TmpDir{
-                .dir = tmp_dir,
-                .path = try tmp_dir.dir.realpathAlloc(allocator, "."),
-            };
-        }
-
-        fn cleanup(self: *TmpDir) void {
-            self.dir.cleanup();
-        }
-    };
-
-    fn exec(
-        self: Generator,
-        cmd: []const []const u8,
-    ) !std.ChildProcess.ExecResult {
-        var res = try std.ChildProcess.exec(.{
-            .allocator = self.allocator,
-            .argv = cmd,
-        });
-        switch (res.term) {
-            .Exited => |code| {
-                if (code != 0) {
-                    std.os.exit(1);
-                }
-            },
-
-            else => unreachable,
-        }
-
-        return res;
-    }
-
-    fn run(self: Generator, cmd: []const []const u8) !void {
-        var cp = try std.ChildProcess.init(cmd, self.allocator);
-        var res = try cp.spawnAndWait();
-        switch (res) {
-            .Exited => |code| {
-                if (code != 0) {
-                    std.os.exit(1);
-                }
-            },
-
-            else => unreachable,
-        }
     }
 
     fn run_in_docker(self: Generator, cmd: DockerCommand) !void {
@@ -205,7 +272,7 @@ const Generator = struct {
             .{cmd.cmds},
         );
 
-        var full_cmd = std.ArrayList([]const u8).init(self.allocator);
+        var full_cmd = std.ArrayList([]const u8).init(self.arena.allocator());
         defer full_cmd.deinit();
 
         try full_cmd.appendSlice(&[_][]const u8{
@@ -233,11 +300,7 @@ const Generator = struct {
             cmd.cmds,
         });
 
-        self.printf(
-            "[Debug] Command: {s}\n",
-            .{full_cmd.items},
-        );
-        try self.run(full_cmd.items);
+        try run(self.arena, full_cmd.items);
     }
 
     fn ensure_path(self: Generator, path: []const u8) !void {
@@ -286,7 +349,7 @@ const Generator = struct {
         defer tmp_file.close();
         _ = try tmp_file.write(file);
 
-        var full_cmd = std.ArrayList(u8).init(self.allocator);
+        var full_cmd = std.ArrayList(u8).init(self.arena.allocator());
         defer full_cmd.deinit();
 
         try full_cmd.writer().print(
@@ -302,7 +365,7 @@ const Generator = struct {
 
         try full_cmd.writer().print(" && {s}", .{cmd.cmds});
 
-        var mount = std.ArrayList([]const u8).init(self.allocator);
+        var mount = std.ArrayList([]const u8).init(self.arena.allocator());
         defer mount.deinit();
         if (cmd.mount) |m| {
             try mount.appendSlice(m);
@@ -322,7 +385,7 @@ const Generator = struct {
     }
 
     fn get_current_commit_and_repo_env(self: Generator) !std.ArrayList([]const u8) {
-        var env = std.ArrayList([]const u8).init(self.allocator);
+        var env = std.ArrayList([]const u8).init(self.arena.allocator());
 
         for (&[_][]const u8{
             "GIT_SHA",
@@ -348,7 +411,7 @@ const Generator = struct {
         // commit. The current commit isn't correct in CI because CI
         // is run against pseudo/temporary branches.
         if (env.items.len == 0 or !std.mem.startsWith(u8, env.items[0], "GIT_SHA=")) {
-            var cp = try self.exec(&[_][]const u8{ "git", "rev-parse", "HEAD" });
+            var cp = try exec(self.arena, &[_][]const u8{ "git", "rev-parse", "HEAD" });
             try env.append(self.sprintf(
                 "GIT_SHA={s}",
                 .{cp.stdout},
@@ -388,7 +451,7 @@ const Generator = struct {
         var env = try self.get_current_commit_and_repo_env();
         defer env.deinit();
 
-        var cmd = std.ArrayList(u8).init(self.allocator);
+        var cmd = std.ArrayList(u8).init(self.arena.allocator());
         defer cmd.deinit();
 
         // Build against current commit and set up project to use current build.
@@ -452,7 +515,7 @@ const Generator = struct {
 
     fn sprintf(self: Generator, comptime msg: []const u8, obj: anytype) []const u8 {
         return std.fmt.allocPrint(
-            self.allocator,
+            self.arena.allocator(),
             msg,
             obj,
         ) catch unreachable;
@@ -461,8 +524,8 @@ const Generator = struct {
     fn validateMinimal(self: Generator) !void {
         // Test the sample file
         self.print("Building minimal sample file");
-        var tmp_dir = try TmpDir.init(self.allocator);
-        defer tmp_dir.cleanup();
+        var tmp_dir = try TmpDir.init(self.arena);
+        defer tmp_dir.deinit();
         try self.build_file_in_docker(tmp_dir, self.language.install_sample_file, true);
     }
 
@@ -470,8 +533,8 @@ const Generator = struct {
         // Test major parts of sample code
         var sample = try self.make_aggregate_sample();
         self.print("Building aggregate sample file");
-        var tmp_dir = try TmpDir.init(self.allocator);
-        defer tmp_dir.cleanup();
+        var tmp_dir = try TmpDir.init(self.arena);
+        defer tmp_dir.deinit();
         try self.build_file_in_docker(tmp_dir, sample, false);
     }
 
@@ -509,7 +572,7 @@ const Generator = struct {
             self.language.linked_events_example,
             self.language.test_main_suffix,
         };
-        var aggregate = std.ArrayList(u8).init(self.allocator);
+        var aggregate = std.ArrayList(u8).init(self.arena.allocator());
         for (parts) |part| {
             try aggregate.writer().print("{s}\n", .{part});
         }
@@ -519,20 +582,29 @@ const Generator = struct {
     fn generate(self: Generator, mw: *MarkdownWriter) !void {
         var language = self.language;
 
-        mw.paragraph(
+        mw.print(
+            \\---
+            \\title: {s}
+            \\---
+            \\
             \\This file is generated by
             \\[src/clients/docs_generate.zig](/src/clients/docs_generate.zig).
-        );
+            \\
+        , .{language.proper_name});
 
         mw.header(1, language.name);
         mw.paragraph(language.description);
 
         mw.header(3, "Prerequisites");
-        mw.paragraph(
+        const windowsSupported: []const u8 = if (language.developer_setup_pwsh_commands.len > 0)
+            " and Windows"
+        else
+            "";
+        mw.print(
             \\Linux >= 5.6 is the only production environment we
-            \\support. But for ease of development we support macOS and
-            \\Windows unless otherwise noted.
-        );
+            \\support. But for ease of development we also support macOS{s}.
+            \\
+        , .{windowsSupported});
         mw.paragraph(language.prerequisites);
 
         mw.header(2, "Setup");
@@ -564,8 +636,27 @@ const Generator = struct {
 
         mw.paragraph(language.install_documentation);
 
+        mw.header(2, "Example projects");
+        mw.paragraph(
+            \\This document is primarily a reference guide to
+            \\the client. Below are various sample projects demonstrating
+            \\features of TigerBeetle.
+            ,
+        );
+        const language_path = std.mem.split(u8, language.readme, "/").next();
+        // Absolute paths here are necessary for resolving within the docs site.
+        mw.print(
+            \\* [Basic](/src/clients/{s}/samples/basic/): Create two accounts and
+            \\  transfer an amount between them.
+            \\* [Two-Phase Transfer](/src/clients/{s}/samples/two-phase/): Create two
+            \\  accounts and start a pending transfer between them, then
+            \\  post the transfer.
+            \\
+        ,
+            .{ language_path, language_path },
+        );
+
         if (language.examples.len != 0) {
-            mw.header(2, "Examples");
             mw.paragraph(language.examples);
         }
 
@@ -690,6 +781,15 @@ const Generator = struct {
         );
         mw.code(language.markdown_name, language.batch_example);
 
+        mw.header(3, "Queues and Workers");
+        mw.paragraph(
+            \\If you are making requests to TigerBeetle from workers
+            \\pulling jobs from a queue, you can batch requests to
+            \\TigerBeetle by having the worker act on multiple jobs from
+            \\the queue at once rather than one at a time. i.e. pulling
+            \\multiple jobs from the queue rather than just one.
+        );
+
         mw.header(2, "Transfer Flags");
         mw.paragraph(
             \\The transfer `flags` value is a bitfield. See details for these flags in
@@ -776,7 +876,7 @@ const Generator = struct {
             mw.paragraph("In PowerShell run:");
             mw.commands(language.developer_setup_pwsh_commands);
         } else {
-            mw.paragraph("Unsupported.");
+            mw.paragraph("Not yet supported.");
         }
 
         try mw.save(language.readme);
@@ -826,7 +926,7 @@ pub fn main() !void {
         var buf = std.ArrayList(u8).init(allocator);
         var mw = MarkdownWriter.init(&buf);
 
-        var generator = try Generator.init(allocator, language);
+        var generator = try Generator.init(&arena, language);
         if (validate) {
             generator.print("Validating");
 

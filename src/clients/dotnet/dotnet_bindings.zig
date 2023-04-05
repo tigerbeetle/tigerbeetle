@@ -2,6 +2,8 @@ const std = @import("std");
 const tb = @import("../../tigerbeetle.zig");
 const tb_client = @import("../c/tb_client.zig");
 
+const output_file = "src/clients/dotnet/TigerBeetle/Bindings.cs";
+
 const TypeMapping = struct {
     name: []const u8,
     visibility: enum { public, internal },
@@ -153,6 +155,7 @@ fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []
 
 fn emit_enum(
     buffer: *std.ArrayList(u8),
+    comptime Type: type,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
@@ -192,7 +195,10 @@ fn emit_enum(
             \\        {s} = 
         ++ value_fmt ++ ",\n\n", .{
             to_case(field.name, .pascal),
-            i,
+            if (@typeInfo(Type) == .Enum)
+                @enumToInt(@field(Type, field.name))
+            else
+                i, // packed struct field.
         });
     }
 
@@ -380,6 +386,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                 .Auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
                 .Packed => try emit_enum(
                     buffer,
+                    ZigType,
                     info,
                     mapping,
                     comptime dotnet_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
@@ -394,6 +401,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
             },
             .Enum => |info| try emit_enum(
                 buffer,
+                ZigType,
                 info,
                 mapping,
                 comptime dotnet_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
@@ -480,5 +488,19 @@ pub fn main() !void {
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
 
-    try std.fs.cwd().writeFile("src/clients/dotnet/TigerBeetle/Bindings.cs", buffer.items);
+    try std.fs.cwd().writeFile(output_file, buffer.items);
+}
+
+const testing = std.testing;
+
+test "bindings dotnet" {
+    var buffer = std.ArrayList(u8).init(testing.allocator);
+    defer buffer.deinit();
+
+    try generate_bindings(&buffer);
+
+    const current = try std.fs.cwd().readFileAlloc(testing.allocator, output_file, std.math.maxInt(usize));
+    defer testing.allocator.free(current);
+
+    try testing.expectEqualStrings(current, buffer.items);
 }

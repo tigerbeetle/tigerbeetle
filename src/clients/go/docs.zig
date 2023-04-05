@@ -5,6 +5,7 @@ pub const GoDocs = Docs{
 
     .markdown_name = "go",
     .extension = "go",
+    .proper_name = "Go",
 
     .test_linux_docker_image = "golang:1.18-alpine",
     .test_source_path = "",
@@ -52,12 +53,6 @@ pub const GoDocs = Docs{
     .install_documentation = "",
 
     .examples = 
-    \\## Basic
-    \\
-    \\See
-    \\[here](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/go/samples/basic)
-    \\for a complete Go project showing many features of the client.
-    \\
     \\### Sidenote: `uint128`
     \\
     \\Throughout this README there will be a reference to a
@@ -305,7 +300,7 @@ pub const GoDocs = Docs{
     \\cd tigerbeetle
     \\git checkout $GIT_SHA
     \\./scripts/install_zig.sh
-    \\./zig/zig build go_client -Drelease-safe
+    \\./scripts/build.sh go_client -Drelease-safe
     \\cd src/clients/go
     \\[ "$TEST" = "true" ] && ./zgo.sh test || echo "Skipping client unit tests"
     ,
@@ -323,7 +318,7 @@ pub const GoDocs = Docs{
     \\cd tigerbeetle
     \\git checkout $GIT_SHA
     \\./scripts/install_zig.bat
-    \\./zig/zig build go_client -Drelease-safe
+    \\./scripts/build.bat go_client -Drelease-safe
     \\cd tigerbeetle/src/clients/go
     \\[ "$TEST" = "true" ] && ./zgo.bat test || echo "Skipping client unit tests"
     ,
