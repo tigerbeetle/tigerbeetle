@@ -1,5 +1,5 @@
 {
   "dependencies": {
-    "tigerbeetle-node": "file:../.."
+    "tigerbeetle-node": "^0.12.52"
   }
 }
