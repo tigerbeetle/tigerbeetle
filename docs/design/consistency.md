@@ -1,4 +1,4 @@
-# Integration
+# Consistency
 
 TigerBeetle is designed to guard against bugs not only in its
 [own code](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/TIGER_STYLE.md), but
@@ -6,16 +6,14 @@ at the boundaries, in the application code which interfaces with TigerBeetle.
 This is exhibited by the client's API design, which may be surprising (see [Retries](#retries)) when
 contrasted with a more conventional database.
 
-Strict consistency guarantees (at the database level) simplify application logic and error handling
+Strict consistency guarantees (at the database level) simplify application logic and push error handling
 farther up the stack.
-
-
 
 ## Consistency
 
 TigerBeetle provides strict serializability
 ([serializability + linearizability](http://www.bailis.org/blog/linearizability-versus-serializability/))
-to each [client session](#client-sessions).
+to each [client session](./client-sessions.md).
 
 But consistency models can seem arcane.
 What specific guarantees does TigerBeetle provide to applications?
@@ -141,7 +139,7 @@ sequenceDiagram
 
 ### Retries
 
-A [client session](#client-sessions) will automatically retry a request until either:
+A [client session](./client-sessions.md) will automatically retry a request until either:
 
 - the client receives a corresponding reply from the cluster, or
 - the client is terminated.
@@ -206,146 +204,3 @@ An alternate approach is to generate a new account `id` for each "create account
 and perhaps store the account's `id` on `U₁` when it is successfully created.
 Then account creation could be restricted to the `.ok` code — but application restarts would leave
 orphaned accounts in TigerBeetle, which may be confusing for auditing and debugging.
-
-
-
-## Client Sessions
-
-A _client session_ is a sequence of alternating [requests](#client-requests) and replies between a
-client and a cluster.
-
-A client session may have at most one in-flight request — i.e. at most one unique request on the
-network for which a reply has not been received. This simplifies consistency and allows the cluster
-to statically guarantee capacity in its incoming message queue. Additional requests from the
-application are queued by the client, to be dequeued and sent when their preceding request receives
-a reply.
-
-TigerBeetle has a [hard limit](#client-session-eviction) on the number of concurrent
-client sessions, and encourages minimizing the number of concurrent clients to
-[maximize throughput](#batching-events).
-
-### Client Session Lifecycle
-
-A client session begins when a client registers itself with the cluster.
-
-- Each client session has a unique identifier ("client id") — an ephemeral random 128-bit id.
-- The client sends a special "register" message which is committed by the cluster, at which point
-  the client is "registered" — once it receives the reply, it may begin sending requests.
-- Client registration is handled automatically by the TigerBeetle client implementation when the
-  client is initialized, before it sends its first request.
-- When a client restarts (for example, the application service running the TigerBeetle client is
-  restarted) it does not resume its old session — it starts a new session, with a new (random)
-  client id.
-
-A client session ends when either:
-
-  - the client session is [evicted](#client-session-eviction), or
-  - the client terminates
-
-— whichever occurs first.
-
-### Client Session Eviction
-
-When a client session is registering and the number of active sessions in the cluster is already at
-the cluster's concurrent client session
-[limit](https://tigerbeetle.com/blog/a-database-without-dynamic-memory/) (`config.clients_max`,
-32 by default), an existing client session must be evicted to make space for
-the new session.
-
-- After a session is evicted by the cluster, no future requests from that session will ever execute.
-- The evicted session is chosen as the session that committed a request the longest time ago.
-
-The cluster sends a message to notify the evicted session that it has ended. Typically the evicted
-client is no longer active (already terminated), but if it is active, the eviction message causes it
-to self-terminate, bubbling up to the application as an `session evicted` error.
-
-(TODO: Right now evicted clients panic — fix that so this is accurate.)
-
-If active clients are terminating with `session evicted` errors, it (most likely) indicates that
-the application is trying to run [too many](#batching-events) concurrent clients.
-
-
-
-## Client Requests
-
-A _request_ is a [batch](#batching-events) of one or more
-[operation events](../reference/operations/index.md) sent to the cluster in a single message.
-
-- All events within a request batch share the same operation type.
-- The cluster commits an entire batch at once, each event in series.
-- The cluster returns a single reply for each unique request it commits.
-- The cluster's reply contains results corresponding to each event in the request.
-- Unless [linked](../reference/transfers.md#flagslinked), events within a request
-  [succeed or fail](../reference/operations/create_transfers.md#result) independently.
-
-
-### Batching Events
-
-To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by
-batching many operation events in each request. For the best performance, each request should batch
-as many events as possible. Typically this means funneling events through fewer client instances.
-
-The maximum number of events per batch depends on the maximum message size
-(`config.message_size_max`) and the operation type.
-(TODO: Expose batch size in the client instead).
-
-In the default configuration, the batch sizes are:
-
-| Operation          | Batch Size |
-| ------------------ | ---------: |
-| `lookup_accounts`  | 8191       |
-| `lookup_transfers` | 8191       |
-| `create_accounts`  | 8191       |
-| `create_transfers` | 8191       |
-
-Presently the client application is responsible for batching events, but only as a stopgap
-because this has not yet been implemented within the clients themselves.
-
-Read more about how two-phase transfers work with each client.
-
-* [Node](/src/clients/node/README.md#batching)
-* [Go](/src/clients/go/README.md#batching)
-* [Java](/src/clients/java/README.md#batching)
-
-#### API Layer Architecture
-
-In some application architectures, the number of services that need to query TigerBeetle may:
-- [exceed `config.clients_max`](#client-session-eviction), or
-- may require additional [batching](#batching-events) to optimize throughput.
-
-Rather than each service connecting to TigerBeetle directly, application services can forward their
-requests to a pool of intermediate services (the "API layer") which can coalesce events from
-many application services into requests, and forward back the respective
-replies. This approach enables larger batch sizes and higher throughput, but comes at a cost: the
-application services' sessions are no longer linearizable, because the API services may restart at
-any time relative to the application service.
-
-```mermaid
-flowchart LR
-    App1[Application service 1]
-    App2[Application service 2]
-    App3[Application service 3]
-    App4[Application service 4]
-    Cluster[TigerBeetle cluster]
-
-    App1 <--> API1
-    App2 <--> API1
-    App3 <--> API2
-    App4 <--> API2
-
-    subgraph API
-        API1{API 1}
-        API2{API 2}
-    end
-
-    API1 <--> Cluster
-    API2 <--> Cluster
-```
-
-#### Queues and Workers
-
-If you are making requests to TigerBeetle from workers
-pulling jobs from a queue, you can batch requests to
-TigerBeetle by having the worker act on multiple jobs from
-the queue at once rather than one at a time. i.e. pulling
-multiple jobs from the queue rather than just one.

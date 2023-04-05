@@ -1,4 +1,4 @@
-# Two-phase Transfer
+# Two-phase transfers
 
 The name "two-phase transfer" is a reference to the [two-phase commit
 protocol for distributed
@@ -24,14 +24,15 @@ increased on the relevant accounts at this point.
 * [`post_pending_transfer`](../reference/transfers.md#flagspost_pending_transfer): Move all (or part) of the reserved funds to the pending transfer's destination.
 * [`void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer): Revert all of the reserved funds to the original account.
 
-A pending transfer can only be posted or voided once. It cannot be
-posted twice or voided then posted, etc.
+## Resolving a two-phase transfer
 
 When the pending transfer is resolved (posted or voided), the
 [`debits_pending`](../reference/accounts.md#debits_pending) and
 [`credits_pending`](../reference/accounts.md#credits_pending) fields
 on the respective accounts are decreased by the
 [`amount`](../reference/transfers.md#amount) of the **pending** transfer.
+
+### Posting
 
 When the pending transfer is posted,
 [`debits_posted`](../reference/accounts.md#debits_posted) and
@@ -40,12 +41,7 @@ the respective accounts are increased by the **posting** transfer's
 [`amount`](../reference/transfers.md#amount) (which cannot exceed the
 pending amount, but need not equal the pending amount either).
 
-When the pending transfer is voided,
-[`debits_posted`](../reference/accounts.md#debits_posted) and
-[`credits_posted`](../reference/accounts.md#credits_posted) are not
-modified.
-
-## Posting a subset of pending `amount`
+#### Posting a subset of pending `amount`
 
 Although an initial [`amount`](../reference/transfers.md#amount) is
 reserved when a pending transfer is created, you can set the
@@ -56,13 +52,31 @@ In the event that you post less than the amount you initially
 reserved, the rest of the amount not posted reverts back to the
 original account.
 
-## Timeouts
+### Voiding
+
+When the pending transfer is voided,
+[`debits_posted`](../reference/accounts.md#debits_posted) and
+[`credits_posted`](../reference/accounts.md#credits_posted) are not
+modified.
+
+### Timeouts
 
 If a pending transfer is created with a timeout (which is optional),
 then if it has not been posted or voided by the time the timeout
 expires, the full amount will be voided.
 
-## `credits_must_not_exceed_debits` and `debits_must_not_exceed_credits`
+### Errors
+
+A pending transfer can only be posted or voided once. It cannot be
+posted twice or voided then posted, etc.
+
+Attempting to resolve a pending transfer more than once will return the applicable error result:
+- [`pending_transfer_already_posted`](../reference/operations/create_transfers.md#pending_transfer_already_posted)
+- [`pending_transfer_already_voided`](../reference/operations/create_transfers.md#pending_transfer_already_voided)
+- [`pending_transfer_expired`](../reference/operations/create_transfers.md#pending_transfer_expired)
+
+
+## Interaction with account invariants
 
 The pending transfer's amount is reserved in a way that the second
 step in a two-phase transfer will never cause the accounts' configured
@@ -93,12 +107,50 @@ flag set.
 The second transfer will have a
 [`post_pending_transfer`](../reference/transfers.md#flagspost_pending_transfer)
 or
-[`void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer2)
+[`void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer)
 flag set and a [`pending_id`](../reference/transfers.md#pending_id) field
 set to the [`id`](../reference/transfers.md#id) of the first transfer. The
 [`id`](../reference/transfers.md#id) of the second transfer will be
 unique, not the same [`id`](../reference/transfers.md#id) as the initial
 pending transfer.
+
+## Examples
+
+The following examples show the state of two accounts in three steps:
+
+1. Initially, before any transfers
+2. After a pending transfer
+3. And after the pending transfer is posted or voided
+
+### Post full pending amount
+
+| Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
+|------------:|-----------:|------------:|-----------:|:---------------------|:----------------------|-----------:|:------------------------|
+|  **debits** |            | **credits** |            |                      |                       |            |                         |
+| **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
+|         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
+|   123 + `w` |        `x` |   123 + `y` |        `z` | `A`                  | `B`                   |        123 | `pending`               |
+|         `w` |  123 + `x` |         `y` |  123 + `z` | `A`                  | `B`                   |        123 | `post_pending_transfer` |
+
+### Post partial pending amount
+
+| Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
+|------------:|-----------:|------------:|-----------:|:---------------------|:----------------------|-----------:|:------------------------|
+|  **debits** |            | **credits** |            |                      |                       |            |                         |
+| **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
+|         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
+|   123 + `w` |        `x` |   123 + `y` |        `z` | `A`                  | `B`                   |        123 | `pending`               |
+|         `w` |  100 + `x` |         `y` |  100 + `z` | `A`                  | `B`                   |        100 | `post_pending_transfer` |
+
+### Void pending transfer
+
+| Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
+|------------:|-----------:|------------:|-----------:|:---------------------|:----------------------|-----------:|:------------------------|
+|  **debits** |            | **credits** |            |                      |                       |            |                         |
+| **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
+|         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
+|   123 + `w` |        `x` |   123 + `y` |        `z` | `A`                  | `B`                   |        123 | `pending`               |
+|         `w` |        `x` |         `y` |        `z` | `A`                  | `B`                   |        123 | `void_pending_transfer` |
 
 ## Client documentation
 
@@ -110,7 +162,7 @@ Read more about how two-phase transfers work with each client.
 
 ## Client samples
 
-Or take a look at how it works in practice.
+Or take a look at how it works with real code.
 
 * [Node](/src/clients/node/samples/two-phase/main.js)
 * [Go](/src/clients/go/samples/two-phase/main.go)

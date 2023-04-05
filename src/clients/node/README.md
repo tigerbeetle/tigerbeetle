@@ -35,7 +35,7 @@ Finally, build and run:
 $ node run test.js
 ```
 
-Now that all prerequisites and depencies are correctly set
+Now that all prerequisites and dependencies are correctly set
 up, let's dig into using TigerBeetle.
 
 If you run into issues, check out the distribution-specific install
