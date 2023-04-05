@@ -62,7 +62,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             network: NetworkOptions,
             storage: Storage.Options,
-            aof: bool,
             state_machine: StateMachine.Options,
         };
 

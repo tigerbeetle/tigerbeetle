@@ -496,9 +496,6 @@ pub const verify = config.process.verify;
 /// Enabling this will have performance implications.
 pub const aof = config.process.aof;
 
-/// Path to the AOF, if enabled. Can be relative or absolute.
-pub const aof_path = config.process.aof_path;
-
 /// Place us in a special recovery state, where we accept timestamps passed in to us. Used to
 /// replay our AOF.
 pub const aof_recovery = config.process.aof_recovery;

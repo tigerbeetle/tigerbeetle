@@ -40,7 +40,6 @@ pub const AOF = struct {
         errdefer allocator.free(memory);
 
         log.info("testing aof: init. allocated {} bytes", .{BACKING_SIZE});
-        // ensureTotalCapacity
         return AOF{
             .index = 0,
             .backing_store = memory,

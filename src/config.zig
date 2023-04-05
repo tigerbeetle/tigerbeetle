@@ -67,8 +67,7 @@ const ConfigProcess = struct {
     clock_epoch_max_ms: u64 = 60000,
     clock_synchronization_window_min_ms: u64 = 2000,
     clock_synchronization_window_max_ms: u64 = 20000,
-    aof: bool = true,
-    aof_path: []const u8 = "./tigerbeetle.aof",
+    aof: bool = false,
     aof_recovery: bool = false,
     grid_iops_read_max: u64 = 16,
     grid_iops_write_max: u64 = 16,
@@ -217,29 +216,18 @@ pub const configs = struct {
             .test_min => test_min,
         };
 
-        // Allow overriding AOF here, to make for easier tests
-        base.process.aof = if (@hasDecl(root, "aof"))
-            root.aof orelse base.process.aof
-        else
-            build_options.aof orelse base.process.aof;
-
-        base.process.aof_recovery = if (@hasDecl(root, "aof_recovery"))
-            root.aof_recovery orelse base.process.aof_recovery
-        else
-            build_options.aof_recovery orelse base.process.aof_recovery;
-
-        base.process.hash_log_mode = if (@hasDecl(root, "decode_events"))
-            // TODO(DJ) This is a hack to work around the absense of tigerbeetle_build_options.
-            // This should be removed once the node client is built using `zig build`.
-            .none
-        else
-            @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
-
         // TODO Use additional build options to overwrite other fields.
+
         // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
         // but a different type from a nominal typing perspective.
         base.process.tracer_backend = @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
         base.process.hash_log_mode = @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
+        if (build_options.config_aof) |config_aof| {
+            base.process.aof = config_aof;
+        }
+        if (build_options.config_aof_recovery) |config_aof_recovery| {
+            base.process.aof_recovery = config_aof_recovery;
+        }
 
         break :current base;
     };
