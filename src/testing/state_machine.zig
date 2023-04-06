@@ -126,6 +126,14 @@ pub fn StateMachineType(
             state_machine.next_tick(callback);
         }
 
+        pub fn op_done(
+            state_machine: *StateMachine,
+            op: u64,
+        ) void {
+            _ = state_machine;
+            _ = op;
+        }
+
         pub fn checkpoint(
             state_machine: *StateMachine,
             callback: fn (*StateMachine) void,

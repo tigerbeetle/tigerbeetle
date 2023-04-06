@@ -201,6 +201,12 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             }
         }
 
+        pub fn op_done(forest: *Forest, op: u64) void {
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).op_done(op);
+            }
+        }
+
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io before checkpointing.

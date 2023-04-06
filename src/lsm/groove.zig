@@ -973,6 +973,15 @@ pub fn GrooveType(
             }
         }
 
+        pub fn op_done(groove: *Groove, op: u64) void {
+            if (has_id) groove.ids.op_done(op);
+            groove.objects.op_done(op);
+
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                @field(groove.indexes, field.name).op_done(op);
+            }
+        }
+
         pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
             // Start a checkpoint join operation.
             const Join = JoinType(.checkpoint);
