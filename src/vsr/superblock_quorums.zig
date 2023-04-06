@@ -149,11 +149,11 @@ pub fn QuorumsType(comptime options: Options) type {
                     continue;
                 }
 
-                if (a.header.vsr_state.replica != b.header.vsr_state.replica) {
-                    log.warn("superblock copy={} has replica={} instead of {}", .{
+                if (a.header.vsr_state.replica_id != b.header.vsr_state.replica_id) {
+                    log.warn("superblock copy={} has replica_id={} instead of {}", .{
                         a.header.copy,
-                        a.header.vsr_state.replica,
-                        b.header.vsr_state.replica,
+                        a.header.vsr_state.replica_id,
+                        b.header.vsr_state.replica_id,
                     });
                     continue;
                 }
@@ -174,7 +174,7 @@ pub fn QuorumsType(comptime options: Options) type {
                 if (a.header.sequence + 1 == b.header.sequence) {
                     assert(a.header.checksum != b.header.checksum);
                     assert(a.header.cluster == b.header.cluster);
-                    assert(a.header.vsr_state.replica == b.header.vsr_state.replica);
+                    assert(a.header.vsr_state.replica_id == b.header.vsr_state.replica_id);
 
                     if (a.header.checksum != b.header.parent) {
                         return error.ParentNotConnected;
