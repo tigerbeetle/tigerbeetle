@@ -1,4 +1,4 @@
-# Data Modeling
+# Data modeling
 
 TigerBeetle is a domain-specific database — its schema of [`Account`s](../reference/accounts.md)
 and [`Transfer`s](../reference/transfers.md) is built-in and fixed. In return for this prescriptive
@@ -73,7 +73,7 @@ lost, the client (or application) will retry — the database must not transfer 
 When selecting an `id` scheme:
 
 - Idempotency is particularly important (and difficult) in the context of
-  [application crash recovery](./integration.md#consistency-with-foreign-databases).
+  [application crash recovery](./consistency.md#consistency-with-foreign-databases).
 - Be careful to [avoid `id` collisions](https://en.wikipedia.org/wiki/Birthday_problem).
 - An account and a transfer may share the same `id` — they belong to different "namespaces".
 - Avoid requiring a central oracle to generate each unique `id` (e.g. an auto-increment field in SQL).
@@ -85,7 +85,7 @@ When selecting an `id` scheme:
 Randomly-generated identifiers are recommended for most applications.
 
 - Random identifiers require coordination with a secondary database to implement idempotent
-  [application crash recovery](./integration.md#consistency-with-foreign-databases).
+  [application crash recovery](./consistency.md#consistency-with-foreign-databases).
 - Random identifiers have an insignificant risk of collisions.
 - Random identifiers do not require a central oracle.
 - Only point queries are useful for fetching randomly-generated identifiers.
@@ -107,7 +107,7 @@ To reuse the foreign identifier, it must conform to TigerBeetle's `id`
 
 Like [randomly-generated identifiers](#random-identifier), this technique requires careful
 coordination with the foreign database for idempotent
-[application crash recovery](./integration.md#consistency-with-foreign-databases).
+[application crash recovery](./consistency.md#consistency-with-foreign-databases).
 
 ### Examples (Advanced)
 
