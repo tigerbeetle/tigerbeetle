@@ -6,10 +6,10 @@ at the boundaries, in the application code which interfaces with TigerBeetle.
 This is exhibited by the client's API design, which may be surprising (see [Retries](#retries)) when
 contrasted with a more conventional database.
 
-Strict consistency guarantees (at the database level) simplify application logic and push error handling
+Strict consistency guarantees (at the database level) simplify 1) application logic and 2) error handling
 farther up the stack.
 
-## Consistency
+## Guarantees
 
 TigerBeetle provides strict serializability
 ([serializability + linearizability](http://www.bailis.org/blog/linearizability-versus-serializability/))

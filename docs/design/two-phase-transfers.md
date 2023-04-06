@@ -32,7 +32,7 @@ When the pending transfer is resolved (posted or voided), the
 on the respective accounts are decreased by the
 [`amount`](../reference/transfers.md#amount) of the **pending** transfer.
 
-### Posting
+### Post
 
 When the pending transfer is posted,
 [`debits_posted`](../reference/accounts.md#debits_posted) and
@@ -41,7 +41,7 @@ the respective accounts are increased by the **posting** transfer's
 [`amount`](../reference/transfers.md#amount) (which cannot exceed the
 pending amount, but need not equal the pending amount either).
 
-#### Posting a subset of pending `amount`
+#### Post a subset of pending `amount`
 
 Although an initial [`amount`](../reference/transfers.md#amount) is
 reserved when a pending transfer is created, you can set the
@@ -52,14 +52,14 @@ In the event that you post less than the amount you initially
 reserved, the rest of the amount not posted reverts back to the
 original account.
 
-### Voiding
+### Void
 
 When the pending transfer is voided,
 [`debits_posted`](../reference/accounts.md#debits_posted) and
 [`credits_posted`](../reference/accounts.md#credits_posted) are not
 modified.
 
-### Timeouts
+### Timeout
 
 If a pending transfer is created with a timeout (which is optional),
 then if it has not been posted or voided by the time the timeout
