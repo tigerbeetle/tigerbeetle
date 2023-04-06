@@ -49,6 +49,8 @@ const ManifestType = @import("manifest.zig").ManifestType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 const LevelDataIteratorType = @import("level_data_iterator.zig").LevelDataIteratorType;
 
+const snapshot_latest = @import("tree.zig").snapshot_latest;
+
 pub fn CompactionType(
     comptime Table: type,
     comptime Tree: type,
@@ -216,6 +218,11 @@ pub fn CompactionType(
             assert(compaction.state == .idle);
             assert(compaction.grid_reservation == null);
 
+            if (context.table_info_a == .disk) {
+                // This table hasn't already been compacted.
+                assert(context.table_info_a.disk.snapshot_max == math.maxInt(u64));
+            }
+
             tracer.start(
                 &compaction.tracer_slot,
                 .{ .tree_compaction = .{
@@ -245,7 +252,9 @@ pub fn CompactionType(
                 null
             else
                 context.grid.reserve(
-                    context.range_b.table_count * Table.block_count_max,
+                    context.range_b.table_count * Table.block_count_max
+                    // TODO(jamii)
+                    * 2,
                 ).?;
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.
@@ -293,7 +302,7 @@ pub fn CompactionType(
                 const table_a = &context.table_info_a.disk;
                 assert(table_a.snapshot_max >= snapshot_max);
 
-                context.tree.manifest.move_table(level_a, level_b, table_a);
+                context.tree.manifest.move_table(snapshot_max, level_a, level_b, table_a);
 
                 compaction.state = .next_tick;
                 compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
@@ -309,7 +318,8 @@ pub fn CompactionType(
                     .grid = context.grid,
                     .manifest = &context.tree.manifest,
                     .level = context.level_b,
-                    .snapshot = context.op_min,
+                    // We only want to visit tables that have not already been compacted.
+                    .snapshot = snapshot_latest,
                     .key_min = context.range_b.key_min,
                     .key_max = context.range_b.key_max,
                 });
@@ -802,11 +812,11 @@ pub fn CompactionType(
 }
 
 fn snapshot_max_for_table_input(op_min: u64) u64 {
-    assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
-    return op_min + @divExact(constants.lsm_batch_multiple, 2) - 1;
+    assert(op_min % constants.lsm_batch_multiple == 0);
+    return op_min + constants.lsm_batch_multiple - 1;
 }
 
 fn snapshot_min_for_table_output(op_min: u64) u64 {
-    assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
-    return op_min + @divExact(constants.lsm_batch_multiple, 2);
+    assert(op_min % constants.lsm_batch_multiple == 0);
+    return op_min + constants.lsm_batch_multiple;
 }

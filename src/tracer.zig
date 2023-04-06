@@ -151,15 +151,12 @@ pub const Event = union(enum) {
             } },
             .tree_compaction => |args| .{ .tree_compaction = .{
                 .tree_name = args.tree_name,
-                .level_b = args.level_b,
             } },
             .tree_compaction_iter => |args| .{ .tree_compaction = .{
                 .tree_name = args.tree_name,
-                .level_b = args.level_b,
             } },
             .tree_compaction_merge => |args| .{ .tree_compaction = .{
                 .tree_name = args.tree_name,
-                .level_b = args.level_b,
             } },
             .grid_read_iop => |args| .{ .grid_read_iop = .{
                 .index = args.index,
@@ -182,7 +179,6 @@ const Fiber = union(enum) {
     },
     tree_compaction: struct {
         tree_name: []const u8,
-        level_b: u8,
     },
     grid_read_iop: struct {
         index: usize,
@@ -208,17 +204,12 @@ const Fiber = union(enum) {
                     args.tree_name,
                 },
             ),
-            .tree_compaction => |args| {
-                const level_a = LevelA{ .level_b = args.level_b };
-                try writer.print(
-                    "tree_compaction({s}, {}->{})",
-                    .{
-                        args.tree_name,
-                        level_a,
-                        args.level_b,
-                    },
-                );
-            },
+            .tree_compaction => |args| try writer.print(
+                "tree_compaction({s})",
+                .{
+                    args.tree_name,
+                },
+            ),
             .grid_read_iop => |args| try writer.print("grid_read_iop({})", .{args.index}),
             .grid_write_iop => |args| try writer.print("grid_write_iop({})", .{args.index}),
         };

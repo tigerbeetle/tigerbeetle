@@ -82,14 +82,14 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(@sizeOf(TableInfo) % alignment == 0);
         }
 
-        /// The maximum number of table updates to the manifest by a half-measure of table
+        /// The maximum number of table updates to the manifest by a measure of table
         /// compaction (not including manifest log compaction).
         ///
         /// Input tables are updated in the manifest (snapshot_max is reduced).
         /// Input tables are removed from the manifest (if not held by a persistent snapshot).
         /// Output tables are inserted into the manifest.
         // TODO If insert-then-remove can update in-memory, then we can only count input tables once.
-        pub const compaction_appends_max = tree.compactions_max *
+        pub const compaction_appends_max = constants.lsm_levels *
             (tree.compaction_tables_input_max + // Update snapshot_max.
             tree.compaction_tables_input_max + // Remove.
             tree.compaction_tables_output_max);
@@ -253,7 +253,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 const label = labels_used[entry];
                 const table = &tables_used[entry];
 
-                if (manifest.insert_table_extent(manifest_log.tree_hash, table.address, block_reference.address, entry)) {
+                if (manifest.insert_table_extent(manifest_log.tree_hash, label.level, table.address, block_reference.address, entry)) {
                     switch (label.event) {
                         .insert => manifest_log.open_event(manifest_log, label.level, table),
                         .remove => manifest.queue_for_compaction(block_reference.address),
@@ -297,7 +297,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(label.level < constants.lsm_levels);
             assert(table.address > 0);
             assert(table.snapshot_min > 0);
-            assert(table.snapshot_max > table.snapshot_min);
 
             if (manifest_log.entry_count == 0) {
                 assert(manifest_log.blocks.count == manifest_log.blocks_closed);
@@ -330,7 +329,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
             const address = Block.address(block);
-            if (manifest.update_table_extent(manifest_log.tree_hash, table.address, address, entry)) |previous_block| {
+            if (manifest.update_table_extent(manifest_log.tree_hash, label.level, table.address, address, entry)) |previous_block| {
                 manifest.queue_for_compaction(previous_block);
                 if (label.event == .remove) manifest.queue_for_compaction(address);
             } else {
@@ -545,7 +544,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 // Remove the extent if the table is the latest version.
                 // We must iterate entries in forward order to drop the extent here.
                 // Otherwise, stale versions earlier in the block may reappear.
-                if (manifest.remove_table_extent(manifest_log.tree_hash, table.address, block_reference.address, entry)) {
+                if (manifest.remove_table_extent(manifest_log.tree_hash, label.level, table.address, block_reference.address, entry)) {
                     switch (label.event) {
                         // Append the table, updating the table extent:
                         .insert => manifest_log.append(label, table),
