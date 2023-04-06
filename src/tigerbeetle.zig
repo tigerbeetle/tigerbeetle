@@ -232,4 +232,9 @@ comptime {
     if (target.cpu.arch.endian() != .Little) {
         @compileError("big-endian systems not supported");
     }
+
+    switch (builtin.mode) {
+        .Debug, .ReleaseSafe => {},
+        .ReleaseFast, .ReleaseSmall => @compileError("safety checks are required for correctness"),
+    }
 }
