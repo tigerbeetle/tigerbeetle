@@ -41,7 +41,7 @@ the respective accounts are increased by the **posting** transfer's
 [`amount`](../reference/transfers.md#amount) (which cannot exceed the
 pending amount, but need not equal the pending amount either).
 
-#### Post a subset of pending `amount`
+#### Post partial pending `amount`
 
 Although an initial [`amount`](../reference/transfers.md#amount) is
 reserved when a pending transfer is created, you can set the
@@ -61,7 +61,7 @@ modified.
 
 ### Timeout
 
-If a pending transfer is created with a timeout (which is optional),
+If a pending transfer is created with a [timeout](../reference/transfers.md#timeout) (which is optional),
 then if it has not been posted or voided by the time the timeout
 expires, the full amount will be voided.
 
