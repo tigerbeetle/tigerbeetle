@@ -350,9 +350,9 @@ would exceed `credit_account.debits_posted`.
 
 For language-specific docs see:
 
-* [Creating transfers using the Java library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/java#creating-transfers)
-* [Creating transfers using the Go library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/go#creating-transfers)
-* [Creating transfers using the Node.js library](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients/node#creating-transfers)
+* [Creating transfers using the Java library](/src/clients/java#create-transfers)
+* [Creating transfers using the Go library](/src/clients/go#create-transfers)
+* [Creating transfers using the Node.js library](/src/clients/node#create-transfers)
 
 ## Internals
 
