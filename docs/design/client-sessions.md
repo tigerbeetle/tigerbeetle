@@ -11,7 +11,7 @@ a reply.
 
 TigerBeetle has a [hard limit](#eviction) on the number of concurrent
 client sessions, and encourages minimizing the number of concurrent clients to
-[maximize throughput](#batching-events).
+[maximize throughput](./client-requests.md#batching-events).
 
 ## Lifecycle
 
