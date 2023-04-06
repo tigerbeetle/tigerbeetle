@@ -848,24 +848,24 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(op != 0);
             assert(op > tree.grid.superblock.working.vsr_state.commit_min);
 
-            const bar_done = bar_done: {
-                if (tree.grid.superblock.working.vsr_state.op_compacted(op)) {
-                    // We recovered from a checkpoint, and must avoid replaying one bar of
-                    // compactions that were applied before the checkpoint. Repeating these ops'
-                    // compactions would actually perform different compactions than before,
-                    // causing the storage state of the replica to diverge from the cluster.
-                    // During recovery, `tree.lookup_snapshot_max` is set to one bar after the
-                    // checkpoint.
-                    // See also: lookup_snapshot_max_for_checkpoint().
-                    break :bar_done op + 1 == tree.lookup_snapshot_max;
-                } else {
-                    assert(op == tree.lookup_snapshot_max);
-                    tree.lookup_snapshot_max = op + 1;
+            // If we recovered from a checkpoint, we must avoid replaying one bar of
+            // compactions that were applied before the checkpoint. Repeating these ops'
+            // compactions would actually perform different compactions than before,
+            // causing the storage state of the replica to diverge from the cluster.
+            const recovering = tree.grid.superblock.working.vsr_state.op_compacted(op);
 
-                    const beat = op % constants.lsm_batch_multiple;
-                    break :bar_done beat + 1 == constants.lsm_batch_multiple;
-                }
-            };
+            if (recovering) {
+                // During recovery, `tree.lookup_snapshot_max` is set to one bar after the
+                // checkpoint. See also `lookup_snapshot_max_for_checkpoint`.
+            } else {
+                assert(op == tree.lookup_snapshot_max);
+                tree.lookup_snapshot_max = op + 1;
+            }
+
+            const bar_done = if (recovering)
+                op + 1 == tree.lookup_snapshot_max
+            else
+                op % constants.lsm_batch_multiple == constants.lsm_batch_multiple - 1;
 
             if (bar_done) {
                 // Ensure the mutable table has space before the next bar starts.
