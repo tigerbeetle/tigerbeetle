@@ -170,8 +170,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
-            // Sometimes operations complete synchronously so we might already be in next_state before ticking.
-            //assert(env.state == current_state or env.state == next_state);
             while (env.state == current_state) env.storage.tick();
             assert(env.state == next_state);
         }
