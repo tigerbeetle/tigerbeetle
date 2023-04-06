@@ -47,7 +47,7 @@ Finally, build and run:
 $ go run test.go
 ```
 
-Now that all prerequisites and depencies are correctly set
+Now that all prerequisites and dependencies are correctly set
 up, let's dig into using TigerBeetle.
 
 ## Example projects
