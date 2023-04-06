@@ -75,7 +75,6 @@ Attempting to resolve a pending transfer more than once will return the applicab
 - [`pending_transfer_already_voided`](../reference/operations/create_transfers.md#pending_transfer_already_voided)
 - [`pending_transfer_expired`](../reference/operations/create_transfers.md#pending_transfer_expired)
 
-
 ## Interaction with account invariants
 
 The pending transfer's amount is reserved in a way that the second

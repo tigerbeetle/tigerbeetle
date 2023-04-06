@@ -54,6 +54,11 @@ stages:
 1. Reserve funds
 2. Resolve funds (post, void, or timeout)
 
+Attempting to resolve a pending transfer more than once will return the applicable error result:
+- [`pending_transfer_already_posted`](../reference/operations/create_transfers.md#pending_transfer_already_posted)
+- [`pending_transfer_already_voided`](../reference/operations/create_transfers.md#pending_transfer_already_voided)
+- [`pending_transfer_expired`](../reference/operations/create_transfers.md#pending_transfer_expired)
+
 #### Pending transfer
 
 A pending transfer, denoted by [`flags.pending`](#flagspending),
@@ -67,6 +72,25 @@ A post-pending transfer, denoted by [`flags.post_pending_transfer`](#flagspost_p
 causes the corresponding pending transfer (referenced by [`pending_id`](#pending_id)) to "post",
 transferring some or all of the pending transfer's reserved amount to its destination, and restoring
 (voiding) the remainder (if any) to its origin accounts.
+
+* If the posted `amount` is 0, the full pending transfer's amount is
+  posted.
+* If the posted `amount` is nonzero, then only this amount is posted,
+  and the remainder is restored to its original accounts. It must be
+  less than or equal to the pending transfer's amount.
+
+Additionally, when `flags.post_pending_transfer` is set:
+
+* `pending_id` must reference a [pending transfer](#pending-transfer).
+* `flags.void_pending_transfer` must not be set.
+
+And the following fields may either be zero, otherwise must match the
+value of the pending transfer's field:
+
+* `debit_account_id`
+* `credit_account_id`
+* `ledger`
+* `code`
 
 #### Void-pending transfer
 
