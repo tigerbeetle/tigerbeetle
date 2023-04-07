@@ -21,7 +21,7 @@ TigerBeetle is not yet production-ready. The production version of
 doc](docs/DESIGN.md) provides an overview of TigerBeetle's data
 structures.
 
-Check out our [short-term roadmap](#short-term-roadmap) below for where we're heading!
+Check out our [roadmap](https://github.com/tigerbeetledb/tigerbeetle/issues/259) below for where we're heading!
 
 ## Documentation
 

@@ -15,8 +15,8 @@
 |             `commit` | primary |       backup | [Normal](#protocol-normal)                                     |
 |  `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)               |
 |     `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                           |
-|         `start_view` | primary |       backup | [Request/Start View](#protocol-request-start-view)             |
-| `request_start_view` |  backup |      primary | [Request/Start View](#protocol-request-start-view)             |
+|         `start_view` | primary |       backup | [Request/Start View](#protocol-requeststart-view)             |
+| `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)             |
 |    `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                     |
 |    `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                             |
 |            `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                     |

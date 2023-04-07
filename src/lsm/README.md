@@ -50,7 +50,7 @@ The immutable table is compacted into level 0 during the odd level half of the b
 At any given point, there are at most `⌈levels/2⌉` compactions running concurrently.
 The source level is denoted as `level_a` and the target level as `level_b`.
 The last level in the LSM tree has no target level so it is never a source level.
-Each compaction compacts a [single table](#table-selection) from `level_a` into all tables in
+Each compaction compacts a [single table](#compaction-selection-policy) from `level_a` into all tables in
 `level_b` which intersect the `level_a` table's key range.
 
 Invariants:
@@ -184,7 +184,7 @@ op  0   4   8  12  16  20  24  (op, snapshot)
 
 However, commits in the first measure following recovery from a checkpoint prefetch from a higher
 snapshot to avoid querying tables that were deleted at the checkpoint.
-See [`lookup_snapshot_max_for_checkpoint()`](#tree.zig) for more detail.
+See [`lookup_snapshot_max_for_checkpoint()`](tree.zig) for more detail.
 
 #### Persistent Snapshots
 
@@ -223,7 +223,7 @@ At the end of the last beat of the compaction bar (`23`):
 ## Manifest
 
 The manifest is a tree's index of table locations and metadata.
-(Not to be confused with the [SuperBlock Manifest](../vsr/README.md#manifest)).
+(Not to be confused with the [SuperBlock Manifest](/src/vsr/superblock_manifest.zig)).
 
 Each manifest has two components:
 - a single [`ManifestLog`](#manifest-log) shared by all levels, and
