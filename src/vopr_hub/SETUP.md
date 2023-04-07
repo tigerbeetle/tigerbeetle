@@ -61,7 +61,7 @@ The file should contain the following (including an actual IP address and develo
 ```
 [Unit]
 
-Description=Continously runs the VOPR Hub.
+Description=Continuously runs the VOPR Hub.
 
 [Service]
 
@@ -155,7 +155,7 @@ sudo nano /etc/systemd/system/vopr@.service
 The file should contain the following:
 ```
 [Unit]
-Description=Continously runs the VOPR.
+Description=Continuously runs the VOPR.
 PartOf=vopr.target
 
 [Service]
