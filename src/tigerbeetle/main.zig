@@ -87,7 +87,7 @@ const Command = struct {
         command.io = try IO.init(128, 0);
         errdefer command.io.deinit();
 
-        command.storage = try Storage.init(&command.io, command.fd);
+        try command.storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
 
         command.message_pool = try MessagePool.init(allocator, .replica);

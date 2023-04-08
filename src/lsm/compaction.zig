@@ -138,6 +138,7 @@ pub fn CompactionType(
 
         next_tick: Grid.NextTick = undefined,
         read: Grid.Read = undefined,
+        data_block_address: ?u64 = null,
         write_data_block: Grid.Write = undefined,
         write_filter_block: Grid.Write = undefined,
         write_index_block: Grid.Write = undefined,
@@ -630,10 +631,9 @@ pub fn CompactionType(
             assert(compaction.state == .compacting);
             const input_exhausted = compaction.input_state == .exhausted;
             const table_builder = &compaction.table_builder;
+            const grid = compaction.context.grid;
 
-            compaction.state = .{ .writing = .{ .pending = 0 } };
-
-            // Flush the data block if needed.
+            // Flush the data block if needed on a separate thread.
             if (table_builder.data_block_full() or
                 // If the filter or index blocks need to be flushed,
                 // the data block has to be flushed first.
@@ -642,10 +642,36 @@ pub fn CompactionType(
                 // If the input is exhausted then we need to flush all blocks before finishing.
                 (input_exhausted and !table_builder.data_block_empty()))
             {
-                table_builder.data_block_finish(.{
-                    .cluster = compaction.context.grid.superblock.working.cluster,
-                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
-                });
+                assert(compaction.data_block_address == null);
+                compaction.data_block_address = grid.acquire(compaction.grid_reservation.?);
+                grid.on_next_tick(finish_data_block, &compaction.next_tick, .cpu_work);
+                return;
+            }
+
+            finish_remaining_blocks(&compaction.next_tick);
+        }
+
+        fn finish_data_block(next_tick: *Grid.NextTick) void {
+            const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
+            compaction.table_builder.data_block_finish(.{
+                .cluster = compaction.context.grid.superblock.working.cluster,
+                .address = compaction.data_block_address.?,
+            });
+
+            const grid = compaction.context.grid;
+            grid.on_next_tick(finish_remaining_blocks, &compaction.next_tick, .cpu_inject);
+        }
+
+        fn finish_remaining_blocks(next_tick: *Grid.NextTick) void {
+            const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
+            const input_exhausted = compaction.input_state == .exhausted;
+            const table_builder = &compaction.table_builder;
+
+            compaction.state = .{ .writing = .{ .pending = 0 } };
+
+            // Check if the data block was flushed and write it out:
+            if (compaction.data_block_address != null) {
+                compaction.data_block_address = null;
                 WriteBlock(.data).write_block(compaction);
             }
 

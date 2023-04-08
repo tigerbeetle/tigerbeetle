@@ -70,7 +70,11 @@ pub const compaction_tables_output_max = compaction_tables_input_max;
 /// The maximum number of concurrent compactions (per tree).
 pub const compactions_max = div_ceil(constants.lsm_levels, 2);
 
-pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_name: [:0]const u8) type {
+pub fn TreeType(
+    comptime TreeTable: type,
+    comptime Storage: type,
+    comptime tree_name: [:0]const u8,
+) type {
     const Key = TreeTable.Key;
     const Value = TreeTable.Value;
     const compare_keys = TreeTable.compare_keys;
@@ -549,7 +553,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
                 tree.lookup_snapshot_max = op + 1;
                 if (op + 1 == constants.lsm_batch_multiple) {
-                    tree.compact_mutable_table_into_immutable();
+                    tree.compaction_callback = .{ .next_tick = callback };
+                    tree.compact_mutable_table_into_immutable(compact_finish_next_tick);
+                    return;
                 }
 
                 tree.compaction_callback = .{ .next_tick = callback };
@@ -568,7 +574,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     // This is the last op of the skipped compaction bar.
                     // Prepare the immutable table for the next bar — since this state is
                     // in-memory, it cannot be skipped.
-                    tree.compact_mutable_table_into_immutable();
+                    tree.compaction_callback = .{ .next_tick = callback };
+                    tree.compact_mutable_table_into_immutable(compact_finish_next_tick);
+                    return;
                 }
 
                 tree.compaction_callback = .{ .next_tick = callback };
@@ -820,37 +828,61 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 // Assert all visible tables haven't overflowed their max per level.
                 tree.manifest.assert_level_table_counts();
 
-                // Convert mutable table to immutable table for next bar.
-                tree.compact_mutable_table_into_immutable();
+                // Convert mutable table to immutable table for next bar, then compact the manifest.
+                tree.compact_mutable_table_into_immutable(compact_manifest_next_tick);
+                return;
             }
 
             // Compact the manifest.
-            tree.manifest.compact(compact_manifest_callback);
+            compact_manifest_next_tick(&tree.compaction_next_tick);
         }
 
-        /// Called after the last beat of a full compaction bar.
-        fn compact_mutable_table_into_immutable(tree: *Tree) void {
+        /// Called after the last beat of a full compaction bar
+        fn compact_mutable_table_into_immutable(
+            tree: *Tree,
+            comptime next_tick_callback: fn (*Grid.NextTick) void,
+        ) void {
             assert(tree.table_immutable.free);
             assert((tree.compaction_op + 1) % constants.lsm_batch_multiple == 0);
             assert(tree.compaction_op + 1 == tree.lookup_snapshot_max);
 
-            if (tree.table_mutable.count() == 0) return;
+            // Nothing to compact.
+            if (tree.table_mutable.count() == 0) {
+                tree.grid.on_next_tick(next_tick_callback, &tree.compaction_next_tick, .yield);
+                return;
+            }
 
-            // Sort the mutable table values directly into the immutable table's array.
-            const values_max = tree.table_immutable.values_max();
-            const values = tree.table_mutable.sort_into_values_and_clear(values_max);
-            assert(values.ptr == values_max.ptr);
+            const cpu_sort_callback = struct {
+                fn callback(next_tick: *Grid.NextTick) void {
+                    const tree_ = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
 
-            // The immutable table must be visible to the next bar — setting its snapshot_min to
-            // lookup_snapshot_max guarantees.
-            //
-            // In addition, the immutable table is conceptually an output table of this compaction
-            // bar, and now its snapshot_min matches the snapshot_min of the Compactions' output
-            // tables.
-            tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max, values);
+                    // Sort the mutable table values directly into the immutable table's array.
+                    const values_max = tree_.table_immutable.values_max();
+                    const values = tree_.table_mutable.sort_into_values_and_clear(values_max);
+                    assert(values.ptr == values_max.ptr);
 
-            assert(tree.table_mutable.count() == 0);
-            assert(!tree.table_immutable.free);
+                    // The immutable table must be visible to the next bar — setting its
+                    // snapshot_min to lookup_snapshot_max guarantees.
+                    //
+                    // In addition, the immutable table is conceptually an output table of this
+                    // compaction bar, and now its snapshot_min matches the snapshot_min of the
+                    // Compactions' output tables.
+                    tree_.table_immutable.reset_with_sorted_values(tree_.lookup_snapshot_max, values);
+                    assert(tree_.table_mutable.count() == 0);
+                    assert(!tree_.table_immutable.free);
+
+                    // Now that the CPU work is finished, switch back to main thread.
+                    tree_.grid.on_next_tick(next_tick_callback, &tree_.compaction_next_tick, .cpu_inject);
+                }
+            }.callback;
+
+            // Run sorting in "blocking cpu work" optimized context asynchronously to caller.
+            tree.grid.on_next_tick(cpu_sort_callback, &tree.compaction_next_tick, .cpu_work);
+        }
+
+        fn compact_manifest_next_tick(next_tick: *Grid.NextTick) void {
+            const tree = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
+            tree.manifest.compact(compact_manifest_callback);
         }
 
         fn compact_manifest_callback(manifest: *Manifest) void {

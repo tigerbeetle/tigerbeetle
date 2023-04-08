@@ -106,6 +106,8 @@ pub fn GridType(comptime Storage: type) type {
         const ReadIOP = struct {
             completion: Storage.Read,
             read: *Read,
+            block_valid: bool,
+            next_tick: Grid.NextTick,
         };
 
         const cache_interface = struct {
@@ -479,6 +481,8 @@ pub fn GridType(comptime Storage: type) type {
             iop.* = .{
                 .completion = undefined,
                 .read = read,
+                .block_valid = false,
+                .next_tick = undefined,
             };
             const iop_block = grid.read_iop_blocks[grid.read_iops.index(iop)];
 
@@ -495,7 +499,30 @@ pub fn GridType(comptime Storage: type) type {
             const iop = @fieldParentPtr(ReadIOP, "completion", completion);
             const read = iop.read;
             const grid = read.grid;
+
+            // Validate the iop block on the Storage thread pool.
+            grid.on_next_tick(read_block_validate_callback, &iop.next_tick, .cpu_work);
+        }
+
+        fn read_block_validate_callback(next_tick: *NextTick) void {
+            const iop = @fieldParentPtr(ReadIOP, "next_tick", next_tick);
+            const read = iop.read;
+            const grid = read.grid;
+
+            const block = grid.read_iop_blocks[grid.read_iops.index(iop)];
+            iop.block_valid = read_block_valid(read, block);
+
+            // After validating, inject back into the Grid's main thread.
+            grid.on_next_tick(read_block_ready_callback, &iop.next_tick, .cpu_inject);
+        }
+
+        fn read_block_ready_callback(next_tick: *NextTick) void {
+            const iop = @fieldParentPtr(ReadIOP, "next_tick", next_tick);
+            const read = iop.read;
+            const grid = read.grid;
+
             const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
+            const block_valid = iop.block_valid;
 
             // Insert the block into the cache, and give the evicted block to `iop`.
             const cache_index = grid.cache.insert_index(&read.address);
@@ -518,7 +545,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // A valid block filled by storage means the reads for the address can be resolved
-            if (read_block_valid(read, cache_block.*)) {
+            if (block_valid) {
                 grid.read_block_resolve(read, cache_block.*);
                 return;
             }

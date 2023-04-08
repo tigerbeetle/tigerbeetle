@@ -3,11 +3,13 @@ const builtin = @import("builtin");
 const os = std.os;
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage);
+const Atomic = std.atomic.Atomic;
 
 const IO = @import("io.zig").IO;
 const FIFO = @import("fifo.zig").FIFO;
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
+const Signal = @import("clients/c/tb_client/signal.zig").Signal;
 
 pub const Storage = struct {
     /// See usage in Journal.write_sectors() for details.
@@ -69,26 +71,101 @@ pub const Storage = struct {
     };
 
     pub const NextTick = struct {
-        completion: IO.Completion,
+        next: ?*NextTick,
         callback: fn (next_tick: *NextTick) void,
+    };
+
+    const ThreadPool = struct {
+        mutex: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
+        queue: FIFO(NextTick) = .{ .name = "thread-pool" },
+        notified: bool = false,
+        idle: u16 = 0,
+
+        var instance = ThreadPool{};
+        var init_once = std.once(ThreadPool.init);
+        var init_result: std.Thread.SpawnError!void = undefined;
+
+        fn init() void {
+            init_result = spawn();
+        }
+
+        fn spawn() std.Thread.SpawnError!void {
+            var threads = @maximum(1, std.Thread.getCpuCount() catch 1);
+            while (threads > 0) : (threads -= 1) {
+                const thread = try std.Thread.spawn(.{}, poll, .{&instance});
+                thread.detach();
+            }
+        }
+
+        fn submit(pool: *ThreadPool, next_tick: *NextTick) void {
+            pool.mutex.lock();
+            pool.queue.push(next_tick);
+            pool.unlock_after_queue_update();
+        }
+
+        fn poll(pool: *ThreadPool) void {
+            pool.mutex.lock();
+            while (true) {
+                while (pool.queue.pop()) |next_tick| {
+                    pool.unlock_after_queue_update();
+                    next_tick.callback(next_tick);
+                    pool.mutex.lock();
+                }
+
+                pool.idle += 1;
+                pool.cond.wait(&pool.mutex);
+                pool.idle -= 1;
+                pool.notified = false;
+            }
+        }
+
+        fn unlock_after_queue_update(pool: *ThreadPool) void {
+            if (!pool.queue.empty() and !pool.notified and pool.idle > 0) {
+                pool.notified = true;
+                pool.cond.signal();
+            }
+            pool.mutex.unlock();
+        }
     };
 
     io: *IO,
     fd: os.fd_t,
+    main_thread_id: std.Thread.Id,
 
-    pub fn init(io: *IO, fd: os.fd_t) !Storage {
-        return Storage{
+    signal: Signal = undefined,
+    injected: Atomic(?*NextTick) = Atomic(?*NextTick).init(null),
+
+    yield_queue: FIFO(NextTick) = .{ .name = "storage-yield" },
+    yield_completion: IO.Completion = undefined,
+    yield_scheduled: bool = false,
+
+    pub fn init(storage: *Storage, io: *IO, fd: os.fd_t) !void {
+        ThreadPool.init_once.call();
+        try ThreadPool.init_result;
+
+        try storage.signal.init(io, on_signal);
+        storage.* = .{
             .io = io,
             .fd = fd,
+            .main_thread_id = std.Thread.getCurrentId(),
+            .signal = storage.signal,
         };
     }
 
     pub fn deinit(storage: *Storage) void {
+        assert(storage.is_local());
+        storage.signal.deinit();
         assert(storage.fd != IO.INVALID_FILE);
         storage.fd = IO.INVALID_FILE;
     }
 
+    fn is_local(self: *const Storage) bool {
+        return std.Thread.getCurrentId() == self.main_thread_id;
+    }
+
     pub fn tick(storage: *Storage) void {
+        assert(storage.is_local());
         storage.io.tick() catch |err| {
             log.warn("tick: {}", .{err});
             std.debug.panic("io.tick(): {}", .{err});
@@ -102,39 +179,71 @@ pub const Storage = struct {
     };
 
     pub fn on_next_tick(
-        storage: *Storage,
+        self: *Storage,
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
         intent: NextTickIntent,
     ) void {
         next_tick.* = .{
+            .next = null,
             .callback = callback,
-            .completion = undefined,
         };
 
         switch (intent) {
             .yield => {
-                // Uses timeout(0ns) as a way to yield execution back to IO / event loop.
-                storage.io.timeout(*Storage, storage, yield_callback, &next_tick.completion, 0);
+                assert(self.is_local());
+                self.yield_queue.push(next_tick);
+
+                if (self.yield_scheduled) return;
+                self.yield_scheduled = true;
+
+                self.io.timeout(*Storage, self, yield_callback, &self.yield_completion, 0);
             },
             .cpu_work => {
-                @panic("TODO");
+                assert(self.is_local());
+                ThreadPool.instance.submit(next_tick);
             },
             .cpu_inject => {
-                @panic("TODO");
+                assert(!self.is_local());
+                defer self.signal.notify();
+
+                var injected = self.injected.load(.Monotonic);
+                while (true) {
+                    next_tick.next = injected;
+                    injected = self.injected.tryCompareAndSwap(injected, next_tick, .Release, .Monotonic) orelse break;
+                }
             },
         }
     }
 
-    fn yield_callback(_: *Storage, completion: *IO.Completion, result: IO.TimeoutError!void) void {
+    fn yield_callback(self: *Storage, completion: *IO.Completion, result: IO.TimeoutError!void) void {
+        assert(self.is_local());
+        assert(&self.yield_completion == completion);
+
         // 0ns timeouts should not fail.
         _ = result catch |e| switch (e) {
             error.Canceled => unreachable,
             error.Unexpected => unreachable,
         };
 
-        const next_tick = @fieldParentPtr(Storage.NextTick, "completion", completion);
-        next_tick.callback(next_tick);
+        assert(self.yield_scheduled);
+        while (self.yield_queue.pop()) |next_tick| next_tick.callback(next_tick);
+
+        assert(self.yield_scheduled);
+        self.yield_scheduled = false;
+    }
+
+    fn on_signal(signal: *Signal) void {
+        const self = @fieldParentPtr(Storage, "signal", signal);
+        assert(self.is_local());
+
+        while (self.injected.load(.Monotonic) != null) {
+            var injected = self.injected.swap(null, .Acquire);
+            while (injected) |next_tick| {
+                injected = next_tick.next;
+                next_tick.callback(next_tick);
+            }
+        }
     }
 
     pub fn read_sectors(
@@ -182,6 +291,7 @@ pub const Storage = struct {
             return;
         }
 
+        assert(self.is_local());
         self.assert_bounds(target, read.offset);
         self.io.read(
             *Storage,
@@ -316,6 +426,7 @@ pub const Storage = struct {
     }
 
     fn start_write(self: *Storage, write: *Storage.Write) void {
+        assert(self.is_local());
         self.assert_bounds(write.buffer, write.offset);
         self.io.write(
             *Storage,

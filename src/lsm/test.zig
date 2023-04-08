@@ -75,7 +75,7 @@ const Environment = struct {
         env.io = try IO.init(128, 0);
         errdefer env.io.deinit();
 
-        env.storage = try Storage.init(&env.io, env.fd);
+        try env.storage.init(&env.io, env.fd);
         errdefer env.storage.deinit();
 
         env.message_pool = try MessagePool.init(allocator, .replica);
