@@ -11,6 +11,7 @@ const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
     kq: os.fd_t,
+    event_id: u32 = 0,
     time: Time = .{},
     io_inflight: usize = 0,
     timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
@@ -639,6 +640,69 @@ pub const IO = struct {
                 }
             },
         );
+    }
+
+    pub const INVALID_EVENT: u32 = 0;
+
+    pub const EventResponse = enum {
+        listen,
+        cancel,
+    };
+
+    pub fn open_event(
+        self: *IO,
+        completion: *Completion,
+        comptime on_event: fn (*Completion) EventResponse,
+    ) !u32 {
+        self.event_id += 1;
+        const event = self.event_id;
+
+        var kev = mem.zeroes([1]os.Kevent);
+        kev[0].ident = event;
+        kev[0].filter = os.system.EVFILT_USER;
+        kev[0].flags = os.system.EV_ADD | os.system.EV_ENABLE | os.system.EV_CLEAR;
+        assert((try os.kevent(self.kq, &kev, kev[0..0], null)) == 0);
+
+        completion.* = .{
+            .next = null,
+            .context = null,
+            .operation = undefined,
+            .callback = struct {
+                fn on_complete(io: *IO, _completion: *Completion) void {
+                    switch (on_event(_completion)) {
+                        .listen => io.io_inflight += 1,
+                        .cancel => {}, // The event is already cleared once triggered.
+                    }
+                }
+            }.on_complete,
+        };
+
+        // We must bump it here as it doesn't go through normal path.
+        self.io_inflight += 1;
+        return event;
+    }
+
+    pub fn trigger_event(self: *IO, event: u32, completion: *Completion) void {
+        assert(event != INVALID_EVENT);
+
+        var kev = mem.zeroes([1]os.Kevent);
+        kev[0].ident = event;
+        kev[0].filter = os.system.EVFILT_USER;
+        kev[0].fflags = os.system.NOTE_TRIGGER;
+        kev[0].udata = @ptrToInt(completion);
+        assert((os.kevent(self.kq, &kev, kev[0..0], null) catch unreachable) == 0);
+    }
+
+    pub fn close_event(self: *IO, event: u32, completion: *Completion) void {
+        assert(event != INVALID_EVENT);
+        _ = completion;
+
+        var kev = mem.zeroes([1]os.Kevent);
+        kev[0].ident = event;
+        kev[0].filter = os.system.EVFILT_USER;
+        kev[0].flags = os.system.EV_DELETE;
+        kev[0].udata = 0; // Not needed for EV_DELETE.
+        assert((os.kevent(self.kq, &kev, kev[0..0], null) catch unreachable) == 0);
     }
 
     pub const INVALID_SOCKET = -1;

@@ -213,6 +213,7 @@ pub const IO = struct {
             timeout: struct {
                 deadline: u64,
             },
+            event: Overlapped,
         };
     };
 
@@ -900,6 +901,62 @@ pub const IO = struct {
                 }
             },
         );
+    }
+
+    pub const INVALID_EVENT: u32 = 0;
+
+    pub const EventResponse = enum {
+        listen,
+        cancel,
+    };
+
+    pub fn open_event(
+        self: *IO,
+        completion: *Completion,
+        comptime on_event: fn (*Completion) EventResponse,
+    ) !u32 {
+        completion.* = .{
+            .next = null,
+            .context = null,
+            .operation = undefined,
+            .callback = struct {
+                fn on_complete(ctx: Completion.Context) void {
+                    switch (on_event(ctx.completion)) {
+                        .listen => ctx.io.io_pending += 1,
+                        .cancel => {},
+                    }
+                }
+            }.on_complete,
+        };
+
+        // Conceptually start listening by bumping the io_pending count.
+        // Then return an event that isn't invalid.
+        self.io_pending += 1;
+        return INVALID_EVENT + 1;
+    }
+
+    pub fn trigger_event(self: *IO, event: u32, completion: *Completion) void {
+        assert(event == INVALID_EVENT + 1);
+        completion.operation = .{
+            .event = .{
+                .overlapped = std.mem.zeroes(os.windows.OVERLAPPED),
+                .completion = completion,
+            },
+        };
+
+        os.windows.PostQueuedCompletionStatus(
+            self.iocp,
+            undefined,
+            undefined,
+            &completion.operation.event.overlapped,
+        ) catch unreachable;
+    }
+
+    pub fn close_event(self: *IO, event: u32, completion: *Completion) void {
+        // Nothing to close as events are just intrusive OVERLAPPED structs.
+        assert(event == INVALID_EVENT + 1);
+        _ = completion;
+        _ = self;
     }
 
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;

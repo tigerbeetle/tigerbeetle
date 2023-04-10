@@ -960,6 +960,80 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
+    pub const INVALID_EVENT = @bitCast(u32, @as(i32, -1));
+
+    pub const EventResponse = enum {
+        listen,
+        cancel,
+    };
+
+    pub fn open_event(
+        self: *IO,
+        completion: *Completion,
+        comptime on_event: fn (*Completion) EventResponse,
+    ) !u32 {
+        const event_fd = try os.eventfd(0, linux.EFD.CLOEXEC); // Initialized with zero value.
+        assert(event_fd != INVALID_EVENT);
+        errdefer os.close(event_fd);
+
+        // Start listening for notifications on this event.
+        const event = @intCast(u32, event_fd);
+        self.listen_event(event, completion, on_event);
+        return event;
+    }
+
+    fn listen_event(
+        self: *IO,
+        event: u32,
+        completion: *Completion,
+        comptime on_event: fn (*Completion) EventResponse,
+    ) void {
+        const Listen = struct {
+            var stub_value: u64 = undefined;
+
+            fn on_read(ctx: *anyopaque, _completion: *Completion, result: ReadError!usize) void {
+                const bytes = result catch unreachable; // eventfd reads should not fail.
+                assert(bytes == @sizeOf(u64));
+
+                const _event = @intCast(u32, @ptrToInt(ctx));
+                assert(_event != INVALID_EVENT);
+
+                switch (on_event(_completion)) {
+                    .listen => _completion.io.listen_event(_event, _completion, on_event),
+                    .cancel => {},
+                }
+            }
+        };
+
+        self.read(
+            *anyopaque,
+            @intToPtr(*anyopaque, event),
+            Listen.on_read,
+            completion,
+            @intCast(os.fd_t, event),
+            std.mem.asBytes(&Listen.stub_value),
+            0, // eventfd reads must always start from 0 offset.
+        );
+    }
+
+    pub fn trigger_event(self: *IO, event: u32, completion: *Completion) void {
+        assert(event != INVALID_EVENT);
+        _ = completion;
+        _ = self;
+
+        const value: u64 = 1;
+        const bytes = os.write(@intCast(os.fd_t, event), std.mem.asBytes(&value)) catch unreachable;
+        assert(bytes == @sizeOf(u64));
+    }
+
+    pub fn close_event(self: *IO, event: u32, completion: *Completion) void {
+        assert(event != INVALID_EVENT);
+        _ = completion;
+        _ = self;
+
+        os.close(@intCast(os.fd_t, event));
+    }
+
     pub const INVALID_SOCKET = -1;
 
     /// Creates a socket that can be used for async operations with the IO instance.
