@@ -16,6 +16,12 @@ jobs:
     env:
       SOURCE_REPO: ${{ github.event.pull_request.head.repo.clone_url }}
 
+  docs_link_spellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/docs_check.sh
+
   test:
     runs-on: ubuntu-latest
     strategy:

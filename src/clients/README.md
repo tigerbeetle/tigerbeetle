@@ -59,7 +59,7 @@ To format all Zig files:
 ```
 
 
-## integation.zig / client_integration
+## integration.zig / client_integration
 
 This directory contains `integration.zig` that sets up an environment
 (without Docker) to run the sample code in

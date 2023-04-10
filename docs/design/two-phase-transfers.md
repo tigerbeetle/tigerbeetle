@@ -165,4 +165,4 @@ Or take a look at how it works with real code.
 
 * [Node](/src/clients/node/samples/two-phase/main.js)
 * [Go](/src/clients/go/samples/two-phase/main.go)
-* [Java](/src/clients/java/samples/two-phase/Main.java)
+* [Java](/src/clients/java/samples/two-phase/src/main/java/Main.java)
