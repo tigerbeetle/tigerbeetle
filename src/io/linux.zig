@@ -972,7 +972,11 @@ pub const IO = struct {
         completion: *Completion,
         comptime on_event: fn (*Completion) EventResponse,
     ) !u32 {
-        const event_fd = try os.eventfd(0, linux.EFD.CLOEXEC); // Initialized with zero value.
+        // eventfd initialized with no (zero) previous write value,
+        const event_fd = os.eventfd(0, linux.EFD.CLOEXEC) catch |err| switch (err) {
+            error.SystemResources, error.SystemFdQuotaExceeded, error.ProcessFdQuotaExceeded => return error.SystemResources,
+            error.Unexpected => return error.Unexpected,
+        };
         assert(event_fd != INVALID_EVENT);
         errdefer os.close(event_fd);
 

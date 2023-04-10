@@ -661,7 +661,14 @@ pub const IO = struct {
         kev[0].ident = event;
         kev[0].filter = os.system.EVFILT_USER;
         kev[0].flags = os.system.EV_ADD | os.system.EV_ENABLE | os.system.EV_CLEAR;
-        assert((try os.kevent(self.kq, &kev, kev[0..0], null)) == 0);
+
+        const polled = os.kevent(self.kq, &kev, kev[0..0], null) catch |err| switch (err) {
+            error.AccessDenied => unreachable, // EV_FILTER is allowed for every user.
+            error.EventNotFound => unreachable, // We're not modifying or deleting an existing one.
+            error.ProcessNotFound => unreachable, // We're not monitoring a process.
+            error.Overflow, error.SystemResources => return error.SystemResources,
+        };
+        assert(polled == 0);
 
         completion.* = .{
             .next = null,

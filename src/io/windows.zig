@@ -939,7 +939,7 @@ pub const IO = struct {
         assert(event == INVALID_EVENT + 1);
         completion.operation = .{
             .event = .{
-                .overlapped = std.mem.zeroes(os.windows.OVERLAPPED),
+                .raw = std.mem.zeroes(os.windows.OVERLAPPED),
                 .completion = completion,
             },
         };
@@ -948,7 +948,7 @@ pub const IO = struct {
             self.iocp,
             undefined,
             undefined,
-            &completion.operation.event.overlapped,
+            &completion.operation.event.raw,
         ) catch unreachable;
     }
 
