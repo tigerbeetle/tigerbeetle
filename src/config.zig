@@ -114,6 +114,21 @@ const ConfigCluster = struct {
             ),
         );
     }
+
+    /// Fingerprint of the cluster-wide configuration.
+    /// It is used to assert that all cluster members share the same config.
+    pub fn checksum(comptime config: ConfigCluster) u128 {
+        @setEvalBranchQuota(10_000);
+        var hasher = std.crypto.hash.Blake3.init(.{});
+        inline for (std.meta.fields(ConfigCluster)) |field| {
+            const value = @field(config, field.name);
+            const value_64 = @as(u64, value);
+            hasher.update(std.mem.asBytes(&value_64));
+        }
+        var target: [32]u8 = undefined;
+        hasher.final(&target);
+        return @bitCast(u128, target[0..@sizeOf(u128)].*);
+    }
 };
 
 pub const ConfigBase = enum {
