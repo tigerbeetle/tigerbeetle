@@ -102,7 +102,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3144]u8 = [_]u8{0} ** 3144,
+    reserved: [2936]u8 = [_]u8{0} ** 2936,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -117,6 +117,16 @@ pub const SuperBlockHeader = extern struct {
         /// The vsr.Header.checksum of commit_min's message.
         commit_min_checksum: u128,
 
+        /// Globally unique identifier of the replica, must be non-zero.
+        replica_id: u128,
+
+        /// Set of replica_ids of cluster members, where order of ids determines replica indexes.
+        ///
+        /// First replica_count elements are active replicas,
+        /// then standby_count standbys, the rest are zeros.
+        /// Order determines ring topology for replication.
+        members: [constants.nodes_max]u128,
+
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
 
@@ -129,23 +139,26 @@ pub const SuperBlockHeader = extern struct {
         /// The view number of the replica.
         view: u32,
 
-        /// Identity of the replica, part of VSR configuration.
-        replica: u8,
-
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [6]u8 = [_]u8{0} ** 6,
+        reserved: [7]u8 = [_]u8{0} ** 7,
 
         comptime {
-            assert(@sizeOf(VSRState) == 48);
+            assert(@sizeOf(VSRState) == 256);
             // Assert that there is no implicit padding in the struct.
             assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
         }
 
-        pub fn root(options: struct { cluster: u32, replica: u8, replica_count: u8 }) VSRState {
+        pub fn root(options: struct {
+            cluster: u32,
+            replica_id: u128,
+            members: [constants.nodes_max]u128,
+            replica_count: u8,
+        }) VSRState {
             return .{
-                .replica = options.replica,
+                .replica_id = options.replica_id,
+                .members = options.members,
                 .replica_count = options.replica_count,
                 .commit_min_checksum = vsr.Header.root_prepare(options.cluster).checksum,
                 .commit_min = 0,
@@ -160,7 +173,7 @@ pub const SuperBlockHeader = extern struct {
             assert(state.view >= state.log_view);
             assert(state.replica_count > 0);
             assert(state.replica_count <= constants.replicas_max);
-            assert(state.replica < state.replica_count + constants.standbys_max);
+            vsr.assert_valid_member(&state.members, state.replica_id);
         }
 
         pub fn monotonic(old: VSRState, new: VSRState) bool {
@@ -169,8 +182,9 @@ pub const SuperBlockHeader = extern struct {
             assert(old.commit_min != new.commit_min or
                 old.commit_min_checksum == new.commit_min_checksum or
                 (old.commit_min_checksum == 0 and old.commit_min == 0));
-            assert(old.replica == new.replica);
+            assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
+            assert(meta.eql(old.members, new.members));
 
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
@@ -255,7 +269,7 @@ pub const SuperBlockHeader = extern struct {
         assert(superblock.flags == 0);
 
         for (mem.bytesAsSlice(u64, &superblock.reserved)) |word| assert(word == 0);
-        for (mem.bytesAsSlice(u16, &superblock.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u8, &superblock.vsr_state.reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &superblock.vsr_headers_reserved)) |word| assert(word == 0);
 
         superblock.checksum = superblock.calculate_checksum();
@@ -270,8 +284,8 @@ pub const SuperBlockHeader = extern struct {
         for (mem.bytesAsSlice(u64, &a.reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &b.reserved)) |word| assert(word == 0);
 
-        for (mem.bytesAsSlice(u16, &a.vsr_state.reserved)) |word| assert(word == 0);
-        for (mem.bytesAsSlice(u16, &b.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u8, &a.vsr_state.reserved)) |word| assert(word == 0);
+        for (mem.bytesAsSlice(u8, &b.vsr_state.reserved)) |word| assert(word == 0);
 
         for (mem.bytesAsSlice(u64, &a.vsr_headers_reserved)) |word| assert(word == 0);
         for (mem.bytesAsSlice(u64, &b.vsr_headers_reserved)) |word| assert(word == 0);
@@ -638,6 +652,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(options.replica_count <= constants.replicas_max);
             assert(options.replica < options.replica_count + constants.standbys_max);
 
+            const members = vsr.root_members(options.cluster);
+            const replica_id = members[options.replica];
+
             // This working copy provides the parent checksum, and will not be written to disk.
             // We therefore use zero values to make this parent checksum as stable as possible.
             superblock.working.* = .{
@@ -653,11 +670,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .client_table_checksum = 0,
                 .vsr_state = .{
                     .commit_min_checksum = 0,
+                    .replica_id = replica_id,
+                    .members = members,
                     .commit_min = 0,
                     .commit_max = 0,
                     .log_view = 0,
                     .view = 0,
-                    .replica = options.replica,
                     .replica_count = options.replica_count,
                 },
                 .snapshots = undefined,
@@ -682,7 +700,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .caller = .format,
                 .vsr_state = SuperBlockHeader.VSRState.root(.{
                     .cluster = options.cluster,
-                    .replica = options.replica,
+                    .replica_id = replica_id,
+                    .members = members,
                     .replica_count = options.replica_count,
                 }),
                 .vsr_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
@@ -734,9 +753,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .commit_min_checksum = update.commit_min_checksum,
                 .commit_min = update.commit_min,
                 .commit_max = update.commit_max,
+
                 .log_view = superblock.staging.vsr_state.log_view,
                 .view = superblock.staging.vsr_state.view,
-                .replica = superblock.staging.vsr_state.replica,
+                .replica_id = superblock.staging.vsr_state.replica_id,
+                .members = superblock.staging.vsr_state.members,
                 .replica_count = superblock.staging.vsr_state.replica_count,
             };
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
@@ -785,7 +806,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .commit_max = update.commit_max,
                 .log_view = update.log_view,
                 .view = update.view,
-                .replica = superblock.staging.vsr_state.replica,
+                .replica_id = superblock.staging.vsr_state.replica_id,
+                .members = superblock.staging.vsr_state.members,
                 .replica_count = superblock.staging.vsr_state.replica_count,
             };
             vsr_state.assert_internally_consistent();
@@ -1070,7 +1092,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             // The superblock cluster and replica should never change once formatted:
             assert(superblock.staging.cluster == superblock.working.cluster);
-            assert(superblock.staging.vsr_state.replica == superblock.working.vsr_state.replica);
+            assert(superblock.staging.vsr_state.replica_id == superblock.working.vsr_state.replica_id);
 
             assert(superblock.staging.storage_size >= data_file_size_min);
             assert(superblock.staging.storage_size <= superblock.staging.storage_size_max);
@@ -1085,7 +1107,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const offset = areas.header.offset(context.copy.?);
 
             log.debug("{}: {s}: write_header: checksum={x} sequence={} copy={} size={} offset={}", .{
-                superblock.staging.vsr_state.replica,
+                superblock.staging.vsr_state.replica_id,
                 @tagName(context.caller),
                 superblock.staging.checksum,
                 superblock.staging.sequence,
@@ -1223,12 +1245,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
                     assert(working.vsr_state.view == 0);
-                    assert(working.vsr_state.replica_count <= constants.replicas_max);
-                    assert(
-                        working.vsr_state.replica <
-                            working.vsr_state.replica_count + constants.standbys_max,
-                    );
                     assert(working.vsr_headers_count == 1);
+
+                    assert(working.vsr_state.replica_count <= constants.replicas_max);
+                    vsr.assert_valid_member(
+                        &working.vsr_state.members,
+                        working.vsr_state.replica_id,
+                    );
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
                 }
@@ -1237,7 +1260,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.* = working.*;
                 log.debug(
                     "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
-                        "replica={} size={} " ++
+                        "replica_id={} size={} " ++
                         "commit_min_checksum={} commit_min={} commit_max={} " ++
                         "log_view={} view={}",
                     .{
@@ -1245,7 +1268,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.checksum,
                         superblock.working.sequence,
                         superblock.working.cluster,
-                        superblock.working.vsr_state.replica,
+                        superblock.working.vsr_state.replica_id,
                         superblock.working.storage_size,
                         superblock.working.vsr_state.commit_min_checksum,
                         superblock.working.vsr_state.commit_min,
