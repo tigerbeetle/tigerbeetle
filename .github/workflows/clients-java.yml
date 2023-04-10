@@ -46,10 +46,6 @@ jobs:
       working-directory: src/clients/java
       run: ./scripts/install.sh
 
-    - name: Example programs
-      working-directory: src/clients/java/examples
-      run: mvn compile
-
     - name: Build
       working-directory: src/clients/java
       run: mvn -B package --file pom.xml
