@@ -115,7 +115,11 @@ pub fn build(b: *std.build.Builder) void {
         lint_tigerstyle_step.dependOn(&run_cmd.step);
 
         // lint_shellcheck
-        const lint_shellcheck = b.addSystemCommand(&.{ "sh", "-c", "command -v shellcheck >/dev/null || (echo -e '\\033[0;31mPlease install shellcheck - https://www.shellcheck.net/\\033[0m' && exit 1) && shellcheck $(find . -type f -name '*.sh')" });
+        const lint_shellcheck = b.addSystemCommand(&.{ "sh", "-c",
+            "command -v shellcheck >/dev/null" ++
+            " || (echo -e '\\033[0;31mPlease install shellcheck - https://www.shellcheck.net/\\033[0m' && exit 1)" ++
+            " && shellcheck $(find ./src ./scripts -type f -name '*.sh')"
+        });
         const lint_shellcheck_step = b.step("lint_shellcheck", "Run shellcheck on **.sh");
         lint_shellcheck_step.dependOn(&lint_shellcheck.step);
 
