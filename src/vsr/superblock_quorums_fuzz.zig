@@ -2,6 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock_quorums);
 
+const constants = @import("../constants.zig");
+
 const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
 const SuperBlockVersion = superblock.SuperBlockVersion;
@@ -115,6 +117,11 @@ fn test_quorums_working(
     var checksums: [6]u128 = undefined;
     for (checksums) |*c| c.* = random.int(u128);
 
+    var members = [_]u128{0} ** constants.nodes_max;
+    for (members[0..6]) |*member| {
+        member.* = random.int(u128);
+    }
+
     // Create headers in ascending-sequence order to build the checksum/parent hash chain.
     std.sort.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
 
@@ -126,7 +133,8 @@ fn test_quorums_working(
             .sequence = copies[i].sequence,
             .parent = checksums[copies[i].sequence - 1],
             .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
-                .replica = 1,
+                .replica_id = members[1],
+                .members = members,
                 .replica_count = 6,
             }),
         });
@@ -151,7 +159,7 @@ fn test_quorums_working(
                 if (misdirect) {
                     header.cluster += 1;
                 } else {
-                    header.vsr_state.replica += 1;
+                    header.vsr_state.replica_id += 1;
                 }
             },
             .invalid_vsr_state => header.vsr_state.view += 1,
@@ -252,6 +260,11 @@ pub fn fuzz_quorum_repairs(
     var q1: Quorums = undefined;
     var q2: Quorums = undefined;
 
+    var members = [_]u128{0} ** constants.nodes_max;
+    for (members[0..6]) |*member| {
+        member.* = random.int(u128);
+    }
+
     const headers_valid = blk: {
         var headers: [superblock_copies]SuperBlockHeader = undefined;
         for (&headers) |*header, i| {
@@ -261,7 +274,8 @@ pub fn fuzz_quorum_repairs(
                 .storage_size_max = superblock.data_file_size_min,
                 .sequence = 123,
                 .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
-                    .replica = 1,
+                    .replica_id = members[1],
+                    .members = members,
                     .replica_count = 6,
                 }),
             });

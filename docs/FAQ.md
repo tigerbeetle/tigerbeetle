@@ -1,5 +1,5 @@
 ---
-sidebar_position: 6
+sidebar_position: 8
 ---
 
 # FAQ
@@ -88,7 +88,7 @@ are created.
 In contrast to single-phase transfers, a two-phase transfer moves
 funds in stages.
 
-See [Two-phase Transfer](./usage/two-phase-transfer.md) for more
+See [Two-phase transfers](./design/two-phase-transfers.md) for more
 detail.
 
 ## How does TigerBeetle fit into my architecture?
@@ -101,7 +101,7 @@ payment system.
 
 You might keep account metadata in your existing database (say,
 PostgreSQL or MongoDB). Then create an account in TigerBeetle with a
-[random id](./usage/data-modeling.md#random-identifier) mapping it
+[random id](./design/data-modeling.md#random-identifier) mapping it
 back to the account with metadata in your existing database.
 
 Then as you need to process transfers between accounts, you store

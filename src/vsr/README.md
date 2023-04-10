@@ -190,8 +190,8 @@ Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/
 
 See also:
 
-  - [Integration: Client Session Lifecycle](../../docs/usage/integration/md#client-session-lifecycle)
-  - [Integration: Client Session Eviction](../../docs/usage/integration/md#client-session-eviction)
+  - [Integration: Client Session Lifecycle](../../docs/design/client-sessions.md#lifecycle)
+  - [Integration: Client Session Eviction](../../docs/design/client-sessions.md#eviction)
 
 ## Protocol: Repair Grid (Backup)
 

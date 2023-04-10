@@ -25,9 +25,9 @@ fn find_tigerbeetle_client_jar(arena: *std.heap.ArenaAllocator) ![]const u8 {
     const root = try git_root(arena);
     try std.os.chdir(root);
 
-    var i: usize = 2;
+    var tries: usize = 2;
     var java_target_path: []const u8 = "";
-    while (i > 0) {
+    while (tries > 0) {
         if (std.fs.cwd().realpathAlloc(arena.allocator(), "src/clients/java/target")) |path| {
             java_target_path = path;
             break;
@@ -41,7 +41,7 @@ fn find_tigerbeetle_client_jar(arena: *std.heap.ArenaAllocator) ![]const u8 {
 
                 // Retry opening the directory now that we've run the install script.
                 try std.os.chdir(root);
-                i -= 1;
+                tries -= 1;
             },
         }
     }
@@ -131,7 +131,7 @@ fn prepare_go_sample_integration_test(
     // Make sure go_client is built, though not necessarily up-to-date.
     const root = try git_root(arena);
     try std.os.chdir(root);
-    if (!file_or_directory_exists(arena, "src/clients/go/pkg/native")) {
+    if (!file_or_directory_exists(arena, "src/clients/go/pkg/native/x86_64-linux")) {
         try run(arena, &[_][]const u8{
             try script_filename(arena, &[_][]const u8{ "scripts", "build" }),
             "go_client",
@@ -179,15 +179,67 @@ fn prepare_go_sample_integration_test(
     _ = try cmds.appendSlice(&[_][]const u8{ "go", "run", "main.go" });
 }
 
+// Caller is responsible for resetting to a good cwd after this completes.
+fn find_node_client_tar(arena: *std.heap.ArenaAllocator) ![]const u8 {
+    var tries: usize = 2;
+    while (tries > 0) {
+        const root = try git_root(arena);
+        try std.os.chdir(root);
+
+        const node_dir = try std.fs.cwd().realpathAlloc(arena.allocator(), "src/clients/node");
+
+        var dir = try std.fs.cwd().openDir(node_dir, .{ .iterate = true });
+        defer dir.close();
+
+        var walker = try dir.walk(arena.allocator());
+        defer walker.deinit();
+
+        while (try walker.next()) |entry| {
+            if (std.mem.startsWith(u8, entry.path, "tigerbeetle-node-") and std.mem.endsWith(u8, entry.path, ".tgz")) {
+                return std.fmt.allocPrint(
+                    arena.allocator(),
+                    "{s}/{s}",
+                    .{ node_dir, entry.path },
+                );
+            }
+        }
+
+        try std.os.chdir(node_dir);
+        try run(arena, &[_][]const u8{ "npm", "install" });
+        try run(arena, &[_][]const u8{ "npm", "pack" });
+        tries -= 1;
+    }
+
+    std.debug.print("Could not find src/clients/node/tigerbeetle-node-*.tgz, run npm install && npm pack in src/clients/node\n", .{});
+    return error.PackageNotFound;
+}
+
 fn prepare_node_sample_integration_test(
     arena: *std.heap.ArenaAllocator,
     sample_dir: []const u8,
     cmds: *std.ArrayList([]const u8),
 ) !void {
-    _ = arena;
-    _ = sample_dir;
-    _ = cmds;
-    @panic("Unsupported");
+    const package = try find_node_client_tar(arena);
+
+    try std.os.chdir(sample_dir);
+
+    // Swap out the normal tigerbeetle-node with our local version.
+    try run(arena, &[_][]const u8{
+        "npm",
+        "uninstall",
+        "tigerbeetle-node",
+    });
+    try run(arena, &[_][]const u8{
+        "npm",
+        "install",
+        package,
+    });
+
+    // Store the way to run the main program.
+    try cmds.appendSlice(&[_][]const u8{
+        "node",
+        "main.js",
+    });
 }
 
 fn copy_into_tmp_dir(

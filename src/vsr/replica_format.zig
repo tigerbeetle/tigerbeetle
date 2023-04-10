@@ -195,7 +195,10 @@ test "format" {
         try std.testing.expectEqual(superblock_header.vsr_state.commit_max, 0);
         try std.testing.expectEqual(superblock_header.vsr_state.view, 0);
         try std.testing.expectEqual(superblock_header.vsr_state.log_view, 0);
-        try std.testing.expectEqual(superblock_header.vsr_state.replica, replica);
+        try std.testing.expectEqual(
+            superblock_header.vsr_state.replica_id,
+            superblock_header.vsr_state.members[replica],
+        );
         try std.testing.expectEqual(superblock_header.vsr_state.replica_count, replica_count);
     }
 
