@@ -143,16 +143,18 @@ pub fn build(b: *std.build.Builder) void {
     };
 
     {
+        const test_filter = b.option(
+            []const u8,
+            "test-filter",
+            "Skip tests that do not match filter",
+        );
+
         const unit_tests = b.addTest("src/unit_tests.zig");
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
         unit_tests.addOptions("vsr_options", options);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
-        unit_tests.setFilter(b.option(
-            []const u8,
-            "test-filter",
-            "Skip tests that do not match filter",
-        ));
+        unit_tests.setFilter(test_filter);
         link_tracer_backend(unit_tests, tracer_backend, target);
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
@@ -164,20 +166,22 @@ pub fn build(b: *std.build.Builder) void {
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
-        // Test that our demos compile, but don't run them.
-        inline for (.{
-            "demo_01_create_accounts",
-            "demo_02_lookup_accounts",
-            "demo_03_create_transfers",
-            "demo_04_create_pending_transfers",
-            "demo_05_post_pending_transfers",
-            "demo_06_void_pending_transfers",
-            "demo_07_lookup_transfers",
-        }) |demo| {
-            const demo_exe = b.addExecutable(demo, "src/demos/" ++ demo ++ ".zig");
-            demo_exe.addPackage(vsr_package);
-            demo_exe.setTarget(target);
-            test_step.dependOn(&demo_exe.step);
+        if (test_filter != null) {
+            // Test that our demos compile, but don't run them.
+            inline for (.{
+                "demo_01_create_accounts",
+                "demo_02_lookup_accounts",
+                "demo_03_create_transfers",
+                "demo_04_create_pending_transfers",
+                "demo_05_post_pending_transfers",
+                "demo_06_void_pending_transfers",
+                "demo_07_lookup_transfers",
+            }) |demo| {
+                const demo_exe = b.addExecutable(demo, "src/demos/" ++ demo ++ ".zig");
+                demo_exe.addPackage(vsr_package);
+                demo_exe.setTarget(target);
+                test_step.dependOn(&demo_exe.step);
+            }
         }
     }
 
