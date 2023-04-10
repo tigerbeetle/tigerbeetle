@@ -260,6 +260,61 @@ test "timeout" {
     }.run_test();
 }
 
+test "event" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        done: bool = false,
+        main_thread_id: std.Thread.Id,
+        event: u32 = IO.INVALID_EVENT,
+        event_completion: IO.Completion = undefined,
+
+        const delay = 1 * std.time.ns_per_s;
+
+        fn run_test() !void {
+            var self: Context = .{
+                .io = try IO.init(32, 0),
+                .main_thread_id = std.Thread.getCurrentId(),
+            };
+            defer self.io.deinit();
+
+            self.event = try self.io.open_event(&self.event_completion, on_event);
+            defer self.io.close_event(self.event, &self.event_completion);
+
+            var timer = Time{};
+            const start = timer.monotonic();
+
+            // Spawn a thread that triggers the event completion after some time.
+            const thread = try std.Thread.spawn(.{}, Context.trigger_event, .{&self});
+            thread.detach();
+
+            // Wait for the injection to happen.
+            while (!self.done) try self.io.tick();
+
+            // Make sure at least some time has passed.
+            const elapsed = timer.monotonic() - start;
+            assert(elapsed >= delay / 2);
+        }
+
+        fn trigger_event(self: *Context) void {
+            assert(std.Thread.getCurrentId() != self.main_thread_id);
+            assert(!self.done);
+
+            std.time.sleep(delay);
+            self.io.trigger_event(self.event, &self.event_completion);
+        }
+
+        fn on_event(completion: *IO.Completion) IO.EventResponse {
+            const self = @fieldParentPtr(Context, "event_completion", completion);
+            assert(std.Thread.getCurrentId() == self.main_thread_id);
+            assert(!self.done);
+            self.done = true;
+            return .cancel;
+        }
+    }.run_test();
+}
+
 test "submission queue full" {
     const ms = 20;
     const count = 10;
