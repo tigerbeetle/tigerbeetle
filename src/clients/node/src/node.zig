@@ -579,7 +579,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
 
-    if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
+    if (!@intToEnum(vsr.Operation, operation_int).valid(StateMachine)) {
         translate.throw(env, "Unknown operation.") catch return null;
     }
 
@@ -628,7 +628,7 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
 
-    if (operation_int >= @typeInfo(Operation).Enum.fields.len) {
+    if (!@intToEnum(vsr.Operation, operation_int).valid(StateMachine)) {
         translate.throw(env, "Unknown operation.") catch return null;
     }
     const operation = @intToEnum(Operation, @intCast(u8, operation_int));

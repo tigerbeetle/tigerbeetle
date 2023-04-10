@@ -388,11 +388,14 @@ pub fn ReplicaType(
             while (!self.opened) self.superblock.storage.tick();
             self.superblock.working.vsr_state.assert_internally_consistent();
 
-            const replica = self.superblock.working.vsr_state.replica;
+            const replica_id = self.superblock.working.vsr_state.replica_id;
+            const replica = for (self.superblock.working.vsr_state.members) |member, index| {
+                if (member == replica_id) break @intCast(u8, index);
+            } else unreachable;
             const replica_count = self.superblock.working.vsr_state.replica_count;
             if (replica >= options.node_count or replica_count > options.node_count) {
                 log.err("{}: open: no address for replica (replica_count={} node_count={})", .{
-                    self.superblock.working.vsr_state.replica,
+                    replica,
                     replica_count,
                     options.node_count,
                 });

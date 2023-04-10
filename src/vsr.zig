@@ -1098,6 +1098,49 @@ test "quorums" {
     }
 }
 
+/// Deterministically assigns replica_ids for the initial configuration.
+///
+/// Eventualy, we want to identify replicas using random u128 ids to prevent operator errors.
+/// However, that requires unergonomic two-step process for spinning a new cluster up.  To avoid
+/// needlessly compromizing the experience until reconfiguration is fully implemented, derive
+/// replica ids for the initial cluster deterministically.
+pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
+    const IdSeed = packed struct {
+        cluster_config_checksum: u128 = config.configs.current.cluster.checksum(),
+        cluster: u32,
+        replica: u8,
+    };
+
+    var result = [_]u128{0} ** constants.nodes_max;
+    var replica: u8 = 0;
+    while (replica < constants.nodes_max) : (replica += 1) {
+        result[replica] = checksum(std.mem.asBytes(&IdSeed{ .cluster = cluster, .replica = replica }));
+    }
+
+    assert_valid_members(&result);
+    return result;
+}
+
+/// Check that:
+///  - all non-zero elements are different
+///  - all zero elements are trailing
+pub fn assert_valid_members(members: *const [constants.nodes_max]u128) void {
+    for (members) |replica_i, i| {
+        for (members[0..i]) |replica_j| {
+            if (replica_j == 0) assert(replica_i == 0);
+            if (replica_j != 0) assert(replica_j != replica_i);
+        }
+    }
+}
+
+pub fn assert_valid_member(members: *const [constants.nodes_max]u128, replica_id: u128) void {
+    assert(replica_id != 0);
+    assert_valid_members(members);
+    for (members) |member| {
+        if (member == replica_id) break;
+    } else unreachable;
+}
+
 pub const Headers = struct {
     pub const Array = std.BoundedArray(Header, constants.view_change_headers_max);
     /// The SuperBlock's persisted VSR headers.

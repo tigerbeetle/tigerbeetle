@@ -149,6 +149,11 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
 
 const Environment = struct {
     const replica = 0;
+    const replica_id = members[replica];
+    const members = members: {
+        @setEvalBranchQuota(100_000);
+        break :members vsr.root_members(cluster);
+    };
     const replica_count = 6;
 
     /// Track the expected value of parameters at a particular sequence.
@@ -177,7 +182,8 @@ const Environment = struct {
         .commit_max = 0,
         .log_view = 0,
         .view = 0,
-        .replica = replica,
+        .replica_id = replica_id,
+        .members = members,
         .replica_count = replica_count,
     },
 
@@ -290,7 +296,8 @@ const Environment = struct {
         try env.sequence_states.append(.{
             .vsr_state = VSRState.root(.{
                 .cluster = cluster,
-                .replica = replica,
+                .replica_id = replica_id,
+                .members = members,
                 .replica_count = replica_count,
             }),
             .vsr_headers = vsr_headers,
@@ -316,7 +323,7 @@ const Environment = struct {
         env.pending.remove(.open);
 
         assert(env.superblock.working.sequence == 1);
-        assert(env.superblock.working.vsr_state.replica == replica);
+        assert(env.superblock.working.vsr_state.replica_id == replica_id);
         assert(env.superblock.working.vsr_state.replica_count == replica_count);
         assert(env.superblock.working.cluster == cluster);
     }
@@ -331,7 +338,8 @@ const Environment = struct {
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
             .log_view = env.superblock.staging.vsr_state.log_view + 4,
             .view = env.superblock.staging.vsr_state.view + 5,
-            .replica = replica,
+            .replica_id = replica_id,
+            .members = members,
             .replica_count = replica_count,
         };
 
@@ -379,7 +387,8 @@ const Environment = struct {
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
             .log_view = env.superblock.staging.vsr_state.log_view,
             .view = env.superblock.staging.vsr_state.view,
-            .replica = replica,
+            .replica_id = replica_id,
+            .members = members,
             .replica_count = replica_count,
         };
 
