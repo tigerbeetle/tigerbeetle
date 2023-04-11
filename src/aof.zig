@@ -593,7 +593,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    while (args.nextPosix()) |arg| {
+    while (args.next(allocator)) |arg_or_err| {
+        const arg = try arg_or_err;
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
             os.exit(0);
