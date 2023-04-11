@@ -903,7 +903,7 @@ pub const IO = struct {
         );
     }
 
-    pub const INVALID_EVENT: u32 = 0;
+    pub const INVALID_EVENT: i32 = 0;
 
     pub const EventResponse = enum {
         listen,
@@ -914,7 +914,7 @@ pub const IO = struct {
         self: *IO,
         completion: *Completion,
         comptime on_event: fn (*Completion) EventResponse,
-    ) !u32 {
+    ) !i32 {
         completion.* = .{
             .next = null,
             .context = null,
@@ -935,7 +935,7 @@ pub const IO = struct {
         return INVALID_EVENT + 1;
     }
 
-    pub fn trigger_event(self: *IO, event: u32, completion: *Completion) void {
+    pub fn trigger_event(self: *IO, event: i32, completion: *Completion) void {
         assert(event == INVALID_EVENT + 1);
         completion.operation = .{
             .event = .{
@@ -952,7 +952,7 @@ pub const IO = struct {
         ) catch unreachable;
     }
 
-    pub fn close_event(self: *IO, event: u32, completion: *Completion) void {
+    pub fn close_event(self: *IO, event: i32, completion: *Completion) void {
         // Nothing to close as events are just intrusive OVERLAPPED structs.
         assert(event == INVALID_EVENT + 1);
         _ = completion;

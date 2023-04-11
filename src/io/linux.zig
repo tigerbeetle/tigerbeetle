@@ -960,7 +960,7 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
-    pub const INVALID_EVENT = @bitCast(u32, @as(i32, -1));
+    pub const INVALID_EVENT: i32 = -1;
 
     pub const EventResponse = enum {
         listen,
@@ -971,7 +971,7 @@ pub const IO = struct {
         self: *IO,
         completion: *Completion,
         comptime on_event: fn (*Completion) EventResponse,
-    ) !u32 {
+    ) !i32 {
         // eventfd initialized with no (zero) previous write value,
         const event_fd = os.eventfd(0, linux.EFD.CLOEXEC) catch |err| switch (err) {
             error.SystemResources, error.SystemFdQuotaExceeded, error.ProcessFdQuotaExceeded => return error.SystemResources,
@@ -981,14 +981,13 @@ pub const IO = struct {
         errdefer os.close(event_fd);
 
         // Start listening for notifications on this event.
-        const event = @intCast(u32, event_fd);
-        self.listen_event(event, completion, on_event);
-        return event;
+        self.listen_event(event_fd, completion, on_event);
+        return event_fd;
     }
 
     fn listen_event(
         self: *IO,
-        event: u32,
+        event_fd: os.fd_t,
         completion: *Completion,
         comptime on_event: fn (*Completion) EventResponse,
     ) void {
@@ -999,7 +998,7 @@ pub const IO = struct {
                 const bytes = result catch unreachable; // eventfd reads should not fail.
                 assert(bytes == @sizeOf(u64));
 
-                const _event = @intCast(u32, @ptrToInt(ctx));
+                const _event = @intCast(os.fd_t, @ptrToInt(ctx));
                 assert(_event != INVALID_EVENT);
 
                 switch (on_event(_completion)) {
@@ -1011,31 +1010,31 @@ pub const IO = struct {
 
         self.read(
             *anyopaque,
-            @intToPtr(*anyopaque, event),
+            @intToPtr(*anyopaque, @intCast(usize, event_fd)),
             Listen.on_read,
             completion,
-            @intCast(os.fd_t, event),
+            event_fd,
             std.mem.asBytes(&Listen.stub_value),
             0, // eventfd reads must always start from 0 offset.
         );
     }
 
-    pub fn trigger_event(self: *IO, event: u32, completion: *Completion) void {
-        assert(event != INVALID_EVENT);
+    pub fn trigger_event(self: *IO, event_fd: os.fd_t, completion: *Completion) void {
+        assert(event_fd != INVALID_EVENT);
         _ = completion;
         _ = self;
 
         const value: u64 = 1;
-        const bytes = os.write(@intCast(os.fd_t, event), std.mem.asBytes(&value)) catch unreachable;
+        const bytes = os.write(event_fd, std.mem.asBytes(&value)) catch unreachable;
         assert(bytes == @sizeOf(u64));
     }
 
-    pub fn close_event(self: *IO, event: u32, completion: *Completion) void {
-        assert(event != INVALID_EVENT);
+    pub fn close_event(self: *IO, event_fd: os.fd_t, completion: *Completion) void {
+        assert(event_fd != INVALID_EVENT);
         _ = completion;
         _ = self;
 
-        os.close(@intCast(os.fd_t, event));
+        os.close(event_fd);
     }
 
     pub const INVALID_SOCKET = -1;
