@@ -27,7 +27,7 @@ jobs:
     uses: ./.github/workflows/macos.yml
   release_test:
     uses: ./.github/workflows/release_artifacts.yml
-    inputs:
+    with:
       dry-run: true
   client-dotnet:
     uses: ./.github/workflows/clients-dotnet.yml
