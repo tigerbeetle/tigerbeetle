@@ -10,6 +10,7 @@ const FIFO = @import("fifo.zig").FIFO;
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 const Signal = @import("clients/c/tb_client/signal.zig").Signal;
+const tracer = @import("tracer.zig");
 
 pub const Storage = struct {
     /// See usage in Journal.write_sectors() for details.
@@ -105,11 +106,26 @@ pub const Storage = struct {
         }
 
         fn poll(pool: *ThreadPool) void {
+            const thread_id = std.Thread.getCurrentId();
             pool.mutex.lock();
             while (true) {
                 while (pool.queue.pop()) |next_tick| {
                     pool.unlock_after_queue_update();
+
+                    var tracer_slot: ?tracer.SpanStart = null;
+                    tracer.start(
+                        &tracer_slot,
+                        .{ .thread_pool_callback = .{ .thread_id = thread_id } },
+                        @src(),
+                    );
+
                     next_tick.callback(next_tick);
+
+                    tracer.end(
+                        &tracer_slot,
+                        .{ .thread_pool_callback = .{ .thread_id = thread_id } },
+                    );
+
                     pool.mutex.lock();
                 }
 

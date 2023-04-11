@@ -76,6 +76,9 @@ pub const Event = union(enum) {
     },
     io_flush,
     io_callback,
+    thread_pool_callback: struct {
+        thread_id: std.Thread.Id,
+    },
 
     pub fn format(
         event: Event,
@@ -135,6 +138,10 @@ pub const Event = union(enum) {
             },
             .grid_read_iop => |args| try writer.print("grid_read_iop({})", .{args.index}),
             .grid_write_iop => |args| try writer.print("grid_write_iop({})", .{args.index}),
+            .thread_pool_callback => |args| try writer.print(
+                "thread_pool_callback({})",
+                .{args.thread_id},
+            ),
         }
     }
 
@@ -168,6 +175,7 @@ pub const Event = union(enum) {
                 .index = args.index,
             } },
             .io_flush, .io_callback => .io,
+            .thread_pool_callback => |args| .{ .thread_pool = .{ .thread_id = args.thread_id } },
         };
     }
 };
@@ -191,6 +199,9 @@ const Fiber = union(enum) {
         index: usize,
     },
     io,
+    thread_pool: struct {
+        thread_id: std.Thread.Id,
+    },
 
     pub fn format(
         fiber: Fiber,
@@ -221,6 +232,7 @@ const Fiber = union(enum) {
             },
             .grid_read_iop => |args| try writer.print("grid_read_iop({})", .{args.index}),
             .grid_write_iop => |args| try writer.print("grid_write_iop({})", .{args.index}),
+            .thread_pool => |args| try writer.print("thread_pool({})", .{args.thread_id}),
         };
     }
 };
