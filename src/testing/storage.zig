@@ -287,7 +287,7 @@ pub const Storage = struct {
         next_tick: *Storage.NextTick,
         intent: NextTickIntent,
     ) void {
-        // All on_next_tick requests are fullened through next_tick_queue for determinism.
+        // All on_next_tick requests are fulfilled through next_tick_queue for determinism.
         // `yield` - This already goes through next_tick_queue.
         // `cpu_work` - Avoid multi-threading and go through next_tick_queue.
         // `cpu_inject` - `cpu_work` goes through next_tick_queue so this does as well.
