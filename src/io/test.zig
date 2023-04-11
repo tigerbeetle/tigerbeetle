@@ -267,7 +267,7 @@ test "event" {
         io: IO,
         done: bool = false,
         main_thread_id: std.Thread.Id,
-        event: u32 = IO.INVALID_EVENT,
+        event: i32 = IO.INVALID_EVENT,
         event_completion: IO.Completion = undefined,
 
         const delay = 1 * std.time.ns_per_s;
