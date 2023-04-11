@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -e
+set -ex
 
 # Determine the operating system:
 if [ "$(uname)" = "Linux" ]; then
@@ -15,6 +15,7 @@ case "$*" in
 	;;
 esac
 
+TARGET=""
 if [ "$target_set" = "false" ]; then
     # Default to specifying "native-macos" if the target is not provided.
     # See https://github.com/ziglang/zig/issues/10478 (and note there's not a backport to 0.9.2).
