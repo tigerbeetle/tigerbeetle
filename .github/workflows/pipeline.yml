@@ -25,6 +25,10 @@ jobs:
     uses: ./.github/workflows/windows.yml
   macos:
     uses: ./.github/workflows/macos.yml
+  release_test:
+    uses: ./.github/workflows/release_artifacts.yml
+    inputs:
+      dry-run: true
   client-dotnet:
     uses: ./.github/workflows/clients-dotnet.yml
     secrets:
