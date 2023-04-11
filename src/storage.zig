@@ -78,25 +78,34 @@ pub const Storage = struct {
 
     const ThreadPool = struct {
         mutex: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
-        queue: FIFO(NextTick) = .{ .name = "thread-pool" },
+        waiting: std.Thread.Condition = .{},
+        joining: std.Thread.Condition = .{},
+        shutdown: bool = false,
         notified: bool = false,
         idle: u16 = 0,
+        spawned: u16 = 0,
+        queue: FIFO(NextTick) = .{ .name = "thread-pool" },
 
-        var instance = ThreadPool{};
-        var init_once = std.once(ThreadPool.init);
-        var init_result: std.Thread.SpawnError!void = undefined;
+        fn spawn(pool: *ThreadPool) !void {
+            pool.* = .{};
+            errdefer pool.join();
 
-        fn init() void {
-            init_result = spawn();
-        }
-
-        fn spawn() std.Thread.SpawnError!void {
-            var threads = @maximum(1, std.Thread.getCpuCount() catch 1);
-            while (threads > 0) : (threads -= 1) {
-                const thread = try std.Thread.spawn(.{}, poll, .{&instance});
+            const threads = @maximum(1, std.Thread.getCpuCount() catch 1);
+            while (pool.spawned < threads) : (pool.spawned += 1) {
+                const thread = try std.Thread.spawn(.{}, poll, .{pool});
                 thread.detach();
             }
+        }
+
+        fn join(pool: *ThreadPool) void {
+            pool.mutex.lock();
+            defer pool.mutex.unlock();
+
+            assert(!pool.shutdown);
+            pool.shutdown = true;
+
+            if (pool.idle > 0) pool.waiting.broadcast();
+            while (pool.spawned > 0) pool.joining.wait(&pool.mutex);
         }
 
         fn submit(pool: *ThreadPool, next_tick: *NextTick) void {
@@ -129,8 +138,15 @@ pub const Storage = struct {
                     pool.mutex.lock();
                 }
 
+                if (pool.shutdown) {
+                    pool.spawned -= 1;
+                    if (pool.spawned == 0) pool.joining.signal();
+                    pool.mutex.unlock();
+                    return;
+                }
+
                 pool.idle += 1;
-                pool.cond.wait(&pool.mutex);
+                pool.waiting.wait(&pool.mutex);
                 pool.idle -= 1;
                 pool.notified = false;
             }
@@ -139,7 +155,7 @@ pub const Storage = struct {
         fn unlock_after_queue_update(pool: *ThreadPool) void {
             if (!pool.queue.empty() and !pool.notified and pool.idle > 0) {
                 pool.notified = true;
-                pool.cond.signal();
+                pool.waiting.signal();
             }
             pool.mutex.unlock();
         }
@@ -149,7 +165,8 @@ pub const Storage = struct {
     fd: os.fd_t,
     main_thread_id: std.Thread.Id,
 
-    signal: Signal = undefined,
+    signal: Signal,
+    thread_pool: ThreadPool,
     injected: Atomic(?*NextTick) = Atomic(?*NextTick).init(null),
 
     yield_queue: FIFO(NextTick) = .{ .name = "storage-yield" },
@@ -157,21 +174,27 @@ pub const Storage = struct {
     yield_scheduled: bool = false,
 
     pub fn init(storage: *Storage, io: *IO, fd: os.fd_t) !void {
-        ThreadPool.init_once.call();
-        try ThreadPool.init_result;
-
-        try storage.signal.init(io, on_signal);
         storage.* = .{
             .io = io,
             .fd = fd,
             .main_thread_id = std.Thread.getCurrentId(),
-            .signal = storage.signal,
+            .signal = undefined,
+            .thread_pool = undefined,
         };
+
+        try storage.signal.init(io, on_signal);
+        errdefer storage.signal.deinit();
+
+        try storage.thread_pool.spawn();
+        errdefer storage.thread_pool.join();
     }
 
     pub fn deinit(storage: *Storage) void {
         assert(storage.is_local());
+
         storage.signal.deinit();
+        storage.thread_pool.join();
+
         assert(storage.fd != IO.INVALID_FILE);
         storage.fd = IO.INVALID_FILE;
     }
@@ -210,14 +233,14 @@ pub const Storage = struct {
                 assert(self.is_local());
                 self.yield_queue.push(next_tick);
 
-                if (self.yield_scheduled) return;
-                self.yield_scheduled = true;
-
-                self.io.timeout(*Storage, self, yield_callback, &self.yield_completion, 0);
+                if (!self.yield_scheduled) {
+                    self.yield_scheduled = true;
+                    self.io.timeout(*Storage, self, yield_callback, &self.yield_completion, 0);
+                }
             },
             .cpu_work => {
                 assert(self.is_local());
-                ThreadPool.instance.submit(next_tick);
+                self.thread_pool.submit(next_tick);
             },
             .cpu_inject => {
                 assert(!self.is_local());
