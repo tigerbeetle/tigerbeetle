@@ -27,6 +27,8 @@ jobs:
     uses: ./.github/workflows/macos.yml
   client-dotnet:
     uses: ./.github/workflows/clients-dotnet.yml
+    secrets:
+      NUGET_KEY: ${{ secrets.NUGET_KEY }}     
   client-go:
     uses: ./.github/workflows/clients-go.yml
     secrets:
