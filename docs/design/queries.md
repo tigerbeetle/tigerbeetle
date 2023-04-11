@@ -7,7 +7,7 @@ Account statements (optionally filtered by code, user_data, or range of amounts)
 ``` sql
 select *
 from transfer
-where (transfer.debit_accout_id = ?1 or transfer.credit_account_id = ?1)
+where (transfer.debit_account_id = ?1 or transfer.credit_account_id = ?1)
 and transfer.timestamp < ?2
 order by transfer.timestamp desc
 limit 100
@@ -16,12 +16,11 @@ limit 100
 We may also want to include historical balances (https://github.com/tigerbeetledb/tigerbeetle/issues/357):
 
 ```
-select transfer.*, historical_balance.*
-from transfer, historical_balance
-where (transfer.timestamp = historical_balance.transfer_timestamp)
-and (transfer.debit_accout_id = ?1 or transfer.credit_account_id = ?1)
-and transfer.timestamp < ?2
-order by transfer.timestamp desc
+select account_history.*, account_history.transfer.*
+from account_history
+and (account_history.debit_account_id = ?1 or account_history.credit_account_id = ?1)
+and account_history.timestamp < ?2
+order by account_history.timestamp desc
 limit 100
 ```
 
@@ -37,29 +36,13 @@ limit 100
 
 ``` sql
 select * 
-from account_mutable
-where account_mutable.timestamp > ?2
-order by account_mutable.timestamp asc
+from account
+where account.timestamp > ?2
+order by account.timestamp asc
 limit 100
 ```
 
-Get all linked transfers from root or intermediate transfers:
-
-``` python
-# This is tricky to express in sql without additional indexes.
-transfers = [transfer]
-for other_transfer range(timestamp_to_transfer, transfer.timestamp, ascending):
-  if (not other_transfer.linked):
-    break
-  transfers.push(other_transfer)
-for other_transfer range(timestamp_to_transfer, transfer.timestamp, descending):
-  transfers.push(other_transfer)
-  if (not other_transfer.linked):
-    break
-return transfers
-```
-
-Get all pending transfers for an account:
+Get all pending transfers for an account (requires a transfer_mutable table?):
 
 ``` sql
 select transfer.*
@@ -86,13 +69,21 @@ from transfer
 where transfer.id = ?
 ```
 
-Get accounts/transfer(s) with id/user_data matching a given prefix.
+Get accounts/transfer with id/user_data matching a given prefix.
 
 ``` sql
 select transfer.*
 from transfer
-where 2000 <= transfer.user_data < 2000
-limit 1
+where 1000 <= transfer.user_data <= 1999
+```
+
+Get accounts/transfer with id/user_data matching a given prefix in the last month.
+
+``` sql
+select transfer.*
+from transfer
+where 1000 <= transfer.user_data <= 1999
+and timestamp("2023-Apr-01") <= transfer.timestamp < timestamp("2023-Mar-01")
 ```
 
 TODO other uses.
