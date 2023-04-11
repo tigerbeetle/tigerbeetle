@@ -74,6 +74,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         join_pending: usize = 0,
         join_callback: ?Callback = null,
 
+        compact_op: ?u64 = null,
+
         grid: *Grid,
         grooves: Grooves,
         node_pool: *NodePool,
@@ -164,6 +166,14 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                             forest.join_pending -= 1;
                             if (forest.join_pending > 0) return;
 
+                            if (join_op == .compacting) {
+                                const op = forest.compact_op.?;
+                                inline for (std.meta.fields(Grooves)) |field| {
+                                    @field(forest.grooves, field.name).op_done(op);
+                                }
+                                forest.compact_op = null;
+                            }
+
                             if (join_op == .checkpoint) {
                                 if (Storage == @import("../testing/storage.zig").Storage) {
                                     // We should have finished all checkpoint io by now.
@@ -192,18 +202,15 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         }
 
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
+            assert(forest.compact_op == null);
+            forest.compact_op = op;
+
             // Start a compacting join.
             const Join = JoinType(.compacting);
             Join.start(forest, callback);
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).compact(Join.groove_callback(field.name), op);
-            }
-        }
-
-        pub fn op_done(forest: *Forest, op: u64) void {
-            inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).op_done(op);
             }
         }
 

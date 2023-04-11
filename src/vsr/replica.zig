@@ -2511,8 +2511,6 @@ pub fn ReplicaType(
             assert(op == self.commit_min);
             assert(op <= self.op_checkpoint_trigger());
 
-            state_machine.op_done(op);
-
             if (self.on_compact) |on_compact| on_compact(self);
 
             if (op == self.op_checkpoint_trigger()) {

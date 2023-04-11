@@ -193,7 +193,6 @@ const Environment = struct {
         env.change_state(.fuzzing, .forest_compact);
         env.forest.compact(forest_compact_callback, op);
         try env.tick_until_state_change(.forest_compact, .fuzzing);
-        env.forest.op_done(op);
     }
 
     fn forest_compact_callback(forest: *Forest) void {

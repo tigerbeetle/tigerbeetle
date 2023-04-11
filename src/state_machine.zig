@@ -641,13 +641,6 @@ pub fn StateMachineType(
             callback(self);
         }
 
-        pub fn op_done(self: *StateMachine, op: u64) void {
-            assert(self.compact_callback == null);
-            assert(self.checkpoint_callback == null);
-
-            self.forest.op_done(op);
-        }
-
         pub fn checkpoint(self: *StateMachine, callback: fn (*StateMachine) void) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
