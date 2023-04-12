@@ -616,9 +616,10 @@ const usage =
     \\           that pass validation, and build a single valid AOF. The first entry
     \\           of the first specified AOF file will be considered the root hash.
     \\           Can also be used to merge multiple incomplete AOF files into one,
-    \\           or re-order a single AOF file.
-    \\           TODO note about commits being lost
-    \\           Will output to `merged.aof`.
+    \\           or re-order a single AOF file. Will output to `merged.aof`.
+    \\
+    \\           NB: Make sure to run merge with at least half of the replicas' AOFs,
+    \\           otherwise entries might be lost.
     \\
     \\Options:
     \\
