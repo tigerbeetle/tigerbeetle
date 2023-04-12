@@ -333,30 +333,23 @@ pub const AOFReplayClient = struct {
         while (try aof.next(&target)) |entry| {
             // Skip replaying reserved messages
             const header = entry.header();
-            if (@enumToInt(header.operation) > constants.vsr_operations_reserved) {
+            if (@enumToInt(header.operation) >= constants.vsr_operations_reserved) {
                 const message = self.client.get_message();
                 assert(self.inflight_message == null);
                 self.inflight_message = message;
 
                 entry.to_message(message);
-                const operation = header.operation.cast(StateMachine);
 
                 message.header.* = .{
                     .client = self.client.id,
                     .cluster = self.client.cluster,
                     .command = .request,
                     .operation = header.operation,
-                    .size = @intCast(u32, header.size),
-                    .timestamp = message.header.timestamp,
+                    .size = header.size,
+                    .timestamp = header.timestamp,
                 };
 
-                self.client.raw_request(
-                    @ptrToInt(self),
-                    AOFReplayClient.replay_callback,
-                    operation,
-                    message,
-                    header.size - @sizeOf(Header),
-                );
+                self.client.raw_request(@ptrToInt(self), AOFReplayClient.replay_callback, message);
 
                 // Process messages one by one for now
                 while (self.client.request_queue.count > 0) {

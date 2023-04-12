@@ -240,12 +240,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self: *Self,
             user_data: u128,
             callback: Request.Callback,
-            operation: StateMachine.Operation,
             message: *Message,
-            message_body_size: usize,
         ) void {
-            _ = message_body_size;
-            assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
+            assert(@enumToInt(message.header.operation) >= constants.vsr_operations_reserved);
+            const operation = message.header.operation.cast(StateMachine);
 
             self.register();
             assert(self.request_number > 0);
