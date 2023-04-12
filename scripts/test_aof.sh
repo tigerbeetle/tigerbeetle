@@ -6,10 +6,10 @@ if [ ! -d "zig" ]; then
     scripts/install_zig.sh
 fi
 
-zig/zig build -Dconfig-aof=true
+zig/zig build -Dconfig-aof-record=true
 mv zig-out/bin/tigerbeetle tigerbeetle-aof
 
-zig/zig build -Dconfig-aof=true -Dconfig-aof-recovery=true
+zig/zig build -Dconfig-aof-record=true -Dconfig-aof-recovery=true
 mv zig-out/bin/tigerbeetle tigerbeetle-aof-recovery
 
 rm -f aof.log

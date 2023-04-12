@@ -33,10 +33,10 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
-    const aof_override = b.option(bool, "config-aof", "Override AOF mode.");
-    const aof_recovery_override = b.option(bool, "config-aof-recovery", "Override AOF Recovery mode.");
-    options.addOption(?bool, "config_aof", aof_override);
-    options.addOption(?bool, "config_aof_recovery", aof_recovery_override);
+    const aof_record_enable = b.option(bool, "config-aof-record", "Enable AOF Recording.") orelse false;
+    const aof_recovery_enable = b.option(bool, "config-aof-recovery", "Enable AOF Recovery mode.") orelse false;
+    options.addOption(bool, "config_aof_record", aof_record_enable);
+    options.addOption(bool, "config_aof_recovery", aof_recovery_enable);
 
     const hash_log_mode = b.option(
         config.HashLogMode,
