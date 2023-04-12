@@ -9,7 +9,7 @@ const AOFEntry = @import("../aof.zig").AOFEntry;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const log = std.log.scoped(.aof);
 
-const BACKING_SIZE = 10 * 1024 * 1024;
+const backing_size = 10 * 1024 * 1024;
 
 const InMemoryAOF = struct {
     const Self = @This();
@@ -36,10 +36,10 @@ pub const AOF = struct {
     validation_checksums: std.AutoHashMap(u128, void) = undefined,
 
     pub fn init(allocator: std.mem.Allocator) !AOF {
-        const memory = try allocator.allocAdvanced(u8, constants.sector_size, BACKING_SIZE, .exact);
+        const memory = try allocator.allocAdvanced(u8, constants.sector_size, backing_size, .exact);
         errdefer allocator.free(memory);
 
-        log.info("testing aof: init. allocated {} bytes", .{BACKING_SIZE});
+        log.debug("init. allocated {} bytes", .{backing_size});
         return AOF{
             .index = 0,
             .backing_store = memory,
@@ -65,30 +65,31 @@ pub const AOF = struct {
         var target: AOFEntry = undefined;
 
         while (try it.next(&target)) |entry| {
+            const header = entry.header();
             if (self.validation_checksums.count() != 0) {
-                assert(self.validation_checksums.get(entry.metadata.vsr_header.parent) != null);
+                assert(self.validation_checksums.get(header.parent) != null);
             }
-            try self.validation_checksums.put(entry.metadata.vsr_header.checksum, {});
+            try self.validation_checksums.put(header.checksum, {});
 
             last_entry = entry;
         }
 
-        if (last_entry.metadata.vsr_header.checksum != last_checksum) {
+        if (last_entry.header().checksum != last_checksum) {
             return error.ChecksumMismatch;
         }
 
-        log.info("testing aof: validated all aof entries. last entry checksum {} matches supplied {}", .{ last_entry.metadata.vsr_header.checksum, last_checksum });
+        log.debug("validated all aof entries. last entry checksum {} matches supplied {}", .{ last_entry.header().checksum, last_checksum });
     }
 
     pub fn write(self: *AOF, message: *const Message, options: struct { replica: u8, primary: u8 }) !void {
         var entry: AOFEntry align(constants.sector_size) = undefined;
-        OriginalAOF.prepare_entry(&self.last_checksum, message, .{ .replica = options.replica, .primary = options.primary }, &entry);
+        entry.from_message(message, .{ .replica = options.replica, .primary = options.primary }, &self.last_checksum);
 
         const padded_size = entry.calculate_padded_size();
         stdx.copy_disjoint(.exact, u8, self.backing_store[self.index .. self.index + padded_size], std.mem.asBytes(&entry)[0..padded_size]);
         self.index += padded_size;
 
-        log.info("testing aof: wrote {} bytes, {} used / {}", .{ padded_size, self.index, BACKING_SIZE });
+        log.debug("wrote {} bytes, {} used / {}", .{ padded_size, self.index, backing_size });
     }
 
     pub const Iterator = OriginalAOF.IteratorType(InMemoryAOF);

@@ -987,7 +987,7 @@ pub const IO = struct {
         dir_fd: os.fd_t,
         relative_path: []const u8,
         size: u64,
-        must_create: bool,
+        method: enum { create, create_or_open, open },
     ) !os.fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
@@ -1015,19 +1015,21 @@ pub const IO = struct {
             }
         }
 
-        if (must_create) {
-            flags |= os.O.CREAT;
-
-            // Use (must_create and size == 0) as a proxy for opening a file best effort
-            if (size != 0) {
+        switch (method) {
+            .create => {
+                flags |= os.O.CREAT;
                 flags |= os.O.EXCL;
+                mode = 0o666;
                 log.info("creating \"{s}\"...", .{relative_path});
-            } else {
-                log.info("opening / creating \"{s}\"...", .{relative_path});
-            }
-            mode = 0o666;
-        } else {
-            log.info("opening \"{s}\"...", .{relative_path});
+            },
+            .create_or_open => {
+                flags |= os.O.CREAT;
+                mode = 0o666;
+                log.info("opening or creating \"{s}\"...", .{relative_path});
+            },
+            .open => {
+                log.info("opening \"{s}\"...", .{relative_path});
+            },
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
@@ -1051,8 +1053,7 @@ pub const IO = struct {
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
-        // TODO: Not happy with this size hack
-        if (must_create and size > 0) {
+        if (method == .create) {
             log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
             fs_allocate(fd, size) catch |err| switch (err) {
                 error.OperationNotSupported => {

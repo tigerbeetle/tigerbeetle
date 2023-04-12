@@ -67,10 +67,10 @@ const ConfigProcess = struct {
     clock_epoch_max_ms: u64 = 60000,
     clock_synchronization_window_min_ms: u64 = 2000,
     clock_synchronization_window_max_ms: u64 = 20000,
-    aof: bool = false,
-    aof_recovery: bool = false,
     grid_iops_read_max: u64 = 16,
     grid_iops_write_max: u64 = 16,
+    aof_record: bool = false,
+    aof_recovery: bool = false,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -237,12 +237,8 @@ pub const configs = struct {
         // but a different type from a nominal typing perspective.
         base.process.tracer_backend = @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
         base.process.hash_log_mode = @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
-        if (build_options.config_aof) |config_aof| {
-            base.process.aof = config_aof;
-        }
-        if (build_options.config_aof_recovery) |config_aof_recovery| {
-            base.process.aof_recovery = config_aof_recovery;
-        }
+        base.process.aof_record = build_options.config_aof_record;
+        base.process.aof_recovery = build_options.config_aof_recovery;
 
         break :current base;
     };

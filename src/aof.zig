@@ -20,20 +20,19 @@ const Transfer = tb.Transfer;
 const Client = vsr.Client(StateMachine, MessageBus);
 const log = std.log.scoped(.aof);
 
-const MAGIC_NUMBER: u128 = 312960301372567410560647846651901451202;
+const magic_number: u128 = 312960301372567410560647846651901451202;
 
-/// On disk format for AOF Metadata
-pub const AOFMetadata = extern struct {
+/// On-disk format for AOF Metadata.
+pub const AOFEntryMetadata = extern struct {
     comptime {
-        assert(@bitSizeOf(AOFMetadata) == @sizeOf(AOFMetadata) * 8);
+        assert(@bitSizeOf(AOFEntryMetadata) == @sizeOf(AOFEntryMetadata) * 8);
     }
 
-    vsr_header: Header,
     primary: u64,
     replica: u64,
 };
 
-/// On disk format for full AOF Entry
+/// On-disk format for full AOF Entry.
 pub const AOFEntry = extern struct {
     comptime {
         assert(@bitSizeOf(AOFEntry) == @sizeOf(AOFEntry) * 8);
@@ -41,15 +40,14 @@ pub const AOFEntry = extern struct {
 
     /// In case of extreme corruption, start each entry with a fixed random integer,
     /// to allow skipping over corrupted entries.
-    magic_number: u128 = MAGIC_NUMBER,
+    magic_number: u128 = magic_number,
 
     /// Arbitrary metadata we want to record
-    metadata: AOFMetadata,
+    metadata: AOFEntryMetadata,
 
     /// The main Message to log. The actual length of the entire payload will be sector
-    /// aligned, so it might continue past body_size.
-    body_size: u64,
-    body: [constants.message_size_max]u8,
+    /// aligned, so we might write more than the header indicates.
+    message: [constants.message_size_max]u8 align(constants.sector_size),
 
     /// Reserved space at the end, in case we require padding past message_size_max.
     reserved: [constants.sector_size]u8 = std.mem.zeroes([constants.sector_size]u8),
@@ -57,16 +55,64 @@ pub const AOFEntry = extern struct {
     /// Calculate the actual length of the entry, from our fixed length struct. Make sure to
     /// exclude the reserved padding at the end, as we use this in case of large messages.
     pub fn calculate_padded_size(self: *AOFEntry) u64 {
-        const unpadded_size = @sizeOf(AOFEntry) - constants.message_size_max - constants.sector_size + self.body_size;
+        // TODO: Revisit this...
+        const unpadded_size = @sizeOf(AOFEntry) - constants.message_size_max - constants.sector_size + self.header().size;
 
         return vsr.sector_ceil(unpadded_size);
     }
 
+    pub fn header(self: *AOFEntry) *Header {
+        return @ptrCast(*Header, &self.message);
+    }
+
     /// Turn an AOFEntry back into a Message.
     pub fn to_message(self: *AOFEntry, target: *Message) void {
-        stdx.copy_disjoint(.inexact, u8, target.buffer, std.mem.asBytes(&self.metadata.vsr_header));
-        stdx.copy_disjoint(.inexact, u8, target.buffer[@sizeOf(Header)..], self.body[0..self.body_size]);
+        stdx.copy_disjoint(.inexact, u8, target.buffer, self.message[0..self.header().size]);
         target.header = @ptrCast(*Header, target.buffer);
+    }
+
+    pub fn from_message(
+        self: *AOFEntry,
+        message: *const Message,
+        options: struct { replica: u64, primary: u64 },
+        last_checksum: *?u128,
+    ) void {
+        assert(message.header.size <= self.message.len);
+
+        // When writing, entries can backtrack / duplicate, so we don't necessarily have a valid chain.
+        // Still, log when that happens. The `aof prepare` command can generate a consistent file from
+        // entries like these.
+        log.debug("{}: from_message: parent {} (should == {}) our checksum {}", .{
+            options.replica,
+            message.header.parent,
+            last_checksum.*,
+            message.header.checksum,
+        });
+        if (last_checksum.* == null or last_checksum.*.? != message.header.parent) {
+            log.info("{}: from_message: parent {}, expected {} instead", .{
+                options.replica,
+                message.header.parent,
+                last_checksum.*,
+            });
+        }
+        last_checksum.* = message.header.checksum;
+
+        // The cluster identifier is in the VSR header so we don't need to store it explicitly.
+        self.* = AOFEntry{
+            .metadata = AOFEntryMetadata{
+                .replica = options.replica,
+                .primary = options.primary,
+            },
+            .message = undefined,
+        };
+
+        stdx.copy_disjoint(
+            .exact,
+            u8,
+            self.message[0..message.header.size],
+            message.buffer[0..message.header.size],
+        );
+        std.mem.set(u8, self.message[message.header.size..self.message.len], 0);
     }
 };
 
@@ -92,7 +138,7 @@ pub const AOF = struct {
     }
 
     fn init(dir_fd: os.fd_t, relative_path: []const u8) !AOF {
-        const fd = try IO.open_file(dir_fd, relative_path, 0, true);
+        const fd = try IO.open_file(dir_fd, relative_path, 0, .create_or_open);
         try os.lseek_END(fd, 0);
 
         return AOF{ .fd = fd };
@@ -100,31 +146,6 @@ pub const AOF = struct {
 
     pub fn close(self: *AOF) void {
         os.close(self.fd);
-    }
-
-    pub fn prepare_entry(last_checksum: *?u128, message: *const Message, options: struct { replica: u64, primary: u64 }, entry: *AOFEntry) void {
-        const body = message.body();
-
-        assert(body.len < constants.message_size_max);
-
-        // When writing, entries can backtrack / duplicate, so we don't necessarily have a valid chain.
-        // Still, log when that happens. The `aof prepare` command can generate a consistent file from
-        // entries like these.
-        log.debug("{}: aof prepare_entry: parent {} (should == {}) our checksum {}", .{ options.replica, message.header.parent, last_checksum.*, message.header.checksum });
-        if (last_checksum.* == null or last_checksum.*.? != message.header.parent) {
-            log.info("{}: aof prepare_entry: parent {}, expected {} instead", .{ options.replica, message.header.parent, last_checksum.* });
-        }
-        last_checksum.* = message.header.checksum;
-
-        // cluster is in the VSR header so we don't need to store it explcitly.
-        entry.* = AOFEntry{
-            .metadata = AOFMetadata{ .vsr_header = message.header.*, .replica = options.replica, .primary = options.primary },
-            .body_size = body.len,
-            .body = undefined,
-        };
-
-        stdx.copy_disjoint(.exact, u8, entry.body[0..body.len], body);
-        std.mem.set(u8, entry.body[body.len..constants.message_size_max], 0);
     }
 
     /// Write a message to disk. Once this function returns, the data passed in
@@ -141,7 +162,11 @@ pub const AOF = struct {
     /// condition.
     pub fn write(self: *AOF, message: *const Message, options: struct { replica: u64, primary: u64 }) !void {
         var entry: AOFEntry align(constants.sector_size) = undefined;
-        prepare_entry(&self.last_checksum, message, .{ .replica = options.replica, .primary = options.primary }, &entry);
+        entry.from_message(
+            message,
+            .{ .replica = options.replica, .primary = options.primary },
+            &self.last_checksum,
+        );
 
         const padded_size = entry.calculate_padded_size();
 
@@ -161,29 +186,29 @@ pub const AOF = struct {
 
             file: File,
             size: u64,
-            read_to: u64 = 0,
+            offset: u64 = 0,
 
             validate_chain: bool = true,
             last_checksum: ?u128 = null,
 
             pub fn next(it: *Self, target: *AOFEntry) !?*AOFEntry {
-                if (it.read_to >= it.size) return null;
+                if (it.offset >= it.size) return null;
 
-                try it.file.seekTo(it.read_to);
+                try it.file.seekTo(it.offset);
 
                 var buf = std.mem.asBytes(target);
                 _ = try it.file.readAll(buf);
 
-                if (target.magic_number != MAGIC_NUMBER) {
+                if (target.magic_number != magic_number) {
                     return error.AOFMagicNumberMismatch;
                 }
 
-                const header = target.metadata.vsr_header;
+                const header = target.header();
                 if (!header.valid_checksum()) {
                     return error.AOFChecksumMismatch;
                 }
 
-                if (!header.valid_checksum_body(target.body[0..target.body_size])) {
+                if (!header.valid_checksum_body(target.message[@sizeOf(Header)..header.size])) {
                     return error.AOFBodyChecksumMismatch;
                 }
 
@@ -194,13 +219,13 @@ pub const AOF = struct {
 
                 it.last_checksum = header.checksum;
 
-                it.read_to += target.calculate_padded_size();
+                it.offset += target.calculate_padded_size();
 
                 return target;
             }
 
             pub fn reset(it: *Self) !void {
-                it.read_to = 0;
+                it.offset = 0;
             }
 
             pub fn close(it: *Self) void {
@@ -208,23 +233,28 @@ pub const AOF = struct {
             }
 
             /// Try skip ahead to the next entry in a potentially corrupted AOF file
-            /// by searching from our current position for the next MAGIC_NUMBER, seeking
+            /// by searching from our current position for the next magic_number, seeking
             /// to it, and setting our internal position correctly.
             pub fn skip(it: *Self, allocator: std.mem.Allocator, count: usize) !void {
                 var skip_buffer = try allocator.alloc(u8, 1024 * 1024);
                 defer allocator.free(skip_buffer);
 
-                try it.file.seekTo(it.read_to);
+                try it.file.seekTo(it.offset);
 
-                while (it.read_to < it.size) {
+                while (it.offset < it.size) {
                     _ = try it.file.readAll(skip_buffer);
-                    const offset = std.mem.indexOfPos(u8, skip_buffer, count, std.mem.asBytes(&MAGIC_NUMBER));
+                    const offset = std.mem.indexOfPos(
+                        u8,
+                        skip_buffer,
+                        count,
+                        std.mem.asBytes(&magic_number),
+                    );
 
-                    if (offset != null) {
-                        it.read_to += offset.?;
+                    if (offset) |offset_bytes| {
+                        it.offset += offset_bytes;
                         break;
                     } else {
-                        it.read_to += skip_buffer.len;
+                        it.offset += skip_buffer.len;
                     }
                 }
             }
@@ -262,7 +292,10 @@ pub const AOFReplayClient = struct {
         var client = try allocator.create(Client);
 
         io.* = try IO.init(32, 0);
+        errdefer io.deinit();
+
         message_pool.* = try MessagePool.init(allocator, .client);
+        errdefer message_pool.deinit(allocator);
 
         client.* = try Client.init(
             allocator,
@@ -275,6 +308,7 @@ pub const AOFReplayClient = struct {
                 .io = io,
             },
         );
+        errdefer client.deinit(allocator);
 
         return Self{
             .io = io,
@@ -297,45 +331,43 @@ pub const AOFReplayClient = struct {
         var target: AOFEntry = undefined;
 
         while (try aof.next(&target)) |entry| {
-            switch (entry.metadata.vsr_header.operation) {
-                // Skip replaying reserved messages
-                .reserved, .root, .register => {},
+            // Skip replaying reserved messages
+            const header = entry.header();
+            if (@enumToInt(header.operation) > constants.vsr_operations_reserved) {
+                const message = self.client.get_message();
+                assert(self.inflight_message == null);
+                self.inflight_message = message;
 
-                else => {
-                    const message = self.client.get_message();
-                    self.inflight_message = message;
+                entry.to_message(message);
+                const operation = header.operation.cast(StateMachine);
 
-                    entry.to_message(message);
-                    const operation = entry.metadata.vsr_header.operation.cast(StateMachine);
+                message.header.* = .{
+                    .client = self.client.id,
+                    .cluster = self.client.cluster,
+                    .command = .request,
+                    .operation = header.operation,
+                    .size = @intCast(u32, header.size),
+                    .timestamp = message.header.timestamp,
+                };
 
-                    message.header.* = .{
-                        .client = self.client.id,
-                        .cluster = self.client.cluster,
-                        .command = .request,
-                        .operation = vsr.Operation.from(StateMachine, operation),
-                        .size = @intCast(u32, @sizeOf(Header) + entry.body_size),
-                        .timestamp = message.header.timestamp,
-                    };
+                self.client.raw_request(
+                    @ptrToInt(self),
+                    AOFReplayClient.replay_callback,
+                    operation,
+                    message,
+                    header.size - @sizeOf(Header),
+                );
 
-                    self.client.raw_request(
-                        @ptrToInt(self),
-                        AOFReplayClient.on_replay_callback,
-                        operation,
-                        message,
-                        entry.body_size,
-                    );
-
-                    // Process messages one by one for now
-                    while (self.client.request_queue.count > 0) {
-                        self.client.tick();
-                        try self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
-                    }
-                },
+                // Process messages one by one for now
+                while (self.client.request_queue.count > 0) {
+                    self.client.tick();
+                    try self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+                }
             }
         }
     }
 
-    fn on_replay_callback(
+    fn replay_callback(
         user_data: u128,
         operation: StateMachine.Operation,
         result: Client.Error![]const u8,
@@ -350,7 +382,7 @@ pub const AOFReplayClient = struct {
     }
 };
 
-pub fn aof_prepare(allocator: std.mem.Allocator, input_paths: [][]const u8, output_path: []const u8) !void {
+pub fn aof_merge(allocator: std.mem.Allocator, input_paths: [][]const u8, output_path: []const u8) !void {
     const stdout = std.io.getStdOut().writer();
     var aofs: [constants.nodes_max]AOF.Iterator = undefined;
 
@@ -415,8 +447,9 @@ pub fn aof_prepare(allocator: std.mem.Allocator, input_paths: [][]const u8, outp
                 break;
             }
 
-            const checksum = entry.?.metadata.vsr_header.checksum;
-            const parent = entry.?.metadata.vsr_header.parent;
+            const header = entry.?.header();
+            const checksum = header.checksum;
+            const parent = header.parent;
 
             if (current_parent == null) {
                 try stdout.print("The root checksum will be {} from {s}.\n", .{ parent, input_paths[i] });
@@ -431,14 +464,17 @@ pub fn aof_prepare(allocator: std.mem.Allocator, input_paths: [][]const u8, outp
             } else {
                 v.value_ptr.* = .{
                     .aof = aof,
-                    .index = aof.read_to - entry.?.calculate_padded_size(),
+                    .index = aof.offset - entry.?.calculate_padded_size(),
                     .size = entry.?.calculate_padded_size(),
                     .checksum = checksum,
                     .parent = parent,
                 };
             }
         }
-        try stdout.print("Finished processing {s} - extracted {} usable entries.\n", .{ input_paths[i], entries_by_parent.count() });
+        try stdout.print(
+            "Finished processing {s} - extracted {} usable entries.\n",
+            .{ input_paths[i], entries_by_parent.count() },
+        );
     }
 
     // Next, start from our root checksum, walk down the hash chain until there's nothing left. We currently
@@ -456,7 +492,10 @@ pub fn aof_prepare(allocator: std.mem.Allocator, input_paths: [][]const u8, outp
         _ = try entry.?.aof.file.readAll(buf);
 
         target.to_message(message);
-        try output_aof.write(message, .{ .replica = target.metadata.replica, .primary = target.metadata.primary });
+        try output_aof.write(
+            message,
+            .{ .replica = target.metadata.replica, .primary = target.metadata.primary },
+        );
 
         current_parent = entry.?.checksum;
         _ = entries_by_parent.remove(entry.?.parent);
@@ -474,14 +513,18 @@ pub fn aof_prepare(allocator: std.mem.Allocator, input_paths: [][]const u8, outp
     var last_checksum: ?u128 = null;
 
     while (try it.next(target)) |entry| {
+        const header = entry.header();
         if (first_checksum == null) {
-            first_checksum = entry.metadata.vsr_header.checksum;
+            first_checksum = header.checksum;
         }
 
-        last_checksum = entry.metadata.vsr_header.checksum;
+        last_checksum = header.checksum;
     }
 
-    try stdout.print("AOF {s} validated. Starting checksum: {} Ending checksum: {}\n", .{ output_path, first_checksum, last_checksum });
+    try stdout.print(
+        "AOF {s} validated. Starting checksum: {} Ending checksum: {}\n",
+        .{ output_path, first_checksum, last_checksum },
+    );
 }
 
 const testing = std.testing;
@@ -532,13 +575,19 @@ test "aof write / read" {
     const read_message = message_pool.get_message();
     defer message_pool.unref(read_message);
     read_entry.to_message(read_message);
-    try testing.expect(std.mem.eql(u8, std.mem.asBytes(demo_message.header), std.mem.asBytes(read_message.header)));
-    try testing.expect(std.mem.eql(u8, demo_message.body(), read_message.body()));
+    try testing.expect(std.mem.eql(
+        u8,
+        demo_message.buffer[0..demo_message.header.size],
+        read_message.buffer[0..read_message.header.size],
+    ));
 
     try testing.expect(read_entry.metadata.replica == 1);
     try testing.expect(read_entry.metadata.primary == 1);
-    try testing.expect(std.mem.eql(u8, std.mem.asBytes(demo_message.header), std.mem.asBytes(&read_entry.metadata.vsr_header)));
-    try testing.expect(std.mem.eql(u8, demo_message.body(), read_entry.body[0..read_entry.body_size]));
+    try testing.expect(std.mem.eql(
+        u8,
+        demo_message.buffer[0..demo_message.header.size],
+        read_entry.message[0..read_entry.header().size],
+    ));
 
     // Ensure our iterator works correctly and stops at EOF.
     try testing.expect((try it.next(target)) == null);
@@ -555,7 +604,7 @@ const usage =
     \\
     \\  aof debug <path>
     \\
-    \\  aof prepare <path 1> ... <path n>
+    \\  aof merge path.aof ... <path.aof n>
     \\
     \\
     \\Commands:
@@ -563,18 +612,20 @@ const usage =
     \\  recover  Recover a recorded AOF file at <path> to a TigerBeetle cluster running
     \\           at <addresses>. Said cluster must be running with aof_recovery = true
     \\           and have the same cluster ID as the source. The AOF must have a consistent
-    \\           hash chain, which can be ensured using the `prepare` subcommand.
+    \\           hash chain, which can be ensured using the `merge` subcommand.
     \\
-    \\  debug    Print all entries that have been recoreded in the AOF file at <path>
+    \\  debug    Print all entries that have been recorded in the AOF file at <path>
     \\           to stdout. Checksums are verified, and aof will panic if an invalid
     \\           checksum is encountered, so this can be used to check the validity
     \\           of an AOF file. Prints a final hash of all data entries in the AOF.
     \\
-    \\  prepare  Walk through multiple AOF files, extracting entries from each one
+    \\  merge    Walk through multiple AOF files, extracting entries from each one
     \\           that pass validation, and build a single valid AOF. The first entry
     \\           of the first specified AOF file will be considered the root hash.
-    \\           Can also be used to merge multiple incomplete AOF files into one.
-    \\           Will output to `prepared.aof`
+    \\           Can also be used to merge multiple incomplete AOF files into one,
+    \\           or re-order a single AOF file.
+    \\           TODO note about commits being lost
+    \\           Will output to `merged.aof`.
     \\
     \\Options:
     \\
@@ -608,7 +659,7 @@ pub fn main() !void {
             paths[0] = arg;
         } else if (count == 3 and std.mem.eql(u8, action.?, "recover")) {
             paths[0] = arg;
-        } else if (count >= 2 and std.mem.eql(u8, action.?, "prepare")) {
+        } else if (count >= 2 and std.mem.eql(u8, action.?, "merge")) {
             paths[count - 2] = arg;
         }
 
@@ -635,20 +686,24 @@ pub fn main() !void {
 
         const stdout = std.io.getStdOut().writer();
         while (try it.next(target)) |entry| {
-            try stdout.print("{}\n", .{entry.metadata});
+            const header = entry.header();
+            try stdout.print("{} {}\n", .{ header, entry.metadata });
 
             // The body isn't the only important information, there's also the operation
             // and the timestamp which are in the header. Include those in our hash too.
-            if (@enumToInt(entry.metadata.vsr_header.operation) > constants.vsr_operations_reserved) {
-                blake3.update(std.mem.asBytes(&entry.metadata.vsr_header.checksum_body));
-                blake3.update(std.mem.asBytes(&entry.metadata.vsr_header.timestamp));
-                blake3.update(std.mem.asBytes(&entry.metadata.vsr_header.operation));
+            if (@enumToInt(header.operation) > constants.vsr_operations_reserved) {
+                blake3.update(std.mem.asBytes(&header.checksum_body));
+                blake3.update(std.mem.asBytes(&header.timestamp));
+                blake3.update(std.mem.asBytes(&header.operation));
             }
         }
         blake3.final(data_checksum[0..]);
-        try stdout.print("\nData checksum chain: {}\n", .{@bitCast(u128, data_checksum[0..@sizeOf(u128)].*)});
-    } else if (action != null and std.mem.eql(u8, action.?, "prepare") and count >= 2) {
-        try aof_prepare(allocator, paths[0 .. count - 2], "prepared.aof");
+        try stdout.print(
+            "\nData checksum chain: {}\n",
+            .{@bitCast(u128, data_checksum[0..@sizeOf(u128)].*)},
+        );
+    } else if (action != null and std.mem.eql(u8, action.?, "merge") and count >= 2) {
+        try aof_merge(allocator, paths[0 .. count - 2], "prepared.aof");
     } else {
         std.io.getStdOut().writeAll(usage) catch os.exit(1);
         os.exit(1);

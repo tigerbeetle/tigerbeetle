@@ -348,7 +348,7 @@ pub fn ReplicaType(
         tracer_slot_commit: ?tracer.SpanStart = null,
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
-        aof: ?*AOF = null,
+        aof: *AOF,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -356,7 +356,7 @@ pub fn ReplicaType(
             storage: *Storage,
             message_pool: *MessagePool,
             time: Time,
-            aof: ?*AOF,
+            aof: *AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
         };
@@ -583,7 +583,7 @@ pub fn ReplicaType(
             replica_index: u8,
             time: Time,
             storage: *Storage,
-            aof: ?*AOF,
+            aof: *AOF,
             message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
@@ -2675,18 +2675,21 @@ pub fn ReplicaType(
             // once the data has been written to disk with O_DIRECT and O_SYNC.
             //
             // We run this here, instead of in state_machine, so we can have full access to the VSR
-            // header information. This way we can just log the Prepare in its entirity.
+            // header information. This way we can just log the Prepare in its entirety.
             //
             // A minor detail, but this is not a WAL. Hence the name being AOF - since it's similar
             // to how Redis's Append Only File works. It's also technically possible for a request
             // to be recorded by the AOF, with the client not having received a response
             // (eg, a panic right after writing to the AOF before sending the response) but we
-            // consider this harmless due to our requirement for unique IDs.
+            // consider this harmless due to our requirement for unique Account / Transfer IDs.
             //
-            // It should be impossible for a client to receive a response without the request having
-            // being logged, however.
-            if (self.aof != null and self.status != .recovering) {
-                self.aof.?.write(prepare, .{ .replica = self.replica, .primary = self.primary_index(self.view) }) catch @panic("aof failure");
+            // It should be impossible for a client to receive a response without the request
+            // being logged by at least one replica.
+            if (AOF != void) {
+                self.aof.write(prepare, .{
+                    .replica = self.replica,
+                    .primary = self.primary_index(self.view),
+                }) catch @panic("aof failure");
             }
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
