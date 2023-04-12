@@ -46,19 +46,14 @@ pub const AOFEntry = extern struct {
     metadata: AOFEntryMetadata,
 
     /// The main Message to log. The actual length of the entire payload will be sector
-    /// aligned, so we might write more than the header indicates.
+    /// aligned, so we might write past what the VSR header in here indicates.
     message: [constants.message_size_max]u8 align(constants.sector_size),
 
-    /// Reserved space at the end, in case we require padding past message_size_max.
-    reserved: [constants.sector_size]u8 = std.mem.zeroes([constants.sector_size]u8),
-
-    /// Calculate the actual length of the entry, from our fixed length struct. Make sure to
-    /// exclude the reserved padding at the end, as we use this in case of large messages.
+    /// Calculate the actual length of the AOFEntry that needs to be written to disk.
     pub fn calculate_padded_size(self: *AOFEntry) u64 {
-        // TODO: Revisit this...
-        const unpadded_size = @sizeOf(AOFEntry) - constants.message_size_max - constants.sector_size + self.header().size;
+        const truncated_size = @sizeOf(AOFEntry) - self.message.len + self.header().size;
 
-        return vsr.sector_ceil(unpadded_size);
+        return vsr.sector_ceil(truncated_size);
     }
 
     pub fn header(self: *AOFEntry) *Header {
