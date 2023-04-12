@@ -2530,7 +2530,7 @@ pub fn ReplicaType(
                 );
                 if (self.on_checkpoint_start) |on_checkpoint| on_checkpoint(self);
 
-                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
+                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback, op);
             } else {
                 self.commit_op_done();
             }

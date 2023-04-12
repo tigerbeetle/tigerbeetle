@@ -228,7 +228,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.checkpoint_op = op - constants.lsm_batch_multiple;
 
             env.change_state(.fuzzing, .tree_checkpoint);
-            env.tree.checkpoint(tree_checkpoint_callback);
+            env.tree.checkpoint(tree_checkpoint_callback, op);
             env.tick_until_state_change(.tree_checkpoint, .superblock_checkpoint);
             env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
         }

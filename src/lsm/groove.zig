@@ -401,7 +401,6 @@ pub fn GrooveType(
 
         const Callback = fn (*Groove) void;
         const JoinOp = enum {
-            compacting,
             checkpoint,
             open,
         };
@@ -430,6 +429,13 @@ pub fn GrooveType(
         };
         const PrefetchObjects = std.HashMapUnmanaged(Object, void, PrefetchObjectsContext, 70);
 
+        const CompactionState = struct {
+            callback: fn (*anyopaque) void,
+            context: *anyopaque,
+            op_min: u64,
+            tree_index: usize,
+        };
+
         join_op: ?JoinOp = null,
         join_pending: usize = 0,
         join_callback: ?Callback = null,
@@ -452,6 +458,8 @@ pub fn GrooveType(
 
         /// The snapshot to prefetch from.
         prefetch_snapshot: ?u64,
+
+        compaction_state: ?CompactionState = null,
 
         pub const Options = struct {
             /// The maximum number of objects that might be prefetched by a batch.
@@ -957,19 +965,66 @@ pub fn GrooveType(
             }
         }
 
-        pub fn compact(groove: *Groove, callback: Callback, op: u64) void {
-            // Start a compacting join operation.
-            const Join = JoinType(.compacting);
-            Join.start(groove, callback);
+        pub fn compact(
+            groove: *Groove,
+            callback: fn (*anyopaque) void,
+            context: *anyopaque,
+            op_min: u64,
+        ) void {
+            assert(groove.compaction_state == null);
+            groove.compaction_state = .{
+                .callback = callback,
+                .context = context,
+                .op_min = op_min,
+                .tree_index = 0,
+            };
+            groove.compact_tree_start();
+        }
 
-            // Compact the ObjectTree and IdTree
-            if (has_id) groove.ids.compact(Join.tree_callback(.ids), op);
-            groove.objects.compact(Join.tree_callback(.objects), op);
+        fn compact_tree_start(groove: *Groove) void {
+            const state = &groove.compaction_state.?;
 
-            // Compact the IndexTrees.
-            inline for (std.meta.fields(IndexTrees)) |field| {
-                const compact_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).compact(compact_callback, op);
+            if (state.tree_index == 0 and !has_id) {
+                state.tree_index += 1;
+            }
+
+            switch (state.tree_index) {
+                0 => {
+                    if (has_id) {
+                        groove.ids.compact(compact_tree_finish, groove, state.op_min);
+                    } else {
+                        unreachable;
+                    }
+                },
+                1 => {
+                    groove.objects.compact(compact_tree_finish, groove, state.op_min);
+                },
+                else => {
+                    inline for (std.meta.fields(IndexTrees)) |field, i| {
+                        if (i == state.tree_index - 2) {
+                            @field(groove.indexes, field.name).compact(
+                                compact_tree_finish,
+                                groove,
+                                state.op_min,
+                            );
+                            return;
+                        }
+                    } else unreachable;
+                },
+            }
+        }
+
+        fn compact_tree_finish(groove_opaque: *anyopaque) void {
+            const groove = @ptrCast(*Groove, @alignCast(@alignOf(Groove), groove_opaque));
+            const state = &groove.compaction_state.?;
+            if (state.tree_index < std.meta.fields(IndexTrees).len - 1) {
+                state.tree_index += 1;
+                groove.compact_tree_start();
+            } else {
+                const callback = state.callback;
+                const context = state.context;
+                groove.compaction_state = null;
+                callback(context);
             }
         }
 
@@ -982,19 +1037,19 @@ pub fn GrooveType(
             }
         }
 
-        pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
+        pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void, op: u64) void {
             // Start a checkpoint join operation.
             const Join = JoinType(.checkpoint);
             Join.start(groove, callback);
 
             // Checkpoint the IdTree and ObjectTree.
-            if (has_id) groove.ids.checkpoint(Join.tree_callback(.ids));
-            groove.objects.checkpoint(Join.tree_callback(.objects));
+            if (has_id) groove.ids.checkpoint(Join.tree_callback(.ids), op);
+            groove.objects.checkpoint(Join.tree_callback(.objects), op);
 
             // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const checkpoint_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).checkpoint(checkpoint_callback);
+                @field(groove.indexes, field.name).checkpoint(checkpoint_callback, op);
             }
         }
     };

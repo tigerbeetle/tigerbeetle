@@ -62,7 +62,6 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
         const Callback = fn (*Forest) void;
         const JoinOp = enum {
-            compacting,
             checkpoint,
             open,
         };
@@ -74,7 +73,21 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         join_pending: usize = 0,
         join_callback: ?Callback = null,
 
-        compact_op: ?u64 = null,
+        /// While a compaction is running, this is the op of the last compact().
+        /// While no compaction is running, this is the op of the last compact() to complete.
+        /// (When recovering from a checkpoint, compaction_op starts at op_checkpoint).
+        compaction_op: u64,
+        compaction_groove_index: ?usize = null,
+        compaction_callback: union(enum) {
+            none,
+            /// We're at the end of a bar.
+            /// Call this callback when all current compactions finish.
+            awaiting: fn (*Forest) void,
+            /// We're at the end of some other beat.
+            /// Call this on the next tick.
+            next_tick: fn (*Forest) void,
+        } = .none,
+        compaction_next_tick: Grid.NextTick = undefined,
 
         grid: *Grid,
         grooves: Grooves,
@@ -123,6 +136,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                 .grid = grid,
                 .grooves = grooves,
                 .node_pool = node_pool,
+                // Compaction is one bar ahead of superblock's commit_min.
+                .compaction_op = grid.superblock.working.vsr_state.commit_min,
             };
         }
 
@@ -166,14 +181,6 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                             forest.join_pending -= 1;
                             if (forest.join_pending > 0) return;
 
-                            if (join_op == .compacting) {
-                                const op = forest.compact_op.?;
-                                inline for (std.meta.fields(Grooves)) |field| {
-                                    @field(forest.grooves, field.name).op_done(op);
-                                }
-                                forest.compact_op = null;
-                            }
-
                             if (join_op == .checkpoint) {
                                 if (Storage == @import("../testing/storage.zig").Storage) {
                                     // We should have finished all checkpoint io by now.
@@ -202,19 +209,116 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         }
 
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
-            assert(forest.compact_op == null);
-            forest.compact_op = op;
+            assert(op != 0);
+            assert(op > forest.grid.superblock.working.vsr_state.commit_min);
 
-            // Start a compacting join.
-            const Join = JoinType(.compacting);
-            Join.start(forest, callback);
+            forest.compaction_op = op;
 
-            inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).compact(Join.groove_callback(field.name), op);
+            if (op < constants.lsm_batch_multiple) {
+                // There is nothing to compact for the first measure.
+                // We skip the main compaction code path first compaction bar entirely because it
+                // is a special case — its first beat is 1, not 0.
+
+                forest.compaction_callback = .{ .next_tick = callback };
+                forest.grid.on_next_tick(compact_finish_next_tick, &forest.compaction_next_tick);
+                return;
+            }
+
+            if (forest.grid.superblock.working.vsr_state.op_compacted(op)) {
+                // We recovered from a checkpoint, and must avoid replaying one bar of
+                // compactions that were applied before the checkpoint. Repeating these ops'
+                // compactions would actually perform different compactions than before,
+                // causing the storage state of the replica to diverge from the cluster.
+                // See also: lookup_snapshot_max_for_checkpoint().
+
+                forest.compaction_callback = .{ .next_tick = callback };
+                forest.grid.on_next_tick(compact_finish_next_tick, &forest.compaction_next_tick);
+                return;
+            }
+
+            const beat = op % constants.lsm_batch_multiple;
+            if (beat == 0) {
+                // Start of bar - start compaction.
+                assert(forest.compaction_groove_index == null);
+                forest.compaction_groove_index = 0;
+                forest.compact_groove_start();
+
+                forest.compaction_callback = .{ .next_tick = callback };
+                forest.grid.on_next_tick(compact_finish_next_tick, &forest.compaction_next_tick);
+            } else if (beat == constants.lsm_batch_multiple - 1) {
+                // End of bar - wait for compaction to finish.
+                forest.compaction_callback = .{ .awaiting = callback };
+                forest.compact_finish_join();
+            } else {
+                // Otherwise just return on next tick.
+                forest.compaction_callback = .{ .next_tick = callback };
+                forest.grid.on_next_tick(compact_finish_next_tick, &forest.compaction_next_tick);
             }
         }
 
-        pub fn checkpoint(forest: *Forest, callback: Callback) void {
+        fn compact_groove_start(forest: *Forest) void {
+            const groove_index = forest.compaction_groove_index.?;
+            inline for (std.meta.fields(Grooves)) |field, i| {
+                if (groove_index == i) {
+                    const groove = &@field(forest.grooves, field.name);
+                    groove.compact(
+                        compact_groove_finish,
+                        forest,
+                        compaction_op_min(forest.compaction_op),
+                    );
+                    return;
+                }
+            } else unreachable;
+        }
+
+        fn compact_groove_finish(forest_opaque: *anyopaque) void {
+            const forest = @ptrCast(*Forest, @alignCast(@alignOf(Forest), forest_opaque));
+            if (forest.compaction_groove_index.? < std.meta.fields(Grooves).len - 1) {
+                forest.compaction_groove_index.? += 1;
+                forest.compact_groove_start();
+            } else {
+                forest.compaction_groove_index = null;
+                forest.compact_finish_join();
+            }
+        }
+
+        /// This is called:
+        /// * When all compactions finishes.
+        /// * When we reach the end of a bar.
+        /// But this function only does anything on the last call -
+        //  when all compactions have finished AND we've reached the end of the bar.
+        fn compact_finish_join(forest: *Forest) void {
+            // If some compactions are still running, we're not finished.
+            if (forest.compaction_groove_index != null) return;
+
+            // If we haven't yet reached the end of the bar, we're not finished.
+            if (forest.compaction_callback != .awaiting) return;
+
+            forest.op_done(forest.compaction_op);
+
+            const callback = forest.compaction_callback.awaiting;
+            forest.compaction_callback = .none;
+            callback(forest);
+        }
+
+        fn compact_finish_next_tick(next_tick: *Grid.NextTick) void {
+            const forest = @fieldParentPtr(Forest, "compaction_next_tick", next_tick);
+            assert(forest.compaction_callback == .next_tick);
+
+            forest.op_done(forest.compaction_op);
+
+            const callback = forest.compaction_callback.next_tick;
+            forest.compaction_callback = .none;
+            callback(forest);
+        }
+
+        fn op_done(forest: *Forest, op: u64) void {
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).op_done(op);
+            }
+        }
+
+        pub fn checkpoint(forest: *Forest, callback: Callback, op: u64) void {
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io before checkpointing.
                 // TODO This may change when grid repair lands.
@@ -225,8 +329,17 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             Join.start(forest, callback);
 
             inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).checkpoint(Join.groove_callback(field.name));
+                @field(forest.grooves, field.name).checkpoint(Join.groove_callback(field.name), op);
             }
         }
     };
+}
+
+/// Returns the first op of the compaction (Compaction.op_min) for a given op/beat.
+///
+/// After this compaction finishes:
+/// - `op_min + lsm_batch_multiple - 1` will be the input tables' snapshot_max.
+/// - `op_min + lsm_batch_multiple` will be the output tables' snapshot_min.
+pub fn compaction_op_min(op: u64) u64 {
+    return op - (op % constants.lsm_batch_multiple);
 }

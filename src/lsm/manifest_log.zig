@@ -464,6 +464,11 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.grid_reservation = manifest_log.grid.reserve(1 + blocks_count_appends).?;
         }
 
+        pub fn forfeit(manifest_log: *ManifestLog) void {
+            manifest_log.grid.forfeit(manifest_log.grid_reservation.?);
+            manifest_log.grid_reservation = null;
+        }
+
         /// `compact` does not close a partial block; that is only necessary during `checkpoint`.
         pub fn compact(manifest_log: *ManifestLog, callback: Callback) void {
             assert(manifest_log.opened);
@@ -513,8 +518,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 );
             } else {
                 manifest_log.read_callback = null;
-                manifest_log.grid.forfeit(manifest_log.grid_reservation.?);
-                manifest_log.grid_reservation = null;
                 callback(manifest_log);
             }
         }
@@ -580,8 +583,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(!manifest.queued_for_compaction(block_reference.address));
 
             manifest_log.grid.release(block_reference.address);
-            manifest_log.grid.forfeit(manifest_log.grid_reservation.?);
-            manifest_log.grid_reservation = null;
 
             const callback = manifest_log.read_callback.?;
             manifest_log.reading = false;

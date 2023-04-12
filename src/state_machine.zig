@@ -641,12 +641,12 @@ pub fn StateMachineType(
             callback(self);
         }
 
-        pub fn checkpoint(self: *StateMachine, callback: fn (*StateMachine) void) void {
+        pub fn checkpoint(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 
             self.checkpoint_callback = callback;
-            self.forest.checkpoint(checkpoint_finish);
+            self.forest.checkpoint(checkpoint_finish, op);
         }
 
         fn checkpoint_finish(forest: *Forest) void {

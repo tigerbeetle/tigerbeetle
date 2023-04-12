@@ -205,7 +205,7 @@ const Environment = struct {
         env.checkpoint_op = op - constants.lsm_batch_multiple;
 
         env.change_state(.fuzzing, .forest_checkpoint);
-        env.forest.checkpoint(forest_checkpoint_callback);
+        env.forest.checkpoint(forest_checkpoint_callback, op);
         try env.tick_until_state_change(.forest_checkpoint, .superblock_checkpoint);
         try env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
     }
