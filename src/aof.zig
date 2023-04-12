@@ -53,9 +53,9 @@ pub const AOFEntry = extern struct {
     /// Calculate the actual length of the AOFEntry that needs to be written to disk,
     /// accounting for sector alignment.
     pub fn calculate_disk_size(self: *AOFEntry) u64 {
-        const truncated_size = @sizeOf(AOFEntry) - self.message.len + self.header().size;
+        const unaligned_size = @sizeOf(AOFEntry) - self.message.len + self.header().size;
 
-        return vsr.sector_ceil(truncated_size);
+        return vsr.sector_ceil(unaligned_size);
     }
 
     pub fn header(self: *AOFEntry) *Header {
