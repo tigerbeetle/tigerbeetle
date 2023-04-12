@@ -20,7 +20,7 @@ pub const messages_max_replica = messages_max: {
 
     sum += constants.journal_iops_read_max; // Journal reads
     sum += constants.journal_iops_write_max; // Journal writes
-    sum += constants.clients_max; // SuperBlock.client_table
+    sum += constants.clients_max; // SuperBlock.client_table // TODO Update.
     sum += 1; // Replica.loopback_queue
     sum += constants.pipeline_prepare_queue_max; // Replica.Pipeline{Queue|Cache}
     sum += constants.pipeline_request_queue_max; // Replica.Pipeline{Queue|Cache}

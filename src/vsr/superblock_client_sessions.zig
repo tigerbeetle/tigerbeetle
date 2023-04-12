@@ -8,7 +8,7 @@ const stdx = @import("../stdx.zig");
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 
-pub const ClientTable = struct {
+pub const ClientSessions = struct {
     /// We found two bugs in the VRR paper relating to the client table:
     ///
     /// 1. a correctness bug, where successive client crashes may cause request numbers to collide for
@@ -39,7 +39,7 @@ pub const ClientTable = struct {
     sorted: []*const Entry,
     message_pool: *MessagePool,
 
-    pub fn init(allocator: mem.Allocator, message_pool: *MessagePool) !ClientTable {
+    pub fn init(allocator: mem.Allocator, message_pool: *MessagePool) !ClientSessions {
         var entries: Entries = .{};
         errdefer entries.deinit(allocator);
 
@@ -49,23 +49,23 @@ pub const ClientTable = struct {
         const sorted = try allocator.alloc(*const Entry, constants.clients_max);
         errdefer allocator.free(sorted);
 
-        return ClientTable{
+        return ClientSessions{
             .entries = entries,
             .sorted = sorted,
             .message_pool = message_pool,
         };
     }
 
-    pub fn deinit(client_table: *ClientTable, allocator: mem.Allocator) void {
+    pub fn deinit(client_sessions: *ClientSessions, allocator: mem.Allocator) void {
         {
-            var it = client_table.iterator();
+            var it = client_sessions.iterator();
             while (it.next()) |entry| {
-                client_table.message_pool.unref(entry.reply);
+                client_sessions.message_pool.unref(entry.reply);
             }
         }
 
-        client_table.entries.deinit(allocator);
-        allocator.free(client_table.sorted);
+        client_sessions.entries.deinit(allocator);
+        allocator.free(client_sessions.sorted);
     }
 
     fn sort_entries_less_than(context: void, a: *const Entry, b: *const Entry) bool {
@@ -101,22 +101,22 @@ pub const ClientTable = struct {
         break :blk size_max;
     };
 
-    pub fn encode(client_table: *const ClientTable, target: []align(@alignOf(vsr.Header)) u8) u64 {
+    pub fn encode(client_sessions: *const ClientSessions, target: []align(@alignOf(vsr.Header)) u8) u64 {
         // The entries must be collected and sorted into a separate buffer first before iteration.
         // This avoids relying on iteration order of AutoHashMapUnmanaged which may change between
         // zig versions.
         var entries_count: u32 = 0;
         {
-            var it = client_table.entries.valueIterator();
+            var it = client_sessions.entries.valueIterator();
             while (it.next()) |entry| : (entries_count += 1) {
-                assert(entries_count < client_table.sorted.len);
+                assert(entries_count < client_sessions.sorted.len);
                 assert(entry.reply.header.command == .reply);
-                client_table.sorted[entries_count] = entry;
+                client_sessions.sorted[entries_count] = entry;
             }
         }
 
-        assert(entries_count <= client_table.sorted.len);
-        const entries = client_table.sorted[0..entries_count];
+        assert(entries_count <= client_sessions.sorted.len);
+        const entries = client_sessions.sorted[0..entries_count];
         std.sort.sort(*const Entry, entries, {}, sort_entries_less_than);
 
         var size: u64 = 0;
@@ -166,14 +166,14 @@ pub const ClientTable = struct {
         return size;
     }
 
-    pub fn decode(client_table: *ClientTable, source: []align(@alignOf(vsr.Header)) const u8) void {
+    pub fn decode(client_sessions: *ClientSessions, source: []align(@alignOf(vsr.Header)) const u8) void {
         // Read the entry count at the end of the buffer to determine how many there are.
         var entries_count: u32 = undefined;
         stdx.copy_disjoint(.exact, u8, mem.asBytes(&entries_count), source[source.len - @sizeOf(u32) ..]);
-        assert(entries_count <= client_table.sorted.len);
+        assert(entries_count <= client_sessions.sorted.len);
 
-        assert(client_table.count() == 0);
-        defer assert(client_table.count() == entries_count);
+        assert(client_sessions.count() == 0);
+        defer assert(client_sessions.count() == entries_count);
 
         // Skip decoding if there aren't any entries.
         if (entries_count == 0) return;
@@ -199,7 +199,7 @@ pub const ClientTable = struct {
         for (headers) |header, i| {
             // Prepare the entry with a message.
             var entry: Entry = undefined;
-            entry.reply = client_table.message_pool.get_message();
+            entry.reply = client_sessions.message_pool.get_message();
 
             // Read the header and session for the entry.
             entry.session = sessions[i];
@@ -219,38 +219,38 @@ pub const ClientTable = struct {
             assert(entry.reply.header.valid_checksum_body(body));
 
             // Insert into the client table
-            client_table.put(&entry);
+            client_sessions.put(&entry);
         }
     }
 
-    pub fn count(client_table: *const ClientTable) usize {
-        return client_table.entries.count();
+    pub fn count(client_sessions: *const ClientSessions) usize {
+        return client_sessions.entries.count();
     }
 
-    pub fn capacity(client_table: *const ClientTable) usize {
-        return client_table.sorted.len;
+    pub fn capacity(client_sessions: *const ClientSessions) usize {
+        return client_sessions.sorted.len;
     }
 
-    pub fn get(client_table: *ClientTable, client: u128) ?*Entry {
-        return client_table.entries.getPtr(client);
+    pub fn get(client_sessions: *ClientSessions, client: u128) ?*Entry {
+        return client_sessions.entries.getPtr(client);
     }
 
-    pub fn put(client_table: *ClientTable, entry: *const Entry) void {
+    pub fn put(client_sessions: *ClientSessions, entry: *const Entry) void {
         const client = entry.reply.header.client;
-        client_table.entries.putAssumeCapacityNoClobber(client, entry.*);
+        client_sessions.entries.putAssumeCapacityNoClobber(client, entry.*);
 
-        if (constants.verify) assert(client_table.entries.contains(client));
+        if (constants.verify) assert(client_sessions.entries.contains(client));
     }
 
-    pub fn remove(client_table: *ClientTable, client: u128) void {
-        assert(client_table.entries.remove(client));
+    pub fn remove(client_sessions: *ClientSessions, client: u128) void {
+        assert(client_sessions.entries.remove(client));
 
-        if (constants.verify) assert(!client_table.entries.contains(client));
+        if (constants.verify) assert(!client_sessions.entries.contains(client));
     }
 
     pub const Iterator = Entries.ValueIterator;
 
-    pub fn iterator(client_table: *ClientTable) Iterator {
-        return client_table.entries.valueIterator();
+    pub fn iterator(client_sessions: *ClientSessions) Iterator {
+        return client_sessions.entries.valueIterator();
     }
 };

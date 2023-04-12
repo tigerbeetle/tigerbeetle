@@ -467,7 +467,7 @@ const Environment = struct {
                 .{
                     .storage = test_storage,
                     .storage_size_limit = constants.storage_size_max,
-                    .message_pool = env.manifest_log.superblock.client_table.message_pool,
+                    .message_pool = env.manifest_log.superblock.client_sessions.message_pool,
                 },
             );
 

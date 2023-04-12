@@ -720,7 +720,7 @@ pub const ClusterFaultAtlas = struct {
             superblock.areas.header.base => .header,
             superblock.areas.manifest.base => .manifest,
             superblock.areas.free_set.base => .free_set,
-            superblock.areas.client_table.base => .client_table,
+            superblock.areas.client_sessions.base => .client_sessions,
             else => unreachable,
         };
 

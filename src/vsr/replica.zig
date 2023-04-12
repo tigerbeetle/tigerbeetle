@@ -11,7 +11,7 @@ const GridType = @import("../lsm/grid.zig").GridType;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const ClientTable = @import("superblock_client_table.zig").ClientTable;
+const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -423,6 +423,8 @@ pub fn ReplicaType(
             errdefer self.deinit(allocator);
 
             // Open the (Forest inside) StateMachine:
+            // TODO If this encounters corruption (in the ManifestLog) we must repair + resume it later.
+            // And maybe transition to a different status — but it may coincide with recovering_head...
             self.opened = false;
             self.state_machine.open(state_machine_open_callback);
             while (!self.opened) self.superblock.storage.tick();
@@ -821,8 +823,8 @@ pub fn ReplicaType(
         }
 
         /// The client table records for each client the latest session and the latest committed reply.
-        inline fn client_table(self: *Self) *ClientTable {
-            return &self.superblock.client_table;
+        inline fn client_table(self: *Self) *ClientSessions {
+            return &self.superblock.client_sessions;
         }
 
         /// Time is measured in logical ticks that are incremented on every call to tick().
