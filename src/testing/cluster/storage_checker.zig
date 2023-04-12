@@ -10,7 +10,8 @@
 //!
 //! Areas verified at checkpoint:
 //! - WAL prepares
-//! - SuperBlock Manifest, FreeSet, ClientTable
+//! - SuperBlock Manifest, FreeSet, ClientSessions
+//! - TODO Verify ClientReplies
 //! - Acquired Grid blocks
 //!
 //! Areas not verified:
@@ -47,7 +48,7 @@ const Checkpoint = struct {
     // `SuperBlockHeader.{trailer}_checksum`.
     checksum_superblock_manifest: u128,
     checksum_superblock_free_set: u128,
-    checksum_superblock_client_table: u128,
+    checksum_superblock_client_sessions: u128,
     checksum_wal_prepares: u128,
     checksum_grid: u128,
 };
@@ -127,12 +128,12 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             var checkpoint = Checkpoint{
                 .checksum_superblock_manifest = 0,
                 .checksum_superblock_free_set = 0,
-                .checksum_superblock_client_table = 0,
+                .checksum_superblock_client_sessions = 0,
                 .checksum_wal_prepares = checksum_wal_prepares(storage),
                 .checksum_grid = checksum_grid(replica),
             };
 
-            inline for (.{ .manifest, .free_set, .client_table }) |trailer| {
+            inline for (.{ .manifest, .free_set, .client_sessions }) |trailer| {
                 const trailer_area = @field(superblock.areas, trailer);
                 const trailer_size = @field(working, @tagName(trailer) ++ "_size");
                 var copy: u8 = 0;

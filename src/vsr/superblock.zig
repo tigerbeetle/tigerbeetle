@@ -26,7 +26,7 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 
 pub const SuperBlockManifest = @import("superblock_manifest.zig").Manifest;
 pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
-pub const SuperBlockClientTable = @import("superblock_client_table.zig").ClientTable;
+pub const SuperBlockClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
 pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
     .superblock_copies = constants.superblock_copies,
 });
@@ -74,7 +74,7 @@ pub const SuperBlockHeader = extern struct {
     free_set_checksum: u128,
 
     /// The checksum over the client table entries in the superblock trailer.
-    client_table_checksum: u128,
+    client_sessions_checksum: u128,
 
     /// State stored on stable storage for the Viewstamped Replication consensus protocol.
     vsr_state: VSRState,
@@ -97,7 +97,7 @@ pub const SuperBlockHeader = extern struct {
     free_set_size: u32,
 
     /// The size of the client table entries stored in the superblock trailer.
-    client_table_size: u32,
+    client_sessions_size: u32,
 
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
@@ -298,7 +298,7 @@ pub const SuperBlockHeader = extern struct {
         if (a.parent != b.parent) return false;
         if (a.manifest_checksum != b.manifest_checksum) return false;
         if (a.free_set_checksum != b.free_set_checksum) return false;
-        if (a.client_table_checksum != b.client_table_checksum) return false;
+        if (a.client_sessions_checksum != b.client_sessions_checksum) return false;
         if (!meta.eql(a.vsr_state, b.vsr_state)) return false;
         if (a.flags != b.flags) return false;
         if (!meta.eql(a.snapshots, b.snapshots)) return false;
@@ -350,14 +350,14 @@ pub const superblock_trailer_size_max = blk: {
     assert(superblock_trailer_free_set_size_max > 0);
     assert(superblock_trailer_free_set_size_max % constants.sector_size == 0);
 
-    assert(superblock_trailer_client_table_size_max > 0);
-    assert(superblock_trailer_client_table_size_max % constants.sector_size == 0);
+    assert(superblock_trailer_client_sessions_size_max > 0);
+    assert(superblock_trailer_client_sessions_size_max % constants.sector_size == 0);
 
     // We order the smaller manifest section ahead of the block free set for better access locality.
     // For example, it's cheaper to skip over 1 MiB when reading from disk than to skip over 32 MiB.
     break :blk superblock_trailer_manifest_size_max +
         superblock_trailer_free_set_size_max +
-        superblock_trailer_client_table_size_max;
+        superblock_trailer_client_sessions_size_max;
 };
 
 // A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
@@ -378,8 +378,14 @@ const superblock_trailer_free_set_size_max = blk: {
     break :blk vsr.sector_ceil(encode_size_max);
 };
 
-const superblock_trailer_client_table_size_max = blk: {
-    const encode_size_max = SuperBlockClientTable.encode_size_max;
+//comptime {
+//    @compileLog("FreeSet", superblock_trailer_free_set_size_max);
+//    @compileLog("CLientTable", superblock_trailer_client_sessions_size_max);
+//    @compileLog("Manifest", superblock_trailer_manifest_size_max);
+//}
+
+const superblock_trailer_client_sessions_size_max = blk: {
+    const encode_size_max = SuperBlockClientSessions.encode_size_max;
     assert(encode_size_max > 0);
 
     break :blk vsr.sector_ceil(encode_size_max);
@@ -393,7 +399,7 @@ pub const data_file_size_min = blk: {
 const block_count_max = blk: {
     var size = constants.storage_size_max;
     size -= constants.superblock_copies * @sizeOf(SuperBlockHeader);
-    size -= constants.superblock_copies * superblock_trailer_client_table_size_max;
+    size -= constants.superblock_copies * superblock_trailer_client_sessions_size_max;
     size -= constants.superblock_copies * superblock_trailer_manifest_size_max;
     size -= constants.journal_size_max;
     // At this point, the remainder of size is split between the grid and the freeset copies.
@@ -449,7 +455,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub const Manifest = SuperBlockManifest;
         pub const FreeSet = SuperBlockFreeSet;
-        pub const ClientTable = SuperBlockClientTable;
+        pub const ClientSessions = SuperBlockClientSessions;
 
         pub const Context = struct {
             pub const Caller = enum {
@@ -511,11 +517,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         manifest: Manifest,
         free_set: FreeSet,
-        client_table: ClientTable,
+        client_sessions: ClientSessions,
 
         manifest_buffer: []align(constants.sector_size) u8,
         free_set_buffer: []align(constants.sector_size) u8,
-        client_table_buffer: []align(constants.sector_size) u8,
+        client_sessions_buffer: []align(constants.sector_size) u8,
 
         /// Whether the superblock has been opened. An open superblock may not be formatted.
         opened: bool = false,
@@ -577,8 +583,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             var free_set = try FreeSet.init(allocator, block_count_limit);
             errdefer free_set.deinit(allocator);
 
-            var client_table = try ClientTable.init(allocator, options.message_pool);
-            errdefer client_table.deinit(allocator);
+            var client_sessions = try ClientSessions.init(allocator, options.message_pool);
+            errdefer client_sessions.deinit(allocator);
 
             const manifest_buffer = try allocator.allocAdvanced(
                 u8,
@@ -596,13 +602,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
             errdefer allocator.free(free_set_buffer);
 
-            const client_table_buffer = try allocator.allocAdvanced(
+            const client_sessions_buffer = try allocator.allocAdvanced(
                 u8,
                 constants.sector_size,
-                superblock_trailer_client_table_size_max,
+                superblock_trailer_client_sessions_size_max,
                 .exact,
             );
-            errdefer allocator.free(client_table_buffer);
+            errdefer allocator.free(client_sessions_buffer);
 
             return SuperBlock{
                 .storage = options.storage,
@@ -611,10 +617,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .reading = &reading[0],
                 .manifest = manifest,
                 .free_set = free_set,
-                .client_table = client_table,
+                .client_sessions = client_sessions,
                 .manifest_buffer = manifest_buffer,
                 .free_set_buffer = free_set_buffer,
-                .client_table_buffer = client_table_buffer,
+                .client_sessions_buffer = client_sessions_buffer,
                 .block_count_limit = block_count_limit,
                 .storage_size_limit = options.storage_size_limit,
             };
@@ -627,11 +633,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             superblock.manifest.deinit(allocator);
             superblock.free_set.deinit(allocator);
-            superblock.client_table.deinit(allocator);
+            superblock.client_sessions.deinit(allocator);
 
             allocator.free(superblock.manifest_buffer);
             allocator.free(superblock.free_set_buffer);
-            allocator.free(superblock.client_table_buffer);
+            allocator.free(superblock.client_sessions_buffer);
         }
 
         pub const FormatOptions = struct {
@@ -667,7 +673,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .parent = 0,
                 .manifest_checksum = 0,
                 .free_set_checksum = 0,
-                .client_table_checksum = 0,
+                .client_sessions_checksum = 0,
                 .vsr_state = .{
                     .commit_min_checksum = 0,
                     .replica_id = replica_id,
@@ -681,7 +687,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .snapshots = undefined,
                 .manifest_size = 0,
                 .free_set_size = 0,
-                .client_table_size = 0,
+                .client_sessions_size = 0,
                 .vsr_headers_count = 0,
                 .vsr_headers_all = mem.zeroes([constants.view_change_headers_max]vsr.Header),
             };
@@ -891,7 +897,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (context.caller != .view_change) {
                 superblock.write_staging_encode_manifest();
                 superblock.write_staging_encode_free_set();
-                superblock.write_staging_encode_client_table();
+                superblock.write_staging_encode_client_sessions();
             }
             superblock.staging.set_checksum();
 
@@ -941,12 +947,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
         }
 
-        fn write_staging_encode_client_table(superblock: *SuperBlock) void {
+        fn write_staging_encode_client_sessions(superblock: *SuperBlock) void {
             const staging: *SuperBlockHeader = superblock.staging;
-            const target = superblock.client_table_buffer;
+            const target = superblock.client_sessions_buffer;
 
-            staging.client_table_size = @intCast(u32, superblock.client_table.encode(target));
-            staging.client_table_checksum = vsr.checksum(target[0..staging.client_table_size]);
+            staging.client_sessions_size = @intCast(u32, superblock.client_sessions.encode(target));
+            staging.client_sessions_checksum = vsr.checksum(target[0..staging.client_sessions_size]);
         }
 
         fn write_manifest(superblock: *SuperBlock, context: *Context) void {
@@ -1032,40 +1038,40 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn write_free_set_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
-            context.superblock.write_client_table(context);
+            context.superblock.write_client_sessions(context);
         }
 
-        fn write_client_table(superblock: *SuperBlock, context: *Context) void {
+        fn write_client_sessions(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            const size = vsr.sector_ceil(superblock.staging.client_table_size);
-            assert(size <= superblock_trailer_client_table_size_max);
+            const size = vsr.sector_ceil(superblock.staging.client_sessions_size);
+            assert(size <= superblock_trailer_client_sessions_size_max);
 
-            const buffer = superblock.client_table_buffer[0..size];
-            const offset = areas.client_table.offset(context.copy.?);
+            const buffer = superblock.client_sessions_buffer[0..size];
+            const offset = areas.client_sessions.offset(context.copy.?);
 
-            mem.set(u8, buffer[superblock.staging.client_table_size..], 0); // Zero sector padding.
+            mem.set(u8, buffer[superblock.staging.client_sessions_size..], 0); // Zero sector padding.
 
-            assert(superblock.staging.client_table_checksum == vsr.checksum(
-                superblock.client_table_buffer[0..superblock.staging.client_table_size],
+            assert(superblock.staging.client_sessions_checksum == vsr.checksum(
+                superblock.client_sessions_buffer[0..superblock.staging.client_sessions_size],
             ));
 
-            log.debug("{s}: write_client_table: checksum={x} size={} offset={}", .{
+            log.debug("{s}: write_client_sessions: checksum={x} size={} offset={}", .{
                 @tagName(context.caller),
-                superblock.staging.client_table_checksum,
-                superblock.staging.client_table_size,
+                superblock.staging.client_sessions_checksum,
+                superblock.staging.client_sessions_size,
                 offset,
             });
 
             superblock.assert_bounds(offset, buffer.len);
 
             if (buffer.len == 0) {
-                write_client_table_callback(&context.write);
+                write_client_sessions_callback(&context.write);
                 return;
             }
 
             superblock.storage.write_sectors(
-                write_client_table_callback,
+                write_client_sessions_callback,
                 &context.write,
                 buffer,
                 .superblock,
@@ -1073,7 +1079,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
         }
 
-        fn write_client_table_callback(write: *Storage.Write) void {
+        fn write_client_sessions_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
             context.superblock.write_header(context);
         }
@@ -1238,7 +1244,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.storage_size == data_file_size_min);
                     assert(working.manifest_size == 0);
                     assert(working.free_set_size == 0);
-                    assert(working.client_table_size == 4);
+                    assert(working.client_sessions_size == 4);
                     assert(working.vsr_state.commit_min_checksum ==
                         vsr.Header.root_prepare(working.cluster).checksum);
                     assert(working.vsr_state.commit_min == 0);
@@ -1437,7 +1443,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 // TODO Repair any impaired copies before we continue.
                 context.copy = 0;
-                superblock.read_client_table(context);
+                superblock.read_client_sessions(context);
             } else if (copy + 1 == constants.superblock_copies) {
                 @panic("superblock free set lost");
             } else {
@@ -1454,18 +1460,18 @@ pub fn SuperBlockType(comptime Storage: type) type {
             }
         }
 
-        fn read_client_table(superblock: *SuperBlock, context: *Context) void {
+        fn read_client_sessions(superblock: *SuperBlock, context: *Context) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
             assert(context.copy.? < constants.superblock_copies);
 
-            const size = vsr.sector_ceil(superblock.working.client_table_size);
-            assert(size <= superblock_trailer_client_table_size_max);
+            const size = vsr.sector_ceil(superblock.working.client_sessions_size);
+            assert(size <= superblock_trailer_client_sessions_size_max);
 
-            const buffer = superblock.client_table_buffer[0..size];
-            const offset = areas.client_table.offset(context.copy.?);
+            const buffer = superblock.client_sessions_buffer[0..size];
+            const offset = areas.client_sessions.offset(context.copy.?);
 
-            log.debug("{s}: read_client_table: copy={} size={} offset={}", .{
+            log.debug("{s}: read_client_sessions: copy={} size={} offset={}", .{
                 @tagName(context.caller),
                 context.copy.?,
                 buffer.len,
@@ -1475,12 +1481,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.assert_bounds(offset, buffer.len);
 
             if (buffer.len == 0) {
-                read_client_table_callback(&context.read);
+                read_client_sessions_callback(&context.read);
                 return;
             }
 
             superblock.storage.read_sectors(
-                read_client_table_callback,
+                read_client_sessions_callback,
                 &context.read,
                 buffer,
                 .superblock,
@@ -1488,7 +1494,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
         }
 
-        fn read_client_table_callback(read: *Storage.Read) void {
+        fn read_client_sessions_callback(read: *Storage.Read) void {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
             const copy = context.copy.?;
@@ -1496,14 +1502,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
             assert(!superblock.opened);
-            assert(superblock.client_table.count() == 0);
+            assert(superblock.client_sessions.count() == 0);
 
-            const slice = superblock.client_table_buffer[0..superblock.working.client_table_size];
-            if (vsr.checksum(slice) == superblock.working.client_table_checksum) {
-                superblock.client_table.decode(slice);
+            const slice = superblock.client_sessions_buffer[0..superblock.working.client_sessions_size];
+            if (vsr.checksum(slice) == superblock.working.client_sessions_checksum) {
+                superblock.client_sessions.decode(slice);
 
-                log.debug("open: read_client_table: client requests: {}/{}", .{
-                    superblock.client_table.count(),
+                log.debug("open: read_client_sessions: client requests: {}/{}", .{
+                    superblock.client_sessions.count(),
                     constants.clients_max,
                 });
 
@@ -1512,9 +1518,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else if (copy + 1 == constants.superblock_copies) {
                 @panic("superblock client table lost");
             } else {
-                log.debug("open: read_client_table: corrupt copy={}", .{copy});
+                log.debug("open: read_client_sessions: corrupt copy={}", .{copy});
                 context.copy = copy + 1;
-                superblock.read_client_table(context);
+                superblock.read_client_sessions(context);
             }
         }
 
@@ -1651,7 +1657,7 @@ pub const Area = enum {
     header,
     manifest,
     free_set,
-    client_table,
+    client_sessions,
 };
 
 pub const areas = struct {
@@ -1670,9 +1676,9 @@ pub const areas = struct {
         .size_max = superblock_trailer_free_set_size_max,
     };
 
-    pub const client_table = AreaRange{
+    pub const client_sessions = AreaRange{
         .base = free_set.base + free_set.size_max,
-        .size_max = superblock_trailer_client_table_size_max,
+        .size_max = superblock_trailer_client_sessions_size_max,
     };
 
     const AreaRange = struct {
