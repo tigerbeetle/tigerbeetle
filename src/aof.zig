@@ -167,14 +167,15 @@ pub const AOF = struct {
 
         const disk_size = entry.calculate_disk_size();
 
-        // writeAll logic - in case we're interrupted by a signal. Needed for Direct IO? Alignment?
         const bytes = std.mem.asBytes(&entry);
-        var index: usize = 0;
-        while (index != disk_size) {
-            index += try os.write(self.fd, bytes[index..disk_size]);
-        }
 
-        assert(index == disk_size);
+        // We don't need writeAll logic here. write() on Linux can't be interrupted
+        // by signals, and a single write supports up to 0x7ffff000 bytes, which is
+        // much greater than the size of our struct could ever be. Zig handles EINTR
+        // for us automatically.
+        const bytes_written = try os.write(self.fd, bytes[0..disk_size]);
+
+        assert(bytes_written == disk_size);
     }
 
     pub fn IteratorType(comptime File: type) type {
