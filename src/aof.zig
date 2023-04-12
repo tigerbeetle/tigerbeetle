@@ -30,6 +30,7 @@ pub const AOFEntryMetadata = extern struct {
 
     primary: u64,
     replica: u64,
+    reserved: [64]u8 = std.mem.zeroes([64]u8),
 };
 
 /// On-disk format for full AOF Entry.
