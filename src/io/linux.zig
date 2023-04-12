@@ -25,6 +25,11 @@ pub const IO = struct {
     ios_queued: u64 = 0,
     ios_in_kernel: u64 = 0,
 
+    recv_bytes: u64 = 0,
+    send_bytes: u64 = 0,
+    read_bytes: u64 = 0,
+    write_bytes: u64 = 0,
+
     flush_tracer_slot: ?tracer.SpanStart = null,
     callback_tracer_slot: ?tracer.SpanStart = null,
 
@@ -112,6 +117,24 @@ pub const IO = struct {
         // The busy loop here is required to avoid a potential deadlock, as the kernel determines
         // when the timeouts are pushed to the completion queue, not us.
         while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
+
+        tracer.plot(
+            .{ .iop = .{ .iop_name = "read" } },
+            @intToFloat(f64, self.read_bytes),
+        );
+        tracer.plot(
+            .{ .iop = .{ .iop_name = "write" } },
+            @intToFloat(f64, self.write_bytes),
+        );
+        tracer.plot(
+            .{ .iop = .{ .iop_name = "recv" } },
+            @intToFloat(f64, self.recv_bytes),
+        );
+        tracer.plot(
+            .{ .iop = .{ .iop_name = "send" } },
+            @intToFloat(f64, self.send_bytes),
+        );
+
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
@@ -751,6 +774,10 @@ pub const IO = struct {
             .context = context,
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    if (tracer.trace_on) {
+                        const read_bytes = @intToPtr(*const ReadError!usize, @ptrToInt(res)).* catch 0;
+                        comp.io.read_bytes += read_bytes;
+                    }
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -798,6 +825,10 @@ pub const IO = struct {
             .context = context,
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    if (tracer.trace_on) {
+                        const recv_bytes = @intToPtr(*const RecvError!usize, @ptrToInt(res)).* catch 0;
+                        comp.io.recv_bytes += recv_bytes;
+                    }
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -849,6 +880,10 @@ pub const IO = struct {
             .context = context,
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    if (tracer.trace_on) {
+                        const send_bytes = @intToPtr(*const SendError!usize, @ptrToInt(res)).* catch 0;
+                        comp.io.send_bytes += send_bytes;
+                    }
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,
@@ -942,6 +977,10 @@ pub const IO = struct {
             .context = context,
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    if (tracer.trace_on) {
+                        const write_bytes = @intToPtr(*const WriteError!usize, @ptrToInt(res)).* catch 0;
+                        comp.io.write_bytes += write_bytes;
+                    }
                     callback(
                         @intToPtr(Context, @ptrToInt(ctx)),
                         comp,

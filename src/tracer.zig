@@ -259,6 +259,9 @@ pub const PlotId = union(enum) {
     filter_block_misses: struct {
         tree_name: []const u8,
     },
+    iop: struct {
+        iop_name: []const u8,
+    },
 
     pub fn format(
         plot_id: PlotId,
@@ -274,9 +277,12 @@ pub const PlotId = union(enum) {
             .cache_misses => |args| try writer.print("cache_misses({s})", .{args.cache_name}),
             .filter_block_hits => |args| try writer.print("filter_block_hits({s})", .{args.tree_name}),
             .filter_block_misses => |args| try writer.print("filter_block_misses({s})", .{args.tree_name}),
+            .iop => |args| try writer.print("iop({s})", .{args.iop_name}),
         };
     }
 };
+
+pub const trace_on = constants.tracer_backend != .none;
 
 usingnamespace switch (constants.tracer_backend) {
     .none => TracerNone,
