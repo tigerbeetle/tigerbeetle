@@ -90,11 +90,11 @@ pub const AOF = struct {
         var entry: AOFEntry align(constants.sector_size) = undefined;
         entry.from_message(message, .{ .replica = options.replica, .primary = options.primary }, &self.last_checksum);
 
-        const padded_size = entry.calculate_padded_size();
-        stdx.copy_disjoint(.exact, u8, self.backing_store[self.index .. self.index + padded_size], std.mem.asBytes(&entry)[0..padded_size]);
-        self.index += padded_size;
+        const disk_size = entry.calculate_disk_size();
+        stdx.copy_disjoint(.exact, u8, self.backing_store[self.index .. self.index + disk_size], std.mem.asBytes(&entry)[0..disk_size]);
+        self.index += disk_size;
 
-        log.debug("wrote {} bytes, {} used / {}", .{ padded_size, self.index, backing_size });
+        log.debug("wrote {} bytes, {} used / {}", .{ disk_size, self.index, backing_size });
     }
 
     pub const Iterator = OriginalAOF.IteratorType(InMemoryAOF);

@@ -49,8 +49,9 @@ pub const AOFEntry = extern struct {
     /// aligned, so we might write past what the VSR header in here indicates.
     message: [constants.message_size_max]u8 align(constants.sector_size),
 
-    /// Calculate the actual length of the AOFEntry that needs to be written to disk.
-    pub fn calculate_padded_size(self: *AOFEntry) u64 {
+    /// Calculate the actual length of the AOFEntry that needs to be written to disk,
+    /// accounting for sector alignment.
+    pub fn calculate_disk_size(self: *AOFEntry) u64 {
         const truncated_size = @sizeOf(AOFEntry) - self.message.len + self.header().size;
 
         return vsr.sector_ceil(truncated_size);
@@ -163,16 +164,16 @@ pub const AOF = struct {
             &self.last_checksum,
         );
 
-        const padded_size = entry.calculate_padded_size();
+        const disk_size = entry.calculate_disk_size();
 
         // writeAll logic - in case we're interrupted by a signal. Needed for Direct IO? Alignment?
         const bytes = std.mem.asBytes(&entry);
         var index: usize = 0;
-        while (index != padded_size) {
-            index += try os.write(self.fd, bytes[index..padded_size]);
+        while (index != disk_size) {
+            index += try os.write(self.fd, bytes[index..disk_size]);
         }
 
-        assert(index == padded_size);
+        assert(index == disk_size);
     }
 
     pub fn IteratorType(comptime File: type) type {
@@ -214,7 +215,7 @@ pub const AOF = struct {
 
                 it.last_checksum = header.checksum;
 
-                it.offset += target.calculate_padded_size();
+                it.offset += target.calculate_disk_size();
 
                 return target;
             }
@@ -452,8 +453,8 @@ pub fn aof_merge(allocator: std.mem.Allocator, input_paths: [][]const u8, output
             } else {
                 v.value_ptr.* = .{
                     .aof = aof,
-                    .index = aof.offset - entry.?.calculate_padded_size(),
-                    .size = entry.?.calculate_padded_size(),
+                    .index = aof.offset - entry.?.calculate_disk_size(),
+                    .size = entry.?.calculate_disk_size(),
                     .checksum = checksum,
                     .parent = parent,
                 };
