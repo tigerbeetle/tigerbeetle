@@ -77,6 +77,7 @@ pub fn ReplicaType(
         const Self = @This();
 
         const Journal = vsr.JournalType(Self, Storage);
+        const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
 
         /// We use this allocator during open/init and then disable it.
@@ -120,6 +121,9 @@ pub fn ReplicaType(
 
         /// The persistent log of hash-chained journal entries:
         journal: Journal,
+
+        /// The persistent log of the latest reply per active client.
+        client_replies: ClientReplies,
 
         /// An abstraction to send messages from the replica to another replica or client.
         /// The message bus will also deliver messages to this replica by calling `on_message_from_bus()`.
@@ -374,7 +378,6 @@ pub fn ReplicaType(
                 .{
                     .storage = options.storage,
                     .storage_size_limit = options.storage_size_limit,
-                    .message_pool = options.message_pool,
                 },
             );
 
@@ -653,6 +656,13 @@ pub fn ReplicaType(
             self.journal = try Journal.init(allocator, options.storage, replica_index);
             errdefer self.journal.deinit(allocator);
 
+            var client_replies = ClientReplies.init(
+                options.storage,
+                options.message_pool,
+                replica_index,
+            );
+            errdefer client_replies.deinit();
+
             self.message_bus = try MessageBus.init(
                 allocator,
                 options.cluster,
@@ -688,6 +698,7 @@ pub fn ReplicaType(
                 .time = self.time,
                 .clock = self.clock,
                 .journal = self.journal,
+                .client_replies = client_replies,
                 .message_bus = self.message_bus,
                 .state_machine = self.state_machine,
                 .superblock = self.superblock,
@@ -769,15 +780,6 @@ pub fn ReplicaType(
                 self.quorum_view_change,
                 self.quorum_replication,
             });
-
-            // To reduce the probability of clustering, for efficient linear probing, the hash map will
-            // always overallocate capacity by a factor of two.
-            log.debug("{}: init: client_table.capacity()={} for constants.clients_max={} entries", .{
-                self.replica,
-                self.client_table().capacity(),
-                constants.clients_max,
-            });
-
             assert(self.status == .recovering);
         }
 
@@ -789,6 +791,7 @@ pub fn ReplicaType(
 
             self.static_allocator.transition_from_static_to_deinit();
 
+            self.client_replies.deinit();
             self.journal.deinit(allocator);
             self.clock.deinit(allocator);
             self.state_machine.deinit(allocator);
@@ -1858,7 +1861,8 @@ pub fn ReplicaType(
             if (self.solo()) {
                 // Replica=1 doesn't write prepares concurrently to avoid gaps in its WAL.
                 assert(self.journal.writes.executing() <= 1);
-                assert(self.journal.writes.executing() == 1 or self.committing);
+                assert(self.journal.writes.executing() == 1 or self.committing or
+                    self.client_replies.writes.executing() > 0);
 
                 self.prepare_timeout.reset();
                 return;
@@ -2342,6 +2346,18 @@ pub fn ReplicaType(
                 const op = self.commit_min + 1;
                 const header = self.journal.header_with_op(op).?;
 
+                if (!self.client_replies.can_write_reply()) {
+                    log.debug("{}: commit_journal_next: waiting to write reply " ++
+                        "(client={} commit={})", .{
+                        self.replica,
+                        header.client,
+                        header.checksum,
+                    });
+
+                    self.commit_ops_done();
+                    return;
+                }
+
                 if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.checksum)) |prepare| {
                     log.debug("{}: commit_journal_next: cached prepare op={} checksum={}", .{
                         self.replica,
@@ -2446,6 +2462,7 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.solo()));
             assert(self.commit_prepare == null);
             assert(self.commit_callback == null);
+            assert(self.client_replies.can_write_reply());
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
@@ -2736,8 +2753,8 @@ pub fn ReplicaType(
                 // updated with entries for one bar beyond the op_checkpoint.
                 assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
                 if (self.client_table().get(prepare.header.client)) |entry| {
-                    assert(entry.reply.header.command == .reply);
-                    assert(entry.reply.header.op >= prepare.header.op);
+                    assert(entry.header.command == .reply);
+                    assert(entry.header.op >= prepare.header.op);
                 } else {
                     assert(self.client_table().count() == self.client_table().capacity());
                 }
@@ -2792,7 +2809,19 @@ pub fn ReplicaType(
 
                 if (!prepare.ok_quorum_received) {
                     // Eventually handled by on_prepare_timeout().
-                    log.debug("{}: commit_pipeline: waiting for quorum", .{self.replica});
+                    log.debug("{}: commit_pipeline_next: waiting for quorum", .{self.replica});
+                    self.commit_ops_done();
+                    return;
+                }
+
+                if (!self.client_replies.can_write_reply()) {
+                    log.debug("{}: commit_pipeline_next: waiting to write reply " ++
+                        "(client={} commit={})", .{
+                        self.replica,
+                        prepare.message.header.client,
+                        prepare.message.header.checksum,
+                    });
+
                     self.commit_ops_done();
                     return;
                 }
@@ -2887,24 +2916,24 @@ pub fn ReplicaType(
             const clients = self.client_table().count();
             assert(clients <= constants.clients_max);
             if (clients == constants.clients_max) {
-                var evictee: ?*Message = null;
+                var evictee: ?*const Header = null;
                 var iterated: usize = 0;
                 var iterator = self.client_table().iterator();
                 while (iterator.next()) |entry| : (iterated += 1) {
-                    assert(entry.reply.header.command == .reply);
-                    assert(entry.reply.header.context == 0);
-                    assert(entry.reply.header.op == entry.reply.header.commit);
-                    assert(entry.reply.header.commit >= entry.session);
+                    assert(entry.header.command == .reply);
+                    assert(entry.header.context == 0);
+                    assert(entry.header.op == entry.header.commit);
+                    assert(entry.header.commit >= entry.session);
 
                     if (evictee) |evictee_reply| {
-                        assert(entry.reply.header.client != evictee_reply.header.client);
-                        assert(entry.reply.header.commit != evictee_reply.header.commit);
+                        assert(entry.header.client != evictee_reply.client);
+                        assert(entry.header.commit != evictee_reply.commit);
 
-                        if (entry.reply.header.commit < evictee_reply.header.commit) {
-                            evictee = entry.reply;
+                        if (entry.header.commit < evictee_reply.commit) {
+                            evictee = &entry.header;
                         }
                     } else {
-                        evictee = entry.reply;
+                        evictee = &entry.header;
                     }
                 }
                 assert(iterated == clients);
@@ -2912,13 +2941,12 @@ pub fn ReplicaType(
                     self.replica,
                     clients,
                     constants.clients_max,
-                    evictee.?.header.client,
+                    evictee.?.client,
                 });
-                self.client_table().remove(evictee.?.header.client);
-                self.message_bus.unref(evictee.?);
+                self.client_table().remove(evictee.?.client);
             }
 
-            log.debug("{}: create_client_table_entry: client={} session={} request={}", .{
+            log.debug("{}: create_client_table_entry: write (client={} session={} request={})", .{
                 self.replica,
                 reply.header.client,
                 session,
@@ -2927,11 +2955,42 @@ pub fn ReplicaType(
 
             // Any duplicate .register requests should have received the same session number if the
             // client table entry already existed, or been dropped if a session was being committed:
-            self.client_table().put(&.{
+            const reply_slot = self.client_table().put(&.{
                 .session = session,
-                .reply = reply.ref(),
+                .header = reply.header.*,
             });
             assert(self.client_table().count() <= constants.clients_max);
+
+            if (reply.header.size != @sizeOf(Header)) {
+                self.client_replies.write_reply(reply_slot, reply, client_replies_write_callback);
+            }
+        }
+
+        fn client_replies_write_callback(
+            client_replies: *ClientReplies,
+            wrote: *Message,
+        ) void {
+            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            assert(self.status == .normal or self.status == .view_change or
+                (self.status == .recovering and self.solo()));
+            assert(self.client_replies.can_write_reply());
+            maybe(self.committing);
+
+            log.debug("{}: client_replies: wrote (client={} request={})", .{
+                client_replies.replica,
+                wrote.header.client,
+                wrote.header.request,
+            });
+
+            // Committing may have stopped prematurely because the ClientReplies was busy.
+            // It isn't busy anymore — attempt to resume it.
+            if (self.status == .normal and self.primary()) {
+                if (self.pipeline.queue.prepare_queue.count > 0) {
+                    self.commit_pipeline();
+                }
+            } else {
+                self.commit_journal(self.commit_max);
+            }
         }
 
         /// Construct a SV/DVC message, including attached headers from the current log_view.
@@ -3075,10 +3134,10 @@ pub fn ReplicaType(
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_message_from_header(self: *Self, header: Header) *Message {
-            assert(header.replica == self.replica);
             assert(
                 header.view == self.view or
                     header.command == .request_start_view or
+                    header.command == .reply or
                     header.command == .ping or header.command == .pong,
             );
             assert(header.size == @sizeOf(Header));
@@ -3382,8 +3441,8 @@ pub fn ReplicaType(
             assert(message.header.request == 0 or message.header.operation != .register);
 
             if (self.client_table().get(message.header.client)) |entry| {
-                assert(entry.reply.header.command == .reply);
-                assert(entry.reply.header.client == message.header.client);
+                assert(entry.header.command == .reply);
+                assert(entry.header.client == message.header.client);
 
                 if (message.header.operation == .register) {
                     // Fall through below to check if we should resend the .register session reply.
@@ -3397,22 +3456,30 @@ pub fn ReplicaType(
                     return true;
                 }
 
-                if (entry.reply.header.request > message.header.request) {
+                if (entry.header.request > message.header.request) {
                     log.debug("{}: on_request: ignoring older request", .{self.replica});
                     return true;
-                } else if (entry.reply.header.request == message.header.request) {
-                    if (message.header.checksum == entry.reply.header.parent) {
-                        assert(entry.reply.header.operation == message.header.operation);
+                } else if (entry.header.request == message.header.request) {
+                    if (message.header.checksum == entry.header.parent) {
+                        assert(entry.header.operation == message.header.operation);
 
                         log.debug("{}: on_request: replying to duplicate request", .{self.replica});
-                        self.message_bus.send_message_to_client(message.header.client, entry.reply);
+                        if (entry.header.size == @sizeOf(Header)) {
+                            self.send_header_to_client(message.header.client, entry.header);
+                        } else {
+                            self.client_replies.read_reply(
+                                self.client_table().get_slot(message.header.client).?,
+                                entry,
+                                on_request_read_reply_callback,
+                            );
+                        }
                         return true;
                     } else {
                         log.err("{}: on_request: request collision (client bug)", .{self.replica});
                         return true;
                     }
-                } else if (entry.reply.header.request + 1 == message.header.request) {
-                    if (message.header.parent == entry.reply.header.checksum) {
+                } else if (entry.header.request + 1 == message.header.request) {
+                    if (message.header.parent == entry.header.checksum) {
                         // The client has proved that they received our last reply.
                         log.debug("{}: on_request: new request", .{self.replica});
                         return false;
@@ -3450,6 +3517,19 @@ pub fn ReplicaType(
                 self.send_eviction_message_to_client(message.header.client);
                 return true;
             }
+        }
+
+        fn on_request_read_reply_callback(client_replies: *ClientReplies, reply_: ?*Message) void {
+            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            const reply = reply_ orelse return;
+
+            log.debug("{}: on_request: repeat reply (client={} request={})", .{
+                self.replica,
+                reply.header.client,
+                reply.header.request,
+            });
+
+            self.message_bus.send_message_to_client(reply.header.client, reply);
         }
 
         /// Returns whether the replica is eligible to process this request as the primary.
@@ -6102,15 +6182,15 @@ pub fn ReplicaType(
             assert(reply.header.request > 0);
 
             if (self.client_table().get(reply.header.client)) |entry| {
-                assert(entry.reply.header.command == .reply);
-                assert(entry.reply.header.context == 0);
-                assert(entry.reply.header.op == entry.reply.header.commit);
-                assert(entry.reply.header.commit >= entry.session);
+                assert(entry.header.command == .reply);
+                assert(entry.header.context == 0);
+                assert(entry.header.op == entry.header.commit);
+                assert(entry.header.commit >= entry.session);
 
-                assert(entry.reply.header.client == reply.header.client);
-                assert(entry.reply.header.request + 1 == reply.header.request);
-                assert(entry.reply.header.op < reply.header.op);
-                assert(entry.reply.header.commit < reply.header.commit);
+                assert(entry.header.client == reply.header.client);
+                assert(entry.header.request + 1 == reply.header.request);
+                assert(entry.header.op < reply.header.op);
+                assert(entry.header.commit < reply.header.commit);
 
                 // TODO Use this reply's prepare to cross-check against the entry's prepare, if we
                 // still have access to the prepare in the journal (it may have been snapshotted).
@@ -6122,8 +6202,14 @@ pub fn ReplicaType(
                     reply.header.request,
                 });
 
-                self.message_bus.unref(entry.reply);
-                entry.reply = reply.ref();
+                entry.header = reply.header.*;
+                if (entry.header.size != @sizeOf(Header)) {
+                    self.client_replies.write_reply(
+                        self.client_table().get_slot(reply.header.client).?,
+                        reply,
+                        client_replies_write_callback,
+                    );
+                }
             } else {
                 // If no entry exists, then the session must have been evicted while being prepared.
                 // We can still send the reply, the next request will receive an eviction message.

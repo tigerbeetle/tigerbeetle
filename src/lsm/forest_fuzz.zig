@@ -10,7 +10,6 @@ const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.lsm_forest_fuzz);
 const tracer = @import("../tracer.zig");
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -92,7 +91,6 @@ const Environment = struct {
 
     state: State,
     storage: *Storage,
-    message_pool: MessagePool,
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context,
     grid: Grid,
@@ -102,12 +100,10 @@ const Environment = struct {
 
     fn init(env: *Environment, storage: *Storage) !void {
         env.storage = storage;
-        env.message_pool = try MessagePool.init(allocator, .replica);
 
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = env.storage,
             .storage_size_limit = constants.storage_size_max,
-            .message_pool = &env.message_pool,
         });
 
         env.grid = try Grid.init(allocator, &env.superblock);
@@ -118,7 +114,6 @@ const Environment = struct {
     }
 
     fn deinit(env: *Environment) void {
-        env.message_pool.deinit(allocator);
         env.superblock.deinit(allocator);
         env.grid.deinit(allocator);
     }

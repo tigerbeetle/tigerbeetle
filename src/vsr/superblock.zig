@@ -22,8 +22,6 @@ const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
-
 pub const SuperBlockManifest = @import("superblock_manifest.zig").Manifest;
 pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
 pub const SuperBlockClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
@@ -97,6 +95,7 @@ pub const SuperBlockHeader = extern struct {
     free_set_size: u32,
 
     /// The size of the client table entries stored in the superblock trailer.
+    /// (Always superblock_trailer_client_sessions_size_max).
     client_sessions_size: u32,
 
     /// The number of headers in vsr_headers_all.
@@ -378,12 +377,6 @@ const superblock_trailer_free_set_size_max = blk: {
     break :blk vsr.sector_ceil(encode_size_max);
 };
 
-//comptime {
-//    @compileLog("FreeSet", superblock_trailer_free_set_size_max);
-//    @compileLog("CLientTable", superblock_trailer_client_sessions_size_max);
-//    @compileLog("Manifest", superblock_trailer_manifest_size_max);
-//}
-
 const superblock_trailer_client_sessions_size_max = blk: {
     const encode_size_max = SuperBlockClientSessions.encode_size_max;
     assert(encode_size_max > 0);
@@ -540,7 +533,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub const Options = struct {
             storage: *Storage,
-            message_pool: *MessagePool,
             storage_size_limit: u64,
         };
 
@@ -583,7 +575,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             var free_set = try FreeSet.init(allocator, block_count_limit);
             errdefer free_set.deinit(allocator);
 
-            var client_sessions = try ClientSessions.init(allocator, options.message_pool);
+            var client_sessions = try ClientSessions.init(allocator);
             errdefer client_sessions.deinit(allocator);
 
             const manifest_buffer = try allocator.allocAdvanced(
@@ -953,6 +945,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             staging.client_sessions_size = @intCast(u32, superblock.client_sessions.encode(target));
             staging.client_sessions_checksum = vsr.checksum(target[0..staging.client_sessions_size]);
+
+            assert(staging.client_sessions_size == ClientSessions.encode_size_max);
         }
 
         fn write_manifest(superblock: *SuperBlock, context: *Context) void {
@@ -1045,7 +1039,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.queue_head == context);
 
             const size = vsr.sector_ceil(superblock.staging.client_sessions_size);
-            assert(size <= superblock_trailer_client_sessions_size_max);
+            assert(size == superblock_trailer_client_sessions_size_max);
 
             const buffer = superblock.client_sessions_buffer[0..size];
             const offset = areas.client_sessions.offset(context.copy.?);
@@ -1244,7 +1238,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.storage_size == data_file_size_min);
                     assert(working.manifest_size == 0);
                     assert(working.free_set_size == 0);
-                    assert(working.client_sessions_size == 4);
+                    assert(working.client_sessions_size == ClientSessions.encode_size_max);
                     assert(working.vsr_state.commit_min_checksum ==
                         vsr.Header.root_prepare(working.cluster).checksum);
                     assert(working.vsr_state.commit_min == 0);
@@ -1466,7 +1460,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.copy.? < constants.superblock_copies);
 
             const size = vsr.sector_ceil(superblock.working.client_sessions_size);
-            assert(size <= superblock_trailer_client_sessions_size_max);
+            assert(size == superblock_trailer_client_sessions_size_max);
 
             const buffer = superblock.client_sessions_buffer[0..size];
             const offset = areas.client_sessions.offset(context.copy.?);
