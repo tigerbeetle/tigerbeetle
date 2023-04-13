@@ -124,6 +124,9 @@
 	"ilpp",
 	"tprt",
 	"preimage",
-	"threadpools"
+	"threadpools",
+	"snapshotting",
+	"checkpointing",
+	"checkpointed"
     ]
 }
