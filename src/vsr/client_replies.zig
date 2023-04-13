@@ -20,6 +20,10 @@ fn slot_offset(slot: Slot) usize {
     return slot.index * constants.message_size_max;
 }
 
+// TODO Optimization:
+// Don't always immediately start writing a reply. Instead, hold onto it in the hopes that
+// the same client will queue another request. If they do (within the same checkpoint),
+// then we no longer need to persist the original reply.
 pub fn ClientRepliesType(comptime Storage: type) type {
     return struct {
         const ClientReplies = @This();
