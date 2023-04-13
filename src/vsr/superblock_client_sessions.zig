@@ -6,7 +6,8 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const stdx = @import("../stdx.zig");
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
+/// There is a slot corresponding to every active client (i.e. a total of clients_max slots).
+pub const ReplySlot = struct { index: usize };
 
 pub const ClientSessions = struct {
     /// We found two bugs in the VRR paper relating to the client table:
@@ -29,55 +30,41 @@ pub const ClientSessions = struct {
         /// The client's session number as committed to the cluster by a register request.
         session: u64,
 
-        /// The reply sent to the client's latest committed request.
-        reply: *MessagePool.Message,
+        /// The header of the reply corresponding to the client's latest committed request.
+        header: vsr.Header,
     };
 
-    const Entries = std.AutoHashMapUnmanaged(u128, Entry);
+    /// Values are indexes into `entries`.
+    const EntriesByClient = std.AutoHashMapUnmanaged(u128, usize);
 
-    entries: Entries,
-    sorted: []*const Entry,
-    message_pool: *MessagePool,
+    entries_by_client: EntriesByClient,
+    /// Free entries are zeroed, both in `entries` and on-disk.
+    entries: []Entry,
 
-    pub fn init(allocator: mem.Allocator, message_pool: *MessagePool) !ClientSessions {
-        var entries: Entries = .{};
-        errdefer entries.deinit(allocator);
+    pub fn init(allocator: mem.Allocator) !ClientSessions {
+        var entries_by_client: EntriesByClient = .{};
+        errdefer entries_by_client.deinit(allocator);
 
-        try entries.ensureTotalCapacity(allocator, @intCast(u32, constants.clients_max));
-        assert(entries.capacity() >= constants.clients_max);
+        try entries_by_client.ensureTotalCapacity(allocator, @intCast(u32, constants.clients_max));
+        assert(entries_by_client.capacity() >= constants.clients_max);
 
-        const sorted = try allocator.alloc(*const Entry, constants.clients_max);
-        errdefer allocator.free(sorted);
+        var entries = try allocator.alloc(Entry, constants.clients_max);
+        errdefer allocator.free(entries);
+        std.mem.set(Entry, entries, std.mem.zeroes(Entry));
 
         return ClientSessions{
+            .entries_by_client = entries_by_client,
             .entries = entries,
-            .sorted = sorted,
-            .message_pool = message_pool,
         };
     }
 
     pub fn deinit(client_sessions: *ClientSessions, allocator: mem.Allocator) void {
-        {
-            var it = client_sessions.iterator();
-            while (it.next()) |entry| {
-                client_sessions.message_pool.unref(entry.reply);
-            }
-        }
-
-        client_sessions.entries.deinit(allocator);
-        allocator.free(client_sessions.sorted);
+        client_sessions.entries_by_client.deinit(allocator);
+        allocator.free(client_sessions.entries);
     }
 
-    fn sort_entries_less_than(context: void, a: *const Entry, b: *const Entry) bool {
-        _ = context;
-        assert(a.reply.header.client != b.reply.header.client);
-        return std.math.order(
-            a.reply.header.client,
-            b.reply.header.client,
-        ) == .lt;
-    }
-
-    /// Maximum size of the buffer needed to encode the client table on disk.
+    /// Maximum size of the buffer needed to encode the client sessions on disk.
+    /// (Not rounded up to a sector boundary).
     pub const encode_size_max = blk: {
         var size_max: usize = 0;
 
@@ -90,45 +77,21 @@ pub const ClientSessions = struct {
         size_max = std.mem.alignForward(size_max, @alignOf(u64));
         size_max += @sizeOf(u64) * constants.clients_max;
 
-        // Followed by the message bodies for the entries.
-        size_max = std.mem.alignForward(size_max, @alignOf(u8));
-        size_max += constants.message_size_max * constants.clients_max;
-
-        // Finally the entry count at the end
-        size_max = std.mem.alignForward(size_max, @alignOf(u32));
-        size_max += @sizeOf(u32);
-
         break :blk size_max;
     };
 
     pub fn encode(client_sessions: *const ClientSessions, target: []align(@alignOf(vsr.Header)) u8) u64 {
-        // The entries must be collected and sorted into a separate buffer first before iteration.
-        // This avoids relying on iteration order of AutoHashMapUnmanaged which may change between
-        // zig versions.
-        var entries_count: u32 = 0;
-        {
-            var it = client_sessions.entries.valueIterator();
-            while (it.next()) |entry| : (entries_count += 1) {
-                assert(entries_count < client_sessions.sorted.len);
-                assert(entry.reply.header.command == .reply);
-                client_sessions.sorted[entries_count] = entry;
-            }
-        }
-
-        assert(entries_count <= client_sessions.sorted.len);
-        const entries = client_sessions.sorted[0..entries_count];
-        std.sort.sort(*const Entry, entries, {}, sort_entries_less_than);
+        assert(target.len >= encode_size_max);
 
         var size: u64 = 0;
-        assert(target.len >= encode_size_max);
 
         // Write all headers:
         var new_size = std.mem.alignForward(size, @alignOf(vsr.Header));
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
-        for (entries) |entry| {
-            stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(entry.reply.header));
+        for (client_sessions.entries) |entry| {
+            stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entry.header));
             size += @sizeOf(vsr.Header);
         }
 
@@ -137,46 +100,21 @@ pub const ClientSessions = struct {
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
-        for (entries) |entry| {
+        for (client_sessions.entries) |entry| {
             stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entry.session));
             size += @sizeOf(u64);
         }
 
-        // Write all messages:
-        new_size = std.mem.alignForward(size, @alignOf(u8));
-        std.mem.set(u8, target[size..new_size], 0);
-        size = new_size;
-
-        for (entries) |entry| {
-            const body = entry.reply.body();
-            assert(body.len == (entry.reply.header.size - @sizeOf(vsr.Header)));
-            stdx.copy_disjoint(.inexact, u8, target[size..], body);
-            size += body.len;
-        }
-
-        // Finally write the entry count:
-        new_size = std.mem.alignForward(size, @alignOf(u32));
-        std.mem.set(u8, target[size..new_size], 0);
-        size = new_size;
-
-        stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entries_count));
-        size += @sizeOf(u32);
-
-        assert(size <= encode_size_max);
+        assert(size == encode_size_max);
         return size;
     }
 
     pub fn decode(client_sessions: *ClientSessions, source: []align(@alignOf(vsr.Header)) const u8) void {
-        // Read the entry count at the end of the buffer to determine how many there are.
-        var entries_count: u32 = undefined;
-        stdx.copy_disjoint(.exact, u8, mem.asBytes(&entries_count), source[source.len - @sizeOf(u32) ..]);
-        assert(entries_count <= client_sessions.sorted.len);
-
         assert(client_sessions.count() == 0);
-        defer assert(client_sessions.count() == entries_count);
-
-        // Skip decoding if there aren't any entries.
-        if (entries_count == 0) return;
+        for (client_sessions.entries) |*entry| {
+            assert(entry.session == 0);
+            assert(std.meta.eql(entry.header, std.mem.zeroes(vsr.Header)));
+        }
 
         var size: u64 = 0;
         assert(source.len > 0);
@@ -185,72 +123,121 @@ pub const ClientSessions = struct {
         size = std.mem.alignForward(size, @alignOf(vsr.Header));
         const headers = mem.bytesAsSlice(
             vsr.Header,
-            source[size..][0 .. entries_count * @sizeOf(vsr.Header)],
+            source[size..][0 .. constants.clients_max * @sizeOf(vsr.Header)],
         );
         size += mem.sliceAsBytes(headers).len;
 
         size = std.mem.alignForward(size, @alignOf(u64));
-        const sessions = mem.bytesAsSlice(u64, source[size..][0 .. entries_count * @sizeOf(u64)]);
+        const sessions = mem.bytesAsSlice(
+            u64,
+            source[size..][0 .. constants.clients_max * @sizeOf(u64)],
+        );
         size += mem.sliceAsBytes(sessions).len;
 
-        size = std.mem.alignForward(size, @alignOf(u8));
-        var bodies = source[size .. source.len - @sizeOf(u32)];
+        assert(size == encode_size_max);
 
-        for (headers) |header, i| {
-            // Prepare the entry with a message.
-            var entry: Entry = undefined;
-            entry.reply = client_sessions.message_pool.get_message();
+        for (headers) |*header, i| {
+            const session = sessions[i];
+            if (session == 0) {
+                assert(std.meta.eql(header.*, std.mem.zeroes(vsr.Header)));
+            } else {
+                assert(header.valid_checksum());
+                assert(header.command == .reply);
+                assert(header.commit >= session);
 
-            // Read the header and session for the entry.
-            entry.session = sessions[i];
-            entry.reply.header.* = header;
-            assert(entry.reply.header.valid_checksum());
-            assert(entry.reply.header.command == .reply);
-            assert(entry.reply.header.commit >= entry.session);
-
-            // Get the message body buffer for the entry.
-            const body_size = entry.reply.header.size - @sizeOf(vsr.Header);
-            const body = entry.reply.body()[0..body_size];
-
-            // Read the message body for the entry.
-            assert(bodies.len >= body_size);
-            stdx.copy_disjoint(.exact, u8, body, bodies[0..body_size]);
-            bodies = bodies[body_size..];
-            assert(entry.reply.header.valid_checksum_body(body));
-
-            // Insert into the client table
-            client_sessions.put(&entry);
+                client_sessions.entries_by_client.putAssumeCapacityNoClobber(header.client, i);
+                client_sessions.entries[i] = .{
+                    .session = session,
+                    .header = header.*,
+                };
+            }
         }
     }
 
     pub fn count(client_sessions: *const ClientSessions) usize {
-        return client_sessions.entries.count();
+        return client_sessions.entries_by_client.count();
     }
 
     pub fn capacity(client_sessions: *const ClientSessions) usize {
-        return client_sessions.sorted.len;
+        _ = client_sessions;
+        return constants.clients_max;
     }
 
     pub fn get(client_sessions: *ClientSessions, client: u128) ?*Entry {
-        return client_sessions.entries.getPtr(client);
+        const entry_index = client_sessions.entries_by_client.get(client) orelse return null;
+        const entry = &client_sessions.entries[entry_index];
+        assert(entry.session != 0);
+        assert(entry.header.command == .reply);
+        assert(entry.header.client == client);
+        return entry;
     }
 
-    pub fn put(client_sessions: *ClientSessions, entry: *const Entry) void {
-        const client = entry.reply.header.client;
-        client_sessions.entries.putAssumeCapacityNoClobber(client, entry.*);
+    pub fn get_slot(client_sessions: *ClientSessions, client: u128) ?ReplySlot {
+        const index = client_sessions.entries_by_client.get(client) orelse return null;
+        return ReplySlot{ .index = index };
+    }
 
-        if (constants.verify) assert(client_sessions.entries.contains(client));
+    /// If the entry is from a newly-registered client, the caller is responsible for ensuring
+    /// the ClientSessions has available capacity.
+    pub fn put(client_sessions: *ClientSessions, entry: *const Entry) ReplySlot {
+        assert(entry.session != 0);
+        assert(entry.header.command == .reply);
+        const client = entry.header.client;
+
+        defer if (constants.verify) assert(client_sessions.entries_by_client.contains(client));
+
+        if (client_sessions.entries_by_client.get(client)) |entry_index| {
+            const existing = &client_sessions.entries[entry_index];
+            assert(existing.session == entry.session);
+            assert(existing.header.client == client);
+            assert(existing.header.commit > entry.header.commit);
+
+            existing.header = entry.header;
+            return ReplySlot{ .index = entry_index };
+        } else {
+            for (client_sessions.entries) |*e, i| {
+                if (e.session == 0) {
+                    e.* = entry.*;
+                    client_sessions.entries_by_client.putAssumeCapacityNoClobber(client, i);
+                    return ReplySlot{ .index = i };
+                }
+            } else unreachable;
+        }
     }
 
     pub fn remove(client_sessions: *ClientSessions, client: u128) void {
-        assert(client_sessions.entries.remove(client));
+        const entry_index = client_sessions.entries_by_client.get(client).?;
 
-        if (constants.verify) assert(!client_sessions.entries.contains(client));
+        const removed = client_sessions.entries_by_client.remove(client);
+        assert(removed);
+
+        assert(client_sessions.entries[entry_index].header.client == client);
+        client_sessions.entries[entry_index] = std.mem.zeroes(Entry);
+
+        if (constants.verify) assert(!client_sessions.entries_by_client.contains(client));
     }
 
-    pub const Iterator = Entries.ValueIterator;
+    pub const Iterator = struct {
+        client_sessions: *const ClientSessions,
+        index: usize,
 
-    pub fn iterator(client_sessions: *ClientSessions) Iterator {
-        return client_sessions.entries.valueIterator();
+        pub fn next(it: *Iterator) ?*const Entry {
+            while (it.index < it.client_sessions.entries.len) {
+                defer it.index += 1;
+
+                const entry = &it.client_sessions.entries[it.index];
+                if (entry.session != 0) {
+                    return entry;
+                }
+            }
+            return null;
+        }
+    };
+
+    pub fn iterator(client_sessions: *const ClientSessions) Iterator {
+        return .{
+            .client_sessions = client_sessions,
+            .index = 0,
+        };
     }
 };
