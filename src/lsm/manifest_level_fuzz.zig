@@ -20,7 +20,7 @@
 //!
 //! - Tables visible to both snapshot_latest and the current snapshot can be removed.
 //! - Tables invisible to snapshot_latest but still the current snapshot cannot be removed.
-//!     - The current snapshot must be bumped which puts them in the next category:
+//! - The current snapshot must be bumped which puts them in the next category:
 //! - Tables invisible to snapshot_latest and the current snapshot can be removed.
 //!
 const std = @import("std");
@@ -205,7 +205,7 @@ const GenerateContext = struct {
                     return ctx.next(.remove_invisible);
                 }
 
-                // Decide if all tables visible ot snapshot_latest should be removed.
+                // Decide if all tables visible at snapshot_latest should be removed.
                 var amount = ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
                 if (ctx.random.boolean()) amount = visible_latest;
 
