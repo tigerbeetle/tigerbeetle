@@ -160,9 +160,11 @@ const GenerateContext = struct {
                 const visible_latest = (ctx.inserted - ctx.invisible) - ctx.updated;
                 if (visible_latest == 0) return ctx.next(.insert_tables);
 
-                // Decide if all tables visible to snapshot_latest should be updated.
-                var amount = ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
-                if (ctx.random.boolean()) amount = visible_latest;
+                // Decide if all, or tables visible to snapshot_latest should be updated.
+                var amount = if (ctx.random.boolean())
+                    visible_latest
+                else
+                    ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
 
                 ctx.updated += amount;
                 assert(ctx.invisible <= ctx.inserted);
@@ -187,8 +189,10 @@ const GenerateContext = struct {
                 }
 
                 // Decide if all invisible tables should be removed.
-                var amount = ctx.random.intRangeAtMostBiased(usize, 1, invisible);
-                if (ctx.random.boolean()) amount = invisible;
+                var amount = if (ctx.random.boolean())
+                    invisible
+                else
+                    ctx.random.intRangeAtMostBiased(usize, 1, invisible);
 
                 ctx.inserted -= amount;
                 ctx.invisible -= amount;
@@ -205,9 +209,11 @@ const GenerateContext = struct {
                     return ctx.next(.remove_invisible);
                 }
 
-                // Decide if all tables visible at snapshot_latest should be removed.
-                var amount = ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
-                if (ctx.random.boolean()) amount = visible_latest;
+                // Decide if all tables visible ot snapshot_latest should be removed.
+                var amount = if (ctx.random.boolean())
+                    visible_latest
+                else
+                    ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
 
                 ctx.inserted -= amount;
                 assert(ctx.invisible <= ctx.inserted);
