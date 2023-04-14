@@ -234,6 +234,48 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             if (was_empty) self.send_request_for_the_first_time(message);
         }
 
+        /// Sends a request, only setting request_number in the header. Currently only used by
+        /// AOF replay support to replay messages with timestamps.
+        pub fn raw_request(
+            self: *Self,
+            user_data: u128,
+            callback: Request.Callback,
+            message: *Message,
+        ) void {
+            assert(@enumToInt(message.header.operation) >= constants.vsr_operations_reserved);
+            const operation = message.header.operation.cast(StateMachine);
+
+            self.register();
+            assert(self.request_number > 0);
+
+            message.header.request = self.request_number;
+
+            log.debug("{}: request: user_data={} request={} size={} {s}", .{
+                self.id,
+                user_data,
+                message.header.request,
+                message.header.size,
+                @tagName(operation),
+            });
+
+            if (self.request_queue.full()) {
+                callback(user_data, operation, error.TooManyOutstandingRequests);
+                return;
+            }
+
+            const was_empty = self.request_queue.empty();
+
+            self.request_number += 1;
+            self.request_queue.push_assume_capacity(.{
+                .user_data = user_data,
+                .callback = callback,
+                .message = message.ref(),
+            });
+
+            // If the queue was empty, then there is no request inflight and we must send this one:
+            if (was_empty) self.send_request_for_the_first_time(message);
+        }
+
         /// Acquires a message from the message bus if one is available.
         pub fn get_message(self: *Self) *Message {
             return self.message_bus.get_message();

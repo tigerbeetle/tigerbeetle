@@ -8,6 +8,7 @@ const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
+const AOF = @import("aof.zig").AOF;
 const Storage = @import("storage.zig").Storage;
 const StorageFaultAtlas = @import("storage.zig").ClusterFaultAtlas;
 const Time = @import("time.zig").Time;
@@ -45,7 +46,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         const Self = @This();
 
         pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
-        pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
+        pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const StorageChecker = StorageCheckerType(Replica);
@@ -76,6 +77,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         network: *Network,
         storages: []Storage,
         storage_fault_atlas: *StorageFaultAtlas,
+        aofs: []AOF,
         /// NB: includes both active replicas and standbys.
         replicas: []Replica,
         replica_pools: []MessagePool,
@@ -149,6 +151,14 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
             }
             errdefer for (storages) |*storage| storage.deinit(allocator);
+
+            const aofs = try allocator.alloc(AOF, node_count);
+            errdefer allocator.free(aofs);
+
+            for (aofs) |*aof| {
+                aof.* = try AOF.init(allocator);
+            }
+            errdefer for (aofs) |*aof| aof.deinit(allocator);
 
             var replica_pools = try allocator.alloc(MessagePool, node_count);
             errdefer allocator.free(replica_pools);
@@ -232,6 +242,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .on_client_reply = on_client_reply,
                 .network = network,
                 .storages = storages,
+                .aofs = aofs,
                 .storage_fault_atlas = storage_fault_atlas,
                 .replicas = replicas,
                 .replica_pools = replica_pools,
@@ -278,6 +289,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
             for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
             for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
+            for (cluster.aofs) |*aof| aof.deinit(cluster.allocator);
 
             cluster.allocator.free(cluster.clients);
             cluster.allocator.free(cluster.client_pools);
@@ -285,6 +297,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             cluster.allocator.free(cluster.replica_health);
             cluster.allocator.free(cluster.replica_pools);
             cluster.allocator.free(cluster.storages);
+            cluster.allocator.free(cluster.aofs);
             cluster.allocator.destroy(cluster.storage_fault_atlas);
             cluster.allocator.destroy(cluster.network);
             cluster.allocator.destroy(cluster);
@@ -355,6 +368,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
                     .storage = &cluster.storages[replica_index],
+                    .aof = &cluster.aofs[replica_index],
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,
                     .message_pool = &cluster.replica_pools[replica_index],

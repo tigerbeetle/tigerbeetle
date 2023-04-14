@@ -239,6 +239,12 @@ pub fn main() !void {
     }
     assert(simulator.done());
 
+    const commits = simulator.cluster.state_checker.commits.items;
+    const last_checksum = commits[commits.len - 1].header.checksum;
+    for (simulator.cluster.aofs) |*aof| {
+        try aof.validate(last_checksum);
+    }
+
     output.info("\n          PASSED ({} ticks)", .{tick});
 }
 

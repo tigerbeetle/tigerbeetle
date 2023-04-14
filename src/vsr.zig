@@ -19,6 +19,7 @@ pub const tracer = @import("tracer.zig");
 pub const config = @import("config.zig");
 pub const stdx = @import("stdx.zig");
 pub const superblock = @import("vsr/superblock.zig");
+pub const aof = @import("aof.zig");
 pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .grid = @import("lsm/grid.zig"),
@@ -437,7 +438,7 @@ pub const Header = extern struct {
         if (self.client == 0) return "client == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
         if (self.replica != 0) return "replica != 0";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
