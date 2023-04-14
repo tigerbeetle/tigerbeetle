@@ -2,25 +2,14 @@
 
 ## Uses
 
-Account statements (optionally filtered by code, user_data, or range of amounts):
+Account statements (https://github.com/tigerbeetledb/tigerbeetle/issues/357):
 
 ``` sql
 select *
-from transfer
-where (transfer.debit_account_id = ?1 or transfer.credit_account_id = ?1)
+from account_historical
+where account_historical.id == ?1
 and transfer.timestamp < ?2
 order by transfer.timestamp desc
-limit 100
-```
-
-We may also want to include historical balances (https://github.com/tigerbeetledb/tigerbeetle/issues/357):
-
-```
-select account_history.*, account_history.transfer.*
-from account_history
-and (account_history.debit_account_id = ?1 or account_history.credit_account_id = ?1)
-and account_history.timestamp < ?2
-order by account_history.timestamp desc
 limit 100
 ```
 
@@ -84,6 +73,17 @@ select transfer.*
 from transfer
 where 1000 <= transfer.user_data <= 1999
 and timestamp("2023-Apr-01") <= transfer.timestamp < timestamp("2023-Mar-01")
+```
+
+Get the balance of an account as of some time T.
+
+``` sql
+select account_history.balance
+from account_history
+where account_history.id = ?1
+and account_history.timestamp < ?2
+order by account_history.timestamp desc
+limit 1
 ```
 
 TODO other uses.
@@ -163,15 +163,70 @@ B:
 * Abitrary filters on object.
 * Results are in field,timestamp order.
 
-## Questions
+For various important use cases we need to support range queries.
+We can't compute the intersection of range queries on two different indexes in bounded space.
+That leaves us with queries of type B above - a range query on one index to get timestamps, many point lookups on timestamp->object, and then arbitrary filters on object.
 
-Do queries have to be replicated, or can they just be executed by the replica that received them?
-The query execution itself doesn't need to be replicated, but reserving a snapshot affects grid layout (because we can't overwrite those blocks yet).
+We can't sort the output of an arbitrary range query in bounded space.
+That leaves us with returning results in the same order as the index we use for the range query.
+Since the choice of index affects the sort order of the results, it must be part of the interface.
 
-Is it ok to just return transfer/account ids and require the client to issue lookups for those?
-Or will we need to be able to return some computed values (eg `sum(transfer.amount) grouped by ...`)?
+## Proposal: Queries
 
-How should we express conditions on nested fields like transfer_flags? Maybe treat them as if they weren't nested, like 'flags_post_pending_transfer".
+A query is against a single grove, either Transfer or Account (or AccountHistory, if we add that grove).
+
+A Transfer/Account query consists of:
+
+* For each field of Transfer/Account, a closed interval of acceptable values. (The default interval in the client api should be the entire range of legal values ie no restriction).
+* A choice of one field whose index we will run the query against. The results will be sorted first by this field and then by timestamp.
+* An order for the index range query, one of ascending/descending.
+* A limit on the number of transfers/accounts to return. (The default limit should be the maximum number of transfers/accounts that can fit in a single response).
+* A limit on the number of transfers/accounts to inspect before returning. (This prevents very sparse conditions from blocking the pipeline for unbounded time).
+
+To execute a query:
+
+* Set result_count=0 and inspect_count=0.
+* Start a range iterator on the chosen index using the range specified for that field and the order specified.
+* For each field/timestamp pair:
+  * If the index chosen was not timestamp->object, lookup the associated transfer/account in the timestamp->object index.
+  * If the transfer/account meets all the other range conditions, add that transfer/account to the response and increment result_count.
+  * Increment inspect_count.
+  * See the response.page field to field/timestamp.
+  * If result_count or inspect_count have reached their limit, return the response.
+
+The response contains all the transfers/accounts found, and also the last field/timestamp pair that was inspected. 
+This allows continuing the query by sending a new query operation with the lower end of the query range for the index field set to field/(timestamp+1).
+
+For queries where the index range is [field/0, field/some_timestamp_in_the_past], the results cannot change over time and so the pagination above is consistent.
+This is sufficient for account statements (if we add an account_historical tree) and change data export - the two most critical use cases.
+For other queries, to get consistent pagination we will need to support snapshots.
+
+Queries do not need to be replicated since they have no effect on the database.
+
+Of the usecases above, this design does not support:
+
+* 'Account statements' without an account_historical tree. Answering this query using the transfer tree requires intersecting multiple sparse range queries.
+* 'Get all pending transfers for an account'. This requires a join, or we could maintain a `transfer_mutable` tree to track this state.
+* 'Get accounts/transfer with id/user_data matching a given prefix in the last month.' We can execute this, but inefficiently because it intersects two sparse range queries.
+* 'Get the balance of an account as of some time T.' We can execute this, but inefficiently because it intersects two sparse range queries.
+
+__Q:__ Do we want queries to always be executed against a node that believes it is the leader?
+
+__Q:__ Do successive queries need to be executed against the same node to ensure consistency?
+
+__Q:__ Is it ok to just return transfer/account ids and require the client to issue lookups for those, or should we return the whole transfer/account?
+
+__Q:__ How should we express conditions on nested fields like transfer_flags? Maybe treat them as if they weren't nested, like 'flags_post_pending_transfer"?
+
+## Proposal: Snapshots
+
+TODO
+
+* Snapshots affect grid layout because they prevent us from overwriting old blocks. This means that acquiring/releasing snapshots needs to be ordered in the replicated log, even though queries don't need to be.
+* How will snapshots be released? It should not be possible for errors in the client to allow an old snapshot to be persisted for a long time.
+  * On client disconnect/crash, release all snapshots for that client.
+  * In the client api, limit the number of snapshots (to 1?) so that old snapshots must be released before starting new queries.
+  * Place a time limit on snapshots, after which querying the snapshot returns an error?
 
 ## Testing
 
