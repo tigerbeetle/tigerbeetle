@@ -59,6 +59,8 @@ pub const AOF = struct {
     }
 
     pub fn validate(self: *AOF, last_checksum: u128) !void {
+        self.validation_checksums.clearAndFree();
+
         var it = self.iterator();
 
         // The iterator only does simple chain validation, but we can have backtracking
