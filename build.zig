@@ -349,6 +349,11 @@ pub fn build(b: *std.build.Builder) void {
             .description = "Fuzz the ManifestLog. Args: [--seed <seed>] [--events-max <count>]",
         },
         .{
+            .name = "fuzz_lsm_manifest_level",
+            .file = "src/lsm/manifest_level_fuzz.zig",
+            .description = "Fuzz the ManifestLevel. Args: [--seed <seed>] [--events-max <count>]",
+        },
+        .{
             .name = "fuzz_lsm_tree",
             .file = "src/lsm/tree_fuzz.zig",
             .description = "Fuzz the LSM tree. Args: [--seed <seed>] [--events-max <count>]",
