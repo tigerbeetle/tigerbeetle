@@ -2354,6 +2354,7 @@ pub fn ReplicaType(
                         header.checksum,
                     });
 
+                    self.client_replies.on_ready(client_replies_ready_callback);
                     self.commit_ops_done();
                     return;
                 }
@@ -2833,6 +2834,7 @@ pub fn ReplicaType(
                         prepare.message.header.checksum,
                     });
 
+                    self.client_replies.on_ready(client_replies_ready_callback);
                     self.commit_ops_done();
                     return;
                 }
@@ -2973,25 +2975,16 @@ pub fn ReplicaType(
             assert(self.client_table().count() <= constants.clients_max);
 
             if (reply.header.size != @sizeOf(Header)) {
-                self.client_replies.write_reply(reply_slot, reply, client_replies_write_callback);
+                self.client_replies.write_reply(reply_slot, reply);
             }
         }
 
-        fn client_replies_write_callback(
-            client_replies: *ClientReplies,
-            wrote: *Message,
-        ) void {
+        fn client_replies_ready_callback(client_replies: *ClientReplies) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.client_replies.can_write_reply());
-            maybe(self.committing);
-
-            log.debug("{}: client_replies: wrote (client={} request={})", .{
-                client_replies.replica,
-                wrote.header.client,
-                wrote.header.request,
-            });
+            assert(!self.committing);
 
             // Committing may have stopped prematurely because the ClientReplies was busy.
             // It isn't busy anymore — attempt to resume it.
@@ -6218,7 +6211,6 @@ pub fn ReplicaType(
                     self.client_replies.write_reply(
                         self.client_table().get_slot(reply.header.client).?,
                         reply,
-                        client_replies_write_callback,
                     );
                 }
             } else {
