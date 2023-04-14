@@ -38,4 +38,6 @@ test {
     _ = @import("vsr/superblock_free_set.zig");
     _ = @import("vsr/superblock_manifest.zig");
     _ = @import("vsr/superblock_quorums.zig");
+
+    _ = @import("aof.zig");
 }

@@ -26,6 +26,8 @@ pub const vsr_options = .{
     .config_base = vsr.config.ConfigBase.default,
     .tracer_backend = vsr.config.TracerBackend.none,
     .hash_log_mode = vsr.config.HashLogMode.none,
+    .config_aof = @as(?bool, false),
+    .config_aof_recovery = @as(?bool, false),
 };
 
 pub fn request(

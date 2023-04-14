@@ -33,6 +33,11 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
+    const aof_record_enable = b.option(bool, "config-aof-record", "Enable AOF Recording.") orelse false;
+    const aof_recovery_enable = b.option(bool, "config-aof-recovery", "Enable AOF Recovery mode.") orelse false;
+    options.addOption(bool, "config_aof_record", aof_record_enable);
+    options.addOption(bool, "config_aof_recovery", aof_recovery_enable);
+
     const hash_log_mode = b.option(
         config.HashLogMode,
         "hash-log-mode",
@@ -86,6 +91,21 @@ pub fn build(b: *std.build.Builder) void {
         if (b.args) |args| run_cmd.addArgs(args);
 
         const run_step = b.step("benchmark", "Run TigerBeetle benchmark");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    {
+        const aof = b.addExecutable("aof", "src/aof.zig");
+        aof.setTarget(target);
+        aof.setBuildMode(mode);
+        aof.install();
+        aof.addOptions("vsr_options", options);
+        link_tracer_backend(aof, tracer_backend, target);
+
+        const run_cmd = aof.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("aof", "Run TigerBeetle AOF Utility");
         run_step.dependOn(&run_cmd.step);
     }
 

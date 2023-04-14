@@ -956,22 +956,27 @@ pub const IO = struct {
         dir_handle: os.fd_t,
         relative_path: []const u8,
         size: u64,
-        must_create: bool,
+        method: enum { create, create_or_open, open },
     ) !os.fd_t {
         assert(relative_path.len > 0);
-        assert(size >= constants.sector_size);
         assert(size % constants.sector_size == 0);
 
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL
         var creation_disposition: os.windows.DWORD = 0;
-        if (must_create) {
-            log.info("creating \"{s}\"...", .{relative_path});
-            creation_disposition = os.windows.FILE_CREATE;
-        } else {
-            log.info("opening \"{s}\"...", .{relative_path});
-            creation_disposition = os.windows.OPEN_EXISTING;
+        switch (method) {
+            .create => {
+                creation_disposition = os.windows.FILE_CREATE;
+                log.info("creating \"{s}\"...", .{relative_path});
+            },
+            .create_or_open => {
+                @panic("create_or_open is unsupported on Windows.");
+            },
+            .open => {
+                log.info("opening \"{s}\"...", .{relative_path});
+                creation_disposition = os.windows.OPEN_EXISTING;
+            },
         }
 
         // O_EXCL
@@ -1025,7 +1030,7 @@ pub const IO = struct {
         };
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
-        if (must_create) {
+        if (method == .create) {
             log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
             fs_allocate(handle, size) catch {
                 log.warn("file system failed to preallocate the file memory", .{});

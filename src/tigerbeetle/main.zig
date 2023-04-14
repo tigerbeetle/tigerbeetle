@@ -19,12 +19,14 @@ const fatal = cli.fatal;
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const Storage = vsr.storage.Storage;
+const AOF = vsr.aof.AOF;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time);
+const AOFType = if (constants.aof_record) AOF else void;
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOFType);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
@@ -79,7 +81,7 @@ const Command = struct {
         errdefer os.close(command.dir_fd);
 
         const basename = std.fs.path.basename(path);
-        command.fd = try IO.open_file(command.dir_fd, basename, data_file_size_min, must_create);
+        command.fd = try IO.open_file(command.dir_fd, basename, data_file_size_min, if (must_create) .create else .open);
         errdefer os.close(command.fd);
 
         command.io = try IO.init(128, 0);
@@ -139,11 +141,20 @@ const Command = struct {
         try command.init(allocator, args.path, false);
         defer command.deinit(allocator);
 
+        var aof: AOFType = undefined;
+        if (constants.aof_record) {
+            var aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
+            defer allocator.free(aof_path);
+
+            aof = try AOF.from_absolute_path(aof_path);
+        }
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(u8, args.addresses.len),
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
+            .aof = &aof,
             .message_pool = &command.message_pool,
             .time = .{},
             .state_machine_options = .{
@@ -185,6 +196,11 @@ const Command = struct {
             replica.cluster,
             args.addresses[replica.replica],
         });
+
+        if (constants.aof_recovery) {
+            log_main.warn("{}: started in AOF recovery mode. This is potentially dangerous - " ++
+                "if it's unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.", .{replica.replica});
+        }
 
         while (true) {
             replica.tick();

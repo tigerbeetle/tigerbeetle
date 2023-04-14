@@ -68,6 +68,7 @@ pub fn ReplicaType(
     comptime MessageBus: type,
     comptime Storage: type,
     comptime Time: type,
+    comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
     const SuperBlock = vsr.SuperBlockType(Storage);
@@ -347,12 +348,15 @@ pub fn ReplicaType(
         tracer_slot_commit: ?tracer.SpanStart = null,
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
+        aof: *AOF,
+
         const OpenOptions = struct {
             node_count: u8,
             storage_size_limit: u64,
             storage: *Storage,
             message_pool: *MessagePool,
             time: Time,
+            aof: *AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
         };
@@ -405,6 +409,7 @@ pub fn ReplicaType(
                 .replica_count = replica_count,
                 .standby_count = options.node_count - replica_count,
                 .storage = options.storage,
+                .aof = options.aof,
                 .time = options.time,
                 .message_pool = options.message_pool,
                 .state_machine_options = options.state_machine_options,
@@ -578,6 +583,7 @@ pub fn ReplicaType(
             replica_index: u8,
             time: Time,
             storage: *Storage,
+            aof: *AOF,
             message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
@@ -751,6 +757,8 @@ pub fn ReplicaType(
                     .after = 50,
                 },
                 .prng = std.rand.DefaultPrng.init(replica_index),
+
+                .aof = options.aof,
             };
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{
@@ -2660,7 +2668,29 @@ pub fn ReplicaType(
                 self.state_machine.commit_timestamp,
                 prepare.header.timestamp,
             });
-            assert(self.state_machine.commit_timestamp < prepare.header.timestamp);
+            assert(self.state_machine.commit_timestamp < prepare.header.timestamp or constants.aof_recovery);
+
+            // Synchronously record this request in our AOF. This can be used for disaster recovery
+            // in the case of catastrophic storage failure. Internally, write() will only return
+            // once the data has been written to disk with O_DIRECT and O_SYNC.
+            //
+            // We run this here, instead of in state_machine, so we can have full access to the VSR
+            // header information. This way we can just log the Prepare in its entirety.
+            //
+            // A minor detail, but this is not a WAL. Hence the name being AOF - since it's similar
+            // to how Redis's Append Only File works. It's also technically possible for a request
+            // to be recorded by the AOF, with the client not having received a response
+            // (eg, a panic right after writing to the AOF before sending the response) but we
+            // consider this harmless due to our requirement for unique Account / Transfer IDs.
+            //
+            // It should be impossible for a client to receive a response without the request
+            // being logged by at least one replica.
+            if (AOF != void) {
+                self.aof.write(prepare, .{
+                    .replica = self.replica,
+                    .primary = self.primary_index(self.view),
+                }) catch @panic("aof failure");
+            }
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
                 prepare.header.client,
@@ -2671,7 +2701,7 @@ pub fn ReplicaType(
                 reply.buffer[@sizeOf(Header)..],
             ));
 
-            assert(self.state_machine.commit_timestamp <= prepare.header.timestamp);
+            assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or constants.aof_recovery);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
 
             self.commit_min += 1;
@@ -3925,7 +3955,16 @@ pub fn ReplicaType(
             message.header.view = self.view;
             message.header.op = self.op + 1;
             message.header.commit = self.commit_max;
-            message.header.timestamp = prepare_timestamp;
+
+            // When running in AOF recovery mode, we allow clients to set a timestamp explicitly, but
+            // they can still pass in 0.
+            if (constants.aof_recovery) {
+                if (message.header.timestamp == 0) {
+                    message.header.timestamp = prepare_timestamp;
+                }
+            } else {
+                message.header.timestamp = prepare_timestamp;
+            }
             message.header.replica = self.replica;
             message.header.command = .prepare;
 
