@@ -219,7 +219,7 @@ pub const ClientSessions = struct {
 
     pub const Iterator = struct {
         client_sessions: *const ClientSessions,
-        index: usize,
+        index: usize = 0,
 
         pub fn next(it: *Iterator) ?*const Entry {
             while (it.index < it.client_sessions.entries.len) {
@@ -235,9 +235,6 @@ pub const ClientSessions = struct {
     };
 
     pub fn iterator(client_sessions: *const ClientSessions) Iterator {
-        return .{
-            .client_sessions = client_sessions,
-            .index = 0,
-        };
+        return .{ .client_sessions = client_sessions };
     }
 };

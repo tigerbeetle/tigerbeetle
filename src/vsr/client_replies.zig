@@ -40,7 +40,6 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         const Write = struct {
             client_replies: *ClientReplies,
             completion: Storage.Write,
-            callback: fn (client_replies: *ClientReplies, wrote: *Message) void,
             slot: Slot,
             message: *Message,
         };
@@ -59,6 +58,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         /// Guard against multiple concurrent writes to the same slot.
         /// Pointers are into `writes`.
         write_queue: RingBuffer(*Write, constants.client_replies_iops_write_max, .array) = .{},
+
+        ready_callback: ?fn (*ClientReplies) void = null,
 
         checkpoint_next_tick: Storage.NextTick = undefined,
         checkpoint_callback: ?fn (*ClientReplies) void = null,
@@ -207,12 +208,21 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             return client_replies.writes.available() > 0;
         }
 
-        pub fn write_reply(
+        /// Call `callback` when can_write_reply() is true.
+        pub fn on_ready(
             client_replies: *ClientReplies,
-            slot: Slot,
-            message: *Message,
-            callback: fn (client_replies: *ClientReplies, wrote: *Message) void,
+            callback: fn (client_replies: *ClientReplies) void,
         ) void {
+            assert(!client_replies.can_write_reply());
+
+            if (client_replies.ready_callback) |ready_callback| {
+                assert(ready_callback == callback);
+            } else {
+                client_replies.ready_callback = callback;
+            }
+        }
+
+        pub fn write_reply(client_replies: *ClientReplies, slot: Slot, message: *Message) void {
             assert(client_replies.can_write_reply());
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
@@ -223,7 +233,6 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             write.* = .{
                 .client_replies = client_replies,
                 .completion = undefined,
-                .callback = callback,
                 .message = message.ref(),
                 .slot = slot,
             };
@@ -259,17 +268,28 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         fn write_reply_callback(completion: *Storage.Write) void {
             const write = @fieldParentPtr(ClientReplies.Write, "completion", completion);
             const client_replies = write.client_replies;
-            const callback = write.callback;
             const message = write.message;
+
+            log.debug("{}: write_reply: wrote (client={} request={})", .{
+                client_replies.replica,
+                message.header.client,
+                message.header.request,
+            });
 
             // Release the write *before* invoking the callback, so that if the callback
             // uses can_write_reply() it doesn't appear busy when its not.
             client_replies.writing.unset(write.slot.index);
             client_replies.writes.release(write);
-            callback(client_replies, message);
 
             client_replies.message_pool.unref(message);
             client_replies.write_reply_next();
+
+            if (client_replies.ready_callback) |ready_callback| {
+                assert(client_replies.can_write_reply());
+
+                client_replies.ready_callback = null;
+                ready_callback(client_replies);
+            }
 
             if (client_replies.checkpoint_callback != null and
                 client_replies.writes.executing() == 0)
