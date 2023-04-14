@@ -73,6 +73,13 @@ pub const AOF = struct {
             const header = entry.header();
             if (self.validation_checksums.count() != 0) {
                 assert(self.validation_checksums.get(header.parent) != null);
+            } else {
+                // For op=1, put its parent in our list of seen checksums too.
+                // This handles the case where it gets replayed, so count() != 0,
+                // but we don't record op=0 so the assert above would fail.
+                // It's needed for simulator validation only (aof merge uses a
+                // different method to walk down AOF entries).
+                try self.validation_checksums.put(header.parent, {});
             }
             try self.validation_checksums.put(header.checksum, {});
 
