@@ -143,6 +143,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             errdefer allocator.free(storages);
 
             for (storages) |*storage, replica_index| {
+                errdefer for (storages[0..replica_index]) |*s| s.deinit(allocator);
                 var storage_options = options.storage;
                 storage_options.replica_index = @intCast(u8, replica_index);
                 storage_options.fault_atlas = storage_fault_atlas;
@@ -155,7 +156,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             const aofs = try allocator.alloc(AOF, node_count);
             errdefer allocator.free(aofs);
 
-            for (aofs) |*aof| {
+            for (aofs) |*aof, i| {
+                errdefer for (aofs[0..i]) |*a| a.deinit(allocator);
                 aof.* = try AOF.init(allocator);
             }
             errdefer for (aofs) |*aof| aof.deinit(allocator);
@@ -257,6 +259,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             };
 
             for (cluster.replicas) |_, replica_index| {
+                errdefer for (replicas[0..replica_index]) |*r| r.deinit(allocator);
                 try cluster.open_replica(@intCast(u8, replica_index), .{
                     .resolution = constants.tick_ms * std.time.ns_per_ms,
                     .offset_type = .linear,
