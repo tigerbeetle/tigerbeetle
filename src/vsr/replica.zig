@@ -825,8 +825,8 @@ pub fn ReplicaType(
             }
         }
 
-        /// The client table records for each client the latest session and the latest committed reply.
-        inline fn client_table(self: *Self) *ClientSessions {
+        /// ClientSessions records for each client the latest session and the latest committed reply.
+        inline fn client_sessions(self: *Self) *ClientSessions {
             return &self.superblock.client_sessions;
         }
 
@@ -2764,11 +2764,11 @@ pub fn ReplicaType(
                 // We are recovering from a checkpoint. Prior to the crash, the client table was
                 // updated with entries for one bar beyond the op_checkpoint.
                 assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
-                if (self.client_table().get(prepare.header.client)) |entry| {
+                if (self.client_sessions().get(prepare.header.client)) |entry| {
                     assert(entry.header.command == .reply);
                     assert(entry.header.op >= prepare.header.op);
                 } else {
-                    assert(self.client_table().count() == self.client_table().capacity());
+                    assert(self.client_sessions().count() == self.client_sessions().capacity());
                 }
 
                 log.debug("{}: commit_op: skip client table update: prepare.op={} checkpoint={}", .{
@@ -2913,12 +2913,12 @@ pub fn ReplicaType(
             // we do require that all entries have different commit numbers and are iterated.
             // This ensures that we will always pick the entry with the oldest commit number.
             // We also check that a client has only one entry in the hash map (or it's buggy).
-            const clients = self.client_table().count();
+            const clients = self.client_sessions().count();
             assert(clients <= constants.clients_max);
             if (clients == constants.clients_max) {
                 var evictee: ?*const Header = null;
                 var iterated: usize = 0;
-                var iterator = self.client_table().iterator();
+                var iterator = self.client_sessions().iterator();
                 while (iterator.next()) |entry| : (iterated += 1) {
                     assert(entry.header.command == .reply);
                     assert(entry.header.context == 0);
@@ -2943,7 +2943,7 @@ pub fn ReplicaType(
                     constants.clients_max,
                     evictee.?.client,
                 });
-                self.client_table().remove(evictee.?.client);
+                self.client_sessions().remove(evictee.?.client);
             }
 
             log.debug("{}: create_client_table_entry: write (client={} session={} request={})", .{
@@ -2955,11 +2955,11 @@ pub fn ReplicaType(
 
             // Any duplicate .register requests should have received the same session number if the
             // client table entry already existed, or been dropped if a session was being committed:
-            const reply_slot = self.client_table().put(&.{
+            const reply_slot = self.client_sessions().put(&.{
                 .session = session,
                 .header = reply.header.*,
             });
-            assert(self.client_table().count() <= constants.clients_max);
+            assert(self.client_sessions().count() <= constants.clients_max);
 
             if (reply.header.size != @sizeOf(Header)) {
                 self.client_replies.write_reply(reply_slot, reply);
@@ -3413,7 +3413,7 @@ pub fn ReplicaType(
             assert(message.header.context == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
 
-            if (self.client_table().get(message.header.client)) |entry| {
+            if (self.client_sessions().get(message.header.client)) |entry| {
                 assert(entry.header.command == .reply);
                 assert(entry.header.client == message.header.client);
 
@@ -3441,7 +3441,7 @@ pub fn ReplicaType(
                             self.send_header_to_client(message.header.client, entry.header);
                         } else {
                             self.client_replies.read_reply(
-                                self.client_table().get_slot(message.header.client).?,
+                                self.client_sessions().get_slot(message.header.client).?,
                                 entry,
                                 on_request_read_reply_callback,
                             );
@@ -6154,7 +6154,7 @@ pub fn ReplicaType(
             assert(reply.header.commit > 0);
             assert(reply.header.request > 0);
 
-            if (self.client_table().get(reply.header.client)) |entry| {
+            if (self.client_sessions().get(reply.header.client)) |entry| {
                 assert(entry.header.command == .reply);
                 assert(entry.header.context == 0);
                 assert(entry.header.op == entry.header.commit);
@@ -6178,7 +6178,7 @@ pub fn ReplicaType(
                 entry.header = reply.header.*;
                 if (entry.header.size != @sizeOf(Header)) {
                     self.client_replies.write_reply(
-                        self.client_table().get_slot(reply.header.client).?,
+                        self.client_sessions().get_slot(reply.header.client).?,
                         reply,
                     );
                 }
