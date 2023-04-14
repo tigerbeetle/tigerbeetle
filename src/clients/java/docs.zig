@@ -1,7 +1,7 @@
 const Docs = @import("../docs_types.zig").Docs;
 
 pub const JavaDocs = Docs{
-    .readme = "java/README.md",
+    .directory = "java",
 
     .markdown_name = "java",
     .extension = "java",
@@ -92,21 +92,16 @@ pub const JavaDocs = Docs{
     .install_prereqs = "apk add -U maven openjdk11",
 
     .current_commit_pre_install_commands = 
-    \\mvn deploy:deploy-file -Durl=file://$(pwd) -Dfile=$(find . -name '*-SNAPSHOT.jar') -DgroupId=com.tigerbeetle -DartifactId=tigerbeetle-java -Dpackaging=jar -Dversion=0.0.1-3431
+    \\mvn deploy:deploy-file -Durl=file://$SAMPLE_ROOT -Dfile=$(find . -name '*-SNAPSHOT.jar') -DgroupId=com.tigerbeetle -DartifactId=tigerbeetle-java -Dpackaging=jar -Dversion=0.0.1-3431
     \\mkdir -p $HOME/.m2/
-    \\echo '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd"><localRepository>'$(pwd)'</localRepository></settings>' > $HOME/.m2/settings.xml
+    \\echo '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd"><localRepository>'$SAMPLE_ROOT'</localRepository></settings>' > $HOME/.m2/settings.xml
     ,
 
     .current_commit_post_install_commands = "",
 
-    .install_commands = 
-    \\mvn install
-    ,
-
-    .install_sample_file_build_commands = 
-    \\mvn compile
-    ,
-    .install_sample_file_test_commands = "mvn exec:java",
+    .install_commands = "mvn install",
+    .build_commands = "mvn compile",
+    .run_commands = "mvn exec:java",
 
     .install_documentation = "",
 
@@ -389,15 +384,16 @@ pub const JavaDocs = Docs{
     ,
 
     .developer_setup_sh_commands = 
-    \\git clone https://github.com/tigerbeetledb/tigerbeetle
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
     \\cd src/clients/java
     \\./scripts/install.sh
-    \\[ "$TEST" = "true" ] && mvn test || echo "Skipping client unit tests"
+    \\if [ "$TEST" = "true" ]; then mvn test; else echo "Skipping client unit tests"; fi
     ,
 
-    .developer_setup_pwsh_commands = "",
+    .developer_setup_pwsh_commands = 
+    \\cd src/clients/java
+    \\.\scripts\install.bat
+    \\if ($env:TEST -q "true") { mvn test } else { echo "Skipping client unit test" }
+    ,
 
     .test_main_prefix = 
     \\package com.tigerbeetle.examples;

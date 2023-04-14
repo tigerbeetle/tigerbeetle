@@ -1,7 +1,7 @@
 const Docs = @import("../docs_types.zig").Docs;
 
 pub const NodeDocs = Docs{
-    .readme = "node/README.md",
+    .directory = "node",
 
     .markdown_name = "javascript",
     .extension = "js",
@@ -33,16 +33,16 @@ pub const NodeDocs = Docs{
     \\console.log("Import ok!");
     ,
 
-    .install_sample_file_build_commands = "npm install typescript @types/node && npx tsc --allowJs --noEmit test.js",
-    .install_sample_file_test_commands = "node run test.js",
+    .install_commands = "npm install tigerbeetle-node",
+    .build_commands = "npm install typescript @types/node && npx tsc --allowJs --noEmit main.js",
+    .run_commands = "node main.js",
 
     .current_commit_pre_install_commands = "",
     .current_commit_post_install_commands = 
     \\npm remove tigerbeetle-node
-    \\npm install ./tigerbeetle/src/clients/node/tigerbeetle-node-*.tgz
+    \\npm install $TB_ROOT/src/clients/node/tigerbeetle-node-*.tgz
     ,
 
-    .install_commands = "npm install tigerbeetle-node",
     .install_documentation = 
     \\If you run into issues, check out the distribution-specific install
     \\steps that are run in CI to test support:
@@ -300,14 +300,15 @@ pub const NodeDocs = Docs{
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_sh_commands = 
-    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
-    \\./scripts/install_zig.sh
     \\cd src/clients/node
     \\npm install --include dev
     \\npm pack
     ,
+
+    // TODO(phil): node tests are the only ones that expect to have a TigerBeetle instance running.
+    // From what I can tell they were never running in CI since I was the first person to add anything Node to CI.
+    // Soon what it tests will be replaced with sample code that is integration tested anyway.
+    // \\if [ "$TEST" = "true" ]; then npm test; else echo "Skipping client unit tests"; fi
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.

@@ -11,14 +11,30 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const java_docs = @import("./java/docs.zig").JavaDocs;
+const go_docs = @import("./go/docs.zig").GoDocs;
+const node_docs = @import("./node/docs.zig").NodeDocs;
+const cmd_sep = @import("./docs_generate.zig").cmd_sep;
 const run = @import("./docs_generate.zig").run;
-const run_with_env = @import("./docs_generate.zig").run_with_env;
+const run_shell = @import("./docs_generate.zig").run_shell;
+const shell_wrap = @import("./docs_generate.zig").shell_wrap;
 const TmpDir = @import("./docs_generate.zig").TmpDir;
 const git_root = @import("./docs_generate.zig").git_root;
 const run_with_tb = @import("./run_with_tb.zig").run_with_tb;
 const file_or_directory_exists = @import("./run_with_tb.zig").file_or_directory_exists;
 const script_filename = @import("./run_with_tb.zig").script_filename;
 const binary_filename = @import("./run_with_tb.zig").binary_filename;
+
+fn append_shell_newlines(into: *std.ArrayList([]const u8), from: []const u8) !void {
+    if (from.len == 0) {
+        return;
+    }
+
+    var lines = std.mem.split(u8, from, "\n");
+    while (lines.next()) |line| {
+        try into.append(line);
+    }
+}
 
 // Caller is responsible for resetting to a good cwd after this completes.
 fn find_tigerbeetle_client_jar(arena: *std.heap.ArenaAllocator) ![]const u8 {
@@ -114,13 +130,26 @@ fn prepare_java_sample_integration_test(
     );
 
     // Run mvn referencing local settings.xml and local JAR
-    const cmdSep = if (builtin.os.tag == .windows) ";" else "&&";
-    _ = try cmds.appendSlice(&[_][]const u8{
-        if (builtin.os.tag == .windows) "powershell" else "sh",
-        "-c",
-        "mvn -s local-settings.xml install " ++ cmdSep ++
-            " mvn -s local-settings.xml exec:java",
-    });
+    try append_shell_newlines(
+        cmds,
+        try std.mem.replaceOwned(
+            u8,
+            arena.allocator(),
+            java_docs.install_commands,
+            "mvn",
+            "mvn -s local-settings.xml",
+        ),
+    );
+    try append_shell_newlines(
+        cmds,
+        try std.mem.replaceOwned(
+            u8,
+            arena.allocator(),
+            java_docs.run_commands,
+            "mvn",
+            "mvn -s local-settings.xml",
+        ),
+    );
 }
 
 fn prepare_go_sample_integration_test(
@@ -176,7 +205,10 @@ fn prepare_go_sample_integration_test(
         "tidy",
     });
 
-    _ = try cmds.appendSlice(&[_][]const u8{ "go", "run", "main.go" });
+    try append_shell_newlines(
+        cmds,
+        go_docs.run_commands,
+    );
 }
 
 // Caller is responsible for resetting to a good cwd after this completes.
@@ -236,10 +268,10 @@ fn prepare_node_sample_integration_test(
     });
 
     // Store the way to run the main program.
-    try cmds.appendSlice(&[_][]const u8{
-        "node",
-        "main.js",
-    });
+    try append_shell_newlines(
+        cmds,
+        node_docs.run_commands,
+    );
 }
 
 fn copy_into_tmp_dir(
@@ -248,12 +280,15 @@ fn copy_into_tmp_dir(
 ) !TmpDir {
     var t = try TmpDir.init(arena);
 
-    try run(arena, &[_][]const u8{
-        if (builtin.os.tag == .windows) "powershell" else "sh",
-        "-c",
+    try run_shell(
+        arena,
         // Should actually work on Windows as well!
-        try std.fmt.allocPrint(arena.allocator(), "cp -r {s}/* {s}/", .{ sample_dir, t.path }),
-    });
+        try std.fmt.allocPrint(
+            arena.allocator(),
+            "cp -r {s}/* {s}/",
+            .{ sample_dir, t.path },
+        ),
+    );
 
     return t;
 }
@@ -343,7 +378,18 @@ fn error_main() !void {
         .none => unreachable, // proven previously
     }
 
-    try run_with_tb(&arena, cmds.items, tmp_copy.path);
+    try run_with_tb(
+        &arena,
+        try shell_wrap(
+            &arena,
+            try std.mem.join(
+                arena.allocator(),
+                cmd_sep,
+                cmds.items,
+            ),
+        ),
+        tmp_copy.path,
+    );
 }
 
 // Returning errors in main produces useless traces, at least for some

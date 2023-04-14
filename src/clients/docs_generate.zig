@@ -5,6 +5,9 @@ const Docs = @import("./docs_types.zig").Docs;
 const go = @import("./go/docs.zig").GoDocs;
 const node = @import("./node/docs.zig").NodeDocs;
 const java = @import("./java/docs.zig").JavaDocs;
+const samples = @import("./docs_samples.zig").samples;
+
+pub const cmd_sep = if (builtin.os.tag == .windows) ";" else "&&";
 
 const languages = [_]Docs{ go, node, java };
 
@@ -70,10 +73,13 @@ const MarkdownWriter = struct {
     }
 
     fn diffOnDisk(mw: *MarkdownWriter, filename: []const u8) !bool {
-        const file = try std.fs.cwd().createFile(
+        const file = std.fs.cwd().createFile(
             filename,
             .{ .read = true, .truncate = false },
-        );
+        ) catch |e| {
+            std.debug.print("Could not open file for reading: {s}.\n", .{filename});
+            return e;
+        };
         const fSize = (try file.stat()).size;
         if (fSize != mw.buf.items.len) {
             return true;
@@ -158,8 +164,8 @@ pub fn run_with_env(
     std.debug.print("\n", .{});
 
     var cp = try std.ChildProcess.init(cmd, arena.allocator());
-    var env_map = try std.process.getEnvMap(arena.allocator());
 
+    var env_map = try std.process.getEnvMap(arena.allocator());
     i = 0;
     while (i < env.len) : (i += 2) {
         try env_map.put(env[i], env[i + 1]);
@@ -178,11 +184,44 @@ pub fn run_with_env(
     }
 }
 
+// Needs to have -e for `sh` otherwise the command might not fail.
+pub fn shell_wrap(arena: *std.heap.ArenaAllocator, cmd: []const u8) ![]const []const u8 {
+    var wrapped = std.ArrayList([]const u8).init(arena.allocator());
+    if (builtin.os.tag == .windows) {
+        try wrapped.append("powershell");
+    } else {
+        try wrapped.append("sh");
+        try wrapped.append("-e");
+    }
+    try wrapped.append("-c");
+    try wrapped.append(cmd);
+    return wrapped.items;
+}
+
+pub fn run_shell_with_env(
+    arena: *std.heap.ArenaAllocator,
+    cmd: []const u8,
+    env: []const []const u8,
+) !void {
+    try run_with_env(
+        arena,
+        try shell_wrap(arena, cmd),
+        env,
+    );
+}
+
 pub fn run(
     arena: *std.heap.ArenaAllocator,
     cmd: []const []const u8,
 ) !void {
     try run_with_env(arena, cmd, &.{});
+}
+
+pub fn run_shell(
+    arena: *std.heap.ArenaAllocator,
+    cmd: []const u8,
+) !void {
+    try run_shell_with_env(arena, cmd, &.{});
 }
 
 pub const TmpDir = struct {
@@ -242,21 +281,13 @@ const Generator = struct {
     language: Docs,
     test_file_name: []const u8,
 
-    const DockerCommand = struct {
-        cmds: []const u8,
-        mount: ?[][]const u8,
-        env: ?[][]const u8,
-    };
-
-    const docker_mount_path = "/tmp/wrk";
-
     fn init(
         arena: *std.heap.ArenaAllocator,
         language: Docs,
     ) !Generator {
         var test_file_name = language.test_file_name;
         if (test_file_name.len == 0) {
-            test_file_name = "test";
+            test_file_name = "main";
         }
 
         return Generator{
@@ -266,41 +297,15 @@ const Generator = struct {
         };
     }
 
-    fn run_in_docker(self: Generator, cmd: DockerCommand) !void {
-        self.printf(
-            "Running command in Docker: {s}",
-            .{cmd.cmds},
-        );
-
-        var full_cmd = std.ArrayList([]const u8).init(self.arena.allocator());
-        defer full_cmd.deinit();
-
-        try full_cmd.appendSlice(&[_][]const u8{
-            "docker",
-            "run",
-        });
-        if (cmd.mount) |mounts| {
-            for (mounts) |entry| {
-                try full_cmd.append("-v");
-                try full_cmd.append(entry);
-            }
+    fn write_shell_newlines_into_single_line(into: *std.ArrayList(u8), from: []const u8) !void {
+        if (from.len == 0) {
+            return;
         }
 
-        if (cmd.env) |envs| {
-            for (envs) |entry| {
-                try full_cmd.append("-e");
-                try full_cmd.append(entry);
-            }
+        var lines = std.mem.split(u8, from, "\n");
+        while (lines.next()) |line| {
+            try into.writer().print("{s} {s} ", .{ line, cmd_sep });
         }
-
-        try full_cmd.appendSlice(&[_][]const u8{
-            self.language.test_linux_docker_image,
-            "sh",
-            "-c",
-            cmd.cmds,
-        });
-
-        try run(self.arena, full_cmd.items);
     }
 
     fn ensure_path(self: Generator, path: []const u8) !void {
@@ -313,13 +318,7 @@ const Generator = struct {
         try dir.makePath(path);
     }
 
-    fn run_with_file_in_docker(
-        self: Generator,
-        tmp_dir: TmpDir,
-        file: []const u8,
-        file_name: ?[]const u8,
-        cmd: DockerCommand,
-    ) !void {
+    fn build_file_within_project(self: Generator, tmp_dir: TmpDir, file: []const u8, run_setup_tests: bool) !void {
         var tmp_file_name = self.sprintf(
             "{s}/{s}{s}.{s}",
             .{
@@ -329,110 +328,13 @@ const Generator = struct {
                 self.language.extension,
             },
         );
-        if (file_name) |name| {
-            tmp_file_name = self.sprintf(
-                "{s}/{s}",
-                .{ tmp_dir.path, name },
-            );
-        }
-
         try self.ensure_path(std.fs.path.dirname(tmp_file_name).?);
-
-        self.printf(
-            "Mounting in file ({s}):\n```\n{s}\n```",
-            .{ tmp_file_name, file },
-        );
-
         var tmp_file = try std.fs.cwd().createFile(tmp_file_name, .{
             .truncate = true,
         });
         defer tmp_file.close();
         _ = try tmp_file.write(file);
 
-        var full_cmd = std.ArrayList(u8).init(self.arena.allocator());
-        defer full_cmd.deinit();
-
-        try full_cmd.writer().print(
-            "cd {s} && apk add -U build-base git xz",
-            .{docker_mount_path},
-        );
-        if (self.language.install_prereqs.len > 0) {
-            try full_cmd.writer().print(
-                " && {s}",
-                .{self.language.install_prereqs},
-            );
-        }
-
-        try full_cmd.writer().print(" && {s}", .{cmd.cmds});
-
-        var mount = std.ArrayList([]const u8).init(self.arena.allocator());
-        defer mount.deinit();
-        if (cmd.mount) |m| {
-            try mount.appendSlice(m);
-        }
-        try mount.append(self.sprintf(
-            "{s}:{s}",
-            .{ tmp_dir.path, docker_mount_path },
-        ));
-
-        try self.run_in_docker(
-            .{
-                .cmds = full_cmd.items,
-                .mount = mount.items,
-                .env = cmd.env,
-            },
-        );
-    }
-
-    fn get_current_commit_and_repo_env(self: Generator) !std.ArrayList([]const u8) {
-        var env = std.ArrayList([]const u8).init(self.arena.allocator());
-
-        for (&[_][]const u8{
-            "GIT_SHA",
-            // TODO: this won't run correctly on forks that are testing
-            // *locally*. But it will run correctly for forks being tested in
-            // Github Actions.
-            // Could fix it by parsing `git remote -v` or something.
-            "GITHUB_REPOSITORY",
-        }) |env_var_name| {
-            if (std.os.getenv(env_var_name)) |value| {
-                try env.append(self.sprintf(
-                    "{s}={s}",
-                    .{
-                        env_var_name,
-                        value,
-                    },
-                ));
-            }
-        }
-
-        // GIT_SHA is correct in CI but locally it won't exist. So
-        // if we're local (GIT_SHA isn't set) then grab the current
-        // commit. The current commit isn't correct in CI because CI
-        // is run against pseudo/temporary branches.
-        if (env.items.len == 0 or !std.mem.startsWith(u8, env.items[0], "GIT_SHA=")) {
-            var cp = try exec(self.arena, &[_][]const u8{ "git", "rev-parse", "HEAD" });
-            try env.append(self.sprintf(
-                "GIT_SHA={s}",
-                .{cp.stdout},
-            ));
-        }
-
-        return env;
-    }
-
-    fn write_shell_newlines_into_single_line(into: *std.ArrayList(u8), from: []const u8) !void {
-        if (from.len == 0) {
-            return;
-        }
-
-        var lines = std.mem.split(u8, from, "\n");
-        while (lines.next()) |line| {
-            try into.writer().print("{s} && ", .{line});
-        }
-    }
-
-    fn build_file_in_docker(self: Generator, tmp_dir: TmpDir, file: []const u8, run_setup_tests: bool) !void {
         // Some languages (Java) have an additional project file
         // (pom.xml) they need to have available.
         if (self.language.project_file.len > 0) {
@@ -448,31 +350,42 @@ const Generator = struct {
             _ = try project_file.write(self.language.project_file);
         }
 
-        var env = try self.get_current_commit_and_repo_env();
-        defer env.deinit();
-
         var cmd = std.ArrayList(u8).init(self.arena.allocator());
         defer cmd.deinit();
 
-        // Build against current commit and set up project to use current build.
-        if (run_setup_tests) {
-            try cmd.appendSlice("export TEST=true && set -x && ");
-        }
+        var env = std.ArrayList([]const u8).init(self.arena.allocator());
+        defer env.deinit();
+        try env.appendSlice(&[_][]const u8{
+            "TB_ROOT", try git_root(self.arena),
+        });
+        try env.appendSlice(&[_][]const u8{
+            "SAMPLE_ROOT", tmp_dir.path,
+        });
 
-        // Join together various setup commands that are shown to the
-        // user (and not) into a single command we can run in Docker.
-        try cmd.appendSlice(" ( ");
+        // First run general setup within already cloned repo
         try write_shell_newlines_into_single_line(
             &cmd,
-            self.language.developer_setup_sh_commands,
+            if (builtin.os.tag == .windows)
+                self.language.developer_setup_pwsh_commands
+            else
+                self.language.developer_setup_sh_commands,
         );
         try write_shell_newlines_into_single_line(
             &cmd,
             self.language.current_commit_pre_install_commands,
         );
-        // The above commands all end with ` && `
-        try cmd.appendSlice("echo ok ) && "); // Setup commands within parens ( ) so that cwd doesn't change outside
 
+        try cmd.appendSlice("echo ok");
+        try run_shell_with_env(
+            self.arena,
+            cmd.items,
+            env.items,
+        );
+
+        // Then run project, within tmp dir
+        try std.os.chdir(tmp_dir.path);
+
+        cmd.clearRetainingCapacity();
         try write_shell_newlines_into_single_line(
             &cmd,
             self.language.install_commands,
@@ -484,21 +397,20 @@ const Generator = struct {
 
         try write_shell_newlines_into_single_line(
             &cmd,
-            self.language.install_sample_file_build_commands,
+            self.language.build_commands,
         );
 
-        // The above commands all end with ` && `
+        // The above commands all end with ` {cmd_sep} `
         try cmd.appendSlice("echo ok");
 
-        try self.run_with_file_in_docker(
-            tmp_dir,
-            file,
-            null,
-            .{
-                .cmds = cmd.items,
-                .mount = null,
-                .env = env.items,
-            },
+        if (run_setup_tests) {
+            try env.appendSlice(&[_][]const u8{ "TEST", "true" });
+        }
+
+        try run_shell_with_env(
+            self.arena,
+            cmd.items,
+            env.items,
         );
     }
 
@@ -521,21 +433,21 @@ const Generator = struct {
         ) catch unreachable;
     }
 
-    fn validateMinimal(self: Generator) !void {
+    fn validate_minimal(self: Generator) !void {
         // Test the sample file
         self.print("Building minimal sample file");
         var tmp_dir = try TmpDir.init(self.arena);
         defer tmp_dir.deinit();
-        try self.build_file_in_docker(tmp_dir, self.language.install_sample_file, true);
+        try self.build_file_within_project(tmp_dir, self.language.install_sample_file, true);
     }
 
-    fn validateAggregate(self: Generator) !void {
+    fn validate_aggregate(self: Generator) !void {
         // Test major parts of sample code
         var sample = try self.make_aggregate_sample();
         self.print("Building aggregate sample file");
         var tmp_dir = try TmpDir.init(self.arena);
         defer tmp_dir.deinit();
-        try self.build_file_in_docker(tmp_dir, sample, false);
+        try self.build_file_within_project(tmp_dir, sample, false);
     }
 
     const tests = [_]struct {
@@ -544,11 +456,11 @@ const Generator = struct {
     }{
         .{
             .name = "minimal",
-            .validate = validateMinimal,
+            .validate = validate_minimal,
         },
         .{
             .name = "aggregate",
-            .validate = validateAggregate,
+            .validate = validate_aggregate,
         },
     };
 
@@ -579,23 +491,9 @@ const Generator = struct {
         return aggregate.items;
     }
 
-    fn generate(self: Generator, mw: *MarkdownWriter) !void {
+    fn generate_language_setup_steps(self: Generator, mw: *MarkdownWriter, directory_info: []const u8, include_project_file: bool) void {
         var language = self.language;
 
-        mw.print(
-            \\---
-            \\title: {s}
-            \\---
-            \\
-            \\This file is generated by
-            \\[src/clients/docs_generate.zig](/src/clients/docs_generate.zig).
-            \\
-        , .{language.proper_name});
-
-        mw.header(1, language.name);
-        mw.paragraph(language.description);
-
-        mw.header(3, "Prerequisites");
         const windowsSupported: []const u8 = if (language.developer_setup_pwsh_commands.len > 0)
             " and Windows"
         else
@@ -609,16 +507,44 @@ const Generator = struct {
 
         mw.header(2, "Setup");
 
-        if (language.project_file.len > 0) {
+        mw.paragraph(directory_info);
+
+        if (language.project_file.len > 0 and include_project_file) {
             mw.print(
-                "First, create `{s}` and copy this into it:\n\n",
+                "Then create `{s}` and copy this into it:\n\n",
                 .{language.project_file_name},
             );
             mw.code(language.markdown_name, language.project_file);
         }
 
-        mw.paragraph("Run:");
+        mw.paragraph("Then, install the TigerBeetle client:");
         mw.commands(language.install_commands);
+    }
+
+    fn generate_main_readme(self: Generator, mw: *MarkdownWriter) !void {
+        var language = self.language;
+
+        mw.print(
+            \\---
+            \\title: {s}
+            \\---
+            \\
+            \\This file is generated by
+            \\[/src/clients/docs_generate.zig](/src/clients/docs_generate.zig).
+            \\
+        , .{language.proper_name});
+
+        mw.header(1, language.name);
+        mw.paragraph(language.description);
+
+        mw.header(3, "Prerequisites");
+        self.generate_language_setup_steps(
+            mw,
+            \\First, create a directory for your project and `cd` into the directory.
+        ,
+            true,
+        );
+
         mw.print("Now, create `{s}{s}.{s}` and copy this into it:\n\n", .{
             self.language.test_source_path,
             self.test_file_name,
@@ -626,7 +552,7 @@ const Generator = struct {
         });
         mw.code(language.markdown_name, language.install_sample_file);
         mw.paragraph("Finally, build and run:");
-        mw.commands(language.install_sample_file_test_commands);
+        mw.commands(language.run_commands);
 
         mw.paragraph(
             \\Now that all prerequisites and dependencies are correctly set
@@ -636,25 +562,22 @@ const Generator = struct {
 
         mw.paragraph(language.install_documentation);
 
-        mw.header(2, "Example projects");
+        mw.header(2, "Sample projects");
         mw.paragraph(
             \\This document is primarily a reference guide to
             \\the client. Below are various sample projects demonstrating
             \\features of TigerBeetle.
             ,
         );
-        const language_path = std.mem.split(u8, language.readme, "/").next();
         // Absolute paths here are necessary for resolving within the docs site.
-        mw.print(
-            \\* [Basic](/src/clients/{s}/samples/basic/): Create two accounts and
-            \\  transfer an amount between them.
-            \\* [Two-Phase Transfer](/src/clients/{s}/samples/two-phase/): Create two
-            \\  accounts and start a pending transfer between them, then
-            \\  post the transfer.
-            \\
-        ,
-            .{ language_path, language_path },
-        );
+        for (samples) |sample| {
+            mw.print("* [{s}](/src/clients/{s}/samples/{s}/): {s}\n", .{
+                sample.proper_name,
+                language.directory,
+                sample.directory,
+                sample.short_description,
+            });
+        }
 
         if (language.examples.len != 0) {
             mw.paragraph(language.examples);
@@ -868,41 +791,148 @@ const Generator = struct {
         // Shell setup
         mw.header(3, "On Linux and macOS");
         mw.paragraph("In a POSIX shell run:");
-        mw.commands(language.developer_setup_sh_commands);
+        mw.commands(
+            self.sprintf("{s}{s}", .{
+                \\git clone https://github.com/tigerbeetledb/tigerbeetle
+                \\cd tigerbeetle
+                \\git submodule update --init --recursive
+                \\./scripts/install_zig.sh
+                \\
+                ,
+                language.developer_setup_sh_commands,
+            }),
+        );
 
         // Windows setup
         mw.header(3, "On Windows");
         if (language.developer_setup_pwsh_commands.len > 0) {
             mw.paragraph("In PowerShell run:");
-            mw.commands(language.developer_setup_pwsh_commands);
+            mw.commands(
+                self.sprintf("{s}{s}", .{
+                    \\git clone https://github.com/tigerbeetledb/tigerbeetle
+                    \\cd tigerbeetle
+                    \\git submodule update --init --recursive
+                    \\.\scripts\install_zig.bat
+                    \\
+                    ,
+                    language.developer_setup_pwsh_commands,
+                }),
+            );
         } else {
             mw.paragraph("Not yet supported.");
         }
 
-        try mw.save(language.readme);
+        const root = git_root(self.arena);
+        try mw.save(self.sprintf("{s}/src/clients/{s}/README.md", .{ root, language.directory }));
+    }
+
+    fn generate_sample_readmes(self: Generator, mw: *MarkdownWriter) !void {
+        var language = self.language;
+
+        for (samples) |sample| {
+            mw.reset();
+            mw.paragraph(
+                \\This file is generated by
+                \\[/src/clients/docs_generate.zig](/src/clients/docs_generate.zig).
+                ,
+            );
+
+            var main_file_name = if (std.mem.eql(u8, language.directory, "go") or
+                std.mem.eql(u8, language.directory, "node"))
+                "main"
+            else
+                "Main";
+
+            mw.print(
+                \\# {s} {s} Sample
+                \\
+                \\Code for this sample is in [./{s}{s}.{s}](./{s}{s}.{s}).
+                \\
+                \\
+            , .{
+                sample.proper_name,
+                language.proper_name,
+                language.test_source_path,
+                main_file_name,
+                language.extension,
+                language.test_source_path,
+                main_file_name,
+                language.extension,
+            });
+
+            mw.header(2, "Prerequisites");
+
+            self.generate_language_setup_steps(
+                mw,
+                self.sprintf(
+                    "First, clone this repo and `cd` into `tigerbeetle/src/clients/{s}/samples/{s}`.",
+                    .{
+                        language.directory,
+                        sample.directory,
+                    },
+                ),
+                false,
+            );
+
+            mw.header(2, "Start the TigerBeetle server");
+            mw.paragraph(
+                \\Follow steps in the repo README to start a **single
+                \\server** [from a single
+                \\binary](/README.md#single-binary) or [in a Docker
+                \\container](/README.md#with-docker).
+                \\
+                \\If you are not running on port `localhost:3000`, set
+                \\the environment variable `TB_ADDRESS` to the full
+                \\address of the TigerBeetle server you started.
+            );
+
+            mw.header(2, "Run this sample");
+            mw.paragraph("Now you can run this sample:");
+            mw.commands(language.run_commands);
+
+            mw.header(2, "Walkthrough");
+            mw.paragraph("Here's what this project does.");
+            mw.paragraph(sample.long_description);
+
+            const root = try git_root(self.arena);
+            try mw.save(self.sprintf("{s}/src/clients/{s}/samples/{s}/README.md", .{
+                root,
+                language.directory,
+                sample.directory,
+            }));
+        }
     }
 };
 
 pub fn main() !void {
-    var args = std.process.args();
     var skipLanguage = [_]bool{false} ** languages.len;
     var validate = true;
     var generate = true;
     var validateOnly: []const u8 = "";
 
-    while (args.nextPosix()) |arg| {
+    var global_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer global_arena.deinit();
+
+    var args = std.process.args();
+    _ = args.next(global_arena.allocator());
+    while (args.next(global_arena.allocator())) |arg_or_err| {
+        const arg = arg_or_err catch {
+            std.debug.print("Could not parse all arguments.\n", .{});
+            return error.CouldNotParseArguments;
+        };
+
         if (std.mem.eql(u8, arg, "--language")) {
-            var filter = args.nextPosix().?;
+            var filter = try (args.next(global_arena.allocator()).?);
             skipLanguage = [_]bool{true} ** languages.len;
             for (languages) |language, i| {
-                if (std.mem.eql(u8, filter, language.markdown_name)) {
+                if (std.mem.eql(u8, filter, language.directory)) {
                     skipLanguage[i] = false;
                 }
             }
         }
 
         if (std.mem.eql(u8, arg, "--validate")) {
-            validateOnly = args.nextPosix().?;
+            validateOnly = try (args.next(global_arena.allocator()).?);
         }
 
         if (std.mem.eql(u8, arg, "--no-validate")) {
@@ -950,13 +980,18 @@ pub fn main() !void {
                     }
                 }
 
+                const root = try git_root(&arena);
+                try std.os.chdir(root);
                 try t.validate(generator);
             }
         }
 
         if (generate) {
-            generator.print("Generating");
-            try generator.generate(&mw);
+            generator.print("Generating main README");
+            try generator.generate_main_readme(&mw);
+
+            generator.print("Generating sample READMEs");
+            try generator.generate_sample_readmes(&mw);
         }
     }
 }

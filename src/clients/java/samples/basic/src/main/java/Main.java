@@ -7,7 +7,7 @@ import com.tigerbeetle.*;
 
 public final class Main {
     public static void main(String[] args) throws com.tigerbeetle.RequestException {
-	var port = System.getenv("TB_PORT");
+	var port = System.getenv("TB_ADDRESS");
 	if (port == null || port == "") {
 	    port = "3000";
 	}

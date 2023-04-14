@@ -14,6 +14,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const run = @import("./docs_generate.zig").run;
+const run_with_env = @import("./docs_generate.zig").run_with_env;
 const TmpDir = @import("./docs_generate.zig").TmpDir;
 const git_root = @import("./docs_generate.zig").git_root;
 const path_exists = @import("./docs_generate.zig").path_exists;
@@ -131,28 +132,13 @@ pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8
     try cp.spawn();
 
     std.debug.print("Running commands: {s}\n", .{commands});
-    const cmdCp = try std.ChildProcess.init(
-        commands,
-        arena.allocator(),
-    );
-    var env = try std.process.getEnvMap(arena.allocator());
-    try env.put(
-        "TB_PORT",
+
+    try std.os.chdir(cwd);
+
+    try run_with_env(arena, commands, &[_][]const u8{
+        "TB_ADDRESS",
         try std.fmt.allocPrint(arena.allocator(), "{}", .{port}),
-    );
-    cmdCp.env_map = &env;
-    cmdCp.cwd = cwd;
-
-    var res = try cmdCp.spawnAndWait();
-    switch (res) {
-        .Exited => |code| {
-            if (code != 0) {
-                return error.ProxiedCommandFailed;
-            }
-        },
-
-        else => return error.UnknownCase,
-    }
+    });
 }
 
 fn error_main() !void {
@@ -187,7 +173,7 @@ pub fn main() !void {
     if (error_main()) {
         // fine
     } else |err| switch (err) {
-        error.ProxiedCommandFailed => std.os.exit(1),
+        error.RunCommandFailed => std.os.exit(1),
         else => return err,
     }
 }

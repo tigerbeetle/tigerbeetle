@@ -9,8 +9,8 @@ const Code = []const u8;
 const Markdown = []const u8;
 
 pub const Docs = struct {
-    // Location of the readme on disk
-    readme: String,
+    // Name of the directory (relative to /src/clients)
+    directory: String,
 
     // Package name (i.e. tigerbeetle-go, tigerbeetle-node, etc.)
     name: String,
@@ -58,10 +58,11 @@ pub const Docs = struct {
     // Minimal code just to test importing the package works.
     install_sample_file: Code,
 
-    // Commands for testing that code compiles. (Not shown to the user.)
-    install_sample_file_build_commands: Code,
-    // Commands for running the shown sample file. (Shown to the user.)
-    install_sample_file_test_commands: Code,
+    // Commands for building code without running it.
+    build_commands: Code,
+    // Commands for building and running code.
+    run_commands: Code,
+
     // Additional instructions for install.
     install_documentation: Markdown,
 
@@ -119,4 +120,18 @@ pub const Docs = struct {
     // All code that must exist after sample code is concatenated such
     // as closing braces.
     test_main_suffix: Code,
+};
+
+pub const Sample = struct {
+    // Capitalized name of the sample program
+    proper_name: String,
+
+    // e.g. `basic`, `two-phase`, etc.
+    directory: String,
+
+    // For use in the language primary README
+    short_description: String,
+
+    // For use as the introduction on the individual sample README
+    long_description: String,
 };

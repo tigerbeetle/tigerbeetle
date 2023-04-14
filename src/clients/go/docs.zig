@@ -1,7 +1,7 @@
 const Docs = @import("../docs_types.zig").Docs;
 
 pub const GoDocs = Docs{
-    .readme = "go/README.md",
+    .directory = "go",
 
     .markdown_name = "go",
     .extension = "go",
@@ -46,9 +46,8 @@ pub const GoDocs = Docs{
     \\go mod init tbtest
     \\go mod tidy
     ,
-
-    .install_sample_file_build_commands = "go build test.go",
-    .install_sample_file_test_commands = "go run test.go",
+    .build_commands = "go build main.go",
+    .run_commands = "go run main.go",
 
     .install_documentation = "",
 
@@ -296,31 +295,23 @@ pub const GoDocs = Docs{
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_sh_commands = 
-    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
-    \\./scripts/install_zig.sh
     \\./scripts/build.sh go_client -Drelease-safe
     \\cd src/clients/go
-    \\[ "$TEST" = "true" ] && ./zgo.sh test || echo "Skipping client unit tests"
+    \\if [ "$TEST" = "true" ]; then ./zgo.sh test; else echo "Skipping client unit tests"; fi
     ,
 
     .current_commit_pre_install_commands = "",
     .current_commit_post_install_commands = 
-    \\printf 'module tbtest\nreplace github.com/tigerbeetledb/tigerbeetle-go => '$(pwd)'/tigerbeetle/src/clients/go\ngo 1.18' > go.mod
+    \\printf 'module tbtest\nreplace github.com/tigerbeetledb/tigerbeetle-go => '$TB_ROOT'/src/clients/go\ngo 1.18' > go.mod
     \\go mod tidy
     ,
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_pwsh_commands = 
-    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
-    \\./scripts/install_zig.bat
-    \\./scripts/build.bat go_client -Drelease-safe
-    \\cd tigerbeetle/src/clients/go
-    \\[ "$TEST" = "true" ] && ./zgo.bat test || echo "Skipping client unit tests"
+    \\.\scripts\build.bat go_client -Drelease-safe
+    \\cd src\clients\go
+    \\if ($env:TEST -q "true") { .\zgo.bat test } else { echo "Skipping client unit test" }
     ,
 
     .test_main_prefix = 

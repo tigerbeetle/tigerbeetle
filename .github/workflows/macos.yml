@@ -40,19 +40,32 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: ./scripts/build.sh c_sample -Drelease-safe
 
-  # TODO(Phil): This never worked, get it working.
-  # Validation only. The linux / docs step validates and checks the diff.
-  # Also, this only validates that Docker on macOS works. It doesn't
-  # test that the commands run on macOS outside of Docker.
-  # docs:
-  #   runs-on: macos-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
-  # 
-  #     # Runs checks against generated client docs
-  #     - run: ./scripts/install_zig.sh
-  #     - run: ( cd src/clients && ../../zig/zig run docs_generate.zig -- --no-generate )
-  #   env:
-  #     # Somehow this is not the same as GITHUB_SHA.
-  #     # https://github.com/orgs/community/discussions/26325
-  #     GIT_SHA: ${{ github.event.pull_request.head.sha }}
+  docs:
+    strategy:
+      matrix:
+        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        language: [java, go, node]
+    runs-on: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - if: matrix.language == 'java'
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          server-id: github
+          settings-path: ${{ github.workspace }}
+
+      # Although Maven is supposed to be installed in the
+      # actions/setup-java@v3 step, it wasn't available in at least the
+      # self-hosted mac runner. So we grab it manually.
+      - if: matrix.language == 'java'
+        run: |
+          curl -o maven.zip https://dlcdn.apache.org/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.zip
+          unzip maven.zip
+          echo "$(pwd)/apache-maven-3.9.1/bin" >> $GITHUB_PATH
+
+      # Runs checks against generated client docs
+      - run: ./scripts/install_zig.sh
+      - run: ./scripts/build.sh client_docs -- --language ${{ matrix.language }}
