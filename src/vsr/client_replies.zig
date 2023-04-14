@@ -59,6 +59,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         /// Pointers are into `writes`.
         write_queue: RingBuffer(*Write, constants.client_replies_iops_write_max, .array) = .{},
 
+        ready_next_tick: Storage.NextTick = undefined,
         ready_callback: ?fn (*ClientReplies) void = null,
 
         checkpoint_next_tick: Storage.NextTick = undefined,
@@ -121,6 +122,12 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 return;
             };
 
+            log.debug("{}: read_reply: start (client={} reply={})", .{
+                client_replies.replica,
+                entry.header.client,
+                entry.header.checksum,
+            });
+
             const message = client_replies.message_pool.get_message();
             defer client_replies.message_pool.unref(message);
 
@@ -132,18 +139,10 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 .header = entry.header,
             };
 
-            const buffer: []u8 = message.buffer[0..vsr.sector_ceil(entry.header.size)];
-
-            log.debug("{}: read_reply: start (client={} reply={})", .{
-                client_replies.replica,
-                read.header.client,
-                read.header.checksum,
-            });
-
             client_replies.storage.read_sectors(
                 read_reply_callback,
                 &read.completion,
-                buffer,
+                message.buffer[0..vsr.sector_ceil(entry.header.size)],
                 .client_replies,
                 slot_offset(slot),
             );
@@ -204,26 +203,38 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             read.callback(client_replies, read.message);
         }
 
-        pub fn can_write_reply(client_replies: *ClientReplies) bool {
-            return client_replies.writes.available() > 0;
-        }
-
-        /// Call `callback` when can_write_reply() is true.
-        pub fn on_ready(
+        /// Call `callback` when ClientReplies is able to start another write_reply().
+        pub fn ready(
             client_replies: *ClientReplies,
             callback: fn (client_replies: *ClientReplies) void,
         ) void {
-            assert(!client_replies.can_write_reply());
+            assert(client_replies.ready_callback == null);
+            client_replies.ready_callback = callback;
 
-            if (client_replies.ready_callback) |ready_callback| {
-                assert(ready_callback == callback);
+            if (client_replies.writes.available() > 0) {
+                client_replies.storage.on_next_tick(
+                    ready_next_tick_callback,
+                    &client_replies.ready_next_tick,
+                );
             } else {
-                client_replies.ready_callback = callback;
+                // ready_callback will be called the next time a write completes.
+            }
+        }
+
+        fn ready_next_tick_callback(next_tick: *Storage.NextTick) void {
+            const client_replies = @fieldParentPtr(ClientReplies, "ready_next_tick", next_tick);
+
+            if (client_replies.ready_callback) |callback| {
+                assert(client_replies.writes.available() > 0);
+
+                client_replies.ready_callback = null;
+                callback(client_replies);
+            } else {
+                // Another write finished before the next_tick triggered.
             }
         }
 
         pub fn write_reply(client_replies: *ClientReplies, slot: Slot, message: *Message) void {
-            assert(client_replies.can_write_reply());
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
             // stored safely in the client sessions superblock trailer.
@@ -277,7 +288,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             });
 
             // Release the write *before* invoking the callback, so that if the callback
-            // uses can_write_reply() it doesn't appear busy when its not.
+            // checks .writes.available() we doesn't appear busy when we're not.
             client_replies.writing.unset(write.slot.index);
             client_replies.writes.release(write);
 
@@ -285,7 +296,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies.write_reply_next();
 
             if (client_replies.ready_callback) |ready_callback| {
-                assert(client_replies.can_write_reply());
+                assert(client_replies.writes.available() > 0);
 
                 client_replies.ready_callback = null;
                 ready_callback(client_replies);

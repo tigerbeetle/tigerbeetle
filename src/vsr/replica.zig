@@ -2346,19 +2346,6 @@ pub fn ReplicaType(
                 const op = self.commit_min + 1;
                 const header = self.journal.header_with_op(op).?;
 
-                if (!self.client_replies.can_write_reply()) {
-                    log.debug("{}: commit_journal_next: waiting to write reply " ++
-                        "(client={} commit={})", .{
-                        self.replica,
-                        header.client,
-                        header.checksum,
-                    });
-
-                    self.client_replies.on_ready(client_replies_ready_callback);
-                    self.commit_ops_done();
-                    return;
-                }
-
                 if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.checksum)) |prepare| {
                     log.debug("{}: commit_journal_next: cached prepare op={} checksum={}", .{
                         self.replica,
@@ -2463,7 +2450,7 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.solo()));
             assert(self.commit_prepare == null);
             assert(self.commit_callback == null);
-            assert(self.client_replies.can_write_reply());
+            assert(self.client_replies.writes.available() > 0);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
@@ -2538,11 +2525,24 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
 
+            if (self.on_compact) |on_compact| on_compact(self);
+
+            // Before we can proceed to the next commit, we must ensure that the ClientReplies
+            // has at least one Write available.
+            self.client_replies.ready(commit_op_client_replies_ready);
+        }
+
+        fn commit_op_client_replies_ready(client_replies: *ClientReplies) void {
+            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            assert(self.committing);
+            assert(self.commit_callback != null);
+            assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
+            assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
+            assert(self.client_replies.writes.available() > 0);
+
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
             assert(op <= self.op_checkpoint_trigger());
-
-            if (self.on_compact) |on_compact| on_compact(self);
 
             if (op == self.op_checkpoint_trigger()) {
                 assert(op == self.op);
@@ -2826,19 +2826,6 @@ pub fn ReplicaType(
                     return;
                 }
 
-                if (!self.client_replies.can_write_reply()) {
-                    log.debug("{}: commit_pipeline_next: waiting to write reply " ++
-                        "(client={} commit={})", .{
-                        self.replica,
-                        prepare.message.header.client,
-                        prepare.message.header.checksum,
-                    });
-
-                    self.client_replies.on_ready(client_replies_ready_callback);
-                    self.commit_ops_done();
-                    return;
-                }
-
                 const count = prepare.ok_from_all_replicas.count();
                 assert(count >= self.quorum_replication);
                 assert(count <= self.replica_count);
@@ -2976,24 +2963,6 @@ pub fn ReplicaType(
 
             if (reply.header.size != @sizeOf(Header)) {
                 self.client_replies.write_reply(reply_slot, reply);
-            }
-        }
-
-        fn client_replies_ready_callback(client_replies: *ClientReplies) void {
-            const self = @fieldParentPtr(Self, "client_replies", client_replies);
-            assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.solo()));
-            assert(self.client_replies.can_write_reply());
-            assert(!self.committing);
-
-            // Committing may have stopped prematurely because the ClientReplies was busy.
-            // It isn't busy anymore — attempt to resume it.
-            if (self.status == .normal and self.primary()) {
-                if (self.pipeline.queue.prepare_queue.count > 0) {
-                    self.commit_pipeline();
-                }
-            } else {
-                self.commit_journal(self.commit_max);
             }
         }
 
