@@ -98,9 +98,7 @@ pub const Storage = struct {
         done_at_tick: u64,
         stack_trace: StackTrace,
 
-        fn less_than(context: void, a: *Read, b: *Read) math.Order {
-            _ = context;
-
+        fn less_than(_: void, a: *Read, b: *Read) math.Order {
             return math.order(a.done_at_tick, b.done_at_tick);
         }
     };
@@ -115,9 +113,7 @@ pub const Storage = struct {
         done_at_tick: u64,
         stack_trace: StackTrace,
 
-        fn less_than(context: void, a: *Write, b: *Write) math.Order {
-            _ = context;
-
+        fn less_than(_: void, a: *Write, b: *Write) math.Order {
             return math.order(a.done_at_tick, b.done_at_tick);
         }
     };
@@ -125,6 +121,7 @@ pub const Storage = struct {
     pub const NextTick = struct {
         next: ?*NextTick = null,
         callback: fn (next_tick: *NextTick) void,
+        context: ExecutionContext,
     };
 
     allocator: mem.Allocator,
@@ -147,6 +144,7 @@ pub const Storage = struct {
     writes: PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
+    current_context: ExecutionContext = .main_thread,
     next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
@@ -271,30 +269,40 @@ pub const Storage = struct {
         }
 
         while (storage.next_tick_queue.pop()) |next_tick| {
+            // Switch the storage's current_context to that of next_tick's during the callback.
+            var next_context = next_tick.context;
+            mem.swap(ExecutionContext, &storage.current_context, &next_context);
+            defer mem.swap(ExecutionContext, &storage.current_context, &next_context);
+
             next_tick.callback(next_tick);
         }
     }
 
-    pub const NextTickIntent = enum {
-        yield,
-        cpu_work,
-        cpu_inject,
+    pub const ExecutionContext = enum {
+        main_thread,
+        background_thread,
     };
 
+    /// Return the execution context of the caller's thread.
+    pub fn context(storage: *const Storage) ExecutionContext {
+        // This storage is single threaded with context updated locally.
+        return storage.current_context;
+    }
+
     pub fn on_next_tick(
-        storage: *Storage,
+        self: *Storage,
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
-        intent: NextTickIntent,
+        next_context: ExecutionContext,
     ) void {
         // All on_next_tick requests are fulfilled through next_tick_queue for determinism.
-        // `yield` - This already goes through next_tick_queue.
-        // `cpu_work` - Avoid multi-threading and go through next_tick_queue.
-        // `cpu_inject` - `cpu_work` goes through next_tick_queue so this does as well.
-        _ = intent;
-
-        next_tick.* = .{ .callback = callback };
-        storage.next_tick_queue.push(next_tick);
+        // The context of the entire storage is temporarily changed for each next_tick node.
+        next_tick.* = .{
+            .next = null,
+            .callback = callback,
+            .context = next_context,
+        };
+        self.next_tick_queue.push(next_tick);
     }
 
     /// * Verifies that the read fits within the target sector.
