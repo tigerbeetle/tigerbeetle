@@ -60,6 +60,9 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         /// Pointers are into `writes`.
         write_queue: RingBuffer(*Write, constants.client_replies_iops_write_max, .array) = .{},
 
+        checkpoint_next_tick: Storage.NextTick = undefined,
+        checkpoint_callback: ?fn (*ClientReplies) void = null,
+
         pub fn init(storage: *Storage, message_pool: *MessagePool, replica_index: u8) ClientReplies {
             return .{
                 .storage = storage,
@@ -261,6 +264,42 @@ pub fn ClientRepliesType(comptime Storage: type) type {
 
             client_replies.message_pool.unref(message);
             client_replies.write_reply_next();
+
+            if (client_replies.checkpoint_callback != null and
+                client_replies.writes.executing() == 0)
+            {
+                client_replies.checkpoint_done();
+            }
+        }
+
+        pub fn checkpoint(client_replies: *ClientReplies, callback: fn (*ClientReplies) void) void {
+            assert(client_replies.checkpoint_callback == null);
+            client_replies.checkpoint_callback = callback;
+
+            if (client_replies.writes.executing() == 0) {
+                assert(client_replies.writing.count() == 0);
+                assert(client_replies.write_queue.count == 0);
+                client_replies.storage.on_next_tick(
+                    checkpoint_next_tick_callback,
+                    &client_replies.checkpoint_next_tick,
+                );
+            }
+        }
+
+        fn checkpoint_next_tick_callback(next_tick: *Storage.NextTick) void {
+            const client_replies = @fieldParentPtr(ClientReplies, "checkpoint_next_tick", next_tick);
+            client_replies.checkpoint_done();
+        }
+
+        fn checkpoint_done(client_replies: *ClientReplies) void {
+            assert(client_replies.writes.executing() == 0);
+            assert(client_replies.writing.count() == 0);
+            assert(client_replies.write_queue.count == 0);
+
+            const callback = client_replies.checkpoint_callback.?;
+            client_replies.checkpoint_callback = null;
+
+            callback(client_replies);
         }
     };
 }

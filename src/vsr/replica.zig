@@ -2574,6 +2574,17 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
 
+            self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
+        }
+
+        fn commit_op_checkpoint_client_replies_callback(client_replies: *ClientReplies) void {
+            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            assert(self.committing);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.op);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+            assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
+
             // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
             //
             //   A  B  C  D  E
