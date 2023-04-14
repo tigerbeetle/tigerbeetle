@@ -66,6 +66,30 @@ class Client:
         self.completion_mapping[self.tb_client[0]] = self
         self.inflight = {}
 
+    def _acquire_packet(self):
+        # TODO: Thread safety
+        packet = self.out_packets.head
+
+        if packet is None:
+            raise Exception("Too many concurrent requests")
+
+        self.out_packets.head = packet.next
+        packet.next = None
+
+        if self.out_packets.head is None:
+            self.out_packets.tail = None
+
+        return packet
+
+    def _release_packet(self, packet):
+        # TODO: Thread safety
+        if self.out_packets.head is None:
+            self.out_packets.head = packet
+            self.out_packets.tail = packet
+        else:
+            self.out_packets.tail.next = packet
+            self.out_packets.tail = packet
+
     @staticmethod
     def _get_event_size(op):
         if op == lib.TB_OPERATION_CREATE_ACCOUNTS:
@@ -96,17 +120,17 @@ class Client:
         # GIL Protects us (maybe???)
         request_id = len(self.inflight)
 
+        packet = self._acquire_packet()
         packets = ffi.new("tb_packet_list_t *")
-        packet = ffi.new("tb_packet_t *")
+        packets.head = packet
+        packets.tail = packet
+
         packet.next = ffi.NULL
         packet.user_data = ffi.cast("void *", request_id)
         packet.operation = lib.TB_OPERATION_CREATE_ACCOUNTS
         packet.status = lib.TB_PACKET_OK
         packet.data_size = self._get_event_size(op) * count
         packet.data = data
-
-        packets.head = packet
-        packets.tail = packet
 
         self.inflight[request_id] = [threading.Event(), None]
         _tb_client.lib.tb_client_submit(self.tb_client[0], packets)
