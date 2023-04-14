@@ -161,13 +161,37 @@ pub const Storage = struct {
         }
     };
 
+    const Injector = struct {
+        pushed: Atomic(?*NextTick) = Atomic(?*NextTick).init(null),
+        popped: ?*NextTick = null,
+
+        fn push(injector: *Injector, next_tick: *NextTick) void {
+            assert(next_tick.next == null);
+            var top = injector.pushed.load(.Monotonic);
+            while (true) {
+                next_tick.next = top;
+                top = injector.pushed.tryCompareAndSwap(top, next_tick, .Release, .Monotonic) orelse break;
+            }
+        }
+
+        fn pop(injector: *Injector) ?*NextTick {
+            const next_tick = injector.popped orelse blk: {
+                if (injector.pushed.load(.Monotonic) == null) return null;
+                break :blk injector.pushed.swap(null, .Acquire) orelse unreachable;
+            };
+            injector.popped = next_tick.next;
+            next_tick.next = null;
+            return next_tick;
+        }
+    };
+
     io: *IO,
     fd: os.fd_t,
     main_thread_id: std.Thread.Id,
 
     signal: Signal,
     thread_pool: ThreadPool,
-    injected: Atomic(?*NextTick) = Atomic(?*NextTick).init(null),
+    inject_queue: Injector = .{},
 
     yield_queue: FIFO(NextTick) = .{ .name = "storage-yield" },
     yield_completion: IO.Completion = undefined,
@@ -190,7 +214,7 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage) void {
-        assert(storage.is_local());
+        assert(storage.context() == .main_thread);
 
         storage.signal.deinit();
         storage.thread_pool.join();
@@ -199,64 +223,61 @@ pub const Storage = struct {
         storage.fd = IO.INVALID_FILE;
     }
 
-    fn is_local(self: *const Storage) bool {
-        return std.Thread.getCurrentId() == self.main_thread_id;
-    }
-
     pub fn tick(storage: *Storage) void {
-        assert(storage.is_local());
+        assert(storage.context() == .main_thread);
         storage.io.tick() catch |err| {
             log.warn("tick: {}", .{err});
             std.debug.panic("io.tick(): {}", .{err});
         };
     }
 
-    pub const NextTickIntent = enum {
-        yield,
-        cpu_work,
-        cpu_inject,
+    pub const ExecutionContext = enum {
+        main_thread,
+        background_thread,
     };
+
+    /// Return the execution context of the caller's thread.
+    pub fn context(storage: *const Storage) ExecutionContext {
+        return if (std.Thread.getCurrentId() == storage.main_thread_id)
+            .main_thread
+        else
+            .background_thread;
+    }
 
     pub fn on_next_tick(
         self: *Storage,
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
-        intent: NextTickIntent,
+        next_context: ExecutionContext,
     ) void {
         next_tick.* = .{
             .next = null,
             .callback = callback,
         };
 
-        switch (intent) {
-            .yield => {
-                assert(self.is_local());
-                self.yield_queue.push(next_tick);
-
-                if (!self.yield_scheduled) {
-                    self.yield_scheduled = true;
-                    self.io.timeout(*Storage, self, yield_callback, &self.yield_completion, 0);
-                }
+        switch (next_context) {
+            .main_thread => switch (self.context()) {
+                // If we're already on main going to main, use the yield_queue.
+                .main_thread => {
+                    self.yield_queue.push(next_tick);
+                    if (!self.yield_scheduled) {
+                        self.yield_scheduled = true;
+                        self.io.timeout(*Storage, self, yield_callback, &self.yield_completion, 0);
+                    }
+                },
+                // If we're on background going to main, use inject_queue and wake main with signal.
+                .background_thread => {
+                    self.inject_queue.push(next_tick);
+                    self.signal.notify();
+                },
             },
-            .cpu_work => {
-                assert(self.is_local());
-                self.thread_pool.submit(next_tick);
-            },
-            .cpu_inject => {
-                assert(!self.is_local());
-                defer self.signal.notify();
-
-                var injected = self.injected.load(.Monotonic);
-                while (true) {
-                    next_tick.next = injected;
-                    injected = self.injected.tryCompareAndSwap(injected, next_tick, .Release, .Monotonic) orelse break;
-                }
-            },
+            // Scheduling to background thread always go through thread pool.
+            .background_thread => self.thread_pool.submit(next_tick),
         }
     }
 
     fn yield_callback(self: *Storage, completion: *IO.Completion, result: IO.TimeoutError!void) void {
-        assert(self.is_local());
+        assert(self.context() == .main_thread);
         assert(&self.yield_completion == completion);
 
         // 0ns timeouts should not fail.
@@ -274,15 +295,9 @@ pub const Storage = struct {
 
     fn on_signal(signal: *Signal) void {
         const self = @fieldParentPtr(Storage, "signal", signal);
-        assert(self.is_local());
+        assert(self.context() == .main_thread);
 
-        while (self.injected.load(.Monotonic) != null) {
-            var injected = self.injected.swap(null, .Acquire);
-            while (injected) |next_tick| {
-                injected = next_tick.next;
-                next_tick.callback(next_tick);
-            }
-        }
+        while (self.inject_queue.pop()) |next_tick| next_tick.callback(next_tick);
     }
 
     pub fn read_sectors(
@@ -293,6 +308,7 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
+        assert(self.context() == .main_thread);
         if (zone.size()) |zone_size| {
             assert(offset_in_zone + buffer.len <= zone_size);
         }
@@ -330,7 +346,6 @@ pub const Storage = struct {
             return;
         }
 
-        assert(self.is_local());
         self.assert_bounds(target, read.offset);
         self.io.read(
             *Storage,
@@ -445,6 +460,7 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
+        assert(self.context() == .main_thread);
         if (zone.size()) |zone_size| {
             assert(offset_in_zone + buffer.len <= zone_size);
         }
@@ -465,7 +481,6 @@ pub const Storage = struct {
     }
 
     fn start_write(self: *Storage, write: *Storage.Write) void {
-        assert(self.is_local());
         self.assert_bounds(write.buffer, write.offset);
         self.io.write(
             *Storage,

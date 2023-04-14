@@ -559,7 +559,7 @@ pub fn TreeType(
                 }
 
                 tree.compaction_callback = .{ .next_tick = callback };
-                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .yield);
+                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .main_thread);
                 return;
             }
 
@@ -580,7 +580,7 @@ pub fn TreeType(
                 }
 
                 tree.compaction_callback = .{ .next_tick = callback };
-                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .yield);
+                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .main_thread);
                 return;
             }
             assert(op == tree.lookup_snapshot_max);
@@ -632,13 +632,13 @@ pub fn TreeType(
                     tree.lookup_snapshot_max = tree.compaction_op + 1;
 
                     tree.compaction_callback = .{ .next_tick = callback };
-                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .yield);
+                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .main_thread);
                 },
                 .half_bar_middle => {
                     tree.lookup_snapshot_max = tree.compaction_op + 1;
 
                     tree.compaction_callback = .{ .next_tick = callback };
-                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .yield);
+                    tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick, .main_thread);
                 },
                 .half_bar_end => {
                     // At the end of a half-bar, we have to wait for all compactions to finish.
@@ -848,13 +848,14 @@ pub fn TreeType(
 
             // Nothing to compact.
             if (tree.table_mutable.count() == 0) {
-                tree.grid.on_next_tick(next_tick_callback, &tree.compaction_next_tick, .yield);
+                tree.grid.on_next_tick(next_tick_callback, &tree.compaction_next_tick, .main_thread);
                 return;
             }
 
-            const cpu_sort_callback = struct {
+            const sort_callback = struct {
                 fn callback(next_tick: *Grid.NextTick) void {
                     const tree_ = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
+                    assert(tree_.grid.context() == .background_thread);
 
                     // Sort the mutable table values directly into the immutable table's array.
                     const values_max = tree_.table_immutable.values_max();
@@ -872,12 +873,12 @@ pub fn TreeType(
                     assert(!tree_.table_immutable.free);
 
                     // Now that the CPU work is finished, switch back to main thread.
-                    tree_.grid.on_next_tick(next_tick_callback, &tree_.compaction_next_tick, .cpu_inject);
+                    tree_.grid.on_next_tick(next_tick_callback, &tree_.compaction_next_tick, .main_thread);
                 }
             }.callback;
 
-            // Run sorting in "blocking cpu work" optimized context asynchronously to caller.
-            tree.grid.on_next_tick(cpu_sort_callback, &tree.compaction_next_tick, .cpu_work);
+            // Run sorting in a background thread asynchronously to caller.
+            tree.grid.on_next_tick(sort_callback, &tree.compaction_next_tick, .background_thread);
         }
 
         fn compact_manifest_next_tick(next_tick: *Grid.NextTick) void {

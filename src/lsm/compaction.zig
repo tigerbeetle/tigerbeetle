@@ -297,7 +297,11 @@ pub fn CompactionType(
                 context.tree.manifest.move_table(level_a, level_b, table_a);
 
                 compaction.state = .next_tick;
-                compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick, .yield);
+                compaction.context.grid.on_next_tick(
+                    done_on_next_tick,
+                    &compaction.next_tick,
+                    .main_thread,
+                );
             } else {
                 // Otherwise, start merging.
 
@@ -633,7 +637,7 @@ pub fn CompactionType(
             const table_builder = &compaction.table_builder;
             const grid = compaction.context.grid;
 
-            // Flush the data block if needed on a separate thread.
+            // Flush the data block if needed on a background thread.
             if (table_builder.data_block_full() or
                 // If the filter or index blocks need to be flushed,
                 // the data block has to be flushed first.
@@ -644,7 +648,7 @@ pub fn CompactionType(
             {
                 assert(compaction.data_block_address == null);
                 compaction.data_block_address = grid.acquire(compaction.grid_reservation.?);
-                grid.on_next_tick(finish_data_block, &compaction.next_tick, .cpu_work);
+                grid.on_next_tick(finish_data_block, &compaction.next_tick, .background_thread);
                 return;
             }
 
@@ -653,13 +657,20 @@ pub fn CompactionType(
 
         fn finish_data_block(next_tick: *Grid.NextTick) void {
             const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
+            const grid = compaction.context.grid;
+            assert(grid.context() == .background_thread);
+
             compaction.table_builder.data_block_finish(.{
                 .cluster = compaction.context.grid.superblock.working.cluster,
                 .address = compaction.data_block_address.?,
             });
 
-            const grid = compaction.context.grid;
-            grid.on_next_tick(finish_remaining_blocks, &compaction.next_tick, .cpu_inject);
+            // Finish the remaining blocks on the main thread as they interact with grid/manifest.
+            grid.on_next_tick(
+                finish_remaining_blocks,
+                &compaction.next_tick,
+                .main_thread,
+            );
         }
 
         fn finish_remaining_blocks(next_tick: *Grid.NextTick) void {
@@ -769,7 +780,11 @@ pub fn CompactionType(
             switch (compaction.input_state) {
                 .remaining => {
                     compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick, .yield);
+                    compaction.context.grid.on_next_tick(
+                        loop_on_next_tick,
+                        &compaction.next_tick,
+                        .main_thread,
+                    );
                 },
                 .exhausted => {
                     // Mark the level_a table as invisible if it was provided;
@@ -793,7 +808,11 @@ pub fn CompactionType(
                     }
 
                     compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick, .yield);
+                    compaction.context.grid.on_next_tick(
+                        done_on_next_tick,
+                        &compaction.next_tick,
+                        .main_thread,
+                    );
                 },
             }
         }

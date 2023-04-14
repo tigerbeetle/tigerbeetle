@@ -208,30 +208,37 @@ pub fn GridType(comptime Storage: type) type {
             grid.* = undefined;
         }
 
-        pub const NextTickIntent = Storage.NextTickIntent;
+        pub const ExecutionContext = Storage.ExecutionContext;
+
+        pub fn context(grid: *const Grid) ExecutionContext {
+            return grid.superblock.storage.context();
+        }
 
         pub fn on_next_tick(
             grid: *Grid,
             callback: fn (*Grid.NextTick) void,
             next_tick: *Grid.NextTick,
-            intent: NextTickIntent,
+            next_context: ExecutionContext,
         ) void {
-            grid.superblock.storage.on_next_tick(callback, next_tick, intent);
+            grid.superblock.storage.on_next_tick(callback, next_tick, next_context);
         }
 
         /// Returning null indicates that there are not enough free blocks to fill the reservation.
         pub fn reserve(grid: *Grid, blocks_count: usize) ?Reservation {
+            assert(grid.context() == .main_thread);
             return grid.superblock.free_set.reserve(blocks_count);
         }
 
         /// Forfeit a reservation.
         pub fn forfeit(grid: *Grid, reservation: Reservation) void {
+            assert(grid.context() == .main_thread);
             return grid.superblock.free_set.forfeit(reservation);
         }
 
         /// Returns a just-allocated block.
         /// The caller is responsible for not acquiring more blocks than they reserved.
         pub fn acquire(grid: *Grid, reservation: Reservation) u64 {
+            assert(grid.context() == .main_thread);
             return grid.superblock.free_set.acquire(reservation).?;
         }
 
@@ -245,6 +252,7 @@ pub fn GridType(comptime Storage: type) type {
         ///
         /// Asserts that the address is not currently being read from or written to.
         pub fn release(grid: *Grid, address: u64) void {
+            assert(grid.context() == .main_thread);
             grid.assert_not_writing(address, null);
             // It's safe to release an address that is being read from,
             // because the superblock will not allow it to be overwritten before
@@ -306,6 +314,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
         ) void {
             assert(address > 0);
+            assert(grid.context() == .main_thread);
             grid.assert_not_writing(address, block.*);
             grid.assert_not_reading(address, block.*);
 
@@ -407,6 +416,7 @@ pub fn GridType(comptime Storage: type) type {
         ) void {
             assert(address > 0);
             assert(block_type != .reserved);
+            assert(grid.context() == .main_thread);
             grid.assert_not_writing(address, null);
 
             assert(grid.superblock.opened);
@@ -439,7 +449,7 @@ pub fn GridType(comptime Storage: type) type {
             // Become the "root" read thats fetching the block for the given address.
             // The fetch happens asynchronously to avoid stack-overflow and nested cache invalidation.
             grid.read_queue.push(read);
-            grid.on_next_tick(read_block_tick_callback, &read.next_tick, .yield);
+            grid.on_next_tick(read_block_tick_callback, &read.next_tick, .main_thread);
         }
 
         fn read_block_tick_callback(next_tick: *Storage.NextTick) void {
@@ -500,8 +510,8 @@ pub fn GridType(comptime Storage: type) type {
             const read = iop.read;
             const grid = read.grid;
 
-            // Validate the iop block on the Storage thread pool.
-            grid.on_next_tick(read_block_validate_callback, &iop.next_tick, .cpu_work);
+            // Validate the iop block checksums on a background thread as its CPU intensive.
+            grid.on_next_tick(read_block_validate_callback, &iop.next_tick, .background_thread);
         }
 
         fn read_block_validate_callback(next_tick: *NextTick) void {
@@ -512,8 +522,8 @@ pub fn GridType(comptime Storage: type) type {
             const block = grid.read_iop_blocks[grid.read_iops.index(iop)];
             iop.block_valid = read_block_valid(read, block);
 
-            // After validating, inject back into the Grid's main thread.
-            grid.on_next_tick(read_block_ready_callback, &iop.next_tick, .cpu_inject);
+            // After validating, return back into the Grid's main thread.
+            grid.on_next_tick(read_block_ready_callback, &iop.next_tick, .main_thread);
         }
 
         fn read_block_ready_callback(next_tick: *NextTick) void {
@@ -523,6 +533,7 @@ pub fn GridType(comptime Storage: type) type {
 
             const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
             const block_valid = iop.block_valid;
+            assert(grid.context() == .main_thread);
 
             // Insert the block into the cache, and give the evicted block to `iop`.
             const cache_index = grid.cache.insert_index(&read.address);
