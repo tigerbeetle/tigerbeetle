@@ -77,7 +77,7 @@ pub const AOFEntry = extern struct {
         assert(message.header.size <= self.message.len);
 
         // When writing, entries can backtrack / duplicate, so we don't necessarily have a valid chain.
-        // Still, log when that happens. The `aof prepare` command can generate a consistent file from
+        // Still, log when that happens. The `aof merge` command can generate a consistent file from
         // entries like these.
         log.debug("{}: from_message: parent {} (should == {}) our checksum {}", .{
             options.replica,
@@ -584,7 +584,7 @@ test "aof write / read" {
     try testing.expect((try it.next(target)) == null);
 }
 
-test "aof prepare" {}
+test "aof merge" {}
 
 const usage =
     \\Usage:
