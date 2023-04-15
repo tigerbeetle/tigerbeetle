@@ -11,8 +11,12 @@ pub const Fingerprint = struct {
     /// Mask of bits set in the block for the key.
     mask: meta.Vector(8, u32),
 
-    pub fn create(key: []const u8) Fingerprint {
-        const hash = std.hash.Wyhash.hash(0, key);
+    pub fn create(key_ptr: anytype) Fingerprint {
+        const hash = @import("../stdx.zig").fast_hash(key_ptr);
+        return create_with_hash(hash);
+    }
+
+    fn create_with_hash(hash: u64) Fingerprint {
         const hash_lower = @truncate(u32, hash);
         const hash_upper = @intCast(u32, hash >> 32);
 
@@ -102,10 +106,10 @@ const test_bloom_filter = struct {
         defer std.testing.allocator.free(filter);
 
         for (keys) |key| {
-            add(Fingerprint.create(std.mem.asBytes(&key)), filter);
+            add(Fingerprint.create(&key), filter);
         }
         for (keys) |key| {
-            try std.testing.expect(may_contain(Fingerprint.create(std.mem.asBytes(&key)), filter));
+            try std.testing.expect(may_contain(Fingerprint.create(&key), filter));
         }
 
         // TODO Test the false positive rate:

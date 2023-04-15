@@ -315,7 +315,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
 
             // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
-            const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
+            const fingerprint = bloom_filter.Fingerprint.create(&key);
 
             context.* = .{
                 .tree = tree,

@@ -202,3 +202,24 @@ pub const log = if (builtin.is_test)
     }
 else
     std.log;
+
+/// Implements fasthash (https://github.com/ztanml/fast-hash) with type/size specialization.
+/// The seed used is the golden ratio from fibonnaci hashing.
+/// The value type must be a multiple of sizeof(u64).
+pub fn fast_hash(value_ptr: anytype) u64 {
+    const len = @sizeOf(@TypeOf(value_ptr.*));
+    comptime assert(len % @sizeOf(u64) == 0);
+
+    const seed: u64 = 0x9e3779b97f4a7c13;
+    const mixer: u64 = 0x2127599bf4325c37;
+    const multiplier: u64 = 0x880355f21e6d1965;
+
+    var hash = seed ^ (len *% multiplier);
+    for (@bitCast([len / @sizeOf(u64)]u64, value_ptr.*)) |qword| {
+        const mix = (qword ^ (qword >> 23)) *% mixer;
+        hash = (hash ^ (mix ^ (mix >> 47))) *% multiplier;
+    }
+
+    const mix = (hash ^ (hash >> 23)) *% mixer;
+    return mix ^ (mix >> 47);
+}

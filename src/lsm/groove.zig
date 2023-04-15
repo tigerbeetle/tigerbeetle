@@ -412,7 +412,7 @@ pub fn GrooveType(
 
         const PrefetchObjectsContext = struct {
             pub fn hash(_: PrefetchObjectsContext, object: Object) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&@field(object, primary_field)));
+                return @import("../stdx.zig").fast_hash(&@field(object, primary_field));
             }
 
             pub fn eql(_: PrefetchObjectsContext, a: Object, b: Object) bool {
@@ -421,7 +421,7 @@ pub fn GrooveType(
         };
         const PrefetchObjectsAdapter = struct {
             pub fn hash(_: PrefetchObjectsAdapter, key: PrimaryKey) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&key));
+                return @import("../stdx.zig").fast_hash(&key);
             }
 
             pub fn eql(_: PrefetchObjectsAdapter, a_key: PrimaryKey, b_object: Object) bool {

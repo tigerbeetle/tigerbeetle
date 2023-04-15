@@ -106,10 +106,8 @@ pub fn TableType(
             }
 
             pub fn hash(_: HashMapContextValue, value: Value) u64 {
-                // TODO(King): this erros out with "unable to hash type void" due to
-                // CompositeKey(T) struct containing .padding which may be void at comptime.
                 const key = key_from_value(&value);
-                return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
+                return @import("../stdx.zig").fast_hash(&key);
             }
         };
 
@@ -521,7 +519,7 @@ pub fn TableType(
                 const filter_bytes = filter_block_filter(builder.filter_block);
                 for (values) |*value| {
                     const key = key_from_value(value);
-                    const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
+                    const fingerprint = bloom_filter.Fingerprint.create(&key);
                     bloom_filter.add(fingerprint, filter_bytes);
                 }
 
