@@ -30,7 +30,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             Table.key_from_value,
             struct {
                 inline fn hash(key: Key) u64 {
-                    return std.hash.Wyhash.hash(0, mem.asBytes(&key));
+                    return @import("../stdx.zig").fast_hash(&key);
                 }
             }.hash,
             struct {
