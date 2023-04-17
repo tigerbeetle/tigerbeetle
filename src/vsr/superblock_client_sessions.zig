@@ -182,9 +182,22 @@ pub const ClientSessions = struct {
         return entry;
     }
 
-    pub fn get_slot(client_sessions: *ClientSessions, client: u128) ?ReplySlot {
+    pub fn get_slot_for_client(client_sessions: *const ClientSessions, client: u128) ?ReplySlot {
         const index = client_sessions.entries_by_client.get(client) orelse return null;
         return ReplySlot{ .index = index };
+    }
+
+    pub fn get_slot_for_header(
+        client_sessions: *const ClientSessions,
+        header: *const vsr.Header,
+    ) ?ReplySlot {
+        if (client_sessions.entries_by_client.get(header.client)) |entry_index| {
+            const entry = &client_sessions.entries[entry_index];
+            if (entry.header.checksum == header.checksum) {
+                return ReplySlot{ .index = entry_index };
+            }
+        }
+        return null;
     }
 
     /// If the entry is from a newly-registered client, the caller is responsible for ensuring
@@ -235,11 +248,11 @@ pub const ClientSessions = struct {
     /// we do require that all entries have different commit numbers and are iterated.
     /// This ensures that we will always pick the entry with the oldest commit number.
     /// We also check that a client has only one entry in the hash map (or it's buggy).
-    pub fn evict(client_sessions: *ClientSessions) u128 {
+    pub fn evictee(client_sessions: *const ClientSessions) u128 {
         assert(client_sessions.entries_free.count() == 0);
         assert(client_sessions.count() == constants.clients_max);
 
-        var evictee: ?*const vsr.Header = null;
+        var evictee_: ?*const vsr.Header = null;
         var iterated: usize = 0;
         var entries = client_sessions.iterator();
         while (entries.next()) |entry| : (iterated += 1) {
@@ -248,24 +261,23 @@ pub const ClientSessions = struct {
             assert(entry.header.op == entry.header.commit);
             assert(entry.header.commit >= entry.session);
 
-            if (evictee) |evictee_reply| {
+            if (evictee_) |evictee_reply| {
                 assert(entry.header.client != evictee_reply.client);
                 assert(entry.header.commit != evictee_reply.commit);
 
                 if (entry.header.commit < evictee_reply.commit) {
-                    evictee = &entry.header;
+                    evictee_ = &entry.header;
                 }
             } else {
-                evictee = &entry.header;
+                evictee_ = &entry.header;
             }
         }
         assert(iterated == constants.clients_max);
 
-        client_sessions.remove(evictee.?.client);
-        return evictee.?.client;
+        return evictee_.?.client;
     }
 
-    fn remove(client_sessions: *ClientSessions, client: u128) void {
+    pub fn remove(client_sessions: *ClientSessions, client: u128) void {
         const entry_index = client_sessions.entries_by_client.fetchRemove(client).?.value;
 
         assert(!client_sessions.entries_free.isSet(entry_index));

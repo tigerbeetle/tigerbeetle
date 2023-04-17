@@ -427,7 +427,7 @@ pub const Storage = struct {
             .superblock => atlas.faulty_superblock(replica_index, offset_in_zone, size),
             .wal_headers => atlas.faulty_wal_headers(replica_index, offset_in_zone, size),
             .wal_prepares => atlas.faulty_wal_prepares(replica_index, offset_in_zone, size),
-            .client_replies => null, // TODO Allow client-reply faults.
+            .client_replies => atlas.faulty_client_replies(replica_index, offset_in_zone, size),
             .grid => null,
         } orelse return;
 
@@ -630,6 +630,7 @@ pub const ClusterFaultAtlas = struct {
         faulty_superblock: bool,
         faulty_wal_headers: bool,
         faulty_wal_prepares: bool,
+        faulty_client_replies: bool,
         // TODO grid
     };
 
@@ -662,17 +663,21 @@ pub const ClusterFaultAtlas = struct {
         constants.journal_size_headers,
         constants.sector_size,
     ));
+    const FaultyClientReplies = std.StaticBitSet(constants.clients_max);
 
     options: Options,
     faulty_superblock_areas: FaultySuperBlockAreas =
         FaultySuperBlockAreas.initFill(CopySet.initEmpty()),
     faulty_wal_header_sectors: [constants.nodes_max]FaultyWALHeaders =
         [_]FaultyWALHeaders{FaultyWALHeaders.initEmpty()} ** constants.nodes_max,
+    faulty_client_reply_sectors: [constants.nodes_max]FaultyClientReplies =
+        [_]FaultyClientReplies{FaultyClientReplies.initEmpty()} ** constants.nodes_max,
 
     pub fn init(replica_count: u8, random: std.rand.Random, options: Options) ClusterFaultAtlas {
         // If there is only one replica in the cluster, WAL/Grid faults are not recoverable.
         assert(replica_count > 1 or options.faulty_wal_headers == false);
         assert(replica_count > 1 or options.faulty_wal_prepares == false);
+        assert(replica_count > 1 or options.faulty_client_replies == false);
 
         var atlas = ClusterFaultAtlas{ .options = options };
 
@@ -769,6 +774,23 @@ pub const ClusterFaultAtlas = struct {
             constants.message_size_max * headers_per_sector,
             .wal_prepares,
             &atlas.faulty_wal_header_sectors[replica_index],
+            offset_in_zone,
+            size,
+        );
+    }
+
+    fn faulty_client_replies(
+        atlas: ClusterFaultAtlas,
+        replica_index: usize,
+        offset_in_zone: u64,
+        size: u64,
+    ) ?SectorRange {
+        if (!atlas.options.faulty_client_replies) return null;
+        return faulty_sectors(
+            constants.clients_max,
+            constants.message_size_max,
+            .client_replies,
+            &atlas.faulty_client_reply_sectors[replica_index],
             offset_in_zone,
             size,
         );
