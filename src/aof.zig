@@ -195,7 +195,11 @@ pub const AOF = struct {
                 try it.file.seekTo(it.offset);
 
                 var buf = std.mem.asBytes(target);
-                _ = try it.file.readAll(buf);
+                const bytes_read = try it.file.readAll(buf);
+
+                if (bytes_read < target.calculate_disk_size()) {
+                    return error.AOFShortRead;
+                }
 
                 if (target.magic_number != magic_number) {
                     return error.AOFMagicNumberMismatch;
@@ -240,10 +244,10 @@ pub const AOF = struct {
                 try it.file.seekTo(it.offset);
 
                 while (it.offset < it.size) {
-                    _ = try it.file.readAll(skip_buffer);
+                    const bytes_read = try it.file.readAll(skip_buffer);
                     const offset = std.mem.indexOfPos(
                         u8,
-                        skip_buffer,
+                        skip_buffer[0..bytes_read],
                         count,
                         std.mem.asBytes(&magic_number),
                     );
@@ -429,6 +433,11 @@ pub fn aof_merge(allocator: std.mem.Allocator, input_paths: [][]const u8, output
                         continue;
                     },
 
+                    error.AOFShortRead => {
+                        try stdout.print("{s}: Skipping truncated entry at EOF.\n", .{input_paths[i]});
+                        break;
+                    },
+
                     else => @panic("Unexpected Error"),
                 }
                 break;
@@ -480,7 +489,21 @@ pub fn aof_merge(allocator: std.mem.Allocator, input_paths: [][]const u8, output
 
         try entry.?.aof.file.seekTo(entry.?.index);
         var buf = std.mem.asBytes(target)[0..entry.?.size];
-        _ = try entry.?.aof.file.readAll(buf);
+        const bytes_read = try entry.?.aof.file.readAll(buf);
+
+        // None of these conditions should happen, but double check them to prevent any TOCTOUs
+        if (bytes_read != target.calculate_disk_size()) {
+            @panic("unexpected short read while reading AOF entry");
+        }
+
+        const header = target.header();
+        if (!header.valid_checksum()) {
+            @panic("unexpected checksum error while merging");
+        }
+
+        if (!header.valid_checksum_body(target.message[@sizeOf(Header)..header.size])) {
+            @panic("unexpected body checksum error while merging");
+        }
 
         target.to_message(message);
         try output_aof.write(
