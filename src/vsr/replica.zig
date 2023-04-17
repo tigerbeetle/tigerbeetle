@@ -2916,34 +2916,15 @@ pub fn ReplicaType(
             const clients = self.client_sessions().count();
             assert(clients <= constants.clients_max);
             if (clients == constants.clients_max) {
-                var evictee: ?*const Header = null;
-                var iterated: usize = 0;
-                var iterator = self.client_sessions().iterator();
-                while (iterator.next()) |entry| : (iterated += 1) {
-                    assert(entry.header.command == .reply);
-                    assert(entry.header.context == 0);
-                    assert(entry.header.op == entry.header.commit);
-                    assert(entry.header.commit >= entry.session);
+                const evictee = self.client_sessions().evict();
+                assert(self.client_sessions().count() == constants.clients_max - 1);
 
-                    if (evictee) |evictee_reply| {
-                        assert(entry.header.client != evictee_reply.client);
-                        assert(entry.header.commit != evictee_reply.commit);
-
-                        if (entry.header.commit < evictee_reply.commit) {
-                            evictee = &entry.header;
-                        }
-                    } else {
-                        evictee = &entry.header;
-                    }
-                }
-                assert(iterated == clients);
                 log.err("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
                     self.replica,
                     clients,
                     constants.clients_max,
-                    evictee.?.client,
+                    evictee,
                 });
-                self.client_sessions().remove(evictee.?.client);
             }
 
             log.debug("{}: create_client_table_entry: write (client={} session={} request={})", .{
@@ -2955,10 +2936,7 @@ pub fn ReplicaType(
 
             // Any duplicate .register requests should have received the same session number if the
             // client table entry already existed, or been dropped if a session was being committed:
-            const reply_slot = self.client_sessions().put(&.{
-                .session = session,
-                .header = reply.header.*,
-            });
+            const reply_slot = self.client_sessions().put(session, reply.header);
             assert(self.client_sessions().count() <= constants.clients_max);
 
             if (reply.header.size != @sizeOf(Header)) {
@@ -3440,11 +3418,18 @@ pub fn ReplicaType(
                         if (entry.header.size == @sizeOf(Header)) {
                             self.send_header_to_client(message.header.client, entry.header);
                         } else {
-                            self.client_replies.read_reply(
-                                self.client_sessions().get_slot(message.header.client).?,
-                                entry,
-                                on_request_read_reply_callback,
-                            );
+                            const slot = self.client_sessions().get_slot(message.header.client).?;
+                            if (self.client_replies.read_reply_sync(slot, entry) catch {
+                                return true;
+                            }) |reply| {
+                                on_request_read_reply_callback(&self.client_replies, reply);
+                            } else {
+                                self.client_replies.read_reply(
+                                    slot,
+                                    entry,
+                                    on_request_read_reply_callback,
+                                );
+                            }
                         }
                         return true;
                     } else {

@@ -9,6 +9,9 @@ const stdx = @import("../stdx.zig");
 /// There is a slot corresponding to every active client (i.e. a total of clients_max slots).
 pub const ReplySlot = struct { index: usize };
 
+/// Track the headers of the latest reply for each active client.
+/// Serialized/deserialized to/from the superblock trailer on-disk.
+/// For the reply bodies, see ClientReplies.
 pub const ClientSessions = struct {
     /// We found two bugs in the VRR paper relating to the client table:
     ///
@@ -37,9 +40,11 @@ pub const ClientSessions = struct {
     /// Values are indexes into `entries`.
     const EntriesByClient = std.AutoHashMapUnmanaged(u128, usize);
 
-    entries_by_client: EntriesByClient,
     /// Free entries are zeroed, both in `entries` and on-disk.
     entries: []Entry,
+    entries_by_client: EntriesByClient,
+    entries_free: std.StaticBitSet(constants.clients_max) =
+        std.StaticBitSet(constants.clients_max).initFull(),
 
     pub fn init(allocator: mem.Allocator) !ClientSessions {
         var entries_by_client: EntriesByClient = .{};
@@ -111,6 +116,7 @@ pub const ClientSessions = struct {
 
     pub fn decode(client_sessions: *ClientSessions, source: []align(@alignOf(vsr.Header)) const u8) void {
         assert(client_sessions.count() == 0);
+        assert(client_sessions.entries_free.count() == constants.clients_max);
         for (client_sessions.entries) |*entry| {
             assert(entry.session == 0);
             assert(std.meta.eql(entry.header, std.mem.zeroes(vsr.Header)));
@@ -146,12 +152,16 @@ pub const ClientSessions = struct {
                 assert(header.commit >= session);
 
                 client_sessions.entries_by_client.putAssumeCapacityNoClobber(header.client, i);
+                client_sessions.entries_free.unset(i);
                 client_sessions.entries[i] = .{
                     .session = session,
                     .header = header.*,
                 };
             }
         }
+
+        assert(constants.clients_max - client_sessions.entries_free.count() ==
+            client_sessions.entries_by_client.count());
     }
 
     pub fn count(client_sessions: *const ClientSessions) usize {
@@ -179,37 +189,87 @@ pub const ClientSessions = struct {
 
     /// If the entry is from a newly-registered client, the caller is responsible for ensuring
     /// the ClientSessions has available capacity.
-    pub fn put(client_sessions: *ClientSessions, entry: *const Entry) ReplySlot {
-        assert(entry.session != 0);
-        assert(entry.header.command == .reply);
-        const client = entry.header.client;
+    pub fn put(
+        client_sessions: *ClientSessions,
+        session: u64,
+        header: *const vsr.Header,
+    ) ReplySlot {
+        assert(session != 0);
+        assert(header.command == .reply);
+        const client = header.client;
 
         defer if (constants.verify) assert(client_sessions.entries_by_client.contains(client));
 
-        if (client_sessions.entries_by_client.get(client)) |entry_index| {
-            const existing = &client_sessions.entries[entry_index];
-            assert(existing.session == entry.session);
-            assert(existing.header.client == client);
-            assert(existing.header.commit > entry.header.commit);
+        const entry_gop = client_sessions.entries_by_client.getOrPutAssumeCapacity(client);
+        if (entry_gop.found_existing) {
+            const entry_index = entry_gop.value_ptr.*;
+            assert(!client_sessions.entries_free.isSet(entry_index));
 
-            existing.header = entry.header;
+            const existing = &client_sessions.entries[entry_index];
+            assert(existing.session == session);
+            assert(existing.header.client == client);
+            assert(existing.header.commit > header.commit);
+
+            existing.header = header.*;
             return ReplySlot{ .index = entry_index };
         } else {
-            for (client_sessions.entries) |*e, i| {
-                if (e.session == 0) {
-                    e.* = entry.*;
-                    client_sessions.entries_by_client.putAssumeCapacityNoClobber(client, i);
-                    return ReplySlot{ .index = i };
-                }
-            } else unreachable;
+            const entry_index = client_sessions.entries_free.findFirstSet().?;
+            client_sessions.entries_free.unset(entry_index);
+
+            const e = &client_sessions.entries[entry_index];
+            assert(e.session == 0);
+
+            entry_gop.value_ptr.* = entry_index;
+            e.session = session;
+            e.header = header.*;
+            return ReplySlot{ .index = entry_index };
         }
     }
 
-    pub fn remove(client_sessions: *ClientSessions, client: u128) void {
-        const entry_index = client_sessions.entries_by_client.get(client).?;
+    /// For correctness, it's critical that all replicas evict deterministically:
+    /// We cannot depend on `HashMap.capacity()` since `HashMap.ensureTotalCapacity()` may
+    /// change across versions of the Zig std lib. We therefore rely on
+    /// `constants.clients_max`, which must be the same across all replicas, and must not
+    /// change after initializing a cluster.
+    /// We also do not depend on `HashMap.valueIterator()` being deterministic here. However,
+    /// we do require that all entries have different commit numbers and are iterated.
+    /// This ensures that we will always pick the entry with the oldest commit number.
+    /// We also check that a client has only one entry in the hash map (or it's buggy).
+    pub fn evict(client_sessions: *ClientSessions) u128 {
+        assert(client_sessions.entries_free.count() == 0);
+        assert(client_sessions.count() == constants.clients_max);
 
-        const removed = client_sessions.entries_by_client.remove(client);
-        assert(removed);
+        var evictee: ?*const vsr.Header = null;
+        var iterated: usize = 0;
+        var entries = client_sessions.iterator();
+        while (entries.next()) |entry| : (iterated += 1) {
+            assert(entry.header.command == .reply);
+            assert(entry.header.context == 0);
+            assert(entry.header.op == entry.header.commit);
+            assert(entry.header.commit >= entry.session);
+
+            if (evictee) |evictee_reply| {
+                assert(entry.header.client != evictee_reply.client);
+                assert(entry.header.commit != evictee_reply.commit);
+
+                if (entry.header.commit < evictee_reply.commit) {
+                    evictee = &entry.header;
+                }
+            } else {
+                evictee = &entry.header;
+            }
+        }
+        assert(iterated == constants.clients_max);
+
+        client_sessions.remove(evictee.?.client);
+        return evictee.?.client;
+    }
+
+    fn remove(client_sessions: *ClientSessions, client: u128) void {
+        const entry_index = client_sessions.entries_by_client.fetchRemove(client).?.value;
+
+        assert(!client_sessions.entries_free.isSet(entry_index));
+        client_sessions.entries_free.set(entry_index);
 
         assert(client_sessions.entries[entry_index].header.client == client);
         client_sessions.entries[entry_index] = std.mem.zeroes(Entry);
@@ -226,7 +286,10 @@ pub const ClientSessions = struct {
                 defer it.index += 1;
 
                 const entry = &it.client_sessions.entries[it.index];
-                if (entry.session != 0) {
+                if (entry.session == 0) {
+                    assert(it.client_sessions.entries_free.isSet(it.index));
+                } else {
+                    assert(!it.client_sessions.entries_free.isSet(it.index));
                     return entry;
                 }
             }
