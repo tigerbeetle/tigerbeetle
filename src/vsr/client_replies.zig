@@ -11,7 +11,7 @@ const vsr = @import("../vsr.zig");
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Slot = @import("superblock_client_sessions.zig").ReplySlot;
-const Entry = @import("superblock_client_sessions.zig").ClientSessions.Entry;
+const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
 
 const client_replies_iops_max =
     constants.client_replies_iops_read_max + constants.client_replies_iops_write_max;
@@ -32,6 +32,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             completion: Storage.Read,
             callback: fn (client_replies: *ClientReplies, reply: ?*Message) void,
+            slot: Slot,
             message: *Message,
             /// The header of the expected reply.
             header: vsr.Header,
@@ -85,13 +86,12 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             // Don't unref `write_queue`'s Writes — they are a subset of `writes`.
         }
 
-        pub fn read_reply(
+        pub fn read_reply_sync(
             client_replies: *ClientReplies,
             slot: Slot,
-            entry: *const Entry,
-            callback: fn (*ClientReplies, ?*Message) void,
-        ) void {
-            const client = entry.header.client;
+            session: *const ClientSessions.Entry,
+        ) error{Busy}!?*Message {
+            const client = session.header.client;
 
             if (client_replies.writing.isSet(slot.index)) {
                 var writes = client_replies.writes.iterate();
@@ -105,27 +105,40 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                         }
                     }
                 }
-                assert(write_latest.?.message.header.checksum == entry.header.checksum);
+                assert(write_latest.?.message.header.checksum == session.header.checksum);
 
-                callback(client_replies, write_latest.?.message);
-                return;
+                return write_latest.?.message;
             }
 
-            const read = client_replies.reads.acquire() orelse {
+            if (client_replies.reads.available() == 0) {
                 log.debug("{}: read_reply: busy (client={} reply={})", .{
                     client_replies.replica,
-                    entry.header.client,
-                    entry.header.checksum,
+                    session.header.client,
+                    session.header.checksum,
                 });
 
-                callback(client_replies, null);
-                return;
-            };
+                return error.Busy;
+            }
+
+            return null;
+        }
+
+        /// Caller must check read_reply_sync() first.
+        /// (They are split up to avoid complicated NextTick bounds.)
+        pub fn read_reply(
+            client_replies: *ClientReplies,
+            slot: Slot,
+            session: *const ClientSessions.Entry,
+            callback: fn (*ClientReplies, ?*Message) void,
+        ) void {
+            assert(client_replies.read_reply_sync(slot, session) catch unreachable == null);
+
+            const read = client_replies.reads.acquire().?;
 
             log.debug("{}: read_reply: start (client={} reply={})", .{
                 client_replies.replica,
-                entry.header.client,
-                entry.header.checksum,
+                session.header.client,
+                session.header.checksum,
             });
 
             const message = client_replies.message_pool.get_message();
@@ -134,15 +147,16 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             read.* = .{
                 .client_replies = client_replies,
                 .completion = undefined,
+                .slot = slot,
                 .message = message.ref(),
                 .callback = callback,
-                .header = entry.header,
+                .header = session.header,
             };
 
             client_replies.storage.read_sectors(
                 read_reply_callback,
                 &read.completion,
-                message.buffer[0..vsr.sector_ceil(entry.header.size)],
+                message.buffer[0..vsr.sector_ceil(session.header.size)],
                 .client_replies,
                 slot_offset(slot),
             );
@@ -151,56 +165,61 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         fn read_reply_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(ClientReplies.Read, "completion", completion);
             const client_replies = read.client_replies;
+            const message = read.message;
+            const header = read.header;
+            const callback = read.callback;
+
+            client_replies.reads.release(read);
 
             defer {
-                client_replies.message_pool.unref(read.message);
-                client_replies.reads.release(read);
+                client_replies.message_pool.unref(message);
+                client_replies.write_reply_next();
             }
 
-            if (!read.message.header.valid_checksum()) {
+            if (!message.header.valid_checksum()) {
                 log.warn("{}: read_reply: corrupt header (client={} reply={})", .{
                     client_replies.replica,
-                    read.header.client,
-                    read.header.checksum,
+                    header.client,
+                    header.checksum,
                 });
 
-                read.callback(client_replies, null);
+                callback(client_replies, null);
                 return;
             }
 
-            if (read.message.header.checksum != read.header.checksum) {
+            if (message.header.checksum != header.checksum) {
                 log.warn("{}: read_reply: unexpected header (client={} reply={} found={})", .{
                     client_replies.replica,
-                    read.header.client,
-                    read.header.checksum,
-                    read.message.header.checksum,
+                    header.client,
+                    header.checksum,
+                    message.header.checksum,
                 });
 
-                read.callback(client_replies, null);
+                callback(client_replies, null);
                 return;
             }
 
-            assert(read.message.header.command == .reply);
-            assert(read.message.header.cluster == read.header.cluster);
+            assert(message.header.command == .reply);
+            assert(message.header.cluster == header.cluster);
 
-            if (!read.message.header.valid_checksum_body(read.message.body())) {
+            if (!message.header.valid_checksum_body(message.body())) {
                 log.warn("{}: read_reply: corrupt body (client={} reply={})", .{
                     client_replies.replica,
-                    read.header.client,
-                    read.header.checksum,
+                    header.client,
+                    header.checksum,
                 });
 
-                read.callback(client_replies, null);
+                callback(client_replies, null);
                 return;
             }
 
             log.debug("{}: read_reply: done (client={} reply={})", .{
                 client_replies.replica,
-                read.header.client,
-                read.header.checksum,
+                header.client,
+                header.checksum,
             });
 
-            read.callback(client_replies, read.message);
+            callback(client_replies, message);
         }
 
         /// Call `callback` when ClientReplies is able to start another write_reply().
@@ -235,6 +254,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         pub fn write_reply(client_replies: *ClientReplies, slot: Slot, message: *Message) void {
+            assert(client_replies.ready_callback == null);
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
             // stored safely in the client sessions superblock trailer.
@@ -248,14 +268,30 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 .slot = slot,
             };
 
-            // TODO Optimization — if there is already a write for this slot queued (but not started), replace it.
-            client_replies.write_queue.push_assume_capacity(write);
-            client_replies.write_reply_next();
+            // If there is already a write to the same slot queued (but not started), replace it.
+            var write_queue = client_replies.write_queue.iterator_mutable();
+            while (write_queue.next_ptr()) |queued| {
+                if (queued.*.slot.index == slot.index) {
+                    client_replies.message_pool.unref(queued.*.message);
+                    client_replies.writes.release(queued.*);
+
+                    queued.* = write;
+                    break;
+                }
+            } else {
+                client_replies.write_queue.push_assume_capacity(write);
+                client_replies.write_reply_next();
+            }
         }
 
         fn write_reply_next(client_replies: *ClientReplies) void {
             while (client_replies.write_queue.head()) |write| {
-                if (client_replies.writing.isSet(write.slot.index)) break;
+                if (client_replies.writing.isSet(write.slot.index)) return;
+
+                var reads = client_replies.reads.iterate();
+                while (reads.next()) |read| {
+                    if (read.slot.index == write.slot.index) return;
+                }
 
                 const message = write.message;
                 _ = client_replies.write_queue.pop();
