@@ -76,14 +76,16 @@ pub const Zone = enum {
             assert(offset_logical < zone_size);
         }
 
-        var offset_ = offset_logical;
-        // TODO(Zig): "inline for" when "unable to evaluate constant expression" is fixed.
-        for (std.enums.values(Zone)) |z| {
-            if (zone == z) return offset_;
-            offset_ += z.size().?;
-        } else {
-            unreachable;
+        return zone.start() + offset_logical;
+    }
+
+    pub fn start(zone: Zone) u64 {
+        comptime var start_offset = 0;
+        inline for (comptime std.enums.values(Zone)) |z| {
+            if (z == zone) return start_offset;
+            start_offset += comptime size(z) orelse 0;
         }
+        unreachable;
     }
 
     pub fn size(zone: Zone) ?u64 {
