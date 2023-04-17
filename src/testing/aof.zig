@@ -22,8 +22,12 @@ const InMemoryAOF = struct {
     }
 
     pub fn readAll(self: *Self, buf: []u8) !usize {
-        stdx.copy_disjoint(.inexact, u8, buf, self.backing_store[self.index .. self.index + buf.len]);
-        return buf.len;
+        // Limit the reads to the end of the buffer and return the count of
+        // bytes read, to have the same behavior as fs's readAll.
+        const end = @minimum(self.index + buf.len, self.backing_store.len);
+
+        stdx.copy_disjoint(.inexact, u8, buf, self.backing_store[self.index..end]);
+        return end - self.index;
     }
 
     pub fn close() void {}
@@ -75,8 +79,8 @@ pub const AOF = struct {
             const header = entry.header();
             if (entry.header().op == 1) {
                 // For op=1, put its parent in our list of seen checksums too.
-                // This handles the case where it gets replayed, so count() != 0,
-                // but we don't record op=0 so the assert above would fail.
+                // This handles the case where it gets replayed, but we don't record
+                // op=0 so the assert below would fail.
                 // It's needed for simulator validation only (aof merge uses a
                 // different method to walk down AOF entries).
                 try self.validation_checksums.put(header.parent, {});
