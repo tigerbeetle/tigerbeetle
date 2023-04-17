@@ -122,6 +122,7 @@ pub const Command = enum(u8) {
     request_start_view,
     request_headers,
     request_prepare,
+    request_reply,
     headers,
 
     eviction,
@@ -222,6 +223,8 @@ pub const Header = extern struct {
     ///
     /// The problem of routing is therefore solved by the 128-bit client ID, and the problem of
     /// detecting whether a session has been evicted is solved by the session number.
+    ///
+    /// * A `request_reply` sets this to the client of the reply being requested.
     client: u128 = 0,
 
     /// The checksum of the message to which this message refers.
@@ -236,6 +239,7 @@ pub const Header = extern struct {
     ///   in the message body which it has definitely not prepared (i.e. "nack").
     ///   The corresponding header may be an actual prepare header, or it may be a "blank" header.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
+    /// * A `request_reply` sets this to the checksum of the reply being requested.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -265,6 +269,8 @@ pub const Header = extern struct {
     /// may be replaced by different ops if they do not survive through a view change.
     ///
     /// * A `request_headers` sets this to the maximum op requested (inclusive).
+    /// * A `request_prepare` sets this to the requested op.
+    /// * A `request_reply` sets this to the requested op.
     op: u64 = 0,
 
     /// The commit number of the latest committed prepare. Committed ops are immutable.
@@ -359,6 +365,7 @@ pub const Header = extern struct {
             .request_start_view => self.invalid_request_start_view(),
             .request_headers => self.invalid_request_headers(),
             .request_prepare => self.invalid_request_prepare(),
+            .request_reply => self.invalid_request_reply(),
             .request_block => null, // TODO
             .headers => self.invalid_headers(),
             .eviction => self.invalid_eviction(),
@@ -638,6 +645,19 @@ pub const Header = extern struct {
         assert(self.command == .request_prepare);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_reply(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_reply);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client == 0) return "client == 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
