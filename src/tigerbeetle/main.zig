@@ -112,7 +112,6 @@ const Command = struct {
             .{
                 .storage = &command.storage,
                 .storage_size_limit = data_file_size_min,
-                .message_pool = &command.message_pool,
             },
         );
         defer superblock.deinit(allocator);

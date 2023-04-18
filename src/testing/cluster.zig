@@ -215,7 +215,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             for (storages) |*storage, replica_index| {
                 var superblock = try SuperBlock.init(allocator, .{
                     .storage = storage,
-                    .message_pool = &replica_pools[replica_index],
                     .storage_size_limit = options.storage_size_limit,
                 });
                 defer superblock.deinit(allocator);

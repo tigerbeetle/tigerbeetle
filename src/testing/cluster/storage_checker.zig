@@ -10,7 +10,8 @@
 //!
 //! Areas verified at checkpoint:
 //! - WAL prepares
-//! - SuperBlock Manifest, FreeSet, ClientTable
+//! - SuperBlock Manifest, FreeSet, ClientSessions
+//! - ClientReplies
 //! - Acquired Grid blocks
 //!
 //! Areas not verified:
@@ -47,8 +48,9 @@ const Checkpoint = struct {
     // `SuperBlockHeader.{trailer}_checksum`.
     checksum_superblock_manifest: u128,
     checksum_superblock_free_set: u128,
-    checksum_superblock_client_table: u128,
+    checksum_superblock_client_sessions: u128,
     checksum_wal_prepares: u128,
+    checksum_client_replies: u128,
     checksum_grid: u128,
 };
 
@@ -120,24 +122,24 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             const storage = replica.superblock.storage;
             const working = replica.superblock.working;
 
-            // TODO(Beat Compaction) Remove when deterministic storage is fixed.
-            // Until then this is too noisy.
-            if (1 == 1) return;
-
             var checkpoint = Checkpoint{
                 .checksum_superblock_manifest = 0,
                 .checksum_superblock_free_set = 0,
-                .checksum_superblock_client_table = 0,
+                .checksum_superblock_client_sessions = 0,
                 .checksum_wal_prepares = checksum_wal_prepares(storage),
-                .checksum_grid = checksum_grid(replica),
+                .checksum_client_replies = checksum_client_replies(storage),
+                // TODO(Beat Compaction) Enable grid check when deterministic storage is fixed.
+                // Until then this is too noisy.
+                // checksum_grid(replica),
+                .checksum_grid = 0,
             };
 
-            inline for (.{ .manifest, .free_set, .client_table }) |trailer| {
-                const trailer_area = @field(superblock.areas, trailer);
+            inline for (.{ .manifest, .free_set, .client_sessions }) |trailer| {
+                const trailer_area = @field(superblock.areas, @tagName(trailer));
                 const trailer_size = @field(working, @tagName(trailer) ++ "_size");
                 var copy: u8 = 0;
                 while (copy < constants.superblock_copies) : (copy += 1) {
-                    @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer.field)) |=
+                    @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer)) |=
                         vsr.checksum(storage.memory[trailer_area.offset(copy)..][0..trailer_size]);
                 }
             }
@@ -185,6 +187,12 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 checksum ^= vsr.checksum(std.mem.asBytes(prepare)[0..prepare.header.size]);
             }
             return checksum;
+        }
+
+        fn checksum_client_replies(storage: *const Storage) u128 {
+            const offset = vsr.Zone.client_replies.offset(0);
+            const size = constants.clients_max * constants.message_size_max;
+            return vsr.checksum(storage.memory[offset..][0..size]);
         }
 
         fn checksum_grid(replica: *const Replica) u128 {

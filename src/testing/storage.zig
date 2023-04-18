@@ -427,6 +427,7 @@ pub const Storage = struct {
             .superblock => atlas.faulty_superblock(replica_index, offset_in_zone, size),
             .wal_headers => atlas.faulty_wal_headers(replica_index, offset_in_zone, size),
             .wal_prepares => atlas.faulty_wal_prepares(replica_index, offset_in_zone, size),
+            .client_replies => null, // TODO Allow client-reply faults.
             .grid => null,
         } orelse return;
 
@@ -544,6 +545,7 @@ pub const Area = union(enum) {
     superblock: struct { area: superblock.Area, copy: u8 },
     wal_headers: struct { sector: usize },
     wal_prepares: struct { slot: usize },
+    client_replies: struct { slot: usize },
     grid: struct { address: u64 },
 
     fn sectors(area: Area) SectorRange {
@@ -560,6 +562,11 @@ pub const Area = union(enum) {
             ),
             .wal_prepares => |data| SectorRange.from_zone(
                 .wal_prepares,
+                constants.message_size_max * data.slot,
+                constants.message_size_max,
+            ),
+            .client_replies => |data| SectorRange.from_zone(
+                .client_replies,
                 constants.message_size_max * data.slot,
                 constants.message_size_max,
             ),
@@ -720,7 +727,7 @@ pub const ClusterFaultAtlas = struct {
             superblock.areas.header.base => .header,
             superblock.areas.manifest.base => .manifest,
             superblock.areas.free_set.base => .free_set,
-            superblock.areas.client_table.base => .client_table,
+            superblock.areas.client_sessions.base => .client_sessions,
             else => unreachable,
         };
 
