@@ -23,7 +23,7 @@ fi
 
 function onerror {
     if [ "$?" == "0" ]; then
-        rm benchmark.log
+        echo "hi" #rm benchmark.log
     else
         echo -e "${COLOR_RED}"
         echo "Error running benchmark, here are more details (from benchmark.log):"

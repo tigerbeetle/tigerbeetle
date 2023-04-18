@@ -216,7 +216,11 @@ pub const ClientTable = struct {
             assert(bodies.len >= body_size);
             stdx.copy_disjoint(.exact, u8, body, bodies[0..body_size]);
             bodies = bodies[body_size..];
-            assert(entry.reply.header.valid_checksum_body(body));
+            {
+                vsr.checksum_context = "SuperBlockClientTable.decode";
+                defer vsr.checksum_context = null;
+                assert(entry.reply.header.valid_checksum_body(body));
+            }
 
             // Insert into the client table
             client_table.put(&entry);

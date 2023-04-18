@@ -649,8 +649,13 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // Zero unused tables, and padding:
             mem.set(u8, block[header.size..], 0);
 
-            header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
-            header.set_checksum();
+            {
+                vsr.checksum_context = "ManifestLog.close_block";
+                defer vsr.checksum_context = null;
+
+                header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
+                header.set_checksum();
+            }
 
             verify_block(block, null, null);
             assert(Block.entry_count(block) == entry_count);

@@ -741,7 +741,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.recv_checked_header = false;
 
                 const body = data[@sizeOf(Header)..header.size];
-                if (!header.valid_checksum_body(body)) {
+                if (blk: {
+                    vsr.checksum_context = "MessageBus.parse_message";
+                    defer vsr.checksum_context = null;
+                    break :blk !header.valid_checksum_body(body);
+                }) {
                     log.err("invalid body checksum received from {}", .{connection.peer});
                     connection.terminate(bus, .shutdown);
                     return null;

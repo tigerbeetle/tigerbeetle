@@ -338,9 +338,14 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         fn on_reply(self: *Self, reply: *Message) void {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
-            assert(reply.header.valid_checksum());
-            assert(reply.header.valid_checksum_body(reply.body()));
-            assert(reply.header.command == .reply);
+            {
+                vsr.checksum_context = "vsr.Client.on_reply";
+                defer vsr.checksum_context = null;
+
+                assert(reply.header.valid_checksum());
+                assert(reply.header.valid_checksum_body(reply.body()));
+                assert(reply.header.command == .reply);
+            }
 
             if (reply.header.client != self.id) {
                 log.debug("{}: on_reply: ignoring (wrong client={})", .{

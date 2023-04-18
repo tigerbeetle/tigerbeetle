@@ -103,7 +103,7 @@ pub fn TreeType(
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 
         const CompactionType = @import("compaction.zig").CompactionType;
-        const Compaction = CompactionType(Table, Tree, Storage);
+        const Compaction = CompactionType(Table, Tree, Storage, tree_name);
 
         grid: *Grid,
         options: Options,
@@ -200,7 +200,7 @@ pub fn TreeType(
             var manifest = try Manifest.init(allocator, node_pool, grid, tree_hash);
             errdefer manifest.deinit(allocator);
 
-            var compaction_table_immutable = try Compaction.init(allocator, tree_name);
+            var compaction_table_immutable = try Compaction.init(allocator);
             errdefer compaction_table_immutable.deinit(allocator);
 
             var compaction_table: [@divFloor(constants.lsm_levels, 2)]Compaction = undefined;
@@ -208,7 +208,7 @@ pub fn TreeType(
                 comptime var i: usize = 0;
                 inline while (i < compaction_table.len) : (i += 1) {
                     errdefer for (compaction_table[0..i]) |*c| c.deinit(allocator);
-                    compaction_table[i] = try Compaction.init(allocator, tree_name);
+                    compaction_table[i] = try Compaction.init(allocator);
                 }
             }
             errdefer for (compaction_table) |*c| c.deinit(allocator);

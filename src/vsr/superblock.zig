@@ -893,7 +893,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.write_staging_encode_free_set();
                 superblock.write_staging_encode_client_table();
             }
-            superblock.staging.set_checksum();
+            {
+                vsr.checksum_context = "SuperBlock.write_staging";
+                defer vsr.checksum_context = null;
+                superblock.staging.set_checksum();
+            }
 
             context.copy = 0;
             if (context.caller == .view_change) {
@@ -906,6 +910,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn write_staging_encode_manifest(superblock: *SuperBlock) void {
             const staging: *SuperBlockHeader = superblock.staging;
             const target = superblock.manifest_buffer;
+
+            vsr.checksum_context = "SuperBlock.write_staging_encode_manifest";
+            defer vsr.checksum_context = null;
 
             staging.manifest_size = @intCast(u32, superblock.manifest.encode(target));
             staging.manifest_checksum = vsr.checksum(target[0..staging.manifest_size]);
@@ -938,12 +945,18 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else {
                 staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
             }
+
+            vsr.checksum_context = "SuperBlock.write_stating_encode_free_set";
+            defer vsr.checksum_context = null;
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
         }
 
         fn write_staging_encode_client_table(superblock: *SuperBlock) void {
             const staging: *SuperBlockHeader = superblock.staging;
             const target = superblock.client_table_buffer;
+
+            vsr.checksum_context = "SuperBlock.write_stating_encode_client_table";
+            defer vsr.checksum_context = null;
 
             staging.client_table_size = @intCast(u32, superblock.client_table.encode(target));
             staging.client_table_checksum = vsr.checksum(target[0..staging.client_table_size]);
@@ -960,9 +973,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             mem.set(u8, buffer[superblock.staging.manifest_size..], 0); // Zero sector padding.
 
-            assert(superblock.staging.manifest_checksum == vsr.checksum(
-                superblock.manifest_buffer[0..superblock.staging.manifest_size],
-            ));
+            {
+                vsr.checksum_context = "SuperBlock.write_manifest";
+                defer vsr.checksum_context = null;
+
+                assert(superblock.staging.manifest_checksum == vsr.checksum(
+                    superblock.manifest_buffer[0..superblock.staging.manifest_size],
+                ));
+            }
 
             log.debug("{s}: write_manifest: checksum={x} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1003,9 +1021,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             mem.set(u8, buffer[superblock.staging.free_set_size..], 0); // Zero sector padding.
 
-            assert(superblock.staging.free_set_checksum == vsr.checksum(
-                superblock.free_set_buffer[0..superblock.staging.free_set_size],
-            ));
+            {
+                vsr.checksum_context = "SuperBlock.write_free_set";
+                defer vsr.checksum_context = null;
+
+                assert(superblock.staging.free_set_checksum == vsr.checksum(
+                    superblock.free_set_buffer[0..superblock.staging.free_set_size],
+                ));
+            }
 
             log.debug("{s}: write_free_set: checksum={x} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1046,9 +1069,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             mem.set(u8, buffer[superblock.staging.client_table_size..], 0); // Zero sector padding.
 
-            assert(superblock.staging.client_table_checksum == vsr.checksum(
-                superblock.client_table_buffer[0..superblock.staging.client_table_size],
-            ));
+            {
+                vsr.checksum_context = "SuperBlock.write_client_table";
+            defer vsr.checksum_context = null;
+
+                assert(superblock.staging.client_table_checksum == vsr.checksum(
+                    superblock.client_table_buffer[0..superblock.staging.client_table_size],
+                ));
+            }
 
             log.debug("{s}: write_client_table: checksum={x} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1355,7 +1383,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.manifest.count == 0);
 
             const slice = superblock.manifest_buffer[0..superblock.working.manifest_size];
-            if (vsr.checksum(slice) == superblock.working.manifest_checksum) {
+            const slice_checksum = blk: {
+                vsr.checksum_context = "SuperBlock.read_manifest_callback";
+                defer vsr.checksum_context = null;
+                break :blk vsr.checksum(slice);
+            };
+            if (slice_checksum == superblock.working.manifest_checksum) {
                 superblock.manifest.decode(slice);
 
                 log.debug("open: read_manifest: manifest blocks: {}/{}", .{
@@ -1424,7 +1457,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.free_set.count_acquired() == 0);
 
             const slice = superblock.free_set_buffer[0..superblock.working.free_set_size];
-            if (vsr.checksum(slice) == superblock.working.free_set_checksum) {
+            const slice_checksum = blk: {
+                vsr.checksum_context = "SuperBlock.read_free_set_callback";
+                defer vsr.checksum_context = null;
+                break :blk vsr.checksum(slice);
+            };
+            if (slice_checksum == superblock.working.free_set_checksum) {
                 superblock.free_set.decode(slice);
 
                 log.debug("open: read_free_set: acquired blocks: {}/{}/{}", .{
@@ -1499,7 +1537,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.client_table.count() == 0);
 
             const slice = superblock.client_table_buffer[0..superblock.working.client_table_size];
-            if (vsr.checksum(slice) == superblock.working.client_table_checksum) {
+            const slice_checksum = blk: {
+                vsr.checksum_context = "SuperBlock.read_client_table_callback";
+                defer vsr.checksum_context = null;
+                break :blk vsr.checksum(slice);
+            };
+            if (slice_checksum == superblock.working.client_table_checksum) {
                 superblock.client_table.decode(slice);
 
                 log.debug("open: read_client_table: client requests: {}/{}", .{

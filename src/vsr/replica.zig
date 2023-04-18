@@ -1800,8 +1800,13 @@ pub fn ReplicaType(
                 return;
             }
 
-            response.header.set_checksum_body(response.body());
-            response.header.set_checksum();
+            {
+                vsr.checksum_context = "Replica.on_request_headers";
+                defer vsr.checksum_context = null;
+
+                response.header.set_checksum_body(response.body());
+                response.header.set_checksum();
+            }
 
             self.send_message_to_replica(message.header.replica, response);
         }
@@ -2726,8 +2731,13 @@ pub fn ReplicaType(
             };
             assert(reply.header.epoch == 0);
 
-            reply.header.set_checksum_body(reply.body());
-            reply.header.set_checksum();
+            {
+                vsr.checksum_context = "Replica.commit_op";
+                defer vsr.checksum_context = null;
+
+                reply.header.set_checksum_body(reply.body());
+                reply.header.set_checksum();
+            }
 
             if (self.superblock.working.vsr_state.op_compacted(prepare.header.op)) {
                 // We are recovering from a checkpoint. Prior to the crash, the client table was
@@ -3024,8 +3034,13 @@ pub fn ReplicaType(
                 std.mem.bytesAsSlice(Header, message.body()),
                 self.view_headers.array.constSlice(),
             );
-            message.header.set_checksum_body(message.body());
-            message.header.set_checksum();
+            {
+                vsr.checksum_context = "Replica.create_view_change_message";
+                defer vsr.checksum_context = null;
+
+                message.header.set_checksum_body(message.body());
+                message.header.set_checksum();
+            }
 
             return message.ref();
         }
@@ -3084,9 +3099,14 @@ pub fn ReplicaType(
             const message = self.message_bus.pool.get_message();
             defer self.message_bus.unref(message);
 
-            message.header.* = header;
-            message.header.set_checksum_body(message.body());
-            message.header.set_checksum();
+            {
+                vsr.checksum_context = "Replica.create_message_from_header";
+                defer vsr.checksum_context = null;
+
+                message.header.* = header;
+                message.header.set_checksum_body(message.body());
+                message.header.set_checksum();
+            }
 
             return message.ref();
         }
@@ -3968,8 +3988,13 @@ pub fn ReplicaType(
             message.header.replica = self.replica;
             message.header.command = .prepare;
 
-            message.header.set_checksum_body(message.body());
-            message.header.set_checksum();
+            {
+                vsr.checksum_context = "Replica.primary_pipeline_repair";
+                defer vsr.checksum_context = null;
+
+                message.header.set_checksum_body(message.body());
+                message.header.set_checksum();
+            }
 
             log.debug("{}: primary_pipeline_next: prepare {}", .{ self.replica, message.header.checksum });
 

@@ -1025,8 +1025,15 @@ pub fn sector_ceil(offset: u64) u64 {
     return sectors * constants.sector_size;
 }
 
+pub threadlocal var checksum_context: ?[*:0]const u8 = null;
+
 pub fn checksum(source: []const u8) u128 {
     @setEvalBranchQuota(4000);
+
+    if (blk: {
+        var a: u8 = 0;
+        break :blk !@typeInfo(@TypeOf(.{a})).Struct.fields[0].is_comptime;
+    } and checksum_context != null) std.debug.print("vsr.checksum({s}) = {}\n", .{checksum_context.?, source.len});
 
     var target: [32]u8 = undefined;
     std.crypto.hash.Blake3.hash(source, target[0..], .{});

@@ -40,6 +40,7 @@ const log = std.log.scoped(.compaction);
 const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
+const vsr = @import("../vsr.zig");
 
 const stdx = @import("../stdx.zig");
 const GridType = @import("grid.zig").GridType;
@@ -53,6 +54,7 @@ pub fn CompactionType(
     comptime Table: type,
     comptime Tree: type,
     comptime Storage: type,
+    comptime tree_name: [:0]const u8,
 ) type {
     return struct {
         const Compaction = @This();
@@ -146,7 +148,7 @@ pub fn CompactionType(
         tracer_slot: ?tracer.SpanStart,
         iter_tracer_slot: ?tracer.SpanStart,
 
-        pub fn init(allocator: Allocator, tree_name: []const u8) !Compaction {
+        pub fn init(allocator: Allocator) !Compaction {
             var iterator_a = try TableDataIterator.init(allocator);
             errdefer iterator_a.deinit(allocator);
 
@@ -660,10 +662,12 @@ pub fn CompactionType(
             const grid = compaction.context.grid;
             assert(grid.context() == .background_thread);
 
+            vsr.checksum_context = "Compaction(" ++ tree_name ++ ").data_block_finish";
             compaction.table_builder.data_block_finish(.{
                 .cluster = compaction.context.grid.superblock.working.cluster,
                 .address = compaction.data_block_address.?,
             });
+            vsr.checksum_context = null;
 
             // Finish the remaining blocks on the main thread as they interact with grid/manifest.
             grid.on_next_tick(
@@ -694,10 +698,17 @@ pub fn CompactionType(
                 // If the input is exhausted then we need to flush all blocks before finishing.
                 (input_exhausted and !table_builder.filter_block_empty()))
             {
-                table_builder.filter_block_finish(.{
-                    .cluster = compaction.context.grid.superblock.working.cluster,
-                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
-                });
+                {
+                    const addr = compaction.context.grid.acquire(compaction.grid_reservation.?);
+
+                    vsr.checksum_context = "Compaction(" ++ tree_name ++ ").filter_block_finish";
+                    defer vsr.checksum_context = null;
+
+                    table_builder.filter_block_finish(.{
+                        .cluster = compaction.context.grid.superblock.working.cluster,
+                        .address = addr,
+                    });
+                }
                 WriteBlock(.filter).write_block(compaction);
             }
 
@@ -706,11 +717,18 @@ pub fn CompactionType(
                 // If the input is exhausted then we need to flush all blocks before finishing.
                 (input_exhausted and !table_builder.index_block_empty()))
             {
-                const table = table_builder.index_block_finish(.{
-                    .cluster = compaction.context.grid.superblock.working.cluster,
-                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
-                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
-                });
+                const table = blk: {
+                    const addr = compaction.context.grid.acquire(compaction.grid_reservation.?);
+
+                    vsr.checksum_context = "Compaction(" ++ tree_name ++ ").index_block_finish";
+                    defer vsr.checksum_context = null;
+
+                    break :blk table_builder.index_block_finish(.{
+                        .cluster = compaction.context.grid.superblock.working.cluster,
+                        .address = addr,
+                        .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
+                    });
+                };
                 // Make this table visible at the end of this half-bar.
                 compaction.context.tree.manifest.insert_table(compaction.context.level_b, &table);
                 WriteBlock(.index).write_block(compaction);

@@ -519,8 +519,11 @@ pub fn GridType(comptime Storage: type) type {
             const read = iop.read;
             const grid = read.grid;
 
+            
             const block = grid.read_iop_blocks[grid.read_iops.index(iop)];
+            vsr.checksum_context = "Grid.read_block_validate";
             iop.block_valid = read_block_valid(read, block);
+            vsr.checksum_context = null;
 
             // After validating, return back into the Grid's main thread.
             grid.on_next_tick(read_block_ready_callback, &iop.next_tick, .main_thread);

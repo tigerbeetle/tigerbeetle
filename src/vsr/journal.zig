@@ -883,7 +883,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            if (!read.message.header.valid_checksum_body(read.message.body())) {
+            if (blk: {
+                vsr.checksum_context = "Journal.read_prepare_with_op_and_checksum_callback";
+                defer vsr.checksum_context = null;
+                break :blk !read.message.header.valid_checksum_body(read.message.body());
+            }) {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
@@ -1113,8 +1117,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // Check `valid_checksum_body` here rather than in `recover_done` so that we don't need
             // to hold onto the whole message (just the header).
-            if (read.message.header.valid_checksum() and
-                read.message.header.valid_checksum_body(read.message.body()))
+            const valid_checksum = blk: {
+                vsr.checksum_context = "Journal.recover_prepare_callback";
+                defer vsr.checksum_context = null;
+                break :blk read.message.header.valid_checksum() and
+                read.message.header.valid_checksum_body(read.message.body());
+            };
+            if (valid_checksum)
             {
                 journal.headers[slot.index] = read.message.header.*;
             }
