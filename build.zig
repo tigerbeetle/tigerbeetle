@@ -135,11 +135,9 @@ pub fn build(b: *std.build.Builder) void {
         lint_tigerstyle_step.dependOn(&run_cmd.step);
 
         // lint_shellcheck
-        const lint_shellcheck = b.addSystemCommand(&.{ "sh", "-c",
-            "command -v shellcheck >/dev/null" ++
+        const lint_shellcheck = b.addSystemCommand(&.{ "sh", "-c", "command -v shellcheck >/dev/null" ++
             " || (echo -e '\\033[0;31mPlease install shellcheck - https://www.shellcheck.net/\\033[0m' && exit 1)" ++
-            " && shellcheck $(find ./src ./scripts -type f -name '*.sh')"
-        });
+            " && shellcheck $(find ./src ./scripts -type f -name '*.sh')" });
         const lint_shellcheck_step = b.step("lint_shellcheck", "Run shellcheck on **.sh");
         lint_shellcheck_step.dependOn(&lint_shellcheck.step);
 
@@ -241,6 +239,7 @@ pub fn build(b: *std.build.Builder) void {
             b,
             mode,
             &.{&install_step.step},
+            target,
             options,
             tracer_backend,
         );
@@ -651,6 +650,7 @@ fn node_client(
     b: *std.build.Builder,
     mode: Mode,
     dependencies: []const *std.build.Step,
+    target: CrossTarget,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
@@ -662,6 +662,7 @@ fn node_client(
 
     const bindings = b.addExecutable("node_bindings", "src/clients/node/node_bindings.zig");
     bindings.addOptions("vsr_options", options);
+    bindings.setTarget(target);
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
