@@ -29,9 +29,9 @@ Check out [docs.tigerbeetle.com](https://docs.tigerbeetle.com/).
 Here are a few key pages you might be interested in:
 
 - Deployment
-  - [Hardware](https://docs.tigerbeetle.com/deployment/hardware)
+  - [Hardware](https://docs.tigerbeetle.com/deploy/hardware)
 - Usage
-  - [Integration](https://docs.tigerbeetle.com/usage/integration)
+  - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
 - Reference
   - [Accounts](https://docs.tigerbeetle.com/reference/accounts)
   - [Transfers](https://docs.tigerbeetle.com/reference/transfers)
