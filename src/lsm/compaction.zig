@@ -64,10 +64,10 @@ pub fn CompactionType(
         const BlockPtrConst = Grid.BlockPtrConst;
 
         const TableInfo = TableInfoType(Table);
-        const Manifest = ManifestType(Table, Storage);
+        const Manifest = ManifestType(Table, Storage, tree_name);
         const CompactionRange = Manifest.CompactionRange;
         const TableDataIterator = TableDataIteratorType(Storage);
-        const LevelDataIterator = LevelDataIteratorType(Table, Storage);
+        const LevelDataIterator = LevelDataIteratorType(Table, Storage, tree_name);
 
         const Key = Table.Key;
         const Value = Table.Value;
@@ -319,6 +319,7 @@ pub fn CompactionType(
                     .snapshot = context.op_min,
                     .key_min = context.range_b.key_min,
                     .key_max = context.range_b.key_max,
+                    .read_name = "Compaction(" ++ tree_name ++ ").iterator_b(read_block_validate)",
                 });
 
                 switch (context.table_info_a) {
@@ -334,6 +335,7 @@ pub fn CompactionType(
                             table_info.address,
                             table_info.checksum,
                             .index,
+                            "Compaction(" ++ tree_name ++ ").start(read_block_validate)",
                         );
                     },
                 }
@@ -351,6 +353,7 @@ pub fn CompactionType(
                 .grid = compaction.context.grid,
                 .addresses = Table.index_data_addresses_used(compaction.index_block_a),
                 .checksums = Table.index_data_checksums_used(compaction.index_block_a),
+                .read_name = "Compaction(" ++ tree_name ++ ").iterator_a(read_block_validate)",
             });
 
             compaction.state = .compacting;

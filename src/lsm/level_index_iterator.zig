@@ -10,13 +10,13 @@ const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("grid.zig").GridType;
 
 /// A LevelIndexIterator iterates the index blocks of every table in a key range in ascending key order.
-pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type {
+pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type, comptime tree_name: [:0]const u8) type {
     return struct {
         const LevelIndexIterator = @This();
         const Key = Table.Key;
         const Grid = GridType(Storage);
         const BlockPtrConst = Grid.BlockPtrConst;
-        const Manifest = ManifestType(Table, Storage);
+        const Manifest = ManifestType(Table, Storage, tree_name);
         const TableInfo = Manifest.TableInfo;
 
         pub const Context = struct {
@@ -27,6 +27,7 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
             key_min: Key,
             key_max: Key,
             direction: Direction,
+            read_name: [*:0]const u8,
         };
 
         pub const Callback = fn (
@@ -114,6 +115,7 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
                     table_info.address,
                     table_info.checksum,
                     .index,
+                    it.context.read_name,
                 );
             } else {
                 it.callback = .{ .next_tick = callback };

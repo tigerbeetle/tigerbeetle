@@ -43,7 +43,11 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 /// │ [≤entry_count_max]TableInfo │
 /// │ […]u8{0}                    │ padding (to end of block)
 /// Label and TableInfo entries correspond.
-pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
+pub fn ManifestLogType(
+    comptime Storage: type,
+    comptime TableInfo: type,
+    comptime tree_name: [:0]const u8,
+) type {
     return struct {
         const ManifestLog = @This();
 
@@ -216,6 +220,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     block.address,
                     block.checksum,
                     .manifest,
+                    "ManifestLog(" ++ tree_name ++ ").open_read_block(read_block_validate)",
                 );
             } else {
                 manifest_log.opened = true;
@@ -511,6 +516,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     block.address,
                     block.checksum,
                     .manifest,
+                    "ManifestLog(" ++ tree_name ++ ").compact_flush_callback(read_block_validate)",
                 );
             } else {
                 manifest_log.read_callback = null;

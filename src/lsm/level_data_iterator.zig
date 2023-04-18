@@ -13,7 +13,7 @@ const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIterat
 const LevelIndexIteratorType = @import("level_index_iterator.zig").LevelIndexIteratorType;
 
 /// A LevelDataIterator iterates the data blocks of every table in a key range in ascending key order.
-pub fn LevelDataIteratorType(comptime Table: type, comptime Storage: type) type {
+pub fn LevelDataIteratorType(comptime Table: type, comptime Storage: type, comptime tree_name: [:0]const u8) type {
     return struct {
         const LevelDataIterator = @This();
 
@@ -21,9 +21,9 @@ pub fn LevelDataIteratorType(comptime Table: type, comptime Storage: type) type 
         const Grid = GridType(Storage);
         const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
-        const Manifest = ManifestType(Table, Storage);
+        const Manifest = ManifestType(Table, Storage, tree_name);
         const TableInfo = Manifest.TableInfo;
-        const LevelIndexIterator = LevelIndexIteratorType(Table, Storage);
+        const LevelIndexIterator = LevelIndexIteratorType(Table, Storage, tree_name);
         const TableDataIterator = TableDataIteratorType(Storage);
 
         pub const Context = struct {
@@ -33,6 +33,7 @@ pub fn LevelDataIteratorType(comptime Table: type, comptime Storage: type) type 
             snapshot: u64,
             key_min: Key,
             key_max: Key,
+            read_name: [*:0]const u8,
         };
 
         pub const IndexCallback = fn (
@@ -110,11 +111,13 @@ pub fn LevelDataIteratorType(comptime Table: type, comptime Storage: type) type 
                 .key_min = context.key_min,
                 .key_max = context.key_max,
                 .direction = .ascending,
+                .read_name = context.read_name,
             });
             it.table_data_iterator.start(.{
                 .grid = context.grid,
                 .addresses = &.{},
                 .checksums = &.{},
+                .read_name = context.read_name,
             });
         }
 
@@ -161,6 +164,7 @@ pub fn LevelDataIteratorType(comptime Table: type, comptime Storage: type) type 
                     .grid = it.context.grid,
                     .addresses = Table.index_data_addresses_used(it.index_block),
                     .checksums = Table.index_data_checksums_used(it.index_block),
+                    .read_name = it.context.read_name,
                 });
 
                 const on_index = callback.on_index;

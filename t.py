@@ -7,7 +7,7 @@ for line in lines[:]:
     parts = line.split(' = ')
 
     value = parts[-1]
-    if value == '0': continue
+    if value == '0' or value != '112': continue
 
     name = '('.join(parts[0].split('(')[1:])
     name = ')'.join(name.split(')')[:-1])

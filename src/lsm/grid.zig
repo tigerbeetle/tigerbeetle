@@ -87,6 +87,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
             block_type: BlockType,
+            read_name: [*:0]const u8,
 
             pending: ReadPending = .{},
             resolves: FIFO(ReadPending) = .{ .name = null },
@@ -413,6 +414,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
             block_type: BlockType,
+            read_name: [*:0]const u8,
         ) void {
             assert(address > 0);
             assert(block_type != .reserved);
@@ -428,6 +430,7 @@ pub fn GridType(comptime Storage: type) type {
                 .checksum = checksum,
                 .block_type = block_type,
                 .grid = grid,
+                .read_name = read_name,
             };
 
             // Check if a read is already processing/recovering and merge with it.
@@ -521,9 +524,12 @@ pub fn GridType(comptime Storage: type) type {
 
             
             const block = grid.read_iop_blocks[grid.read_iops.index(iop)];
-            vsr.checksum_context = "Grid.read_block_validate";
-            iop.block_valid = read_block_valid(read, block);
-            vsr.checksum_context = null;
+            
+            iop.block_valid = blk: {
+                vsr.checksum_context = read.read_name;
+                defer vsr.checksum_context = null;
+                break :blk read_block_valid(read, block);
+            };
 
             // After validating, return back into the Grid's main thread.
             grid.on_next_tick(read_block_ready_callback, &iop.next_tick, .main_thread);

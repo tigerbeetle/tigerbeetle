@@ -24,6 +24,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
             addresses: []const u64,
             /// Table data block checksums.
             checksums: []const u128,
+            read_name: [*:0]const u8,
         };
 
         context: Context,
@@ -47,6 +48,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                     // and get `null` rather than UB.
                     .addresses = &.{},
                     .checksums = &.{},
+                    .read_name = "FORGOT TO INIT",
                 },
                 .callback = .none,
                 .read = undefined,
@@ -88,7 +90,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                 const address = it.context.addresses[0];
                 const checksum = it.context.checksums[0];
                 it.callback = .{ .read = callback };
-                it.context.grid.read_block(on_read, &it.read, address, checksum, .data);
+                it.context.grid.read_block(on_read, &it.read, address, checksum, .data, it.context.read_name);
             } else {
                 it.callback = .{ .next_tick = callback };
                 it.context.grid.on_next_tick(on_next_tick, &it.next_tick, .main_thread);

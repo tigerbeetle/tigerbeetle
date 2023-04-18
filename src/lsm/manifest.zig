@@ -101,7 +101,7 @@ pub fn TableInfoType(comptime Table: type) type {
     };
 }
 
-pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
+pub fn ManifestType(comptime Table: type, comptime Storage: type, comptime tree_name: [:0]const u8) type {
     const Key = Table.Key;
     const compare_keys = Table.compare_keys;
 
@@ -117,7 +117,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
         const KeyRange = Level.KeyRange;
 
-        const ManifestLog = ManifestLogType(Storage, TableInfo);
+        const ManifestLog = ManifestLogType(Storage, TableInfo, tree_name);
 
         node_pool: *NodePool,
 

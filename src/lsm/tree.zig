@@ -98,7 +98,7 @@ pub fn TreeType(
         pub const hash = tree_hash;
 
         const Grid = @import("grid.zig").GridType(Storage);
-        const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
+        const Manifest = @import("manifest.zig").ManifestType(Table, Storage, tree_name);
         pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table, tree_name);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 
@@ -373,6 +373,7 @@ pub fn TreeType(
                     context.index_block_addresses[context.index_block],
                     context.index_block_checksums[context.index_block],
                     .index,
+                    "Tree(" ++ tree_name ++ ").lookup_index_block(read_block_validate)",
                 );
             }
 
@@ -396,6 +397,7 @@ pub fn TreeType(
                     blocks.filter_block_address,
                     blocks.filter_block_checksum,
                     .filter,
+                    "Tree(" ++ tree_name ++ ").lookup_filter_block(read_block_validate)",
                 );
             }
 
@@ -420,6 +422,7 @@ pub fn TreeType(
                         context.data_block.?.address,
                         context.data_block.?.checksum,
                         .data,
+                        "Tree(" ++ tree_name ++ ").lookup_data_block(read_block_validate)",
                     );
                 } else {
                     context.tree.filter_block_misses += 1;
