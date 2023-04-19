@@ -1665,7 +1665,25 @@ pub fn ReplicaType(
 
             for (view_headers.slice) |*header| {
                 if (header.op <= self.op_checkpoint_trigger()) {
+                    // Consider this case:
+                    // 1. Replica A prepares and commits op X (as backup).
+                    // 2. Replica A crashes.
+                    // 3. Prepare X is corrupted in the WAL.
+                    // 4. Replica A recovers into status=recovering_head.
+                    // 5. Replica A receives a start_view, which includes the header of X.
+                    // 6. Replica A participates in a view-change.
+                    // During this view-change, replica A *must not* nack op X.
+                    // Otherwise, op X might be truncated from the new view.
+                    // To ensure this, leave the entry as faulty.
+                    const slot = self.journal.slot_for_op(header.op);
+                    const fault = self.journal.faulty.bit(slot);
+
                     self.replace_header(header);
+
+                    if (fault) {
+                        assert(self.journal.dirty.bit(slot));
+                        self.journal.faulty.set(slot);
+                    }
                 }
             }
 
