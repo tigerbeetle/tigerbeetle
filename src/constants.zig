@@ -111,18 +111,25 @@ comptime {
     assert(cache_transfers_posted_max == 0 or std.math.isPowerOfTwo(cache_transfers_posted_max));
 }
 
+/// The size of the client replies zone.
+pub const client_replies_size = clients_max * message_size_max;
+
+comptime {
+    assert(client_replies_size > 0);
+    assert(client_replies_size % sector_size == 0);
+}
+
 /// The maximum number of batch entries in the journal file:
 /// A batch entry may contain many transfers, so this is not a limit on the number of transfers.
 /// We need this limit to allocate space for copies of batch headers at the start of the journal.
 /// These header copies enable us to disentangle corruption from crashes and recover accordingly.
 pub const journal_slot_count = config.cluster.journal_slot_count;
 
-/// The maximum size of the journal file:
+/// The maximum size of the WAL zone:
 /// This is pre-allocated and zeroed for performance when initialized.
 /// Writes within this file never extend the filesystem inode size reducing the cost of fdatasync().
 /// This enables static allocation of disk space so that appends cannot fail with ENOSPC.
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
-// TODO remove this; just allocate a part of the total storage for the journal
 pub const journal_size_max = journal_size_headers + journal_size_prepares;
 pub const journal_size_headers = journal_slot_count * @sizeOf(vsr.Header);
 pub const journal_size_prepares = journal_slot_count * message_size_max;
@@ -340,9 +347,9 @@ pub const sector_size = 4096;
 pub const direct_io = config.process.direct_io;
 pub const direct_io_required = config.process.direct_io_required;
 
-// TODO Add in the Grid's IOPS and the upper-bound that the Superblock will use.
-pub const iops_read_max = journal_iops_read_max + grid_iops_read_max;
-pub const iops_write_max = journal_iops_write_max + grid_iops_write_max;
+// TODO Add in the upper-bound that the Superblock will use.
+pub const iops_read_max = journal_iops_read_max + client_replies_iops_read_max + grid_iops_read_max;
+pub const iops_write_max = journal_iops_write_max + client_replies_iops_write_max + grid_iops_write_max;
 
 /// The maximum number of concurrent WAL read I/O operations to allow at once.
 pub const journal_iops_read_max = config.process.journal_iops_read_max;
@@ -350,10 +357,27 @@ pub const journal_iops_read_max = config.process.journal_iops_read_max;
 /// Ideally this is at least as high as pipeline_prepare_queue_max, but it is safe to be lower.
 pub const journal_iops_write_max = config.process.journal_iops_write_max;
 
+/// The maximum number of concurrent reads to the client-replies zone.
+/// Client replies are read when the client misses their original reply and retries a request.
+pub const client_replies_iops_read_max = config.process.client_replies_iops_read_max;
+/// The maximum number of concurrent writes to the client-replies zone.
+/// Client replies are written after every commit.
+pub const client_replies_iops_write_max = config.process.client_replies_iops_write_max;
+
 /// The maximum number of concurrent grid read I/O operations to allow at once.
 pub const grid_iops_read_max = config.process.grid_iops_read_max;
 /// The maximum number of concurrent grid write I/O operations to allow at once.
 pub const grid_iops_write_max = config.process.grid_iops_write_max;
+
+comptime {
+    assert(journal_iops_read_max > 0);
+    assert(journal_iops_write_max > 0);
+    assert(client_replies_iops_read_max > 0);
+    assert(client_replies_iops_write_max > 0);
+    assert(client_replies_iops_write_max <= clients_max);
+    assert(grid_iops_read_max > 0);
+    assert(grid_iops_write_max > 0);
+}
 
 /// The number of redundant copies of the superblock in the superblock storage zone.
 /// This must be either { 4, 6, 8 }, i.e. an even number, for more efficient flexible quorums.

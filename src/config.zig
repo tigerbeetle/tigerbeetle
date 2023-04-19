@@ -58,6 +58,8 @@ const ConfigProcess = struct {
     direct_io_required: bool,
     journal_iops_read_max: usize = 8,
     journal_iops_write_max: usize = 8,
+    client_replies_iops_read_max: usize = 1,
+    client_replies_iops_write_max: usize = 2,
     tick_ms: u63 = 10,
     rtt_ms: u64 = 300,
     rtt_multiple: u8 = 2,

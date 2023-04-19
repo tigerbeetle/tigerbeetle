@@ -37,6 +37,7 @@ pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
+pub const ClientRepliesType = @import("vsr/client_replies.zig").ClientRepliesType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
@@ -51,17 +52,20 @@ pub const Zone = enum {
     superblock,
     wal_headers,
     wal_prepares,
+    client_replies,
     grid,
 
     const size_superblock = superblock.superblock_zone_size;
     const size_wal_headers = constants.journal_size_headers;
     const size_wal_prepares = constants.journal_size_prepares;
+    const size_client_replies = constants.client_replies_size;
 
     comptime {
         for (.{
             size_superblock,
             size_wal_headers,
             size_wal_prepares,
+            size_client_replies,
         }) |zone_size| {
             assert(zone_size % constants.sector_size == 0);
         }
@@ -72,12 +76,16 @@ pub const Zone = enum {
             assert(offset_logical < zone_size);
         }
 
-        return offset_logical + switch (zone) {
-            .superblock => 0,
-            .wal_headers => size_superblock,
-            .wal_prepares => size_superblock + size_wal_headers,
-            .grid => size_superblock + size_wal_headers + size_wal_prepares,
-        };
+        return zone.start() + offset_logical;
+    }
+
+    pub fn start(zone: Zone) u64 {
+        comptime var start_offset = 0;
+        inline for (comptime std.enums.values(Zone)) |z| {
+            if (z == zone) return start_offset;
+            start_offset += comptime size(z) orelse 0;
+        }
+        unreachable;
     }
 
     pub fn size(zone: Zone) ?u64 {
@@ -85,6 +93,7 @@ pub const Zone = enum {
             .superblock => size_superblock,
             .wal_headers => size_wal_headers,
             .wal_prepares => size_wal_prepares,
+            .client_replies => size_client_replies,
             .grid => null,
         };
     }

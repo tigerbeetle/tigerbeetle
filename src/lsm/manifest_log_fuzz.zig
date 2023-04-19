@@ -18,7 +18,6 @@ const log = std.log.scoped(.fuzz_lsm_manifest_log);
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const MessagePool = @import("../message_pool.zig").MessagePool;
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
 const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
 const TableExtent = @import("../vsr/superblock_manifest.zig").Manifest.TableExtent;
@@ -70,21 +69,15 @@ fn run_fuzz(
     var storage_verify = try Storage.init(allocator, constants.storage_size_max, storage_options);
     defer storage_verify.deinit(allocator);
 
-    // The MessagePool is shared by both superblocks because they will not use it.
-    var message_pool = try MessagePool.init(allocator, .replica);
-    defer message_pool.deinit(allocator);
-
     var superblock = try SuperBlock.init(allocator, .{
         .storage = &storage,
         .storage_size_limit = constants.storage_size_max,
-        .message_pool = &message_pool,
     });
     defer superblock.deinit(allocator);
 
     var superblock_verify = try SuperBlock.init(allocator, .{
         .storage = &storage_verify,
         .storage_size_limit = constants.storage_size_max,
-        .message_pool = &message_pool,
     });
     defer superblock_verify.deinit(allocator);
 
@@ -467,7 +460,6 @@ const Environment = struct {
                 .{
                     .storage = test_storage,
                     .storage_size_limit = constants.storage_size_max,
-                    .message_pool = env.manifest_log.superblock.client_table.message_pool,
                 },
             );
 

@@ -1358,7 +1358,6 @@ test "sum_overflows" {
 
 const TestContext = struct {
     const Storage = @import("testing/storage.zig").Storage;
-    const MessagePool = @import("message_pool.zig").MessagePool;
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("lsm/grid.zig").GridType(Storage);
@@ -1371,7 +1370,6 @@ const TestContext = struct {
     const message_body_size_max = 32 * @sizeOf(Account);
 
     storage: Storage,
-    message_pool: MessagePool,
     superblock: SuperBlock,
     grid: Grid,
     state_machine: StateMachine,
@@ -1389,16 +1387,9 @@ const TestContext = struct {
         );
         errdefer ctx.storage.deinit(allocator);
 
-        ctx.message_pool = .{
-            .free_list = null,
-            .messages_max = 0,
-        };
-        errdefer ctx.message_pool.deinit(allocator);
-
         ctx.superblock = try SuperBlock.init(allocator, .{
             .storage = &ctx.storage,
             .storage_size_limit = data_file_size_min,
-            .message_pool = &ctx.message_pool,
         });
         errdefer ctx.superblock.deinit(allocator);
 
@@ -1423,7 +1414,6 @@ const TestContext = struct {
         ctx.superblock.deinit(allocator);
         ctx.grid.deinit(allocator);
         ctx.state_machine.deinit(allocator);
-        ctx.message_pool.deinit(allocator);
         ctx.* = undefined;
     }
 };

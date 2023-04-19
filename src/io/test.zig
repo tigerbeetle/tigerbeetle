@@ -102,7 +102,7 @@ test "accept/connect/send/receive" {
             var io = try IO.init(32, 0);
             defer io.deinit();
 
-            const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
+            const address = try std.net.Address.parseIp4("127.0.0.1", 0);
             const kernel_backlog = 1;
             const server = try io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
@@ -119,6 +119,10 @@ test "accept/connect/send/receive" {
             try os.bind(server, &address.any, address.getOsSockLen());
             try os.listen(server, kernel_backlog);
 
+            var client_address = std.net.Address.initIp4(undefined, undefined);
+            var client_address_len = client_address.getOsSockLen();
+            try os.getsockname(server, &client_address.any, &client_address_len);
+
             var self: Context = .{
                 .io = &io,
                 .server = server,
@@ -132,7 +136,7 @@ test "accept/connect/send/receive" {
                 connect_callback,
                 &client_completion,
                 client,
-                address,
+                client_address,
             );
 
             var server_completion: IO.Completion = undefined;
@@ -318,7 +322,7 @@ test "tick to wait" {
             var self: Context = .{ .io = try IO.init(1, 0) };
             defer self.io.deinit();
 
-            const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
+            const address = try std.net.Address.parseIp4("127.0.0.1", 0);
             const kernel_backlog = 1;
 
             const server = try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
@@ -333,7 +337,11 @@ test "tick to wait" {
             try os.bind(server, &address.any, address.getOsSockLen());
             try os.listen(server, kernel_backlog);
 
-            const client = try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            var client_address = std.net.Address.initIp4(undefined, undefined);
+            var client_address_len = client_address.getOsSockLen();
+            try os.getsockname(server, &client_address.any, &client_address_len);
+
+            const client = try self.io.open_socket(client_address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             // Start the accept
@@ -348,7 +356,7 @@ test "tick to wait" {
                 connect_callback,
                 &client_completion,
                 client,
-                address,
+                client_address,
             );
 
             // Tick the IO to drain the accept & connect completions
@@ -509,7 +517,7 @@ test "pipe data over socket" {
             self.server.fd = try self.io.open_socket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(self.server.fd);
 
-            const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
+            const address = try std.net.Address.parseIp4("127.0.0.1", 0);
             try os.setsockopt(
                 self.server.fd,
                 os.SOL.SOCKET,
@@ -519,6 +527,10 @@ test "pipe data over socket" {
 
             try os.bind(self.server.fd, &address.any, address.getOsSockLen());
             try os.listen(self.server.fd, 1);
+
+            var client_address = std.net.Address.initIp4(undefined, undefined);
+            var client_address_len = client_address.getOsSockLen();
+            try os.getsockname(self.server.fd, &client_address.any, &client_address_len);
 
             self.io.accept(
                 *Context,
@@ -537,7 +549,7 @@ test "pipe data over socket" {
                 on_connect,
                 &self.tx.socket.completion,
                 self.tx.socket.fd,
-                address,
+                client_address,
             );
 
             var tick: usize = 0xdeadbeef;
