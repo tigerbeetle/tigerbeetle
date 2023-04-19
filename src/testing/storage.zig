@@ -699,12 +699,19 @@ pub const ClusterFaultAtlas = struct {
         assert(faults_max < replica_count);
         assert(faults_max > 0 or replica_count == 1);
 
-        var wal_header_sectors = [_]ReplicaSet{ReplicaSet.initEmpty()} ** header_sectors;
-        for (wal_header_sectors) |*wal_header_sector, sector| {
+        var sector: usize = 0;
+        while (sector < header_sectors) : (sector += 1) {
+            var wal_header_sector = ReplicaSet.initEmpty();
             while (wal_header_sector.count() < faults_max) {
                 const replica_index = random.uintLessThan(u8, replica_count);
-                wal_header_sector.set(replica_index);
-                atlas.faulty_wal_header_sectors[replica_index].set(sector);
+                if (atlas.faulty_wal_header_sectors[replica_index].count() + 1 <
+                    atlas.faulty_wal_header_sectors[replica_index].capacity())
+                {
+                    atlas.faulty_wal_header_sectors[replica_index].set(sector);
+                    wal_header_sector.set(replica_index);
+                } else {
+                    // Don't add a fault to this replica, to avoid error.WALInvalid.
+                }
             }
         }
 
