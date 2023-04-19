@@ -31,11 +31,17 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         const Read = struct {
             client_replies: *ClientReplies,
             completion: Storage.Read,
-            callback: fn (client_replies: *ClientReplies, reply: ?*Message) void,
+            callback: fn (
+                client_replies: *ClientReplies,
+                reply_header: *const vsr.Header,
+                reply: ?*Message,
+                destination_replica: ?u8,
+            ) void,
             slot: Slot,
             message: *Message,
             /// The header of the expected reply.
             header: vsr.Header,
+            destination_replica: ?u8,
         };
 
         const Write = struct {
@@ -55,22 +61,33 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         /// Track which slots have a write currently in progress.
         writing: std.StaticBitSet(constants.clients_max) =
             std.StaticBitSet(constants.clients_max).initEmpty(),
+        /// Track which slots hold a corrupt reply, or are otherwise missing the reply
+        /// that ClientSessions believes they should hold.
+        faulty: std.StaticBitSet(constants.clients_max) =
+            std.StaticBitSet(constants.clients_max).initEmpty(),
 
         /// Guard against multiple concurrent writes to the same slot.
         /// Pointers are into `writes`.
         write_queue: RingBuffer(*Write, constants.client_replies_iops_write_max, .array) = .{},
 
         ready_next_tick: Storage.NextTick = undefined,
-        ready_callback: ?fn (*ClientReplies) void = null,
+        ready_callback: ?union(enum) {
+            next_tick: fn (*ClientReplies) void,
+            write: fn (*ClientReplies) void,
+        } = null,
 
         checkpoint_next_tick: Storage.NextTick = undefined,
         checkpoint_callback: ?fn (*ClientReplies) void = null,
 
-        pub fn init(storage: *Storage, message_pool: *MessagePool, replica_index: u8) ClientReplies {
+        pub fn init(options: struct {
+            storage: *Storage,
+            message_pool: *MessagePool,
+            replica_index: u8,
+        }) ClientReplies {
             return .{
-                .storage = storage,
-                .message_pool = message_pool,
-                .replica = replica_index,
+                .storage = options.storage,
+                .message_pool = options.message_pool,
+                .replica = options.replica_index,
             };
         }
 
@@ -90,7 +107,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-        ) error{Busy}!?*Message {
+        ) ?*Message {
             const client = session.header.client;
 
             if (client_replies.writing.isSet(slot.index)) {
@@ -110,16 +127,6 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 return write_latest.?.message;
             }
 
-            if (client_replies.reads.available() == 0) {
-                log.debug("{}: read_reply: busy (client={} reply={})", .{
-                    client_replies.replica,
-                    session.header.client,
-                    session.header.checksum,
-                });
-
-                return error.Busy;
-            }
-
             return null;
         }
 
@@ -129,11 +136,20 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-            callback: fn (*ClientReplies, ?*Message) void,
-        ) void {
-            assert(client_replies.read_reply_sync(slot, session) catch unreachable == null);
+            callback: fn (*ClientReplies, *const vsr.Header, ?*Message, ?u8) void,
+            destination_replica: ?u8,
+        ) error{Busy}!void {
+            assert(client_replies.read_reply_sync(slot, session) == null);
 
-            const read = client_replies.reads.acquire().?;
+            const read = client_replies.reads.acquire() orelse {
+                log.debug("{}: read_reply: busy (client={} reply={})", .{
+                    client_replies.replica,
+                    session.header.client,
+                    session.header.checksum,
+                });
+
+                return error.Busy;
+            };
 
             log.debug("{}: read_reply: start (client={} reply={})", .{
                 client_replies.replica,
@@ -151,6 +167,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 .message = message.ref(),
                 .callback = callback,
                 .header = session.header,
+                .destination_replica = destination_replica,
             };
 
             client_replies.storage.read_sectors(
@@ -165,9 +182,10 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         fn read_reply_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(ClientReplies.Read, "completion", completion);
             const client_replies = read.client_replies;
-            const message = read.message;
             const header = read.header;
+            const message = read.message;
             const callback = read.callback;
+            const destination_replica = read.destination_replica;
 
             client_replies.reads.release(read);
 
@@ -176,17 +194,23 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 client_replies.write_reply_next();
             }
 
-            if (!message.header.valid_checksum()) {
-                log.warn("{}: read_reply: corrupt header (client={} reply={})", .{
+            if (!message.header.valid_checksum() or
+                !message.header.valid_checksum_body(message.body()))
+            {
+                log.warn("{}: read_reply: corrupt reply (client={} reply={})", .{
                     client_replies.replica,
                     header.client,
                     header.checksum,
                 });
 
-                callback(client_replies, null);
+                callback(client_replies, &header, null, destination_replica);
                 return;
             }
 
+            // Possible causes:
+            // - The read targets an older reply.
+            // - The read targets a newer reply (that we haven't seen/written yet).
+            // - The read targets a reply that we wrote, but was misdirected.
             if (message.header.checksum != header.checksum) {
                 log.warn("{}: read_reply: unexpected header (client={} reply={} found={})", .{
                     client_replies.replica,
@@ -195,23 +219,12 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                     message.header.checksum,
                 });
 
-                callback(client_replies, null);
+                callback(client_replies, &header, null, destination_replica);
                 return;
             }
 
             assert(message.header.command == .reply);
             assert(message.header.cluster == header.cluster);
-
-            if (!message.header.valid_checksum_body(message.body())) {
-                log.warn("{}: read_reply: corrupt body (client={} reply={})", .{
-                    client_replies.replica,
-                    header.client,
-                    header.checksum,
-                });
-
-                callback(client_replies, null);
-                return;
-            }
 
             log.debug("{}: read_reply: done (client={} reply={})", .{
                 client_replies.replica,
@@ -219,7 +232,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 header.checksum,
             });
 
-            callback(client_replies, message);
+            callback(client_replies, &header, message, destination_replica);
         }
 
         /// Call `callback` when ClientReplies is able to start another write_reply().
@@ -228,33 +241,37 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             callback: fn (client_replies: *ClientReplies) void,
         ) void {
             assert(client_replies.ready_callback == null);
-            client_replies.ready_callback = callback;
 
             if (client_replies.writes.available() > 0) {
+                client_replies.ready_callback = .{ .next_tick = callback };
                 client_replies.storage.on_next_tick(
                     ready_next_tick_callback,
                     &client_replies.ready_next_tick,
                 );
             } else {
                 // ready_callback will be called the next time a write completes.
+                client_replies.ready_callback = .{ .write = callback };
             }
         }
 
         fn ready_next_tick_callback(next_tick: *Storage.NextTick) void {
             const client_replies = @fieldParentPtr(ClientReplies, "ready_next_tick", next_tick);
+            assert(client_replies.writes.available() > 0);
 
-            if (client_replies.ready_callback) |callback| {
-                assert(client_replies.writes.available() > 0);
-
-                client_replies.ready_callback = null;
-                callback(client_replies);
-            } else {
-                // Another write finished before the next_tick triggered.
-            }
+            const callback = client_replies.ready_callback.?.next_tick;
+            client_replies.ready_callback = null;
+            callback(client_replies);
         }
 
+        pub fn remove_reply(client_replies: *ClientReplies, slot: Slot) void {
+            client_replies.faulty.unset(slot.index);
+        }
+
+        /// The caller is responsible for ensuring that the ClientReplies is able to write
+        /// by calling `write_reply()` after `ready()` finishes.
         pub fn write_reply(client_replies: *ClientReplies, slot: Slot, message: *Message) void {
             assert(client_replies.ready_callback == null);
+            assert(client_replies.writes.available() > 0);
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
             // stored safely in the client sessions superblock trailer.
@@ -326,16 +343,20 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             // Release the write *before* invoking the callback, so that if the callback
             // checks .writes.available() we doesn't appear busy when we're not.
             client_replies.writing.unset(write.slot.index);
+            client_replies.faulty.unset(write.slot.index);
             client_replies.writes.release(write);
 
             client_replies.message_pool.unref(message);
             client_replies.write_reply_next();
 
             if (client_replies.ready_callback) |ready_callback| {
-                assert(client_replies.writes.available() > 0);
-
-                client_replies.ready_callback = null;
-                ready_callback(client_replies);
+                switch (ready_callback) {
+                    .write => |callback| {
+                        client_replies.ready_callback = null;
+                        callback(client_replies);
+                    },
+                    .next_tick => {},
+                }
             }
 
             if (client_replies.checkpoint_callback != null and

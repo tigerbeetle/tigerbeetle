@@ -49,6 +49,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .faulty_superblock = true,
         .faulty_wal_headers = false,
         .faulty_wal_prepares = false,
+        .faulty_client_replies = false,
     });
 
     const storage_options = .{

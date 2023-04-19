@@ -126,6 +126,7 @@ pub fn main() !void {
             .faulty_superblock = true,
             .faulty_wal_headers = replica_count > 1,
             .faulty_wal_prepares = replica_count > 1,
+            .faulty_client_replies = replica_count > 1,
         },
         .state_machine = switch (state_machine) {
             .testing => .{},

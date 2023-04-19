@@ -656,11 +656,11 @@ pub fn ReplicaType(
             self.journal = try Journal.init(allocator, options.storage, replica_index);
             errdefer self.journal.deinit(allocator);
 
-            var client_replies = ClientReplies.init(
-                options.storage,
-                options.message_pool,
-                replica_index,
-            );
+            var client_replies = ClientReplies.init(.{
+                .storage = options.storage,
+                .message_pool = options.message_pool,
+                .replica_index = replica_index,
+            });
             errdefer client_replies.deinit();
 
             self.message_bus = try MessageBus.init(
@@ -921,6 +921,7 @@ pub fn ReplicaType(
                 .request => self.on_request(message),
                 .prepare => self.on_prepare(message),
                 .prepare_ok => self.on_prepare_ok(message),
+                .reply => self.on_reply(message),
                 .commit => self.on_commit(message),
                 .start_view_change => self.on_start_view_change(message),
                 .do_view_change => self.on_do_view_change(message),
@@ -928,16 +929,17 @@ pub fn ReplicaType(
                 .request_start_view => self.on_request_start_view(message),
                 .request_prepare => self.on_request_prepare(message),
                 .request_headers => self.on_request_headers(message),
-                .request_block => unreachable, // TODO
+                .request_reply => self.on_request_reply(message),
                 .headers => self.on_headers(message),
                 // A replica should never handle misdirected messages intended for a client:
-                .pong_client, .eviction, .reply => {
+                .pong_client, .eviction => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
                         self.replica,
                         @tagName(message.header.command),
                     });
                     return;
                 },
+                .request_block => unreachable, // TODO
                 .block => unreachable, // TODO
                 .reserved => unreachable,
             }
@@ -1217,6 +1219,56 @@ pub fn ReplicaType(
             }
 
             self.commit_pipeline();
+        }
+
+        fn on_reply(self: *Self, message: *Message) void {
+            assert(message.header.command == .reply);
+            assert(message.header.replica < self.replica_count);
+
+            const entry = self.client_sessions().get(message.header.client) orelse {
+                log.debug("{}: on_reply: ignoring, client not in table (client={} request={})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.request,
+                });
+                return;
+            };
+
+            if (message.header.checksum != entry.header.checksum) {
+                log.debug("{}: on_reply: ignoring, reply not in table (client={} request={})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.request,
+                });
+                return;
+            }
+
+            const slot = self.client_sessions().get_slot_for_header(message.header).?;
+            if (!self.client_replies.faulty.isSet(slot.index)) {
+                log.debug("{}: on_reply: ignoring, reply is clean (client={} request={})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.request,
+                });
+                return;
+            }
+
+            if (self.client_replies.writes.available() == 0) {
+                log.debug("{}: on_reply: ignoring, busy (client={} request={})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.request,
+                });
+                return;
+            }
+
+            log.debug("{}: on_reply: repairing reply (client={} request={})", .{
+                self.replica,
+                message.header.client,
+                message.header.request,
+            });
+
+            self.client_replies.write_reply(slot, message);
         }
 
         /// Known issue:
@@ -1809,6 +1861,87 @@ pub fn ReplicaType(
             response.header.set_checksum();
 
             self.send_message_to_replica(message.header.replica, response);
+        }
+
+        fn on_request_reply(self: *Self, message: *const Message) void {
+            assert(message.header.command == .request_reply);
+            assert(message.header.client != 0);
+
+            if (self.ignore_repair_message(message)) return;
+            assert(message.header.replica != self.replica);
+
+            const entry = self.client_sessions().get(message.header.client) orelse {
+                log.debug("{}: on_request_reply: ignoring, client not in table", .{self.replica});
+                return;
+            };
+            assert(entry.header.client == message.header.client);
+
+            if (entry.header.checksum != message.header.context) {
+                log.debug("{}: on_request_reply: ignoring, reply not in table " ++
+                    "(requested={} stored={})", .{
+                    self.replica,
+                    message.header.context,
+                    entry.header.checksum,
+                });
+                return;
+            }
+            assert(entry.header.size != @sizeOf(Header));
+            assert(entry.header.op == message.header.op);
+
+            const slot = self.client_sessions().get_slot_for_header(&entry.header).?;
+            if (self.client_replies.read_reply_sync(slot, entry)) |reply| {
+                on_request_reply_read_callback(
+                    &self.client_replies,
+                    &entry.header,
+                    reply,
+                    message.header.replica,
+                );
+            } else {
+                self.client_replies.read_reply(
+                    slot,
+                    entry,
+                    on_request_reply_read_callback,
+                    message.header.replica,
+                ) catch |err| {
+                    assert(err == error.Busy);
+
+                    log.debug("{}: on_request_reply: ignoring, client_replies busy", .{
+                        self.replica,
+                    });
+                };
+            }
+        }
+
+        fn on_request_reply_read_callback(
+            client_replies: *ClientReplies,
+            reply_header: *const Header,
+            reply_: ?*Message,
+            destination_replica: ?u8,
+        ) void {
+            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            const reply = reply_ orelse {
+                log.debug("{}: on_request_reply: reply not found for replica={} (checksum={})", .{
+                    self.replica,
+                    destination_replica.?,
+                    reply_header.checksum,
+                });
+
+                if (self.client_sessions().get_slot_for_header(reply_header)) |slot| {
+                    self.client_replies.faulty.set(slot.index);
+                }
+                return;
+            };
+
+            assert(reply.header.command == .reply);
+            assert(reply.header.checksum == reply_header.checksum);
+
+            log.debug("{}: on_request_reply: sending reply to replica={} (checksum={})", .{
+                self.replica,
+                destination_replica.?,
+                reply_header.checksum,
+            });
+
+            self.send_message_to_replica(destination_replica.?, reply);
         }
 
         fn on_headers(self: *Self, message: *const Message) void {
@@ -2450,7 +2583,6 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.solo()));
             assert(self.commit_prepare == null);
             assert(self.commit_callback == null);
-            assert(self.client_replies.writes.available() > 0);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
@@ -2478,6 +2610,19 @@ pub fn ReplicaType(
             assert(self.commit_prepare != null);
             assert(self.commit_callback != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+
+            // Ensure that the ClientReplies has at least one Write available.
+            maybe(self.client_replies.writes.available() == 0);
+            self.client_replies.ready(commit_op_client_replies_ready);
+        }
+
+        fn commit_op_client_replies_ready(client_replies: *ClientReplies) void {
+            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            assert(self.committing);
+            assert(self.commit_prepare != null);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+            assert(self.client_replies.writes.available() > 0);
 
             self.commit_op(self.commit_prepare.?);
             assert(self.commit_min == self.commit_prepare.?.header.op);
@@ -2526,19 +2671,6 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
 
             if (self.on_compact) |on_compact| on_compact(self);
-
-            // Before we can proceed to the next commit, we must ensure that the ClientReplies
-            // has at least one Write available.
-            self.client_replies.ready(commit_op_client_replies_ready);
-        }
-
-        fn commit_op_client_replies_ready(client_replies: *ClientReplies) void {
-            const self = @fieldParentPtr(Self, "client_replies", client_replies);
-            assert(self.committing);
-            assert(self.commit_callback != null);
-            assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
-            assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
-            assert(self.client_replies.writes.available() > 0);
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
@@ -2661,6 +2793,7 @@ pub fn ReplicaType(
             assert(self.commit_callback != null);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
+            assert(self.client_replies.writes.available() > 0);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
@@ -2916,7 +3049,11 @@ pub fn ReplicaType(
             const clients = self.client_sessions().count();
             assert(clients <= constants.clients_max);
             if (clients == constants.clients_max) {
-                const evictee = self.client_sessions().evict();
+                const evictee = self.client_sessions().evictee();
+                const slot = self.client_sessions().get_slot_for_client(evictee).?;
+                self.client_sessions().remove(evictee);
+                self.client_replies.remove_reply(slot);
+
                 assert(self.client_sessions().count() == constants.clients_max - 1);
 
                 log.err("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
@@ -3225,6 +3362,7 @@ pub fn ReplicaType(
             assert(message.header.command == .request_start_view or
                 message.header.command == .request_headers or
                 message.header.command == .request_prepare or
+                message.header.command == .request_reply or
                 message.header.command == .headers);
             switch (message.header.command) {
                 .headers => assert(message.header.replica < self.replica_count),
@@ -3234,9 +3372,10 @@ pub fn ReplicaType(
             const command: []const u8 = @tagName(message.header.command);
 
             if (message.header.command == .request_headers or
-                message.header.command == .request_prepare)
+                message.header.command == .request_prepare or
+                message.header.command == .request_reply)
             {
-                // A recovering_head replica can still assist others with WAL-repair,
+                // A recovering_head replica can still assist others with WAL/Reply-repair,
                 // but does not itself install headers, since its head is unknown.
             } else {
                 if (self.status != .normal and self.status != .view_change) {
@@ -3247,6 +3386,7 @@ pub fn ReplicaType(
 
             if (message.header.command == .request_headers or
                 message.header.command == .request_prepare or
+                message.header.command == .request_reply or
                 message.header.command == .headers)
             {
                 // A replica in a different view can assist WAL repair.
@@ -3272,7 +3412,7 @@ pub fn ReplicaType(
             if (self.standby()) {
                 switch (message.header.command) {
                     .headers => {},
-                    .request_start_view, .request_headers, .request_prepare => {
+                    .request_start_view, .request_headers, .request_prepare, .request_reply => {
                         log.warn("{}: on_{s}: misdirected message (standby)", .{ self.replica, command });
                         return true;
                     },
@@ -3287,7 +3427,7 @@ pub fn ReplicaType(
                         log.warn("{}: on_{s}: misdirected message (backup)", .{ self.replica, command });
                         return true;
                     },
-                    .request_prepare, .headers, .request_headers => {},
+                    .request_prepare, .headers, .request_headers, .request_reply => {},
                     else => unreachable,
                 }
             }
@@ -3304,7 +3444,7 @@ pub fn ReplicaType(
                     log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
                     return true;
                 },
-                .request_headers, .request_prepare => {
+                .request_headers, .request_prepare, .request_reply => {
                     if (self.primary_index(self.view) != message.header.replica) {
                         log.debug("{}: on_{s}: ignoring (view change, requested by backup)", .{
                             self.replica,
@@ -3415,22 +3555,7 @@ pub fn ReplicaType(
                         assert(entry.header.operation == message.header.operation);
 
                         log.debug("{}: on_request: replying to duplicate request", .{self.replica});
-                        if (entry.header.size == @sizeOf(Header)) {
-                            self.send_header_to_client(message.header.client, entry.header);
-                        } else {
-                            const slot = self.client_sessions().get_slot(message.header.client).?;
-                            if (self.client_replies.read_reply_sync(slot, entry) catch {
-                                return true;
-                            }) |reply| {
-                                on_request_read_reply_callback(&self.client_replies, reply);
-                            } else {
-                                self.client_replies.read_reply(
-                                    slot,
-                                    entry,
-                                    on_request_read_reply_callback,
-                                );
-                            }
-                        }
+                        self.on_request_repeat_reply(message, entry);
                         return true;
                     } else {
                         log.err("{}: on_request: request collision (client bug)", .{self.replica});
@@ -3477,9 +3602,70 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_read_reply_callback(client_replies: *ClientReplies, reply_: ?*Message) void {
+        fn on_request_repeat_reply(
+            self: *Self,
+            message: *const Message,
+            entry: *const ClientSessions.Entry,
+        ) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            assert(message.header.command == .request);
+            assert(message.header.client > 0);
+            assert(message.header.view <= self.view); // See ignore_request_message_backup().
+            assert(message.header.context == 0 or message.header.operation != .register);
+            assert(message.header.request == 0 or message.header.operation != .register);
+            assert(message.header.checksum == entry.header.parent);
+            assert(message.header.request == entry.header.request);
+
+            if (entry.header.size == @sizeOf(Header)) {
+                self.send_header_to_client(message.header.client, entry.header);
+                return;
+            }
+
+            const slot = self.client_sessions().get_slot_for_client(message.header.client).?;
+            if (self.client_replies.read_reply_sync(slot, entry)) |reply| {
+                on_request_repeat_reply_callback(
+                    &self.client_replies,
+                    &entry.header,
+                    reply,
+                    null,
+                );
+            } else {
+                self.client_replies.read_reply(
+                    slot,
+                    entry,
+                    on_request_repeat_reply_callback,
+                    null,
+                ) catch |err| {
+                    assert(err == error.Busy);
+
+                    log.debug("{}: on_request: ignoring (client_replies busy)", .{
+                        self.replica,
+                    });
+                };
+            }
+        }
+
+        fn on_request_repeat_reply_callback(
+            client_replies: *ClientReplies,
+            reply_header: *const Header,
+            reply_: ?*Message,
+            destination_replica: ?u8,
+        ) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
-            const reply = reply_ orelse return;
+            assert(destination_replica == null);
+
+            const reply = reply_ orelse {
+                if (self.client_sessions().get_slot_for_header(reply_header)) |slot| {
+                    self.client_replies.faulty.set(slot.index);
+                } else {
+                    // The read may have been a repair for an older op,
+                    // or a newer op that we haven't seen yet.
+                }
+                return;
+            };
+            assert(reply.header.checksum == reply_header.checksum);
 
             log.debug("{}: on_request: repeat reply (client={} request={})", .{
                 self.replica,
@@ -4182,6 +4368,23 @@ pub fn ReplicaType(
 
             // Request and repair any dirty or faulty prepares:
             if (self.journal.dirty.count > 0) return self.repair_prepares();
+
+            if (self.client_replies.faulty.findFirstSet()) |slot| {
+                const entry = &self.client_sessions().entries[slot];
+                assert(entry.session != 0);
+                assert(!self.client_sessions().entries_free.isSet(slot));
+
+                self.send_header_to_replica(self.choose_any_other_replica(), .{
+                    .command = .request_reply,
+                    .cluster = self.cluster,
+                    .replica = self.replica,
+                    .view = self.view,
+                    .client = entry.header.client,
+                    .op = entry.header.op,
+                    .context = entry.header.checksum,
+                });
+                // Don't return here — it is safe to start a view without all replies repaired.
+            }
 
             // Commit ops, which may in turn discover faulty prepares and drive more repairs:
             if (self.commit_min < self.commit_max) {
@@ -5176,7 +5379,11 @@ pub fn ReplicaType(
                     assert(replica == self.primary_index(self.view));
                     assert(message.header.replica == self.replica);
                 },
-                .reply => unreachable,
+                .reply => {
+                    assert(!self.standby());
+                    assert(message.header.view <= self.view);
+                    assert(message.header.op <= self.op_checkpoint_trigger());
+                },
                 .start_view_change => {
                     assert(!self.standby());
                     assert(self.status == .normal or self.status == .view_change);
@@ -5250,6 +5457,12 @@ pub fn ReplicaType(
                 },
                 .request_prepare => {
                     maybe(self.standby());
+                    assert(message.header.view == self.view);
+                    assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
+                },
+                .request_reply => {
+                    assert(!self.standby());
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
@@ -6163,7 +6376,7 @@ pub fn ReplicaType(
                 entry.header = reply.header.*;
                 if (entry.header.size != @sizeOf(Header)) {
                     self.client_replies.write_reply(
-                        self.client_sessions().get_slot(reply.header.client).?,
+                        self.client_sessions().get_slot_for_header(reply.header).?,
                         reply,
                     );
                 }
