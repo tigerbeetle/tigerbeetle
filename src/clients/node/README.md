@@ -163,12 +163,12 @@ let account3 = { /* ... account values ... */ };
 let account4 = { /* ... account values ... */ };
 accountErrors = await client.createAccounts([account2, account3, account4]);
 for (const error of accountErrors) {
-  switch (error.code) {
+  switch (error.result) {
     case CreateAccountError.exists:
       console.error(`Batch account at ${error.index} already exists.`);
 	  break;
     default:
-      console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.code]}.`);
+      console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
   }
 }
 ```
@@ -247,12 +247,12 @@ reference](https://docs.tigerbeetle.com/reference/operations/create_transfers).
 
 ```javascript
 for (const error of transferErrors) {
-  switch (error.code) {
+  switch (error.result) {
     case CreateTransferError.exists:
       console.error(`Batch transfer at ${error.index} already exists.`);
 	  break;
     default:
-      console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.code]}.`);
+      console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
 }
 ```
@@ -476,7 +476,6 @@ $ ./scripts/install_zig.sh
 $ cd src/clients/node
 $ npm install --include dev
 $ npm pack
-$ [ "$TEST" = "true" ] && mvn test || echo "Skipping client unit tests"
 ```
 
 ### On Windows

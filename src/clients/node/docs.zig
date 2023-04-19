@@ -112,12 +112,12 @@ pub const NodeDocs = Docs{
     \\let account4 = { /* ... account values ... */ };
     \\accountErrors = await client.createAccounts([account2, account3, account4]);
     \\for (const error of accountErrors) {
-    \\  switch (error.code) {
+    \\  switch (error.result) {
     \\    case CreateAccountError.exists:
     \\      console.error(`Batch account at ${error.index} already exists.`);
     \\	  break;
     \\    default:
-    \\      console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.code]}.`);
+    \\      console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
     \\  }
     \\}
     ,
@@ -167,12 +167,12 @@ pub const NodeDocs = Docs{
     .create_transfers_documentation = "",
     .create_transfers_errors_example = 
     \\for (const error of transferErrors) {
-    \\  switch (error.code) {
+    \\  switch (error.result) {
     \\    case CreateTransferError.exists:
     \\      console.error(`Batch transfer at ${error.index} already exists.`);
     \\	  break;
     \\    default:
-    \\      console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.code]}.`);
+    \\      console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
     \\  }
     \\}
     ,
@@ -307,7 +307,6 @@ pub const NodeDocs = Docs{
     \\cd src/clients/node
     \\npm install --include dev
     \\npm pack
-    \\[ "$TEST" = "true" ] && mvn test || echo "Skipping client unit tests"
     ,
 
     // Extra steps to determine commit and repo so this works in
