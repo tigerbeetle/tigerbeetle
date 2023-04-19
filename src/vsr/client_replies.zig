@@ -61,7 +61,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         /// Track which slots have a write currently in progress.
         writing: std.StaticBitSet(constants.clients_max) =
             std.StaticBitSet(constants.clients_max).initEmpty(),
-        /// Track which slots hold a corrupt reply.
+        /// Track which slots hold a corrupt reply, or are otherwise missing the reply
+        /// that ClientSessions believes they should hold.
         faulty: std.StaticBitSet(constants.clients_max) =
             std.StaticBitSet(constants.clients_max).initEmpty(),
 
@@ -70,7 +71,10 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         write_queue: RingBuffer(*Write, constants.client_replies_iops_write_max, .array) = .{},
 
         ready_next_tick: Storage.NextTick = undefined,
-        ready_callback: ?fn (*ClientReplies) void = null,
+        ready_callback: ?union(enum) {
+            next_tick: fn (*ClientReplies) void,
+            write: fn (*ClientReplies) void,
+        } = null,
 
         checkpoint_next_tick: Storage.NextTick = undefined,
         checkpoint_callback: ?fn (*ClientReplies) void = null,
@@ -239,35 +243,34 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             callback: fn (client_replies: *ClientReplies) void,
         ) void {
             assert(client_replies.ready_callback == null);
-            client_replies.ready_callback = callback;
 
             if (client_replies.writes.available() > 0) {
+                client_replies.ready_callback = .{ .next_tick = callback };
                 client_replies.storage.on_next_tick(
                     ready_next_tick_callback,
                     &client_replies.ready_next_tick,
                 );
             } else {
                 // ready_callback will be called the next time a write completes.
+                client_replies.ready_callback = .{ .write = callback };
             }
         }
 
         fn ready_next_tick_callback(next_tick: *Storage.NextTick) void {
             const client_replies = @fieldParentPtr(ClientReplies, "ready_next_tick", next_tick);
+            assert(client_replies.writes.available() > 0);
 
-            if (client_replies.ready_callback) |callback| {
-                assert(client_replies.writes.available() > 0);
-
-                client_replies.ready_callback = null;
-                callback(client_replies);
-            } else {
-                // Another write finished before the next_tick triggered.
-            }
+            const callback = client_replies.ready_callback.?.next_tick;
+            client_replies.ready_callback = null;
+            callback(client_replies);
         }
 
         pub fn remove_reply(client_replies: *ClientReplies, slot: Slot) void {
             client_replies.faulty.unset(slot.index);
         }
 
+        /// The caller is responsible for ensuring that the ClientReplies is able to write
+        /// by calling `write_reply()` after `ready()` finishes.
         pub fn write_reply(client_replies: *ClientReplies, slot: Slot, message: *Message) void {
             assert(client_replies.ready_callback == null);
             assert(client_replies.writes.available() > 0);
@@ -349,10 +352,13 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies.write_reply_next();
 
             if (client_replies.ready_callback) |ready_callback| {
-                assert(client_replies.writes.available() > 0);
-
-                client_replies.ready_callback = null;
-                ready_callback(client_replies);
+                switch (ready_callback) {
+                    .write => |callback| {
+                        client_replies.ready_callback = null;
+                        callback(client_replies);
+                    },
+                    .next_tick => {},
+                }
             }
 
             if (client_replies.checkpoint_callback != null and

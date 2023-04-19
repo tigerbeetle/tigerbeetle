@@ -1891,6 +1891,10 @@ pub fn ReplicaType(
             const slot = self.client_sessions().get_slot_for_header(&entry.header).?;
             if (self.client_replies.read_reply_sync(slot, entry) catch |err| {
                 assert(err == error.Busy);
+
+                log.debug("{}: on_request_reply: ignoring, client_replies busy", .{
+                    self.replica,
+                });
                 return;
             }) |reply| {
                 on_request_reply_read_callback(
@@ -2580,7 +2584,6 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.solo()));
             assert(self.commit_prepare == null);
             assert(self.commit_callback == null);
-            assert(self.client_replies.writes.available() > 0);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
@@ -2608,6 +2611,19 @@ pub fn ReplicaType(
             assert(self.commit_prepare != null);
             assert(self.commit_callback != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+
+            // Ensure that the ClientReplies has at least one Write available.
+            maybe(self.client_replies.writes.available() == 0);
+            self.client_replies.ready(commit_op_client_replies_ready);
+        }
+
+        fn commit_op_client_replies_ready(client_replies: *ClientReplies) void {
+            const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            assert(self.committing);
+            assert(self.commit_prepare != null);
+            assert(self.commit_callback != null);
+            assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+            assert(self.client_replies.writes.available() > 0);
 
             self.commit_op(self.commit_prepare.?);
             assert(self.commit_min == self.commit_prepare.?.header.op);
@@ -2656,19 +2672,6 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
 
             if (self.on_compact) |on_compact| on_compact(self);
-
-            // Before we can proceed to the next commit, we must ensure that the ClientReplies
-            // has at least one Write available.
-            self.client_replies.ready(commit_op_client_replies_ready);
-        }
-
-        fn commit_op_client_replies_ready(client_replies: *ClientReplies) void {
-            const self = @fieldParentPtr(Self, "client_replies", client_replies);
-            assert(self.committing);
-            assert(self.commit_callback != null);
-            assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
-            assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
-            assert(self.client_replies.writes.available() > 0);
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
@@ -2795,6 +2798,7 @@ pub fn ReplicaType(
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
+            maybe(self.client_replies.writes.available() == 0);
 
             // If we are a backup committing through `commit_journal()` then a view change may
             // have happened since we last checked in `commit_journal_next()`. However, this would
@@ -3552,30 +3556,7 @@ pub fn ReplicaType(
                         assert(entry.header.operation == message.header.operation);
 
                         log.debug("{}: on_request: replying to duplicate request", .{self.replica});
-                        if (entry.header.size == @sizeOf(Header)) {
-                            self.send_header_to_client(message.header.client, entry.header);
-                        } else {
-                            const slot =
-                                self.client_sessions().get_slot_for_client(message.header.client).?;
-                            if (self.client_replies.read_reply_sync(slot, entry) catch |err| {
-                                assert(err == error.Busy);
-                                return true;
-                            }) |reply| {
-                                on_request_read_reply_callback(
-                                    &self.client_replies,
-                                    &entry.header,
-                                    reply,
-                                    null,
-                                );
-                            } else {
-                                self.client_replies.read_reply(
-                                    slot,
-                                    entry,
-                                    on_request_read_reply_callback,
-                                    null,
-                                );
-                            }
-                        }
+                        self.on_request_repeat_reply(message, entry);
                         return true;
                     } else {
                         log.err("{}: on_request: request collision (client bug)", .{self.replica});
@@ -3622,7 +3603,53 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_read_reply_callback(
+        fn on_request_repeat_reply(
+            self: *Self,
+            message: *const Message,
+            entry: *const ClientSessions.Entry,
+        ) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            assert(message.header.command == .request);
+            assert(message.header.client > 0);
+            assert(message.header.view <= self.view); // See ignore_request_message_backup().
+            assert(message.header.context == 0 or message.header.operation != .register);
+            assert(message.header.request == 0 or message.header.operation != .register);
+            assert(message.header.checksum == entry.header.parent);
+            assert(message.header.request == entry.header.request);
+
+            if (entry.header.size == @sizeOf(Header)) {
+                self.send_header_to_client(message.header.client, entry.header);
+                return;
+            }
+
+            const slot = self.client_sessions().get_slot_for_client(message.header.client).?;
+            if (self.client_replies.read_reply_sync(slot, entry) catch |err| {
+                assert(err == error.Busy);
+
+                log.debug("{}: on_request: ignoring (client_replies busy)", .{
+                    self.replica,
+                });
+                return;
+            }) |reply| {
+                on_request_repeat_reply_callback(
+                    &self.client_replies,
+                    &entry.header,
+                    reply,
+                    null,
+                );
+            } else {
+                self.client_replies.read_reply(
+                    slot,
+                    entry,
+                    on_request_repeat_reply_callback,
+                    null,
+                );
+            }
+        }
+
+        fn on_request_repeat_reply_callback(
             client_replies: *ClientReplies,
             reply_header: *const Header,
             reply_: ?*Message,
@@ -3635,7 +3662,7 @@ pub fn ReplicaType(
                 if (self.client_sessions().get_slot_for_header(reply_header)) |slot| {
                     self.client_replies.faulty.set(slot.index);
                 } else {
-                    // The read may have be a repair for an older op,
+                    // The read may have been a repair for an older op,
                     // or a newer op that we haven't seen yet.
                 }
                 return;
