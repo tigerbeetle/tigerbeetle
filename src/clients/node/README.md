@@ -476,7 +476,6 @@ $ ./scripts/install_zig.sh
 $ cd src/clients/node
 $ npm install --include dev
 $ npm pack
-$ [ "$TEST" = "true" ] && npm test || echo "Skipping client unit tests"
 ```
 
 ### On Windows
