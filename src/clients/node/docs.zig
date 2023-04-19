@@ -307,7 +307,6 @@ pub const NodeDocs = Docs{
     \\cd src/clients/node
     \\npm install --include dev
     \\npm pack
-    \\[ "$TEST" = "true" ] && npm test || echo "Skipping client unit tests"
     ,
 
     // Extra steps to determine commit and repo so this works in
