@@ -15,10 +15,10 @@ pub const NodeDocs = Docs{
     .test_source_path = "",
 
     .name = "tigerbeetle-node",
-    .description =
+    .description = 
     \\The TigerBeetle client for Node.js.
     ,
-    .prerequisites =
+    .prerequisites = 
     \\* NodeJS >= `14`
     ,
 
@@ -28,7 +28,7 @@ pub const NodeDocs = Docs{
 
     .install_prereqs = "apk add -U python3",
 
-    .install_sample_file =
+    .install_sample_file = 
     \\const { createClient } = require("tigerbeetle-node");
     \\console.log("Import ok!");
     ,
@@ -37,13 +37,13 @@ pub const NodeDocs = Docs{
     .install_sample_file_test_commands = "node run test.js",
 
     .current_commit_pre_install_commands = "",
-    .current_commit_post_install_commands =
+    .current_commit_post_install_commands = 
     \\npm remove tigerbeetle-node
     \\npm install ./tigerbeetle/src/clients/node/tigerbeetle-node-*.tgz
     ,
 
     .install_commands = "npm install tigerbeetle-node",
-    .install_documentation =
+    .install_documentation = 
     \\If you run into issues, check out the distribution-specific install
     \\steps that are run in CI to test support:
     \\
@@ -54,7 +54,7 @@ pub const NodeDocs = Docs{
     \\* [Ubuntu](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_ubuntu.sh)
     \\* [RHEL](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_rhelubi.sh)
     ,
-    .examples =
+    .examples = 
     \\### Sidenote: `BigInt`
     \\TigerBeetle uses 64-bit integers for many fields while JavaScript's
     \\builtin `Number` maximum value is `2^53-1`. The `n` suffix in JavaScript
@@ -64,14 +64,14 @@ pub const NodeDocs = Docs{
     \\`BigInt(1)`.
     ,
 
-    .client_object_example =
+    .client_object_example = 
     \\const client = createClient({
     \\  cluster_id: 0,
     \\  replica_addresses: ['3001', '3002', '3003']
     \\});
     ,
     .client_object_documentation = "",
-    .create_accounts_example =
+    .create_accounts_example = 
     \\let account = {
     \\  id: 137n,
     \\  user_data: 0n,
@@ -89,7 +89,7 @@ pub const NodeDocs = Docs{
     \\let accountErrors = await client.createAccounts([account]);
     ,
     .create_accounts_documentation = "",
-    .account_flags_documentation =
+    .account_flags_documentation = 
     \\To toggle behavior for an account, combine enum values stored in the
     \\`AccountFlags` object (in TypeScript it is an actual enum) with
     \\bitwise-or:
@@ -100,13 +100,13 @@ pub const NodeDocs = Docs{
     \\
     ,
 
-    .account_flags_example =
+    .account_flags_example = 
     \\let account0 = { /* ... account values ... */ };
     \\let account1 = { /* ... account values ... */ };
     \\account0.flags = AccountFlags.linked | AccountFlags.debits_must_not_exceed_credits;
     \\accountErrors = await client.createAccounts([account0, account1]);
     ,
-    .create_accounts_errors_example =
+    .create_accounts_errors_example = 
     \\let account2 = { /* ... account values ... */ };
     \\let account3 = { /* ... account values ... */ };
     \\let account4 = { /* ... account values ... */ };
@@ -121,13 +121,13 @@ pub const NodeDocs = Docs{
     \\  }
     \\}
     ,
-    .create_accounts_errors_documentation =
+    .create_accounts_errors_documentation = 
     \\To handle errors you can either 1) exactly match error codes returned
     \\from `client.createAccounts` with enum values in the
     \\`CreateAccountError` object, or you can 2) look up the error code in
     \\the `CreateAccountError` object for a human-readable string.
     ,
-    .lookup_accounts_example =
+    .lookup_accounts_example = 
     \\const accounts = await client.lookupAccounts([137n, 138n]);
     \\console.log(accounts);
     \\/*    
@@ -147,7 +147,7 @@ pub const NodeDocs = Docs{
     \\ */
     ,
 
-    .create_transfers_example =
+    .create_transfers_example = 
     \\let transfer = {
     \\  id: 1n,
     \\  pending_id: 0n,
@@ -165,7 +165,7 @@ pub const NodeDocs = Docs{
     \\let transferErrors = await client.createTransfers([transfer]);
     ,
     .create_transfers_documentation = "",
-    .create_transfers_errors_example =
+    .create_transfers_errors_example = 
     \\for (const error of transferErrors) {
     \\  switch (error.result) {
     \\    case CreateTransferError.exists:
@@ -176,21 +176,21 @@ pub const NodeDocs = Docs{
     \\  }
     \\}
     ,
-    .create_transfers_errors_documentation =
+    .create_transfers_errors_documentation = 
     \\To handle errors you can either 1) exactly match error codes returned
     \\from `client.createTransfers` with enum values in the
     \\`CreateTransferError` object, or you can 2) look up the error code in
     \\the `CreateTransferError` object for a human-readable string.
     ,
 
-    .no_batch_example =
+    .no_batch_example = 
     \\for (let i = 0; i < transfers.len; i++) {
     \\  const transferErrors = await client.createTransfers(transfers[i]);
     \\  // error handling omitted
     \\}
     ,
 
-    .batch_example =
+    .batch_example = 
     \\const BATCH_SIZE = 8191;
     \\for (let i = 0; i < transfers.length; i += BATCH_SIZE) {
     \\  const transferErrors = await client.createTransfers(transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)));
@@ -198,7 +198,7 @@ pub const NodeDocs = Docs{
     \\}
     ,
 
-    .transfer_flags_documentation =
+    .transfer_flags_documentation = 
     \\To toggle behavior for a transfer, combine enum values stored in the
     \\`TransferFlags` object (in TypeScript it is an actual enum) with
     \\bitwise-or:
@@ -208,14 +208,14 @@ pub const NodeDocs = Docs{
     \\* `TransferFlags.post_pending_transfer`
     \\* `TransferFlags.void_pending_transfer`
     ,
-    .transfer_flags_link_example =
+    .transfer_flags_link_example = 
     \\transfer0 = { /* ... transfer values ... */ };
     \\transfer1 = { /* ... transfer values ... */ };
     \\transfer0.flags = TransferFlags.linked;
     \\// Create the transfer
     \\transferErrors = await client.createTransfers([transfer0, transfer1]);
     ,
-    .transfer_flags_post_example =
+    .transfer_flags_post_example = 
     \\transfer = {
     \\  id: 2n,
     \\  pending_id: 1n,
@@ -224,7 +224,7 @@ pub const NodeDocs = Docs{
     \\};
     \\transferErrors = await client.createTransfers([transfer]);
     ,
-    .transfer_flags_void_example =
+    .transfer_flags_void_example = 
     \\transfer = {
     \\  id: 2n,
     \\  pending_id: 1n,
@@ -234,7 +234,7 @@ pub const NodeDocs = Docs{
     \\transferErrors = await client.createTransfers([transfer]);
     ,
 
-    .lookup_transfers_example =
+    .lookup_transfers_example = 
     \\const transfers = await client.lookupTransfers([1n, 2n]);
     \\console.log(transfers);
     \\/*
@@ -255,7 +255,7 @@ pub const NodeDocs = Docs{
     \\ */
     ,
 
-    .linked_events_example =
+    .linked_events_example = 
     \\const batch = [];
     \\let linkedFlag = 0;
     \\linkedFlag |= CreateTransferFlags.linked;
@@ -299,7 +299,7 @@ pub const NodeDocs = Docs{
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
-    .developer_setup_sh_commands =
+    .developer_setup_sh_commands = 
     \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
     \\cd tigerbeetle
     \\git checkout $GIT_SHA
@@ -313,12 +313,12 @@ pub const NodeDocs = Docs{
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_pwsh_commands = "",
-    .test_main_prefix =
+    .test_main_prefix = 
     \\const { createClient } = require("tigerbeetle-node");
     \\
     \\async function main() {
     ,
-    .test_main_suffix =
+    .test_main_suffix = 
     \\}
     \\main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
     ,
