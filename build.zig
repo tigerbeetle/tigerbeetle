@@ -188,7 +188,7 @@ pub fn build(b: *std.build.Builder) void {
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
-        if (test_filter != null) {
+        if (test_filter == null) {
             // Test that our demos compile, but don't run them.
             inline for (.{
                 "demo_01_create_accounts",
