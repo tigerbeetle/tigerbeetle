@@ -19,7 +19,6 @@ const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../testing/storage.zig").Storage;
 const StorageFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
-const MessagePool = @import("../message_pool.zig").MessagePool;
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("superblock.zig").data_file_size_min;
 const VSRState = @import("superblock.zig").SuperBlockHeader.VSRState;
@@ -74,20 +73,15 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     var storage_verify = try Storage.init(allocator, superblock_zone_size, storage_options);
     defer storage_verify.deinit(allocator);
 
-    var message_pool = try MessagePool.init(allocator, .replica);
-    defer message_pool.deinit(allocator);
-
     var superblock = try SuperBlock.init(allocator, .{
         .storage = &storage,
         .storage_size_limit = constants.storage_size_max,
-        .message_pool = &message_pool,
     });
     defer superblock.deinit(allocator);
 
     var superblock_verify = try SuperBlock.init(allocator, .{
         .storage = &storage_verify,
         .storage_size_limit = constants.storage_size_max,
-        .message_pool = &message_pool,
     });
     defer superblock_verify.deinit(allocator);
 

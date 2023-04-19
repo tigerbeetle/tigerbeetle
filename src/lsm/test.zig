@@ -8,7 +8,6 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.lsm_forest_test);
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../storage.zig").Storage;
@@ -54,7 +53,6 @@ const Environment = struct {
     fd: os.fd_t,
     io: IO,
     storage: Storage,
-    message_pool: MessagePool,
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context,
     grid: Grid,
@@ -78,13 +76,9 @@ const Environment = struct {
         env.storage = try Storage.init(&env.io, env.fd);
         errdefer env.storage.deinit();
 
-        env.message_pool = try MessagePool.init(allocator, .replica);
-        errdefer env.message_pool.deinit(allocator);
-
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = &env.storage,
             .storage_size_limit = constants.storage_size_max,
-            .message_pool = &env.message_pool,
         });
         env.superblock_context = undefined;
         errdefer env.superblock.deinit(allocator);
@@ -109,7 +103,6 @@ const Environment = struct {
         }
         env.grid.deinit(allocator);
         env.superblock.deinit(allocator);
-        env.message_pool.deinit(allocator);
         env.storage.deinit();
         env.io.deinit();
         std.os.close(env.fd);
