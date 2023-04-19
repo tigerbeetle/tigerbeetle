@@ -2793,11 +2793,11 @@ pub fn ReplicaType(
             assert(self.commit_callback != null);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
+            assert(self.client_replies.writes.available() > 0);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.op == self.commit_min + 1);
             assert(prepare.header.op <= self.op);
-            maybe(self.client_replies.writes.available() == 0);
 
             // If we are a backup committing through `commit_journal()` then a view change may
             // have happened since we last checked in `commit_journal_next()`. However, this would
