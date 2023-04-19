@@ -1889,14 +1889,7 @@ pub fn ReplicaType(
             assert(entry.header.op == message.header.op);
 
             const slot = self.client_sessions().get_slot_for_header(&entry.header).?;
-            if (self.client_replies.read_reply_sync(slot, entry) catch |err| {
-                assert(err == error.Busy);
-
-                log.debug("{}: on_request_reply: ignoring, client_replies busy", .{
-                    self.replica,
-                });
-                return;
-            }) |reply| {
+            if (self.client_replies.read_reply_sync(slot, entry)) |reply| {
                 on_request_reply_read_callback(
                     &self.client_replies,
                     &entry.header,
@@ -1909,7 +1902,13 @@ pub fn ReplicaType(
                     entry,
                     on_request_reply_read_callback,
                     message.header.replica,
-                );
+                ) catch |err| {
+                    assert(err == error.Busy);
+
+                    log.debug("{}: on_request_reply: ignoring, client_replies busy", .{
+                        self.replica,
+                    });
+                };
             }
         }
 
@@ -3625,14 +3624,7 @@ pub fn ReplicaType(
             }
 
             const slot = self.client_sessions().get_slot_for_client(message.header.client).?;
-            if (self.client_replies.read_reply_sync(slot, entry) catch |err| {
-                assert(err == error.Busy);
-
-                log.debug("{}: on_request: ignoring (client_replies busy)", .{
-                    self.replica,
-                });
-                return;
-            }) |reply| {
+            if (self.client_replies.read_reply_sync(slot, entry)) |reply| {
                 on_request_repeat_reply_callback(
                     &self.client_replies,
                     &entry.header,
@@ -3645,7 +3637,13 @@ pub fn ReplicaType(
                     entry,
                     on_request_repeat_reply_callback,
                     null,
-                );
+                ) catch |err| {
+                    assert(err == error.Busy);
+
+                    log.debug("{}: on_request: ignoring (client_replies busy)", .{
+                        self.replica,
+                    });
+                };
             }
         }
 

@@ -107,7 +107,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-        ) error{Busy}!?*Message {
+        ) ?*Message {
             const client = session.header.client;
 
             if (client_replies.writing.isSet(slot.index)) {
@@ -127,16 +127,6 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 return write_latest.?.message;
             }
 
-            if (client_replies.reads.available() == 0) {
-                log.debug("{}: read_reply: busy (client={} reply={})", .{
-                    client_replies.replica,
-                    session.header.client,
-                    session.header.checksum,
-                });
-
-                return error.Busy;
-            }
-
             return null;
         }
 
@@ -148,10 +138,18 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             session: *const ClientSessions.Entry,
             callback: fn (*ClientReplies, *const vsr.Header, ?*Message, ?u8) void,
             destination_replica: ?u8,
-        ) void {
-            assert(client_replies.read_reply_sync(slot, session) catch unreachable == null);
+        ) error{Busy}!void {
+            assert(client_replies.read_reply_sync(slot, session) == null);
 
-            const read = client_replies.reads.acquire().?;
+            const read = client_replies.reads.acquire() orelse {
+                log.debug("{}: read_reply: busy (client={} reply={})", .{
+                    client_replies.replica,
+                    session.header.client,
+                    session.header.checksum,
+                });
+
+                return error.Busy;
+            };
 
             log.debug("{}: read_reply: start (client={} reply={})", .{
                 client_replies.replica,
