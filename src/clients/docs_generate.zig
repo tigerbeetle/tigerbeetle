@@ -313,9 +313,7 @@ const Generator = struct {
             "[Debug] Ensuring path: {s}",
             .{path},
         );
-        var dir = try std.fs.openDirAbsolute("/", .{});
-        defer dir.close();
-        try dir.makePath(path);
+        try std.fs.cwd().makePath(path);
     }
 
     fn build_file_within_project(self: Generator, tmp_dir: TmpDir, file: []const u8, run_setup_tests: bool) !void {
