@@ -484,6 +484,14 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             std.os.exit(@enumToInt(failure));
         }
 
+        /// Print the current state of the cluster, intended for printf debugging.
+        pub fn log_cluster(cluster: *const Self) void {
+            var replica: u8 = 0;
+            while (replica < cluster.replicas.len) : (replica += 1) {
+                cluster.log_replica(.commit, replica);
+            }
+        }
+
         fn log_replica(
             cluster: *const Self,
             event: enum(u8) {
