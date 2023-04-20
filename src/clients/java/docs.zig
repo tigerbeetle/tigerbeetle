@@ -392,7 +392,7 @@ pub const JavaDocs = Docs{
     .developer_setup_pwsh_commands = 
     \\cd src/clients/java
     \\.\scripts\install.bat
-    \\if ($env:TEST -q "true") { mvn test } else { echo "Skipping client unit test" }
+    \\if ($env:TEST -eq "true") { mvn test } else { echo "Skipping client unit test" }
     ,
 
     .test_main_prefix = 
