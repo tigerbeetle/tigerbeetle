@@ -1729,24 +1729,6 @@ pub fn ReplicaType(
                         prepare_checksum,
                         message.header.replica,
                     );
-
-                    // We have guaranteed the prepare (not safe to nack).
-                    // Our copy may or may not be valid, but we will try to read & forward it.
-                    return;
-                }
-            }
-
-            {
-                // We may have guaranteed the prepare but our copy is faulty (not safe to nack).
-                if (self.journal.faulty.bit(slot)) return;
-                if (self.journal.header_with_op_and_checksum(message.header.op, checksum)) |_| {
-                    if (self.journal.dirty.bit(slot)) {
-                        // We know of the prepare but have yet to write it (safe to nack).
-                        // Continue through below...
-                    } else {
-                        // We have guaranteed the prepare and our copy is clean (not safe to nack).
-                        return;
-                    }
                 }
             }
         }
