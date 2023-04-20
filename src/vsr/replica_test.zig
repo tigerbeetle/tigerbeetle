@@ -449,6 +449,58 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, trunc
     try expectEqual(b2.op_checkpoint(), checkpoint_1);
 }
 
+test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-change; dont nack" {
+    // This scenario is also applicable when any op within the pipeline suffix is corrupted.
+    // But we test by corrupting the last op to take advantage of recovering_head to learn the last
+    // op's header without its prepare.
+    //
+    // Also, a corrupt last op maximizes uncertainty — there are no higher ops which
+    // can definitively show that the last op is committed (via `header.commit`).
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.pipeline_prepare_queue_max,
+    });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    b2.drop_all(.R_, .bidirectional);
+
+    try c.request(30, 30);
+
+    b1.stop();
+    b1.corrupt(.{ .wal_prepare = 30 });
+
+    // We can't learn op=30's prepare, only its header (via start_view).
+    b1.drop(.R_, .bidirectional, .prepare);
+    try expectEqual(b1.open(), .ok);
+    try expectEqual(b1.status(), .recovering_head);
+    t.run();
+
+    a0.stop();
+    b1.pass_all(.R_, .bidirectional);
+    b2.pass_all(.R_, .bidirectional);
+    t.run();
+
+    // The cluster is stuck trying to repair op=30 (requesting the prepare).
+    // B2 can nack op=30, but B1 *must not*.
+    try expectEqual(b1.status(), .view_change);
+    try expectEqual(b1.commit(), 29);
+    try expectEqual(b1.op_head(), 30);
+
+    // A0 provides prepare=30.
+    try expectEqual(a0.open(), .ok);
+    t.run();
+    try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).commit(), 30);
+    try expectEqual(t.replica(.R_).op_head(), 30);
+}
+
 test "Cluster: repair: corrupt reply" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
