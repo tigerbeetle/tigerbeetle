@@ -7,7 +7,7 @@ jobs:
   docs:
     strategy:
       matrix:
-        language: [java, go, node]
+        language: [java, go]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
