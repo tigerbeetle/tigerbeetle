@@ -4,36 +4,22 @@ on:
   workflow_call:
 
 jobs:
-  benchmark:
+  docs:
+    strategy:
+      matrix:
+        language: [java, go, node]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
-      - run: ./scripts/benchmark.bat --transfer-count 4000
-
-  c_sample:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v3
+  
+      - if: matrix.language == 'java'
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          server-id: github
+          settings-path: ${{ github.workspace }}
+  
+      # Runs checks against generated client docs
       - run: .\scripts\install_zig.bat
-      - run: zig\zig.exe build c_sample -Drelease-safe
-
-  # TODO(Phil): This is new and never worked. Let's get it working.
-  # docs:
-  #   strategy:
-  #     matrix:
-  #       language: [java, go, node]
-  #   runs-on: windows-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
-  # 
-  #     - if: matrix.language == 'java'
-  #       uses: actions/setup-java@v3
-  #       with:
-  #         java-version: '11'
-  #         distribution: 'temurin'
-  #         server-id: github
-  #         settings-path: ${{ github.workspace }}
-  # 
-  #     # Runs checks against generated client docs
-  #     - run: .\scripts\install_zig.bat
-  #     - run: .\scripts\build.bat client_docs -- --language ${{ matrix.language }}
+      - run: .\scripts\build.bat client_docs -- --language ${{ matrix.language }}
