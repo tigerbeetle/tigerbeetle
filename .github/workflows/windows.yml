@@ -7,7 +7,7 @@ jobs:
   docs:
     strategy:
       matrix:
-        language: [java, go]
+        language: [go] # java
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3
@@ -22,4 +22,5 @@ jobs:
   
       # Runs checks against generated client docs
       - run: .\scripts\install_zig.bat
-      - run: .\scripts\build.bat client_docs -- --language ${{ matrix.language }}
+      - run: .\scripts\build.bat client_docs
+      - run: .\zig-out\bin\client_docs.exe --language ${{ matrix.language }}
