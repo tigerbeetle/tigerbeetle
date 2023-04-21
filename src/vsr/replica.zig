@@ -5669,6 +5669,11 @@ pub fn ReplicaType(
             }
 
             if (self.solo()) {
+                assert(self.status == .recovering);
+                assert(self.view == self.log_view);
+                assert(!update_dvc);
+                assert(!update_sv);
+
                 if (self.commit_min < self.op) {
                     self.commit_journal(self.op);
                 } else {
