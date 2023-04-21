@@ -121,7 +121,7 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
             }
         }
 
-        fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
+        fn on_read(_: *Grid, read: *Grid.Read, block: Grid.BlockPtrConst) void {
             const it = @fieldParentPtr(LevelIndexIterator, "read", read);
             assert(it.callback == .read);
 

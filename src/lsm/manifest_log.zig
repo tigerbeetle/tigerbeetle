@@ -231,7 +231,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
         }
 
-        fn open_read_block_callback(read: *Grid.Read, block: Grid.BlockPtrConst) void {
+        fn open_read_block_callback(_: *Grid, read: *Grid.Read, block: Grid.BlockPtrConst) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "read", read);
             assert(!manifest_log.opened);
             assert(manifest_log.reading);
@@ -434,7 +434,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.blocks.advance_head();
         }
 
-        fn write_block_callback(write: *Grid.Write) void {
+        fn write_block_callback(_: *Grid, write: *Grid.Write) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "write", write);
             assert(manifest_log.opened);
             assert(manifest_log.writing);
@@ -520,7 +520,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
         }
 
-        fn compact_read_block_callback(read: *Grid.Read, block: BlockPtrConst) void {
+        fn compact_read_block_callback(_: *Grid, read: *Grid.Read, block: BlockPtrConst) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "read", read);
             assert(manifest_log.opened);
             assert(manifest_log.reading);
