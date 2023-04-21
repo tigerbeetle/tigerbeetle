@@ -130,6 +130,7 @@ pub const IO = struct {
     fs_pool: Pool = .{},
 
     injector: Injector = .{},
+    event_set: bool = false,
     event_fd: os.fd_t,
 
     pub fn init(entries: u12, flags: u32) !IO {
@@ -247,6 +248,8 @@ pub const IO = struct {
                     var value: u64 = undefined;
                     const bytes = try os.read(self.event_fd, std.mem.asBytes(&value));
                     assert(bytes == @sizeOf(u64));
+                    assert(value == 1);
+                    assert(@atomicRmw(bool, &self.event_set, .Xchg, false, .Acquire));
                 }
 
                 self.io_inflight = 0;
@@ -384,9 +387,11 @@ pub const IO = struct {
                         op_data.result = result;
 
                         if (io.injector.push(_completion)) {
-                            var value: u64 = 1;
-                            const wrote = os.write(io.event_fd, std.mem.asBytes(&value)) catch unreachable;
-                            assert(wrote == @sizeOf(u64));
+                            if (!@atomicRmw(bool, &io.event_set, .Xchg, true, .Release)) {
+                                var value: u64 = 1;
+                                const wrote = os.write(io.event_fd, std.mem.asBytes(&value)) catch unreachable;
+                                assert(wrote == @sizeOf(u64));
+                            }
                         }
                         return;
                     },
