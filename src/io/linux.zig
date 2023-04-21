@@ -190,7 +190,7 @@ pub const IO = struct {
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
         if (!self.fs_spawned) {
-            try self.fs_pool.spawn(8);
+            try self.fs_pool.spawn(64);
             self.fs_spawned = true;
         }
 
