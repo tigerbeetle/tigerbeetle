@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -ex
+set -e
 
 # Determine the operating system:
 if [ "$(uname)" = "Linux" ]; then
