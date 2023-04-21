@@ -194,6 +194,8 @@ pub const Header = extern struct {
         checksum_empty = checksum(&.{});
     }
 
+    /// Aegis128 (used by checksum) uses hardware accelerated AES via inline asm which isn't
+    /// available at comptime. Instead of a constant, lazily initialize the empty block checksum.
     fn checksum_body_empty() u128 {
         checksum_empty_once.call();
         return checksum_empty;
@@ -1065,12 +1067,14 @@ pub fn sector_ceil(offset: u64) u64 {
 }
 
 pub fn checksum(source: []const u8) u128 {
+    // From std.crypto.aegis.State128L:
     const AesBlock = std.crypto.core.aes.Block;
     const Aegis128 = struct {
         const State = [8]AesBlock;
         const key = std.mem.zeroes([16]u8);
         const nonce = std.mem.zeroes([16]u8);
 
+        // Initialize the seed state (from key and nonce) once instead of at each call to checksum.
         var seed_once = std.once(seed_init);
         var seed_state: State = undefined;
 
@@ -1102,7 +1106,7 @@ pub fn checksum(source: []const u8) u128 {
             blocks[4] = blocks[4].xorBlocks(d2);
         }
 
-        fn enc(state: *State, src: *const [32]u8) void {
+        fn absorb(state: *State, src: *const [32]u8) void {
             const msg0 = AesBlock.fromBytes(src[0..16]);
             const msg1 = AesBlock.fromBytes(src[16..32]);
             update(state, msg0, msg1);
@@ -1120,21 +1124,21 @@ pub fn checksum(source: []const u8) u128 {
         }
     };
 
-    // Initialize the seed state and make a copy.
+    // Initialize the seed state and make a local copy.
     Aegis128.seed_once.call();
     var state = Aegis128.seed_state;
 
     // Encrypt the source with the state (without an output cipher).
     var src: [32]u8 align(16) = undefined;
     var i: usize = 0;
-    while (i + 32 <= source.len) : (i += 32) Aegis128.enc(&state, source[i..][0..32]);
+    while (i + 32 <= source.len) : (i += 32) Aegis128.absorb(&state, source[i..][0..32]);
     if (source.len % 32 != 0) {
         std.mem.set(u8, src[0..], 0);
         std.mem.copy(u8, src[0 .. source.len % 32], source[i .. i + source.len % 32]);
-        Aegis128.enc(&state, &src);
+        Aegis128.absorb(&state, &src);
     }
 
-    // Get the max.
+    // Get the mac.
     return @bitCast(u128, Aegis128.mac(&state, 0, source.len));
 }
 
