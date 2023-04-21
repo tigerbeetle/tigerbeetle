@@ -138,7 +138,7 @@ fn build_simulator(
     mode: std.builtin.Mode,
 ) void {
     const mode_str = switch (mode) {
-        .Debug => "-Ddebug",
+        .Debug => "--",
         .ReleaseSafe => "-Drelease-safe",
         else => unreachable,
     };
