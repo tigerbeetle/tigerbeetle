@@ -1,553 +1,172 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const os = std.os;
-const linux = os.linux;
-const IO_Uring = linux.IO_Uring;
-const io_uring_cqe = linux.io_uring_cqe;
-const io_uring_sqe = linux.io_uring_sqe;
+const mem = std.mem;
+const assert = std.debug.assert;
 const log = std.log.scoped(.io);
-const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
+const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
-    ring: IO_Uring,
-
-    /// Operations not yet submitted to the kernel and waiting on available space in the
-    /// submission queue.
-    unqueued: FIFO(Completion) = .{ .name = "io_unqueued" },
-
-    /// Completions that are ready to have their callbacks run.
+    time: Time = .{},
+    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
     completed: FIFO(Completion) = .{ .name = "io_completed" },
-
-    ios_queued: u64 = 0,
-    ios_in_kernel: u64 = 0,
-
-    flush_tracer_slot: ?tracer.SpanStart = null,
-    callback_tracer_slot: ?tracer.SpanStart = null,
+    io_inflight: u32 = 0,
+    io_pending: [64]*Completion = undefined,
 
     pub fn init(entries: u12, flags: u32) !IO {
-        // Detect the linux version to ensure that we support all io_uring ops used.
-        const uts = std.os.uname();
-        const release = std.mem.sliceTo(&uts.release, 0);
-        const version = try std.builtin.Version.parse(release);
-        if (version.order(std.builtin.Version{ .major = 5, .minor = 5 }) == .lt) {
-            @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
-        }
-
-        return IO{ .ring = try IO_Uring.init(entries, flags) };
+        _ = entries;
+        _ = flags;
+        return IO{};
     }
 
     pub fn deinit(self: *IO) void {
-        assert(self.flush_tracer_slot == null);
-        assert(self.callback_tracer_slot == null);
-
-        self.ring.deinit();
+        self.* = undefined;
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn tick(self: *IO) !void {
-        // We assume that all timeouts submitted by `run_for_ns()` will be reaped by `run_for_ns()`
-        // and that `tick()` and `run_for_ns()` cannot be run concurrently.
-        // Therefore `timeouts` here will never be decremented and `etime` will always be false.
-        var timeouts: usize = 0;
-        var etime = false;
-
-        try self.flush(0, &timeouts, &etime);
-        assert(etime == false);
-
-        // Flush any SQEs that were queued while running completion callbacks in `flush()`:
-        // This is an optimization to avoid delaying submissions until the next tick.
-        // At the same time, we do not flush any ready CQEs since SQEs may complete synchronously.
-        // We guard against an io_uring_enter() syscall if we know we do not have any queued SQEs.
-        // We cannot use `self.ring.sq_ready()` here since this counts flushed and unflushed SQEs.
-        const queued = self.ring.sq.sqe_tail -% self.ring.sq.sqe_head;
-        if (queued > 0) {
-            try self.flush_submissions(0, &timeouts, &etime);
-            assert(etime == false);
-        }
+        return self.flush(false);
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
-    /// in the kernel_timespec struct.
+    /// in the __kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
-        // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
-        // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
-        var current_ts: os.timespec = undefined;
-        os.clock_gettime(os.CLOCK.MONOTONIC, &current_ts) catch unreachable;
-        // The absolute CLOCK_MONOTONIC time after which we may return from this function:
-        const timeout_ts: os.linux.kernel_timespec = .{
-            .tv_sec = current_ts.tv_sec,
-            .tv_nsec = current_ts.tv_nsec + nanoseconds,
-        };
-        var timeouts: usize = 0;
-        var etime = false;
-        while (!etime) {
-            const timeout_sqe = self.ring.get_sqe() catch blk: {
-                // The submission queue is full, so flush submissions to make space:
-                try self.flush_submissions(0, &timeouts, &etime);
-                break :blk self.ring.get_sqe() catch unreachable;
-            };
-            // Submit an absolute timeout that will be canceled if any other SQE completes first:
-            linux.io_uring_prep_timeout(timeout_sqe, &timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
-            timeout_sqe.user_data = 0;
-            timeouts += 1;
+        var timed_out = false;
+        var completion: Completion = undefined;
+        const on_timeout = struct {
+            fn callback(
+                timed_out_ptr: *bool,
+                _completion: *Completion,
+                result: TimeoutError!void,
+            ) void {
+                _ = _completion;
+                _ = result catch unreachable;
 
-            // We don't really want to count this timeout as an io,
-            // but it's tricky to track separately.
-            self.ios_queued += 1;
-            tracer.plot(
-                .{ .queue_count = .{ .queue_name = "io_queued" } },
-                @intToFloat(f64, self.ios_queued),
-            );
+                timed_out_ptr.* = true;
+            }
+        }.callback;
 
-            // The amount of time this call will block is bounded by the timeout we just submitted:
-            try self.flush(1, &timeouts, &etime);
-        }
-        // Reap any remaining timeouts, which reference the timespec in the current stack frame.
-        // The busy loop here is required to avoid a potential deadlock, as the kernel determines
-        // when the timeouts are pushed to the completion queue, not us.
-        while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
-    }
-
-    fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
-        tracer.start(
-            &self.flush_tracer_slot,
-            .io_flush,
-            @src(),
+        // Submit a timeout which sets the timed_out value to true to terminate the loop below.
+        self.timeout(
+            *bool,
+            &timed_out,
+            on_timeout,
+            &completion,
+            nanoseconds,
         );
 
-        // Flush any queued SQEs and reuse the same syscall to wait for completions if required:
-        try self.flush_submissions(wait_nr, timeouts, etime);
-        // We can now just peek for any CQEs without waiting and without another syscall:
-        try self.flush_completions(0, timeouts, etime);
-
-        // The SQE array is empty from flush_submissions(). Fill it up with unqueued completions.
-        // This runs before `self.completed` is flushed below to prevent new IO from reserving SQE
-        // slots and potentially starving those in `self.unqueued`.
-        // Loop over a copy to avoid an infinite loop of `enqueue()` re-adding to `self.unqueued`.
-        {
-            var copy = self.unqueued;
-            self.unqueued.reset();
-            while (copy.pop()) |completion| self.enqueue(completion);
+        // Loop until our timeout completion is processed above, which sets timed_out to true.
+        // LLVM shouldn't be able to cache timed_out's value here since its address escapes above.
+        while (!timed_out) {
+            try self.flush(true);
         }
-
-        tracer.end(
-            &self.flush_tracer_slot,
-            .io_flush,
-        );
-
-        // Run completions only after all completions have been flushed:
-        // Loop until all completions are processed. Calls to complete() may queue more work
-        // and extend the duration of the loop, but this is fine as it 1) executes completions
-        // that become ready without going through another syscall from flush_submissions() and
-        // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
-        while (self.completed.pop()) |completion| completion.complete(&self.callback_tracer_slot);
-
-        // At this point, unqueued could have completions either by 1) those who didn't get an SQE
-        // during the popping of unqueued or 2) completion.complete() which start new IO. These
-        // unqueued completions will get priority to acquiring SQEs on the next flush().
     }
 
-    fn flush_completions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
-        var cqes: [256]io_uring_cqe = undefined;
-        var wait_remaining = wait_nr;
-        while (true) {
-            // Guard against waiting indefinitely (if there are too few requests inflight),
-            // especially if this is not the first time round the loop:
-            const completed = self.ring.copy_cqes(&cqes, wait_remaining) catch |err| switch (err) {
-                error.SignalInterrupt => continue,
-                else => return err,
-            };
-            if (completed > wait_remaining) wait_remaining = 0 else wait_remaining -= completed;
-            for (cqes[0..completed]) |cqe| {
-                self.ios_in_kernel -= 1;
+    fn flush(self: *IO, wait_for_completions: bool) !void {
+        // Timeouts are expired here and possibly pushed to the completed queue.
+        const next_timeout = self.flush_timeouts();
+        const inflight = self.io_inflight;
 
-                if (cqe.user_data == 0) {
-                    timeouts.* -= 1;
-                    // We are only done if the timeout submitted was completed due to time, not if
-                    // it was completed due to the completion of an event, in which case `cqe.res`
-                    // would be 0. It is possible for multiple timeout operations to complete at the
-                    // same time if the nanoseconds value passed to `run_for_ns()` is very short.
-                    if (-cqe.res == @enumToInt(os.E.TIME)) etime.* = true;
-                    continue;
+        // Only call poll() if we need to check pending IO or if we need to wait for completions.
+        if (inflight > 0 or self.completed.empty()) {
+            // Zero timeouts implies a non-blocking poll
+            var timeout_ms: i32 = 0;
+
+            // We need to wait (not check) on poll if there's nothing inflight or complete.
+            // We should never wait indefinitely (timeout_ms = -1 for poll) given:
+            // - tick() is non-blocking (wait_for_completions = false)
+            // - run_for_ns() always submits a timeout
+            if (self.completed.empty()) {
+                if (wait_for_completions) {
+                    const timeout_ns = next_timeout orelse @panic("poll() blocking forever");
+                    timeout_ms = @intCast(i32, @maximum(1, timeout_ns / std.time.ns_per_ms));
+                } else if (inflight == 0) {
+                    return;
                 }
-                const completion = @intToPtr(*Completion, @intCast(usize, cqe.user_data));
-                completion.result = cqe.res;
-                // We do not run the completion here (instead appending to a linked list) to avoid:
-                // * recursion through `flush_submissions()` and `flush_completions()`,
-                // * unbounded stack usage, and
-                // * confusing stack traces.
+            }
+
+            var pfds: [self.io_pending.len]os.pollfd = undefined;
+            for (self.io_pending[0..inflight]) |completion, i| {
+                const info = switch (completion.operation) {
+                    .accept => |op| [2]c_int{ op.socket, os.POLL.IN },
+                    .connect => |op| [2]c_int{ op.socket, os.POLL.OUT },
+                    .read => |op| [2]c_int{ op.fd, os.POLL.IN },
+                    .write => |op| [2]c_int{ op.fd, os.POLL.OUT },
+                    .recv => |op| [2]c_int{ op.socket, os.POLL.IN },
+                    .send => |op| [2]c_int{ op.socket, os.POLL.OUT },
+                    else => @panic("invalid completion operation queued for io"),
+                };
+
+                pfds[i] = .{
+                    .fd = info[0],
+                    .events = @intCast(i16, info[1]),
+                    .revents = 0,
+                };
+            }
+
+            const ready = try os.poll(pfds[0..inflight], timeout_ms);
+            if (ready > 0) {
+                self.io_inflight = 0;
+                for (pfds[0..inflight]) |pfd, i| {
+                    const completion = self.io_pending[i];
+                    if (pfd.revents != 0) {
+                        self.completed.push(completion);
+                    } else {
+                        self.io_pending[self.io_inflight] = completion;
+                        self.io_inflight += 1;
+                    }
+                }
+            }
+        }
+
+        while (self.completed.pop()) |completion| {
+            (completion.callback)(self, completion);
+        }
+    }
+
+    fn flush_timeouts(self: *IO) ?u64 {
+        var min_timeout: ?u64 = null;
+        var timeouts: ?*Completion = self.timeouts.peek();
+        while (timeouts) |completion| {
+            timeouts = completion.next;
+
+            // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call.
+            const now = self.time.monotonic();
+            const expires = completion.operation.timeout.expires;
+
+            // NOTE: remove() could be O(1) here with a doubly-linked-list
+            // since we know the previous Completion.
+            if (now >= expires) {
+                self.timeouts.remove(completion);
                 self.completed.push(completion);
+                continue;
             }
 
-            tracer.plot(
-                .{ .queue_count = .{ .queue_name = "io_in_kernel" } },
-                @intToFloat(f64, self.ios_in_kernel),
-            );
-
-            if (completed < cqes.len) break;
+            const timeout_ns = expires - now;
+            if (min_timeout) |min_ns| {
+                min_timeout = std.math.min(min_ns, timeout_ns);
+            } else {
+                min_timeout = timeout_ns;
+            }
         }
+        return min_timeout;
     }
 
-    fn flush_submissions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
-        while (true) {
-            const submitted = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
-                error.SignalInterrupt => continue,
-                // Wait for some completions and then try again:
-                // See https://github.com/axboe/liburing/issues/281 re: error.SystemResources.
-                // Be careful also that copy_cqes() will flush before entering to wait (it does):
-                // https://github.com/axboe/liburing/commit/35c199c48dfd54ad46b96e386882e7ac341314c5
-                error.CompletionQueueOvercommitted, error.SystemResources => {
-                    try self.flush_completions(1, timeouts, etime);
-                    continue;
-                },
-                else => return err,
-            };
-
-            self.ios_queued -= submitted;
-            self.ios_in_kernel += submitted;
-            tracer.plot(
-                .{ .queue_count = .{ .queue_name = "io_queued" } },
-                @intToFloat(f64, self.ios_queued),
-            );
-            tracer.plot(
-                .{ .queue_count = .{ .queue_name = "io_in_kernel" } },
-                @intToFloat(f64, self.ios_in_kernel),
-            );
-
-            break;
-        }
-    }
-
-    fn enqueue(self: *IO, completion: *Completion) void {
-        const sqe = self.ring.get_sqe() catch |err| switch (err) {
-            error.SubmissionQueueFull => {
-                self.unqueued.push(completion);
-                return;
-            },
-        };
-        completion.prep(sqe);
-
-        self.ios_queued += 1;
-        tracer.plot(
-            .{ .queue_count = .{ .queue_name = "io_queued" } },
-            @intToFloat(f64, self.ios_queued),
-        );
-    }
-
-    /// This struct holds the data needed for a single io_uring operation
+    /// This struct holds the data needed for a single IO operation
     pub const Completion = struct {
-        io: *IO,
-        result: i32 = undefined,
-        next: ?*Completion = null,
-        operation: Operation,
+        next: ?*Completion,
         context: ?*anyopaque,
-        callback: fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
-
-        fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
-            switch (completion.operation) {
-                .accept => |*op| {
-                    linux.io_uring_prep_accept(
-                        sqe,
-                        op.socket,
-                        &op.address,
-                        &op.address_size,
-                        os.SOCK.CLOEXEC,
-                    );
-                },
-                .close => |op| {
-                    linux.io_uring_prep_close(sqe, op.fd);
-                },
-                .connect => |*op| {
-                    linux.io_uring_prep_connect(
-                        sqe,
-                        op.socket,
-                        &op.address.any,
-                        op.address.getOsSockLen(),
-                    );
-                },
-                .read => |op| {
-                    linux.io_uring_prep_read(
-                        sqe,
-                        op.fd,
-                        op.buffer[0..buffer_limit(op.buffer.len)],
-                        op.offset,
-                    );
-                },
-                .recv => |op| {
-                    linux.io_uring_prep_recv(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
-                },
-                .send => |op| {
-                    linux.io_uring_prep_send(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
-                },
-                .timeout => |*op| {
-                    linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
-                },
-                .write => |op| {
-                    linux.io_uring_prep_write(
-                        sqe,
-                        op.fd,
-                        op.buffer[0..buffer_limit(op.buffer.len)],
-                        op.offset,
-                    );
-                },
-            }
-            sqe.user_data = @ptrToInt(completion);
-        }
-
-        fn complete(completion: *Completion, callback_tracer_slot: *?tracer.SpanStart) void {
-            switch (completion.operation) {
-                .accept => {
-                    const result = blk: {
-                        if (completion.result < 0) {
-                            const err = switch (@intToEnum(os.E, -completion.result)) {
-                                .INTR => {
-                                    completion.io.enqueue(completion);
-                                    return;
-                                },
-                                .AGAIN => error.WouldBlock,
-                                .BADF => error.FileDescriptorInvalid,
-                                .CONNABORTED => error.ConnectionAborted,
-                                .FAULT => unreachable,
-                                .INVAL => error.SocketNotListening,
-                                .MFILE => error.ProcessFdQuotaExceeded,
-                                .NFILE => error.SystemFdQuotaExceeded,
-                                .NOBUFS => error.SystemResources,
-                                .NOMEM => error.SystemResources,
-                                .NOTSOCK => error.FileDescriptorNotASocket,
-                                .OPNOTSUPP => error.OperationNotSupported,
-                                .PERM => error.PermissionDenied,
-                                .PROTO => error.ProtocolFailure,
-                                else => |errno| os.unexpectedErrno(errno),
-                            };
-                            break :blk err;
-                        } else {
-                            break :blk @intCast(os.socket_t, completion.result);
-                        }
-                    };
-                    call_callback(completion, &result, callback_tracer_slot);
-                },
-                .close => {
-                    const result = blk: {
-                        if (completion.result < 0) {
-                            const err = switch (@intToEnum(os.E, -completion.result)) {
-                                .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
-                                .BADF => error.FileDescriptorInvalid,
-                                .DQUOT => error.DiskQuota,
-                                .IO => error.InputOutput,
-                                .NOSPC => error.NoSpaceLeft,
-                                else => |errno| os.unexpectedErrno(errno),
-                            };
-                            break :blk err;
-                        } else {
-                            assert(completion.result == 0);
-                        }
-                    };
-                    call_callback(completion, &result, callback_tracer_slot);
-                },
-                .connect => {
-                    const result = blk: {
-                        if (completion.result < 0) {
-                            const err = switch (@intToEnum(os.E, -completion.result)) {
-                                .INTR => {
-                                    completion.io.enqueue(completion);
-                                    return;
-                                },
-                                .ACCES => error.AccessDenied,
-                                .ADDRINUSE => error.AddressInUse,
-                                .ADDRNOTAVAIL => error.AddressNotAvailable,
-                                .AFNOSUPPORT => error.AddressFamilyNotSupported,
-                                .AGAIN, .INPROGRESS => error.WouldBlock,
-                                .ALREADY => error.OpenAlreadyInProgress,
-                                .BADF => error.FileDescriptorInvalid,
-                                .CONNREFUSED => error.ConnectionRefused,
-                                .CONNRESET => error.ConnectionResetByPeer,
-                                .FAULT => unreachable,
-                                .ISCONN => error.AlreadyConnected,
-                                .NETUNREACH => error.NetworkUnreachable,
-                                .NOENT => error.FileNotFound,
-                                .NOTSOCK => error.FileDescriptorNotASocket,
-                                .PERM => error.PermissionDenied,
-                                .PROTOTYPE => error.ProtocolNotSupported,
-                                .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| os.unexpectedErrno(errno),
-                            };
-                            break :blk err;
-                        } else {
-                            assert(completion.result == 0);
-                        }
-                    };
-                    call_callback(completion, &result, callback_tracer_slot);
-                },
-                .read => {
-                    const result = blk: {
-                        if (completion.result < 0) {
-                            const err = switch (@intToEnum(os.E, -completion.result)) {
-                                .INTR => {
-                                    completion.io.enqueue(completion);
-                                    return;
-                                },
-                                .AGAIN => error.WouldBlock,
-                                .BADF => error.NotOpenForReading,
-                                .CONNRESET => error.ConnectionResetByPeer,
-                                .FAULT => unreachable,
-                                .INVAL => error.Alignment,
-                                .IO => error.InputOutput,
-                                .ISDIR => error.IsDir,
-                                .NOBUFS => error.SystemResources,
-                                .NOMEM => error.SystemResources,
-                                .NXIO => error.Unseekable,
-                                .OVERFLOW => error.Unseekable,
-                                .SPIPE => error.Unseekable,
-                                .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| os.unexpectedErrno(errno),
-                            };
-                            break :blk err;
-                        } else {
-                            break :blk @intCast(usize, completion.result);
-                        }
-                    };
-                    call_callback(completion, &result, callback_tracer_slot);
-                },
-                .recv => {
-                    const result = blk: {
-                        if (completion.result < 0) {
-                            const err = switch (@intToEnum(os.E, -completion.result)) {
-                                .INTR => {
-                                    completion.io.enqueue(completion);
-                                    return;
-                                },
-                                .AGAIN => error.WouldBlock,
-                                .BADF => error.FileDescriptorInvalid,
-                                .CONNREFUSED => error.ConnectionRefused,
-                                .FAULT => unreachable,
-                                .INVAL => unreachable,
-                                .NOMEM => error.SystemResources,
-                                .NOTCONN => error.SocketNotConnected,
-                                .NOTSOCK => error.FileDescriptorNotASocket,
-                                .CONNRESET => error.ConnectionResetByPeer,
-                                .TIMEDOUT => error.ConnectionTimedOut,
-                                .OPNOTSUPP => error.OperationNotSupported,
-                                else => |errno| os.unexpectedErrno(errno),
-                            };
-                            break :blk err;
-                        } else {
-                            break :blk @intCast(usize, completion.result);
-                        }
-                    };
-                    call_callback(completion, &result, callback_tracer_slot);
-                },
-                .send => {
-                    const result = blk: {
-                        if (completion.result < 0) {
-                            const err = switch (@intToEnum(os.E, -completion.result)) {
-                                .INTR => {
-                                    completion.io.enqueue(completion);
-                                    return;
-                                },
-                                .ACCES => error.AccessDenied,
-                                .AGAIN => error.WouldBlock,
-                                .ALREADY => error.FastOpenAlreadyInProgress,
-                                .AFNOSUPPORT => error.AddressFamilyNotSupported,
-                                .BADF => error.FileDescriptorInvalid,
-                                .CONNRESET => error.ConnectionResetByPeer,
-                                .DESTADDRREQ => unreachable,
-                                .FAULT => unreachable,
-                                .INVAL => unreachable,
-                                .ISCONN => unreachable,
-                                .MSGSIZE => error.MessageTooBig,
-                                .NOBUFS => error.SystemResources,
-                                .NOMEM => error.SystemResources,
-                                .NOTCONN => error.SocketNotConnected,
-                                .NOTSOCK => error.FileDescriptorNotASocket,
-                                .OPNOTSUPP => error.OperationNotSupported,
-                                .PIPE => error.BrokenPipe,
-                                .TIMEDOUT => error.ConnectionTimedOut,
-                                else => |errno| os.unexpectedErrno(errno),
-                            };
-                            break :blk err;
-                        } else {
-                            break :blk @intCast(usize, completion.result);
-                        }
-                    };
-                    call_callback(completion, &result, callback_tracer_slot);
-                },
-                .timeout => {
-                    assert(completion.result < 0);
-                    const result = switch (@intToEnum(os.E, -completion.result)) {
-                        .INTR => {
-                            completion.io.enqueue(completion);
-                            return;
-                        },
-                        .CANCELED => error.Canceled,
-                        .TIME => {}, // A success.
-                        else => |errno| os.unexpectedErrno(errno),
-                    };
-                    call_callback(completion, &result, callback_tracer_slot);
-                },
-                .write => {
-                    const result = blk: {
-                        if (completion.result < 0) {
-                            const err = switch (@intToEnum(os.E, -completion.result)) {
-                                .INTR => {
-                                    completion.io.enqueue(completion);
-                                    return;
-                                },
-                                .AGAIN => error.WouldBlock,
-                                .BADF => error.NotOpenForWriting,
-                                .DESTADDRREQ => error.NotConnected,
-                                .DQUOT => error.DiskQuota,
-                                .FAULT => unreachable,
-                                .FBIG => error.FileTooBig,
-                                .INVAL => error.Alignment,
-                                .IO => error.InputOutput,
-                                .NOSPC => error.NoSpaceLeft,
-                                .NXIO => error.Unseekable,
-                                .OVERFLOW => error.Unseekable,
-                                .PERM => error.AccessDenied,
-                                .PIPE => error.BrokenPipe,
-                                .SPIPE => error.Unseekable,
-                                else => |errno| os.unexpectedErrno(errno),
-                            };
-                            break :blk err;
-                        } else {
-                            break :blk @intCast(usize, completion.result);
-                        }
-                    };
-                    call_callback(completion, &result, callback_tracer_slot);
-                },
-            }
-        }
+        callback: fn (*IO, *Completion) void,
+        operation: Operation,
     };
 
-    fn call_callback(
-        completion: *Completion,
-        result: *const anyopaque,
-        callback_tracer_slot: *?tracer.SpanStart,
-    ) void {
-        tracer.start(
-            callback_tracer_slot,
-            .io_callback,
-            @src(),
-        );
-        completion.callback(completion.context, completion, result);
-        tracer.end(
-            callback_tracer_slot,
-            .io_callback,
-        );
-    }
-
-    /// This union encodes the set of operations supported as well as their arguments.
     const Operation = union(enum) {
         accept: struct {
             socket: os.socket_t,
-            address: os.sockaddr = undefined,
-            address_size: os.socklen_t = @sizeOf(os.sockaddr),
         },
         close: struct {
             fd: os.fd_t,
@@ -555,43 +174,90 @@ pub const IO = struct {
         connect: struct {
             socket: os.socket_t,
             address: std.net.Address,
+            initiated: bool,
         },
         read: struct {
             fd: os.fd_t,
-            buffer: []u8,
+            buf: [*]u8,
+            len: u32,
             offset: u64,
         },
         recv: struct {
             socket: os.socket_t,
-            buffer: []u8,
+            buf: [*]u8,
+            len: u32,
         },
         send: struct {
             socket: os.socket_t,
-            buffer: []const u8,
+            buf: [*]const u8,
+            len: u32,
         },
         timeout: struct {
-            timespec: os.linux.kernel_timespec,
+            expires: u64,
         },
         write: struct {
             fd: os.fd_t,
-            buffer: []const u8,
+            buf: [*]const u8,
+            len: u32,
             offset: u64,
         },
     };
 
-    pub const AcceptError = error{
-        WouldBlock,
-        FileDescriptorInvalid,
-        ConnectionAborted,
-        SocketNotListening,
-        ProcessFdQuotaExceeded,
-        SystemFdQuotaExceeded,
-        SystemResources,
-        FileDescriptorNotASocket,
-        OperationNotSupported,
-        PermissionDenied,
-        ProtocolFailure,
-    } || os.UnexpectedError;
+    fn submit(
+        self: *IO,
+        context: anytype,
+        comptime callback: anytype,
+        completion: *Completion,
+        comptime operation_tag: std.meta.Tag(Operation),
+        operation_data: anytype,
+        comptime OperationImpl: type,
+    ) void {
+        const Context = @TypeOf(context);
+        const onCompleteFn = struct {
+            fn onComplete(io: *IO, _completion: *Completion) void {
+                // Perform the actual operaton
+                const op_data = &@field(_completion.operation, @tagName(operation_tag));
+                const result = OperationImpl.do_operation(op_data);
+
+                // Requeue onto io_pending if error.WouldBlock
+                switch (operation_tag) {
+                    .accept, .connect, .read, .write, .send, .recv => {
+                        _ = result catch |err| switch (err) {
+                            error.WouldBlock => {
+                                _completion.next = null;
+                                io.io_pending[io.io_inflight] = _completion;
+                                io.io_inflight += 1;
+                                return;
+                            },
+                            else => {},
+                        };
+                    },
+                    else => {},
+                }
+
+                // Complete the Completion
+                return callback(
+                    @intToPtr(Context, @ptrToInt(_completion.context)),
+                    _completion,
+                    result,
+                );
+            }
+        }.onComplete;
+
+        completion.* = .{
+            .next = null,
+            .context = context,
+            .callback = onCompleteFn,
+            .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),
+        };
+
+        switch (operation_tag) {
+            .timeout => self.timeouts.push(completion),
+            else => self.completed.push(completion),
+        }
+    }
+
+    pub const AcceptError = os.AcceptError || os.SetSockOptError;
 
     pub fn accept(
         self: *IO,
@@ -605,27 +271,25 @@ pub const IO = struct {
         completion: *Completion,
         socket: os.socket_t,
     ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const AcceptError!os.socket_t, @ptrToInt(res)).*,
+        self.submit(
+            context,
+            callback,
+            completion,
+            .accept,
+            .{
+                .socket = socket,
+            },
+            struct {
+                fn do_operation(op: anytype) AcceptError!os.socket_t {
+                    return os.accept(
+                        op.socket,
+                        null,
+                        null,
+                        os.SOCK.NONBLOCK | os.SOCK.CLOEXEC,
                     );
                 }
-            }.wrapper,
-            .operation = .{
-                .accept = .{
-                    .socket = socket,
-                    .address = undefined,
-                    .address_size = @sizeOf(os.sockaddr),
-                },
             },
-        };
-        self.enqueue(completion);
+        );
     }
 
     pub const CloseError = error{
@@ -647,43 +311,29 @@ pub const IO = struct {
         completion: *Completion,
         fd: os.fd_t,
     ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const CloseError!void, @ptrToInt(res)).*,
-                    );
-                }
-            }.wrapper,
-            .operation = .{
-                .close = .{ .fd = fd },
+        self.submit(
+            context,
+            callback,
+            completion,
+            .close,
+            .{
+                .fd = fd,
             },
-        };
-        self.enqueue(completion);
+            struct {
+                fn do_operation(op: anytype) CloseError!void {
+                    return switch (os.errno(os.system.close(op.fd))) {
+                        .SUCCESS => {},
+                        .BADF => error.FileDescriptorInvalid,
+                        .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                        .IO => error.InputOutput,
+                        else => |errno| os.unexpectedErrno(errno),
+                    };
+                }
+            },
+        );
     }
 
-    pub const ConnectError = error{
-        AccessDenied,
-        AddressInUse,
-        AddressNotAvailable,
-        AddressFamilyNotSupported,
-        WouldBlock,
-        OpenAlreadyInProgress,
-        FileDescriptorInvalid,
-        ConnectionRefused,
-        AlreadyConnected,
-        NetworkUnreachable,
-        FileNotFound,
-        FileDescriptorNotASocket,
-        PermissionDenied,
-        ProtocolNotSupported,
-        ConnectionTimedOut,
-        SystemResources,
-    } || os.UnexpectedError;
+    pub const ConnectError = os.ConnectError;
 
     pub fn connect(
         self: *IO,
@@ -698,26 +348,30 @@ pub const IO = struct {
         socket: os.socket_t,
         address: std.net.Address,
     ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const ConnectError!void, @ptrToInt(res)).*,
-                    );
-                }
-            }.wrapper,
-            .operation = .{
-                .connect = .{
-                    .socket = socket,
-                    .address = address,
-                },
+        self.submit(
+            context,
+            callback,
+            completion,
+            .connect,
+            .{
+                .socket = socket,
+                .address = address,
+                .initiated = false,
             },
-        };
-        self.enqueue(completion);
+            struct {
+                fn do_operation(op: anytype) ConnectError!void {
+                    // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
+                    // Instead, check the socket error to see if has been connected successfully.
+                    const result = switch (op.initiated) {
+                        true => os.getsockoptError(op.socket),
+                        else => os.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
+                    };
+
+                    op.initiated = true;
+                    return result;
+                }
+            },
+        );
     }
 
     pub const ReadError = error{
@@ -746,39 +400,51 @@ pub const IO = struct {
         buffer: []u8,
         offset: u64,
     ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const ReadError!usize, @ptrToInt(res)).*,
-                    );
-                }
-            }.wrapper,
-            .operation = .{
-                .read = .{
-                    .fd = fd,
-                    .buffer = buffer,
-                    .offset = offset,
-                },
+        self.submit(
+            context,
+            callback,
+            completion,
+            .read,
+            .{
+                .fd = fd,
+                .buf = buffer.ptr,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .offset = offset,
             },
-        };
-        self.enqueue(completion);
+            struct {
+                fn do_operation(op: anytype) ReadError!usize {
+                    while (true) {
+                        const rc = os.system.pread(
+                            op.fd,
+                            op.buf,
+                            op.len,
+                            @bitCast(isize, op.offset),
+                        );
+                        return switch (os.errno(rc)) {
+                            .SUCCESS => @intCast(usize, rc),
+                            .INTR => continue,
+                            .AGAIN => error.WouldBlock,
+                            .BADF => error.NotOpenForReading,
+                            .CONNRESET => error.ConnectionResetByPeer,
+                            .FAULT => unreachable,
+                            .INVAL => error.Alignment,
+                            .IO => error.InputOutput,
+                            .ISDIR => error.IsDir,
+                            .NOBUFS => error.SystemResources,
+                            .NOMEM => error.SystemResources,
+                            .NXIO => error.Unseekable,
+                            .OVERFLOW => error.Unseekable,
+                            .SPIPE => error.Unseekable,
+                            .TIMEDOUT => error.ConnectionTimedOut,
+                            else => |err| os.unexpectedErrno(err),
+                        };
+                    }
+                }
+            },
+        );
     }
 
-    pub const RecvError = error{
-        WouldBlock,
-        FileDescriptorInvalid,
-        ConnectionRefused,
-        SystemResources,
-        SocketNotConnected,
-        FileDescriptorNotASocket,
-        ConnectionTimedOut,
-        OperationNotSupported,
-    } || os.UnexpectedError;
+    pub const RecvError = os.RecvFromError;
 
     pub fn recv(
         self: *IO,
@@ -793,43 +459,25 @@ pub const IO = struct {
         socket: os.socket_t,
         buffer: []u8,
     ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const RecvError!usize, @ptrToInt(res)).*,
-                    );
-                }
-            }.wrapper,
-            .operation = .{
-                .recv = .{
-                    .socket = socket,
-                    .buffer = buffer,
-                },
+        self.submit(
+            context,
+            callback,
+            completion,
+            .recv,
+            .{
+                .socket = socket,
+                .buf = buffer.ptr,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
             },
-        };
-        self.enqueue(completion);
+            struct {
+                fn do_operation(op: anytype) RecvError!usize {
+                    return os.recv(op.socket, op.buf[0..op.len], 0);
+                }
+            },
+        );
     }
 
-    pub const SendError = error{
-        AccessDenied,
-        WouldBlock,
-        FastOpenAlreadyInProgress,
-        AddressFamilyNotSupported,
-        FileDescriptorInvalid,
-        ConnectionResetByPeer,
-        MessageTooBig,
-        SystemResources,
-        SocketNotConnected,
-        FileDescriptorNotASocket,
-        OperationNotSupported,
-        BrokenPipe,
-        ConnectionTimedOut,
-    } || os.UnexpectedError;
+    pub const SendError = os.SendError;
 
     pub fn send(
         self: *IO,
@@ -844,26 +492,22 @@ pub const IO = struct {
         socket: os.socket_t,
         buffer: []const u8,
     ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const SendError!usize, @ptrToInt(res)).*,
-                    );
-                }
-            }.wrapper,
-            .operation = .{
-                .send = .{
-                    .socket = socket,
-                    .buffer = buffer,
-                },
+        self.submit(
+            context,
+            callback,
+            completion,
+            .send,
+            .{
+                .socket = socket,
+                .buf = buffer.ptr,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
             },
-        };
-        self.enqueue(completion);
+            struct {
+                fn do_operation(op: anytype) SendError!usize {
+                    return os.send(op.socket, op.buf[0..op.len], os.MSG.NOSIGNAL);
+                }
+            },
+        );
     }
 
     pub const TimeoutError = error{Canceled} || os.UnexpectedError;
@@ -880,48 +524,42 @@ pub const IO = struct {
         completion: *Completion,
         nanoseconds: u63,
     ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const TimeoutError!void, @ptrToInt(res)).*,
-                    );
-                }
-            }.wrapper,
-            .operation = .{
-                .timeout = .{
-                    .timespec = .{ .tv_sec = 0, .tv_nsec = nanoseconds },
-                },
-            },
-        };
-
         // Special case a zero timeout as a yield.
         if (nanoseconds == 0) {
-            completion.result = -@intCast(i32, @enumToInt(std.os.E.TIME));
+            completion.* = .{
+                .next = null,
+                .context = context,
+                .operation = undefined,
+                .callback = struct {
+                    fn on_complete(_io: *IO, _completion: *Completion) void {
+                        _ = _io;
+                        const _context = @intToPtr(Context, @ptrToInt(_completion.context));
+                        callback(_context, _completion, {});
+                    }
+                }.on_complete,
+            };
+
             self.completed.push(completion);
             return;
         }
 
-        self.enqueue(completion);
+        self.submit(
+            context,
+            callback,
+            completion,
+            .timeout,
+            .{
+                .expires = self.time.monotonic() + nanoseconds,
+            },
+            struct {
+                fn do_operation(_: anytype) TimeoutError!void {
+                    return; // timeouts don't have errors for now
+                }
+            },
+        );
     }
 
-    pub const WriteError = error{
-        WouldBlock,
-        NotOpenForWriting,
-        NotConnected,
-        DiskQuota,
-        FileTooBig,
-        Alignment,
-        InputOutput,
-        NoSpaceLeft,
-        Unseekable,
-        AccessDenied,
-        BrokenPipe,
-    } || os.UnexpectedError;
+    pub const WriteError = os.PWriteError;
 
     pub fn write(
         self: *IO,
@@ -937,35 +575,30 @@ pub const IO = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
-        completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @intToPtr(Context, @ptrToInt(ctx)),
-                        comp,
-                        @intToPtr(*const WriteError!usize, @ptrToInt(res)).*,
-                    );
-                }
-            }.wrapper,
-            .operation = .{
-                .write = .{
-                    .fd = fd,
-                    .buffer = buffer,
-                    .offset = offset,
-                },
+        self.submit(
+            context,
+            callback,
+            completion,
+            .write,
+            .{
+                .fd = fd,
+                .buf = buffer.ptr,
+                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .offset = offset,
             },
-        };
-        self.enqueue(completion);
+            struct {
+                fn do_operation(op: anytype) WriteError!usize {
+                    return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
+                }
+            },
+        );
     }
 
     pub const INVALID_SOCKET = -1;
 
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
-        _ = self;
-        return os.socket(family, sock_type, protocol);
+    pub fn open_socket(_: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        return os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
     }
 
     /// Opens a directory with read only access.
