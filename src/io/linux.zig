@@ -10,20 +10,141 @@ const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
+    const Pool = struct {
+        mutex: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
+        queue: FIFO(Completion) = .{ .name = null },
+        notified: bool = false,
+        shutdown: bool = false,
+        spawned: u32 = 0,
+        idle: u32 = 0,
+
+        fn spawn(pool: *Pool, concurrency: u32) !void {
+            errdefer pool.join();
+
+            while (pool.spawned < concurrency) : (pool.spawned += 1) {
+                const thread = try std.Thread.spawn(.{}, worker, .{pool});
+                thread.detach();
+            }
+        }
+
+        fn join(pool: *Pool) void {
+            pool.mutex.lock();
+            defer pool.mutex.unlock();
+
+            assert(!pool.shutdown);
+            pool.shutdown = true;
+
+            if (pool.idle > 0) pool.cond.broadcast();
+            while (pool.spawned == 0) pool.cond.wait(&pool.mutex);
+        }
+
+        fn submit(pool: *Pool, completion: *Completion) void {
+            pool.mutex.lock();
+            defer pool.mutex.unlock();
+
+            pool.queue.push(completion);
+            pool.notify();
+        }
+
+        fn notify(pool: *Pool) void {
+            if (pool.queue.empty() or pool.notified or pool.idle == 0) return;
+            pool.notified = true;
+            pool.cond.signal();
+        }
+
+        fn worker(pool: *Pool) void {
+            pool.mutex.lock();
+            defer pool.mutex.unlock();
+
+            while (true) {
+                while (pool.queue.pop()) |completion| {
+                    pool.notify();
+
+                    pool.mutex.unlock();
+                    defer pool.mutex.lock();
+
+                    const io = @fieldParentPtr(IO, "fs_pool", pool);
+                    completion.callback(io, completion);
+                }
+
+                if (pool.shutdown) {
+                    pool.spawned -= 1;
+                    if (pool.spawned == 0) pool.cond.signal();
+                    return;
+                }
+
+                pool.idle += 1;
+                defer pool.idle -= 1;
+
+                pool.cond.wait(&pool.mutex);
+                pool.notified = false;
+            }
+        }
+    };
+
+    const Injector = struct {
+        mutex: std.Thread.Mutex = .{},
+        queue: FIFO(Completion) = .{ .name = null },
+        waiting: bool = false,
+        pending: bool = false,
+
+        fn push(injector: *Injector, completion: *Completion) bool {
+            injector.mutex.lock();
+            defer injector.mutex.unlock();
+
+            const was_empty = injector.queue.empty();
+            injector.queue.push(completion);
+
+            @atomicStore(bool, &injector.pending, true, .Monotonic);
+            return was_empty and injector.waiting;
+        }
+
+        fn poll(injector: *Injector, completed: *FIFO(Completion), wait: bool) void {
+            assert(completed.empty());
+
+            if (!@atomicLoad(bool, &injector.pending, .Monotonic)) blk: {
+                if (wait and !injector.waiting) break :blk;
+                return;
+            }
+
+            injector.mutex.lock();
+            defer injector.mutex.unlock();
+
+            std.mem.swap(FIFO(Completion), completed, &injector.queue);
+            std.mem.swap(?[]const u8, &completed.name, &injector.queue.name);
+
+            injector.pending = false;
+            injector.waiting = completed.empty() and wait;
+        }
+    };
+
     time: Time = .{},
     timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
     completed: FIFO(Completion) = .{ .name = "io_completed" },
+
     io_inflight: u32 = 0,
     io_pending: [64]*Completion = undefined,
+
+    fs_spawned: bool = false,
+    fs_pool: Pool = .{},
+
+    injector: Injector = .{},
+    event_fd: os.fd_t,
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
         _ = flags;
-        return IO{};
+
+        const event_fd = try os.eventfd(0, os.linux.EFD.CLOEXEC);
+        errdefer os.close(event_fd);
+
+        return IO{ .event_fd = event_fd };
     }
 
     pub fn deinit(self: *IO) void {
-        self.* = undefined;
+        if (self.fs_spawned) self.fs_pool.join();
+        os.close(self.event_fd);
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
@@ -67,9 +188,15 @@ pub const IO = struct {
     }
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
+        if (!self.fs_spawned) {
+            try self.fs_pool.spawn(8);
+            self.fs_spawned = true;
+        }
+
         // Timeouts are expired here and possibly pushed to the completed queue.
-        const next_timeout = self.flush_timeouts();
         const inflight = self.io_inflight;
+        const next_timeout = self.flush_timeouts();
+        if (self.completed.empty()) self.injector.poll(&self.completed, true);
 
         // Only call poll() if we need to check pending IO or if we need to wait for completions.
         if (inflight > 0 or self.completed.empty()) {
@@ -89,29 +216,41 @@ pub const IO = struct {
                 }
             }
 
-            var pfds: [self.io_pending.len]os.pollfd = undefined;
+            var pfds: [self.io_pending.len + 1]os.pollfd = undefined;
+            pfds[0] = .{
+                .fd = self.event_fd,
+                .events = os.POLL.IN,
+                .revents = 0,
+            };
+
             for (self.io_pending[0..inflight]) |completion, i| {
                 const info = switch (completion.operation) {
                     .accept => |op| [2]c_int{ op.socket, os.POLL.IN },
                     .connect => |op| [2]c_int{ op.socket, os.POLL.OUT },
-                    .read => |op| [2]c_int{ op.fd, os.POLL.IN },
-                    .write => |op| [2]c_int{ op.fd, os.POLL.OUT },
                     .recv => |op| [2]c_int{ op.socket, os.POLL.IN },
                     .send => |op| [2]c_int{ op.socket, os.POLL.OUT },
                     else => @panic("invalid completion operation queued for io"),
                 };
 
-                pfds[i] = .{
+                pfds[i + 1] = .{
                     .fd = info[0],
                     .events = @intCast(i16, info[1]),
                     .revents = 0,
                 };
             }
 
-            const ready = try os.poll(pfds[0..inflight], timeout_ms);
+            const pfd_count = inflight + 1;
+            const ready = try os.poll(pfds[0..pfd_count], timeout_ms);
+
             if (ready > 0) {
+                if (pfds[0].revents != 0) {
+                    var value: u64 = undefined;
+                    const bytes = try os.read(self.event_fd, std.mem.asBytes(&value));
+                    assert(bytes == @sizeOf(u64));
+                }
+
                 self.io_inflight = 0;
-                for (pfds[0..inflight]) |pfd, i| {
+                for (pfds[1..pfd_count]) |pfd, i| {
                     const completion = self.io_pending[i];
                     if (pfd.revents != 0) {
                         self.completed.push(completion);
@@ -123,8 +262,9 @@ pub const IO = struct {
             }
         }
 
-        while (self.completed.pop()) |completion| {
-            (completion.callback)(self, completion);
+        while (!self.completed.empty()) {
+            while (self.completed.pop()) |completion| (completion.callback)(self, completion);
+            self.injector.poll(&self.completed, false);
         }
     }
 
@@ -181,6 +321,7 @@ pub const IO = struct {
             buf: [*]u8,
             len: u32,
             offset: u64,
+            result: ?(ReadError!usize) = null,
         },
         recv: struct {
             socket: os.socket_t,
@@ -200,6 +341,7 @@ pub const IO = struct {
             buf: [*]const u8,
             len: u32,
             offset: u64,
+            result: ?(WriteError!usize) = null,
         },
     };
 
@@ -217,11 +359,16 @@ pub const IO = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
                 // Perform the actual operaton
                 const op_data = &@field(_completion.operation, @tagName(operation_tag));
-                const result = OperationImpl.do_operation(op_data);
+                const result = blk: {
+                    if (@hasField(@TypeOf(op_data.*), "result")) {
+                        if (op_data.result) |r| break :blk r;
+                    }
+                    break :blk OperationImpl.do_operation(op_data);
+                };
 
                 // Requeue onto io_pending if error.WouldBlock
                 switch (operation_tag) {
-                    .accept, .connect, .read, .write, .send, .recv => {
+                    .accept, .connect, .send, .recv => {
                         _ = result catch |err| switch (err) {
                             error.WouldBlock => {
                                 _completion.next = null;
@@ -231,6 +378,17 @@ pub const IO = struct {
                             },
                             else => {},
                         };
+                    },
+                    .read, .write => blk: {
+                        if (op_data.result != null) break :blk;
+                        op_data.result = result;
+
+                        if (io.injector.push(_completion)) {
+                            var value: u64 = 1;
+                            const wrote = os.write(io.event_fd, std.mem.asBytes(&value)) catch unreachable;
+                            assert(wrote == @sizeOf(u64));
+                        }
+                        return;
                     },
                     else => {},
                 }
@@ -252,6 +410,7 @@ pub const IO = struct {
         };
 
         switch (operation_tag) {
+            .read, .write => self.fs_pool.submit(completion),
             .timeout => self.timeouts.push(completion),
             else => self.completed.push(completion),
         }
