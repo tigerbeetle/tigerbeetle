@@ -160,6 +160,10 @@ pub fn main() !void {
         .request_idle_off_probability = 10 + random.uintLessThan(u8, 10),
     };
 
+    if (chance_f64(random, 0.5)) {
+        @panic("testing fail");
+    }
+
     output.info(
         \\
         \\          SEED={}
