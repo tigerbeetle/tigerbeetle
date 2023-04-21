@@ -531,12 +531,7 @@ pub fn ReplicaType(
                 self.view += 1;
                 self.primary_update_view_headers();
                 self.view_durable_update();
-
-                if (self.commit_min < self.op) {
-                    self.commit_journal(self.op);
-                } else {
-                    self.transition_to_normal_from_recovering_status();
-                }
+                // Recovery will resume in view_durable_update_callback.
             } else {
                 // Even if op_head_certain() returns false, a DVC always has a certain head op.
                 if (self.log_view < self.view or self.op_head_certain()) {
@@ -5671,6 +5666,19 @@ pub fn ReplicaType(
 
             if (self.status == .view_change and self.log_view < self.view) {
                 if (!self.do_view_change_quorum) self.send_do_view_change();
+            }
+
+            if (self.solo()) {
+                assert(self.status == .recovering);
+                assert(self.view == self.log_view);
+                assert(!update_dvc);
+                assert(!update_sv);
+
+                if (self.commit_min < self.op) {
+                    self.commit_journal(self.op);
+                } else {
+                    self.transition_to_normal_from_recovering_status();
+                }
             }
         }
 
