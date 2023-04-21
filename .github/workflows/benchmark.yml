@@ -1,0 +1,19 @@
+name: Benchmark
+
+on:
+  push:
+    branches:
+      - 'main'
+
+  # Run benchmarking for any PRs that target 'main' when they are opened or updated.
+  pull_request:
+    branches:
+      - 'main'
+    types:
+      - opened
+      - synchronize
+
+jobs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -d "commit=${GITHUB_SHA}" https://ci.arewe1mtpsyet.com/submit >> ${GITHUB_STEP_SUMMARY}
