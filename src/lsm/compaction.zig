@@ -333,7 +333,7 @@ pub fn CompactionType(
             }
         }
 
-        fn on_iter_init_a(read: *Grid.Read, index_block: BlockPtrConst) void {
+        fn on_iter_init_a(_: *Grid, read: *Grid.Read, index_block: BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "read", read);
             assert(compaction.state == .iter_init_a);
 
@@ -709,7 +709,7 @@ pub fn CompactionType(
                     );
                 }
 
-                fn on_write(write: *Grid.Write) void {
+                fn on_write(_: *Grid, write: *Grid.Write) void {
                     const compaction = @fieldParentPtr(
                         Compaction,
                         switch (write_block_field) {

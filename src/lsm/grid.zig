@@ -68,7 +68,7 @@ pub fn GridType(comptime Storage: type) type {
         pub const NextTick = Storage.NextTick;
 
         pub const Write = struct {
-            callback: fn (*Grid.Write) void,
+            callback: fn (*Grid, *Grid.Write) void,
             address: u64,
             block: *BlockPtr,
 
@@ -83,7 +83,7 @@ pub fn GridType(comptime Storage: type) type {
         };
 
         pub const Read = struct {
-            callback: fn (*Grid.Read, BlockPtrConst) void,
+            callback: fn (*Grid, *Grid.Read, BlockPtrConst) void,
             address: u64,
             checksum: u128,
             block_type: BlockType,
@@ -295,7 +295,7 @@ pub fn GridType(comptime Storage: type) type {
         /// NOTE: This will consume `block` and replace it with a fresh block.
         pub fn write_block(
             grid: *Grid,
-            callback: fn (*Grid.Write) void,
+            callback: fn (*Grid, *Grid.Write) void,
             write: *Grid.Write,
             block: *BlockPtr,
             address: u64,
@@ -385,7 +385,7 @@ pub fn GridType(comptime Storage: type) type {
             // This call must come after (logicall) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
-            completed_write.callback(completed_write);
+            completed_write.callback(grid, completed_write);
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -394,7 +394,7 @@ pub fn GridType(comptime Storage: type) type {
         /// block has been recovered.
         pub fn read_block(
             grid: *Grid,
-            callback: fn (*Grid.Read, BlockPtrConst) void,
+            callback: fn (*Grid, *Grid.Read, BlockPtrConst) void,
             read: *Grid.Read,
             address: u64,
             checksum: u128,
@@ -581,12 +581,12 @@ pub fn GridType(comptime Storage: type) type {
             // Resolve all reads queued to the address with the block.
             while (read.resolves.pop()) |pending| {
                 const pending_read = @fieldParentPtr(Read, "pending", pending);
-                pending_read.callback(pending_read, block);
+                pending_read.callback(grid, pending_read, block);
             }
 
             // Then invoke the callback with the cache block (which should be valid for the duration
             // of the callback as any nested Grid calls cannot synchronously update the cache).
-            read.callback(read, block);
+            read.callback(grid, read, block);
         }
 
         fn block_offset(address: u64) u64 {

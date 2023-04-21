@@ -157,7 +157,7 @@ pub fn StateMachineType(
             );
         }
 
-        fn next_tick_callback(write: *Grid.Write) void {
+        fn next_tick_callback(_: *Grid, write: *Grid.Write) void {
             const state_machine = @fieldParentPtr(StateMachine, "grid_write", write);
             const callback = state_machine.callback.?;
             state_machine.callback = null;
