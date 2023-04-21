@@ -9,7 +9,6 @@
 //!  the block, this check will need to be removed or use a different strategy.
 //!
 //! Areas verified at checkpoint:
-//! - WAL prepares
 //! - SuperBlock Manifest, FreeSet, ClientSessions
 //! - ClientReplies
 //! - Acquired Grid blocks
@@ -18,6 +17,8 @@
 //! - SuperBlock headers, which hold replica-specific state.
 //! - WAL headers, which may differ because the WAL writes deliberately corrupt redundant headers
 //!   to faulty slots to ensure recovery is consistent.
+//! - WAL prepares — a replica can commit + checkpoint an op before it is persisted to the WAL.
+//!   (The primary can commit from the pipeline-queue, backups can commit from the pipeline-cache.)
 //! - Non-allocated Grid blocks, which may differ due to state transfer.
 const std = @import("std");
 const assert = std.debug.assert;
@@ -49,7 +50,6 @@ const Checkpoint = struct {
     checksum_superblock_manifest: u128,
     checksum_superblock_free_set: u128,
     checksum_superblock_client_sessions: u128,
-    checksum_wal_prepares: u128,
     checksum_client_replies: u128,
     checksum_grid: u128,
 };
@@ -126,7 +126,6 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 .checksum_superblock_manifest = 0,
                 .checksum_superblock_free_set = 0,
                 .checksum_superblock_client_sessions = 0,
-                .checksum_wal_prepares = checksum_wal_prepares(storage),
                 .checksum_client_replies = checksum_client_replies(storage),
                 // TODO(Beat Compaction) Enable grid check when deterministic storage is fixed.
                 // Until then this is too noisy.
@@ -174,19 +173,6 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 }
             }
             if (fail) return error.StorageMismatch;
-        }
-
-        fn checksum_wal_prepares(storage: *const Storage) u128 {
-            var checksum: u128 = 0;
-            for (storage.wal_prepares()) |*prepare| {
-                assert(prepare.header.valid_checksum());
-                assert(prepare.header.command == .prepare);
-
-                // Only checksum the actual message header+body. Any leftover space is nondeterministic,
-                // because the current prepare may have overwritten a longer message.
-                checksum ^= vsr.checksum(std.mem.asBytes(prepare)[0..prepare.header.size]);
-            }
-            return checksum;
         }
 
         fn checksum_client_replies(storage: *const Storage) u128 {
