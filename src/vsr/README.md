@@ -2,25 +2,26 @@
 
 ### Commands
 
-| `vsr.Header.Command` |  Source |       Target | Protocols                                                      |
-| -------------------: | ------: | -----------: | -------------------------------------------------------------- |
-|               `ping` | replica |      replica | [Ping (Replica-Replica)](#protocol-ping-replica-replica)       |
-|               `pong` | replica |      replica | [Ping (Replica-Replica)](#protocol-ping-replica-replica)       |
-|        `ping_client` |  client |      replica | [Ping (Replica-Client)](#protocol-ping-replica-client)         |
-|        `pong_client` | replica |       client | [Ping (Replica-Client)](#protocol-ping-replica-client)         |
-|            `request` |  client |      primary | [Normal](#protocol-normal)                                     |
-|            `prepare` | replica |       backup | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal) |
-|         `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal) |
-|              `reply` | primary |       client | [Normal](#protocol-normal)                                     |
-|             `commit` | primary |       backup | [Normal](#protocol-normal)                                     |
-|  `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)               |
-|     `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                           |
-|         `start_view` | primary |       backup | [Request/Start View](#protocol-request-start-view)             |
-| `request_start_view` |  backup |      primary | [Request/Start View](#protocol-request-start-view)             |
-|    `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                     |
-|    `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                             |
-|            `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                     |
-|           `eviction` | primary |       client | [Client](#protocol-client)                                     |
+| `vsr.Header.Command` |  Source |       Target | Protocols                                                                        |
+| -------------------: | ------: | -----------: | -------------------------------------------------------------------------------- |
+|               `ping` | replica |      replica | [Ping (Replica-Replica)](#protocol-ping-replica-replica)                         |
+|               `pong` | replica |      replica | [Ping (Replica-Replica)](#protocol-ping-replica-replica)                         |
+|        `ping_client` |  client |      replica | [Ping (Replica-Client)](#protocol-ping-replica-client)                           |
+|        `pong_client` | replica |       client | [Ping (Replica-Client)](#protocol-ping-replica-client)                           |
+|            `request` |  client |      primary | [Normal](#protocol-normal)                                                       |
+|            `prepare` | replica |       backup | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
+|         `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
+|              `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Table](#protocol-repair-client-table) |
+|             `commit` | primary |       backup | [Normal](#protocol-normal)                                                       |
+|  `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                 |
+|     `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                                             |
+|         `start_view` | primary |       backup | [Request/Start View](#protocol-requeststart-view)                                |
+| `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                |
+|    `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
+|    `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                               |
+|      `request_reply` | replica |      replica | [Repair Client Table](#protocol-repair-client-table)                             |
+|            `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
+|           `eviction` | primary |       client | [Client](#protocol-client)                                                       |
 
 ### Recovery
 
@@ -179,6 +180,17 @@ In response to a `request_prepare`:
 
 Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf), we do not nack corrupt entries, since they _might_ be the prepare being requested.
 
+## Protocol: Repair Client Table
+
+The replica's client table stores the latest reply to each active client.
+
+During repair, corrupt replies are requested & repaired.
+
+In response to a `request_reply`:
+
+- Respond with the `command=reply` (the requested reply), if available and valid.
+- Otherwise do not reply.
+
 ## Protocol: Client
 
 1. Client sends `command=request operation=register` to registers with the cluster by starting a new request-reply hashchain. (See also: [Protocol: Normal](#protocol-normal)).
@@ -190,8 +202,8 @@ Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/
 
 See also:
 
-  - [Integration: Client Session Lifecycle](../../docs/usage/integration/md#client-session-lifecycle)
-  - [Integration: Client Session Eviction](../../docs/usage/integration/md#client-session-eviction)
+  - [Integration: Client Session Lifecycle](../../docs/design/client-sessions.md#lifecycle)
+  - [Integration: Client Session Eviction](../../docs/design/client-sessions.md#eviction)
 
 ## Protocol: Repair Grid (Backup)
 

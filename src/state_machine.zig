@@ -6,6 +6,7 @@ const mem = std.mem;
 const log = std.log.scoped(.state_machine);
 const tracer = @import("tracer.zig");
 
+const global_constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
@@ -707,7 +708,7 @@ pub fn StateMachineType(
         ) usize {
             _ = client;
             assert(op != 0);
-            assert(timestamp > self.commit_timestamp);
+            assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             tracer.start(
                 &self.tracer_slot,
@@ -932,7 +933,7 @@ pub fn StateMachineType(
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
-            assert(a.timestamp > self.commit_timestamp);
+            assert(a.timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             if (a.flags.padding != 0) return .reserved_flag;
             if (!zeroed_48_bytes(a.reserved)) return .reserved_field;
@@ -981,7 +982,7 @@ pub fn StateMachineType(
         }
 
         fn create_transfer(self: *StateMachine, t: *const Transfer) CreateTransferResult {
-            assert(t.timestamp > self.commit_timestamp);
+            assert(t.timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             if (t.flags.padding != 0) return .reserved_flag;
             if (t.reserved != 0) return .reserved_field;
@@ -1476,7 +1477,6 @@ test "sum_overflows" {
 
 const TestContext = struct {
     const Storage = @import("testing/storage.zig").Storage;
-    const MessagePool = @import("message_pool.zig").MessagePool;
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("lsm/grid.zig").GridType(Storage);
@@ -1490,7 +1490,6 @@ const TestContext = struct {
     const message_body_size_max = 32 * @sizeOf(Account);
 
     storage: Storage,
-    message_pool: MessagePool,
     superblock: SuperBlock,
     grid: Grid,
     state_machine: StateMachine,
@@ -1508,16 +1507,9 @@ const TestContext = struct {
         );
         errdefer ctx.storage.deinit(allocator);
 
-        ctx.message_pool = .{
-            .free_list = null,
-            .messages_max = 0,
-        };
-        errdefer ctx.message_pool.deinit(allocator);
-
         ctx.superblock = try SuperBlock.init(allocator, .{
             .storage = &ctx.storage,
             .storage_size_limit = data_file_size_min,
-            .message_pool = &ctx.message_pool,
         });
         errdefer ctx.superblock.deinit(allocator);
 
@@ -1542,7 +1534,6 @@ const TestContext = struct {
         ctx.superblock.deinit(allocator);
         ctx.grid.deinit(allocator);
         ctx.state_machine.deinit(allocator);
-        ctx.message_pool.deinit(allocator);
         ctx.* = undefined;
     }
 };

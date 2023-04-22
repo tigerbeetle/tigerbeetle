@@ -19,6 +19,7 @@ pub const tracer = @import("tracer.zig");
 pub const config = @import("config.zig");
 pub const stdx = @import("stdx.zig");
 pub const superblock = @import("vsr/superblock.zig");
+pub const aof = @import("aof.zig");
 pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .grid = @import("lsm/grid.zig"),
@@ -36,6 +37,7 @@ pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
+pub const ClientRepliesType = @import("vsr/client_replies.zig").ClientRepliesType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
@@ -50,17 +52,20 @@ pub const Zone = enum {
     superblock,
     wal_headers,
     wal_prepares,
+    client_replies,
     grid,
 
     const size_superblock = superblock.superblock_zone_size;
     const size_wal_headers = constants.journal_size_headers;
     const size_wal_prepares = constants.journal_size_prepares;
+    const size_client_replies = constants.client_replies_size;
 
     comptime {
         for (.{
             size_superblock,
             size_wal_headers,
             size_wal_prepares,
+            size_client_replies,
         }) |zone_size| {
             assert(zone_size % constants.sector_size == 0);
         }
@@ -71,12 +76,16 @@ pub const Zone = enum {
             assert(offset_logical < zone_size);
         }
 
-        return offset_logical + switch (zone) {
-            .superblock => 0,
-            .wal_headers => size_superblock,
-            .wal_prepares => size_superblock + size_wal_headers,
-            .grid => size_superblock + size_wal_headers + size_wal_prepares,
-        };
+        return zone.start() + offset_logical;
+    }
+
+    pub fn start(zone: Zone) u64 {
+        comptime var start_offset = 0;
+        inline for (comptime std.enums.values(Zone)) |z| {
+            if (z == zone) return start_offset;
+            start_offset += comptime size(z) orelse 0;
+        }
+        unreachable;
     }
 
     pub fn size(zone: Zone) ?u64 {
@@ -84,6 +93,7 @@ pub const Zone = enum {
             .superblock => size_superblock,
             .wal_headers => size_wal_headers,
             .wal_prepares => size_wal_prepares,
+            .client_replies => size_client_replies,
             .grid => null,
         };
     }
@@ -112,6 +122,7 @@ pub const Command = enum(u8) {
     request_start_view,
     request_headers,
     request_prepare,
+    request_reply,
     headers,
 
     eviction,
@@ -212,6 +223,8 @@ pub const Header = extern struct {
     ///
     /// The problem of routing is therefore solved by the 128-bit client ID, and the problem of
     /// detecting whether a session has been evicted is solved by the session number.
+    ///
+    /// * A `request_reply` sets this to the client of the reply being requested.
     client: u128 = 0,
 
     /// The checksum of the message to which this message refers.
@@ -226,6 +239,7 @@ pub const Header = extern struct {
     ///   in the message body which it has definitely not prepared (i.e. "nack").
     ///   The corresponding header may be an actual prepare header, or it may be a "blank" header.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
+    /// * A `request_reply` sets this to the checksum of the reply being requested.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -255,6 +269,8 @@ pub const Header = extern struct {
     /// may be replaced by different ops if they do not survive through a view change.
     ///
     /// * A `request_headers` sets this to the maximum op requested (inclusive).
+    /// * A `request_prepare` sets this to the requested op.
+    /// * A `request_reply` sets this to the requested op.
     op: u64 = 0,
 
     /// The commit number of the latest committed prepare. Committed ops are immutable.
@@ -349,6 +365,7 @@ pub const Header = extern struct {
             .request_start_view => self.invalid_request_start_view(),
             .request_headers => self.invalid_request_headers(),
             .request_prepare => self.invalid_request_prepare(),
+            .request_reply => self.invalid_request_reply(),
             .request_block => null, // TODO
             .headers => self.invalid_headers(),
             .eviction => self.invalid_eviction(),
@@ -437,7 +454,7 @@ pub const Header = extern struct {
         if (self.client == 0) return "client == 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
         if (self.replica != 0) return "replica != 0";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
@@ -628,6 +645,19 @@ pub const Header = extern struct {
         assert(self.command == .request_prepare);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_reply(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_reply);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client == 0) return "client == 0";
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -1095,6 +1125,49 @@ test "quorums" {
             try std.testing.expectEqual(actual.nack_prepare, actual.view_change);
         }
     }
+}
+
+/// Deterministically assigns replica_ids for the initial configuration.
+///
+/// Eventualy, we want to identify replicas using random u128 ids to prevent operator errors.
+/// However, that requires unergonomic two-step process for spinning a new cluster up.  To avoid
+/// needlessly compromizing the experience until reconfiguration is fully implemented, derive
+/// replica ids for the initial cluster deterministically.
+pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
+    const IdSeed = packed struct {
+        cluster_config_checksum: u128 = config.configs.current.cluster.checksum(),
+        cluster: u32,
+        replica: u8,
+    };
+
+    var result = [_]u128{0} ** constants.nodes_max;
+    var replica: u8 = 0;
+    while (replica < constants.nodes_max) : (replica += 1) {
+        result[replica] = checksum(std.mem.asBytes(&IdSeed{ .cluster = cluster, .replica = replica }));
+    }
+
+    assert_valid_members(&result);
+    return result;
+}
+
+/// Check that:
+///  - all non-zero elements are different
+///  - all zero elements are trailing
+pub fn assert_valid_members(members: *const [constants.nodes_max]u128) void {
+    for (members) |replica_i, i| {
+        for (members[0..i]) |replica_j| {
+            if (replica_j == 0) assert(replica_i == 0);
+            if (replica_j != 0) assert(replica_j != replica_i);
+        }
+    }
+}
+
+pub fn assert_valid_member(members: *const [constants.nodes_max]u128, replica_id: u128) void {
+    assert(replica_id != 0);
+    assert_valid_members(members);
+    for (members) |member| {
+        if (member == replica_id) break;
+    } else unreachable;
 }
 
 pub const Headers = struct {

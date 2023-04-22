@@ -674,10 +674,9 @@ pub const IO = struct {
         dir_fd: os.fd_t,
         relative_path: []const u8,
         size: u64,
-        must_create: bool,
+        method: enum { create, create_or_open, open },
     ) !os.fd_t {
         assert(relative_path.len > 0);
-        assert(size >= constants.sector_size);
         assert(size % constants.sector_size == 0);
 
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
@@ -691,13 +690,21 @@ pub const IO = struct {
         // TODO Document this and investigate whether this is in fact correct to set here.
         if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
-        if (must_create) {
-            log.info("creating \"{s}\"...", .{relative_path});
-            flags |= os.O.CREAT;
-            flags |= os.O.EXCL;
-            mode = 0o666;
-        } else {
-            log.info("opening \"{s}\"...", .{relative_path});
+        switch (method) {
+            .create => {
+                flags |= os.O.CREAT;
+                flags |= os.O.EXCL;
+                mode = 0o666;
+                log.info("creating \"{s}\"...", .{relative_path});
+            },
+            .create_or_open => {
+                flags |= os.O.CREAT;
+                mode = 0o666;
+                log.info("opening or creating \"{s}\"...", .{relative_path});
+            },
+            .open => {
+                log.info("opening \"{s}\"...", .{relative_path});
+            },
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
@@ -727,7 +734,7 @@ pub const IO = struct {
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
-        if (must_create) try fs_allocate(fd, size);
+        if (method == .create) try fs_allocate(fd, size);
 
         // The best fsync strategy is always to fsync before reading because this prevents us from
         // making decisions on data that was never durably written by a previously crashed process.

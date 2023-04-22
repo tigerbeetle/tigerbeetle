@@ -2,7 +2,7 @@
 
 - [Clone TigerBeetle](#clone-tigerbeetle)
 - [Upgrade Ubuntu to the 5.7.15 kernel](#upgrade-ubuntu-to-the-5715-kernel)
-- [Install Zig](#install-zig)
+- [Install Zig](./HACKING.md#setup)
 - [Simulate non-pristine lab conditions](#simulate-non-pristine-lab-conditions)
 - [Benchmark!](#benchmark)
 - [Explore the API through six demos](#explore-the-api-through-six-demos)

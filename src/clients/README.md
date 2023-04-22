@@ -15,6 +15,7 @@ Existing `Docs` struct implementations are in:
 
 * [go/docs.zig](./go/docs.zig), which generates [go/README.md](./go/README.md)
 * [node/docs.zig](./node/docs.zig), which generates [node/README.md](./node/README.md)
+* [java/docs.zig](./java/docs.zig), which generates [java/README.md](./java/README.md)
 
 ### Run
 
@@ -58,7 +59,7 @@ To format all Zig files:
 ```
 
 
-## integation.zig / client_integration
+## integration.zig / client_integration
 
 This directory contains `integration.zig` that sets up an environment
 (without Docker) to run the sample code in

@@ -10,7 +10,6 @@ const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.lsm_tree_fuzz);
 const tracer = @import("../tracer.zig");
 
-const MessagePool = @import("../message_pool.zig").MessagePool;
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -126,7 +125,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         state: State,
         storage: *Storage,
-        message_pool: MessagePool,
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context,
         grid: Grid,
@@ -141,13 +139,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = .init;
             env.storage = storage;
 
-            env.message_pool = try MessagePool.init(allocator, .replica);
-            defer env.message_pool.deinit(allocator);
-
             env.superblock = try SuperBlock.init(allocator, .{
                 .storage = env.storage,
                 .storage_size_limit = constants.storage_size_max,
-                .message_pool = &env.message_pool,
             });
             defer env.superblock.deinit(allocator);
 

@@ -33,6 +33,11 @@ pub fn build(b: *std.build.Builder) void {
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
 
+    const aof_record_enable = b.option(bool, "config-aof-record", "Enable AOF Recording.") orelse false;
+    const aof_recovery_enable = b.option(bool, "config-aof-recovery", "Enable AOF Recovery mode.") orelse false;
+    options.addOption(bool, "config_aof_record", aof_record_enable);
+    options.addOption(bool, "config_aof_recovery", aof_recovery_enable);
+
     const hash_log_mode = b.option(
         config.HashLogMode,
         "hash-log-mode",
@@ -89,6 +94,21 @@ pub fn build(b: *std.build.Builder) void {
         run_step.dependOn(&run_cmd.step);
     }
 
+    {
+        const aof = b.addExecutable("aof", "src/aof.zig");
+        aof.setTarget(target);
+        aof.setBuildMode(mode);
+        aof.install();
+        aof.addOptions("vsr_options", options);
+        link_tracer_backend(aof, tracer_backend, target);
+
+        const run_cmd = aof.run();
+        if (b.args) |args| run_cmd.addArgs(args);
+
+        const run_step = b.step("aof", "Run TigerBeetle AOF Utility");
+        run_step.dependOn(&run_cmd.step);
+    }
+
     // Linting targets
     // We currently have: lint_zig_fmt, lint_tigerstyle, lint_shellcheck, lint_validate_docs.
     // The meta-target lint runs them all
@@ -115,7 +135,9 @@ pub fn build(b: *std.build.Builder) void {
         lint_tigerstyle_step.dependOn(&run_cmd.step);
 
         // lint_shellcheck
-        const lint_shellcheck = b.addSystemCommand(&.{ "sh", "-c", "command -v shellcheck >/dev/null || (echo -e '\\033[0;31mPlease install shellcheck - https://www.shellcheck.net/\\033[0m' && exit 1) && shellcheck $(find . -type f -name '*.sh')" });
+        const lint_shellcheck = b.addSystemCommand(&.{ "sh", "-c", "command -v shellcheck >/dev/null" ++
+            " || (echo -e '\\033[0;31mPlease install shellcheck - https://www.shellcheck.net/\\033[0m' && exit 1)" ++
+            " && shellcheck $(find ./src ./scripts -type f -name '*.sh')" });
         const lint_shellcheck_step = b.step("lint_shellcheck", "Run shellcheck on **.sh");
         lint_shellcheck_step.dependOn(&lint_shellcheck.step);
 
@@ -143,16 +165,18 @@ pub fn build(b: *std.build.Builder) void {
     };
 
     {
+        const test_filter = b.option(
+            []const u8,
+            "test-filter",
+            "Skip tests that do not match filter",
+        );
+
         const unit_tests = b.addTest("src/unit_tests.zig");
         unit_tests.setTarget(target);
         unit_tests.setBuildMode(mode);
         unit_tests.addOptions("vsr_options", options);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
-        unit_tests.setFilter(b.option(
-            []const u8,
-            "test-filter",
-            "Skip tests that do not match filter",
-        ));
+        unit_tests.setFilter(test_filter);
         link_tracer_backend(unit_tests, tracer_backend, target);
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
@@ -164,20 +188,22 @@ pub fn build(b: *std.build.Builder) void {
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&unit_tests.step);
-        // Test that our demos compile, but don't run them.
-        inline for (.{
-            "demo_01_create_accounts",
-            "demo_02_lookup_accounts",
-            "demo_03_create_transfers",
-            "demo_04_create_pending_transfers",
-            "demo_05_post_pending_transfers",
-            "demo_06_void_pending_transfers",
-            "demo_07_lookup_transfers",
-        }) |demo| {
-            const demo_exe = b.addExecutable(demo, "src/demos/" ++ demo ++ ".zig");
-            demo_exe.addPackage(vsr_package);
-            demo_exe.setTarget(target);
-            test_step.dependOn(&demo_exe.step);
+        if (test_filter == null) {
+            // Test that our demos compile, but don't run them.
+            inline for (.{
+                "demo_01_create_accounts",
+                "demo_02_lookup_accounts",
+                "demo_03_create_transfers",
+                "demo_04_create_pending_transfers",
+                "demo_05_post_pending_transfers",
+                "demo_06_void_pending_transfers",
+                "demo_07_lookup_transfers",
+            }) |demo| {
+                const demo_exe = b.addExecutable(demo, "src/demos/" ++ demo ++ ".zig");
+                demo_exe.addPackage(vsr_package);
+                demo_exe.setTarget(target);
+                test_step.dependOn(&demo_exe.step);
+            }
         }
     }
 
@@ -213,6 +239,7 @@ pub fn build(b: *std.build.Builder) void {
             b,
             mode,
             &.{&install_step.step},
+            target,
             options,
             tracer_backend,
         );
@@ -319,6 +346,11 @@ pub fn build(b: *std.build.Builder) void {
             .name = "fuzz_lsm_manifest_log",
             .file = "src/lsm/manifest_log_fuzz.zig",
             .description = "Fuzz the ManifestLog. Args: [--seed <seed>] [--events-max <count>]",
+        },
+        .{
+            .name = "fuzz_lsm_manifest_level",
+            .file = "src/lsm/manifest_level_fuzz.zig",
+            .description = "Fuzz the ManifestLevel. Args: [--seed <seed>] [--events-max <count>]",
         },
         .{
             .name = "fuzz_lsm_tree",
@@ -465,11 +497,7 @@ const platforms = .{
     .{ "x86_64-macos", "osx-x64" },
     .{ "aarch64-linux-gnu", "linux-arm64" },
     .{ "aarch64-linux-musl", "linux-musl-arm64" },
-    .{
-        // Works around our build issues with Zig 0.9.1 and Ventura Macs. Can be dropped when we upgrade Zig.
-        if (builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) "native-macos" else "aarch64-macos",
-        "osx-arm64",
-    },
+    .{ "aarch64-macos", "osx-arm64" },
     .{ "x86_64-windows", "win-x64" },
 };
 
@@ -622,6 +650,7 @@ fn node_client(
     b: *std.build.Builder,
     mode: Mode,
     dependencies: []const *std.build.Step,
+    target: CrossTarget,
     options: *std.build.OptionsStep,
     tracer_backend: config.TracerBackend,
 ) void {
@@ -633,6 +662,7 @@ fn node_client(
 
     const bindings = b.addExecutable("node_bindings", "src/clients/node/node_bindings.zig");
     bindings.addOptions("vsr_options", options);
+    bindings.setTarget(target);
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 

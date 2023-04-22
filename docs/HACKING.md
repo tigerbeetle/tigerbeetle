@@ -52,7 +52,7 @@ To run the unit tests:
 zig/zig build test
 ```
 
-The [QuickStart](#quickstart) step above will install Zig for you to the root of the `tigerbeetle` directory.
+The [Setup](#setup) step above will install Zig for you to the root of the `tigerbeetle` directory.
 
 ### Simulation Tests
 
@@ -62,7 +62,7 @@ To run TigerBeetle's long-running simulation, called *The VOPR*:
 zig/zig build vopr
 ```
 
-Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR Hub](../src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create GitHub issues as needed.
+Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR Hub](/src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create GitHub issues as needed.
 
 ```bash
 zig/zig build vopr -- --send
@@ -82,8 +82,29 @@ zig/zig build vopr -- --help
 
 *The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love of fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
 
-*The VOPR* is [a deterministic simulator](../src/simulator.zig) that can fuzz many clusters of TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus protocol, but all within a single developer machine process, with [a network simulator](../src/test/packet_simulator.zig) to simulate all kinds of network faults, and with an in-memory [storage simulator](../src/test/storage.zig) to simulate all kinds of storage faults, to explore and test TigerBeetle against huge state spaces in a short amount of time, by literally speeding up the passing of time within the simulation itself.
+*The VOPR* is [a deterministic simulator](/src/simulator.zig) that can fuzz many clusters of TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus protocol, but all within a single developer machine process, with [a network simulator](/src/testing/packet_simulator.zig) to simulate all kinds of network faults, and with an in-memory [storage simulator](/src/testing/storage.zig) to simulate all kinds of storage faults, to explore and test TigerBeetle against huge state spaces in a short amount of time, by literally speeding up the passing of time within the simulation itself.
 
-Beyond being a deterministic simulator, *The VOPR* also features [a state checker](../src/test/state_checker.zig) that can hook into all the replicas, and check all their state transitions the instant they take place, using cryptographic hash chaining to prove causality and check that all interim state transitions are valid, based on any of the set of inflight client requests at the time, without divergent states, and then check for convergence to the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.
+Beyond being a deterministic simulator, *The VOPR* also features [a state checker](/src/testing/cluster/state_checker.zig) that can hook into all the replicas, and check all their state transitions the instant they take place, using cryptographic hash chaining to prove causality and check that all interim state transitions are valid, based on any of the set of inflight client requests at the time, without divergent states, and then check for convergence to the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.
 
 Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr) bug bounty challenge repository for more details on how to run *The VOPR* and interpret its output.
+
+## Hacking on clients
+
+Detailed instructions for each client are in their respective README:
+
+* [Java Development Setup](/src/clients/java#development-setup)
+* [Go Development Setup](/src/clients/go#development-setup)
+* [Node.js Development Setup](/src/clients/node#development-setup)
+
+### Running client integration tests
+
+The `client_integration` target in build.zig helps with running the
+sample programs for each client as an integration test.
+
+```bash
+./scripts/build.sh client_integration -- --language go --sample basic
+```
+
+See [the src/clients/README.md
+section](/src/clients#integrationzig--client_integration) on this
+script for details.

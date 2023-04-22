@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 REM Install Zig if it does not already exist:
 if not exist "zig" (
-    call .\scripts\install_zig.bat
+    call .\scripts\install_zig.bat || exit /b
 )
 
 if "%~1" equ ":main" (
@@ -27,13 +27,13 @@ echo.
 exit /b
 
 :main
-zig\zig.exe build install -Drelease-safe -Dconfig=production
+zig\zig.exe build install -Drelease-safe -Dconfig=production || exit /b
 
 for /l %%i in (0, 1, 0) do (
     echo Initializing replica %%i
     set ZIG_FILE=.\0_%%i.tigerbeetle.benchmark
     if exist "!ZIG_FILE!" DEL /F "!ZIG_FILE!"
-    .\tigerbeetle.exe format --cluster=0 --replica=%%i --replica-count=1 !ZIG_FILE! > benchmark.log 2>&1
+    .\tigerbeetle.exe format --cluster=0 --replica=%%i --replica-count=1 !ZIG_FILE! > benchmark.log 2>&1 || exit /b
 )
 
 for /l %%i in (0, 1, 0) do (

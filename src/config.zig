@@ -58,6 +58,8 @@ const ConfigProcess = struct {
     direct_io_required: bool,
     journal_iops_read_max: usize = 8,
     journal_iops_write_max: usize = 8,
+    client_replies_iops_read_max: usize = 1,
+    client_replies_iops_write_max: usize = 2,
     tick_ms: u63 = 10,
     rtt_ms: u64 = 300,
     rtt_multiple: u8 = 2,
@@ -69,6 +71,8 @@ const ConfigProcess = struct {
     clock_synchronization_window_max_ms: u64 = 20000,
     grid_iops_read_max: u64 = 16,
     grid_iops_write_max: u64 = 16,
+    aof_record: bool = false,
+    aof_recovery: bool = false,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -113,6 +117,21 @@ const ConfigCluster = struct {
                 sector_size,
             ),
         );
+    }
+
+    /// Fingerprint of the cluster-wide configuration.
+    /// It is used to assert that all cluster members share the same config.
+    pub fn checksum(comptime config: ConfigCluster) u128 {
+        @setEvalBranchQuota(10_000);
+        var hasher = std.crypto.hash.Blake3.init(.{});
+        inline for (std.meta.fields(ConfigCluster)) |field| {
+            const value = @field(config, field.name);
+            const value_64 = @as(u64, value);
+            hasher.update(std.mem.asBytes(&value_64));
+        }
+        var target: [32]u8 = undefined;
+        hasher.final(&target);
+        return @bitCast(u128, target[0..@sizeOf(u128)].*);
     }
 };
 
@@ -220,6 +239,8 @@ pub const configs = struct {
         // but a different type from a nominal typing perspective.
         base.process.tracer_backend = @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
         base.process.hash_log_mode = @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
+        base.process.aof_record = build_options.config_aof_record;
+        base.process.aof_recovery = build_options.config_aof_recovery;
 
         break :current base;
     };

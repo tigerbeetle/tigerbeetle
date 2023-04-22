@@ -427,6 +427,7 @@ pub const Storage = struct {
             .superblock => atlas.faulty_superblock(replica_index, offset_in_zone, size),
             .wal_headers => atlas.faulty_wal_headers(replica_index, offset_in_zone, size),
             .wal_prepares => atlas.faulty_wal_prepares(replica_index, offset_in_zone, size),
+            .client_replies => atlas.faulty_client_replies(replica_index, offset_in_zone, size),
             .grid => null,
         } orelse return;
 
@@ -544,6 +545,7 @@ pub const Area = union(enum) {
     superblock: struct { area: superblock.Area, copy: u8 },
     wal_headers: struct { sector: usize },
     wal_prepares: struct { slot: usize },
+    client_replies: struct { slot: usize },
     grid: struct { address: u64 },
 
     fn sectors(area: Area) SectorRange {
@@ -560,6 +562,11 @@ pub const Area = union(enum) {
             ),
             .wal_prepares => |data| SectorRange.from_zone(
                 .wal_prepares,
+                constants.message_size_max * data.slot,
+                constants.message_size_max,
+            ),
+            .client_replies => |data| SectorRange.from_zone(
+                .client_replies,
                 constants.message_size_max * data.slot,
                 constants.message_size_max,
             ),
@@ -623,6 +630,7 @@ pub const ClusterFaultAtlas = struct {
         faulty_superblock: bool,
         faulty_wal_headers: bool,
         faulty_wal_prepares: bool,
+        faulty_client_replies: bool,
         // TODO grid
     };
 
@@ -655,17 +663,21 @@ pub const ClusterFaultAtlas = struct {
         constants.journal_size_headers,
         constants.sector_size,
     ));
+    const FaultyClientReplies = std.StaticBitSet(constants.clients_max);
 
     options: Options,
     faulty_superblock_areas: FaultySuperBlockAreas =
         FaultySuperBlockAreas.initFill(CopySet.initEmpty()),
     faulty_wal_header_sectors: [constants.nodes_max]FaultyWALHeaders =
         [_]FaultyWALHeaders{FaultyWALHeaders.initEmpty()} ** constants.nodes_max,
+    faulty_client_reply_sectors: [constants.nodes_max]FaultyClientReplies =
+        [_]FaultyClientReplies{FaultyClientReplies.initEmpty()} ** constants.nodes_max,
 
     pub fn init(replica_count: u8, random: std.rand.Random, options: Options) ClusterFaultAtlas {
         // If there is only one replica in the cluster, WAL/Grid faults are not recoverable.
         assert(replica_count > 1 or options.faulty_wal_headers == false);
         assert(replica_count > 1 or options.faulty_wal_prepares == false);
+        assert(replica_count > 1 or options.faulty_client_replies == false);
 
         var atlas = ClusterFaultAtlas{ .options = options };
 
@@ -692,12 +704,19 @@ pub const ClusterFaultAtlas = struct {
         assert(faults_max < replica_count);
         assert(faults_max > 0 or replica_count == 1);
 
-        var wal_header_sectors = [_]ReplicaSet{ReplicaSet.initEmpty()} ** header_sectors;
-        for (wal_header_sectors) |*wal_header_sector, sector| {
+        var sector: usize = 0;
+        while (sector < header_sectors) : (sector += 1) {
+            var wal_header_sector = ReplicaSet.initEmpty();
             while (wal_header_sector.count() < faults_max) {
                 const replica_index = random.uintLessThan(u8, replica_count);
-                wal_header_sector.set(replica_index);
-                atlas.faulty_wal_header_sectors[replica_index].set(sector);
+                if (atlas.faulty_wal_header_sectors[replica_index].count() + 1 <
+                    atlas.faulty_wal_header_sectors[replica_index].capacity())
+                {
+                    atlas.faulty_wal_header_sectors[replica_index].set(sector);
+                    wal_header_sector.set(replica_index);
+                } else {
+                    // Don't add a fault to this replica, to avoid error.WALInvalid.
+                }
             }
         }
 
@@ -720,7 +739,7 @@ pub const ClusterFaultAtlas = struct {
             superblock.areas.header.base => .header,
             superblock.areas.manifest.base => .manifest,
             superblock.areas.free_set.base => .free_set,
-            superblock.areas.client_table.base => .client_table,
+            superblock.areas.client_sessions.base => .client_sessions,
             else => unreachable,
         };
 
@@ -762,6 +781,23 @@ pub const ClusterFaultAtlas = struct {
             constants.message_size_max * headers_per_sector,
             .wal_prepares,
             &atlas.faulty_wal_header_sectors[replica_index],
+            offset_in_zone,
+            size,
+        );
+    }
+
+    fn faulty_client_replies(
+        atlas: ClusterFaultAtlas,
+        replica_index: usize,
+        offset_in_zone: u64,
+        size: u64,
+    ) ?SectorRange {
+        if (!atlas.options.faulty_client_replies) return null;
+        return faulty_sectors(
+            constants.clients_max,
+            constants.message_size_max,
+            .client_replies,
+            &atlas.faulty_client_reply_sectors[replica_index],
             offset_in_zone,
             size,
         );

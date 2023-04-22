@@ -126,6 +126,7 @@ pub fn main() !void {
             .faulty_superblock = true,
             .faulty_wal_headers = replica_count > 1,
             .faulty_wal_prepares = replica_count > 1,
+            .faulty_client_replies = replica_count > 1,
         },
         .state_machine = switch (state_machine) {
             .testing => .{},
@@ -238,6 +239,12 @@ pub fn main() !void {
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
     assert(simulator.done());
+
+    const commits = simulator.cluster.state_checker.commits.items;
+    const last_checksum = commits[commits.len - 1].header.checksum;
+    for (simulator.cluster.aofs) |*aof| {
+        try aof.validate(last_checksum);
+    }
 
     output.info("\n          PASSED ({} ticks)", .{tick});
 }

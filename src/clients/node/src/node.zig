@@ -310,9 +310,9 @@ fn encode_napi_results_array(
                 try translate.u32_into_object(
                     env,
                     napi_object,
-                    "code",
+                    "result",
                     @enumToInt(result.result),
-                    "Failed to set property \"code\" of result.",
+                    "Failed to set property \"result\" of result.",
                 );
 
                 try translate.set_array_element(

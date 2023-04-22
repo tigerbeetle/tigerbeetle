@@ -414,6 +414,61 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
         }
 
+        /// Sends a request, only setting request_number in the header. Currently only used by
+        /// AOF replay support to replay messages with timestamps.
+        pub fn raw_request(
+            self: *Self,
+            user_data: u128,
+            callback: Callback,
+            message: *Message,
+        ) void {
+            if (!constants.aof_recovery) @panic("Not in AOF recovery mode");
+            assert(@enumToInt(message.header.operation) >= constants.vsr_operations_reserved);
+            const operation = message.header.operation.cast(StateMachine);
+
+            self.register();
+            assert(self.request_number > 0);
+
+            message.header.request = self.request_number;
+
+            log.debug("{}: request: user_data={} request={} size={} {s}", .{
+                self.id,
+                user_data,
+                message.header.request,
+                message.header.size,
+                @tagName(operation),
+            });
+
+            assert(!self.request_queue.full());
+            var demux = self.batch_demux_pool.acquire(
+                0,
+                message.header.size,
+            ) orelse unreachable;
+            demux.callback = .{
+                .function = callback,
+                .user_data = user_data,
+            };
+
+            const was_empty = self.request_queue.empty();
+
+            self.request_number += 1;
+            self.request_queue.push_assume_capacity(blk: {
+                // TODO: Compiler glitch if .demux_list is initialized inside Request,
+                // both pointer are set as null.
+                const demux_list = BatchDemux.List{
+                    .head = demux,
+                    .tail = demux,
+                };
+                break :blk Request{
+                    .demux_list = demux_list,
+                    .message = message,
+                };
+            });
+
+            // If the queue was empty, then there is no request inflight and we must send this one:
+            if (was_empty) self.send_request_for_the_first_time(message);
+        }
+
         fn on_eviction(self: *Self, eviction: *const Message) void {
             assert(eviction.header.command == .eviction);
             assert(eviction.header.cluster == self.cluster);

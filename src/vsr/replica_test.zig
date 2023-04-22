@@ -449,6 +449,37 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, trunc
     try expectEqual(b2.op_checkpoint(), checkpoint_1);
 }
 
+test "Cluster: repair: corrupt reply" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    // Prevent any view changes, to ensure A0 repairs its corrupt prepare.
+    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+
+    // Block the client from seeing the reply from the cluster.
+    t.replica(.R_).drop(.C_, .outgoing, .reply);
+    try c.request(21, 20);
+
+    // Corrupt all of the primary's saved replies.
+    // (Its easier than figuring out the reply's actual slot.)
+    var slot: usize = 0;
+    while (slot < constants.clients_max) : (slot += 1) {
+        t.replica(.A0).corrupt(.{ .client_reply = slot });
+    }
+
+    // The client will keep retrying request 21 until it receives a reply.
+    // The primary requests the reply from one of its backups.
+    // (Pass A0 only to ensure that no other client forwards the reply.)
+    t.replica(.A0).pass(.C_, .outgoing, .reply);
+    t.run();
+
+    try expectEqual(c.replies(), 21);
+}
+
 test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header succeed" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
@@ -579,6 +610,7 @@ const TestContext = struct {
                 .faulty_superblock = false,
                 .faulty_wal_headers = false,
                 .faulty_wal_prepares = false,
+                .faulty_client_replies = false,
             },
             .state_machine = .{},
         });
@@ -606,14 +638,14 @@ const TestContext = struct {
 
     pub fn replica(t: *TestContext, selector: ProcessSelector) TestReplicas {
         const replica_processes = t.processes(selector);
-        var replica_indexess = std.BoundedArray(u8, constants.replicas_max){ .buffer = undefined };
+        var replica_indexes = std.BoundedArray(u8, constants.replicas_max){ .buffer = undefined };
         // TODO Zig: This should iterate over values instead of pointers once the miscompilation
         // segfault is fixed.
-        for (replica_processes.constSlice()) |*p| replica_indexess.appendAssumeCapacity(p.replica);
+        for (replica_processes.constSlice()) |*p| replica_indexes.appendAssumeCapacity(p.replica);
         return TestReplicas{
             .context = t,
             .cluster = t.cluster,
-            .replicas = replica_indexess,
+            .replicas = replica_indexes,
         };
     }
 
@@ -629,7 +661,7 @@ const TestContext = struct {
     }
 
     pub fn run(t: *TestContext) void {
-        const tick_max = 2_000;
+        const tick_max = 2_400;
         var tick_count: usize = 0;
         while (tick_count < tick_max) : (tick_count += 1) {
             if (t.tick()) tick_count = 0;
@@ -808,8 +840,9 @@ const TestReplicas = struct {
     pub fn corrupt(
         t: *const TestReplicas,
         target: union(enum) {
-            wal_header: usize, // slot,
-            wal_prepare: usize, // slot,
+            wal_header: usize, // slot
+            wal_prepare: usize, // slot
+            client_reply: usize, // slot
         },
     ) void {
         switch (target) {
@@ -821,6 +854,13 @@ const TestReplicas = struct {
             },
             .wal_prepare => |slot| {
                 const fault_offset = vsr.Zone.wal_prepares.offset(slot * constants.message_size_max);
+                const fault_sector = @divExact(fault_offset, constants.sector_size);
+                for (t.replicas.constSlice()) |r| {
+                    t.cluster.storages[r].faults.set(fault_sector);
+                }
+            },
+            .client_reply => |slot| {
+                const fault_offset = vsr.Zone.client_replies.offset(slot * constants.message_size_max);
                 const fault_sector = @divExact(fault_offset, constants.sector_size);
                 for (t.replicas.constSlice()) |r| {
                     t.cluster.storages[r].faults.set(fault_sector);
@@ -908,7 +948,7 @@ const TestClients = struct {
             }
         }
 
-        const tick_max = 2_000;
+        const tick_max = 2_400;
         var tick: usize = 0;
         while (tick < tick_max) : (tick += 1) {
             if (t.context.tick()) tick = 0;
