@@ -1,161 +1,57 @@
 const std = @import("std");
-const os = std.os;
-const mem = std.mem;
 const assert = std.debug.assert;
+const os = std.os;
+const linux = os.linux;
+const IO_Uring = linux.IO_Uring;
+const io_uring_cqe = linux.io_uring_cqe;
+const io_uring_sqe = linux.io_uring_sqe;
 const log = std.log.scoped(.io);
+const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
-const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 
 pub const IO = struct {
-    const Pool = struct {
-        mutex: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
-        queue: FIFO(Completion) = .{ .name = null },
-        notified: bool = false,
-        shutdown: bool = false,
-        spawned: u32 = 0,
-        idle: u32 = 0,
-
-        fn spawn(pool: *Pool, concurrency: u32) !void {
-            errdefer pool.join();
-
-            while (pool.spawned < concurrency) : (pool.spawned += 1) {
-                const thread = try std.Thread.spawn(.{}, worker, .{pool});
-                thread.detach();
-            }
-        }
-
-        fn join(pool: *Pool) void {
-            pool.mutex.lock();
-            defer pool.mutex.unlock();
-
-            assert(!pool.shutdown);
-            pool.shutdown = true;
-
-            if (pool.idle > 0) pool.cond.broadcast();
-            while (pool.spawned == 0) pool.cond.wait(&pool.mutex);
-        }
-
-        fn submit(pool: *Pool, completion: *Completion) void {
-            pool.mutex.lock();
-            defer pool.mutex.unlock();
-
-            pool.queue.push(completion);
-            pool.notify();
-        }
-
-        fn notify(pool: *Pool) void {
-            if (pool.queue.empty() or pool.notified or pool.idle == 0) return;
-            pool.notified = true;
-            pool.cond.signal();
-        }
-
-        fn worker(pool: *Pool) void {
-            pool.mutex.lock();
-            defer pool.mutex.unlock();
-
-            while (true) {
-                while (pool.queue.pop()) |completion| {
-                    pool.notify();
-
-                    pool.mutex.unlock();
-                    defer pool.mutex.lock();
-
-                    const io = @fieldParentPtr(IO, "fs_pool", pool);
-                    completion.callback(io, completion);
-                }
-
-                if (pool.shutdown) {
-                    pool.spawned -= 1;
-                    if (pool.spawned == 0) pool.cond.signal();
-                    return;
-                }
-
-                pool.idle += 1;
-                defer pool.idle -= 1;
-
-                pool.cond.wait(&pool.mutex);
-                pool.notified = false;
-            }
-        }
-    };
-
-    const Injector = struct {
-        mutex: std.Thread.Mutex = .{},
-        queue: FIFO(Completion) = .{ .name = null },
-        waiting: bool = false,
-        pending: bool = false,
-
-        fn push(injector: *Injector, completion: *Completion) bool {
-            injector.mutex.lock();
-            defer injector.mutex.unlock();
-
-            const was_empty = injector.queue.empty();
-            injector.queue.push(completion);
-
-            @atomicStore(bool, &injector.pending, true, .Monotonic);
-            return was_empty and injector.waiting;
-        }
-
-        fn poll(injector: *Injector, completed: *FIFO(Completion), wait: bool) void {
-            assert(completed.empty());
-
-            if (!@atomicLoad(bool, &injector.pending, .Monotonic)) blk: {
-                if (wait and !injector.waiting) break :blk;
-                return;
-            }
-
-            injector.mutex.lock();
-            defer injector.mutex.unlock();
-
-            std.mem.swap(FIFO(Completion), completed, &injector.queue);
-            std.mem.swap(?[]const u8, &completed.name, &injector.queue.name);
-
-            injector.pending = false;
-            injector.waiting = completed.empty() and wait;
-        }
-    };
-
-    time: Time = .{},
-    timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
+    ring: IO_Uring,
+    /// Operations not yet submitted to the kernel and waiting on available space in the
+    /// submission queue.
+    unqueued: FIFO(Completion) = .{ .name = "io_unqueued" },
+    /// Completions that are ready to have their callbacks run.
     completed: FIFO(Completion) = .{ .name = "io_completed" },
 
-    io_inflight: u32 = 0,
-    io_pending: [64]*Completion = undefined,
-
-    fs_spawned: bool = false,
-    fs_pool: Pool = .{},
-
-    injector: Injector = .{},
-    event_set: bool = false,
-    event_fd: os.fd_t,
+    ios_queued: u64 = 0,
+    ios_in_kernel: u64 = 0,
+    tracer_slot_flush: ?tracer.SpanStart = null,
+    tracer_slot_callback: ?tracer.SpanStart = null,
 
     pub fn init(entries: u12, flags: u32) !IO {
-        _ = entries;
-        _ = flags;
+        // Detect the linux version to ensure that we support all io_uring ops used.
+        const uts = std.os.uname();
+        const release = std.mem.sliceTo(&uts.release, 0);
+        const version = try std.builtin.Version.parse(release);
+        if (version.order(std.builtin.Version{ .major = 5, .minor = 5 }) == .lt) {
+            @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
+        }
 
-        const event_fd = try os.eventfd(0, os.linux.EFD.CLOEXEC);
-        errdefer os.close(event_fd);
-
-        return IO{ .event_fd = event_fd };
+        return IO{ .ring = try IO_Uring.init(entries, flags) };
     }
 
     pub fn deinit(self: *IO) void {
-        if (self.fs_spawned) self.fs_pool.join();
-        os.close(self.event_fd);
+        assert(self.tracer_slot_flush == null);
+        assert(self.tracer_slot_callback == null);
+
+        self.ring.deinit();
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn tick(self: *IO) !void {
-        return self.flush(false);
+        return self.flush(.non_blocking);
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
-    /// in the __kernel_timespec struct.
+    /// in the kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
         var timed_out = false;
         var completion: Completion = undefined;
@@ -184,132 +80,438 @@ pub const IO = struct {
         // Loop until our timeout completion is processed above, which sets timed_out to true.
         // LLVM shouldn't be able to cache timed_out's value here since its address escapes above.
         while (!timed_out) {
-            try self.flush(true);
+            try self.flush(.blocking);
         }
     }
 
-    fn flush(self: *IO, wait_for_completions: bool) !void {
-        if (!self.fs_spawned) {
-            try self.fs_pool.spawn(64);
-            self.fs_spawned = true;
-        }
-
-        // Timeouts are expired here and possibly pushed to the completed queue.
-        const inflight = self.io_inflight;
-        const next_timeout = self.flush_timeouts();
-        if (self.completed.empty()) self.injector.poll(&self.completed, true);
-
-        // Only call poll() if we need to check pending IO or if we need to wait for completions.
-        if (inflight > 0 or self.completed.empty()) {
-            // Zero timeouts implies a non-blocking poll
-            var timeout_ms: i32 = 0;
-
-            // We need to wait (not check) on poll if there's nothing inflight or complete.
-            // We should never wait indefinitely (timeout_ms = -1 for poll) given:
-            // - tick() is non-blocking (wait_for_completions = false)
-            // - run_for_ns() always submits a timeout
-            if (self.completed.empty()) {
-                if (wait_for_completions) {
-                    const timeout_ns = next_timeout orelse @panic("poll() blocking forever");
-                    timeout_ms = @intCast(i32, @maximum(1, timeout_ns / std.time.ns_per_ms));
-                } else if (inflight == 0) {
-                    return;
-                }
-            }
-
-            var pfds: [self.io_pending.len + 1]os.pollfd = undefined;
-            pfds[0] = .{
-                .fd = self.event_fd,
-                .events = os.POLL.IN,
-                .revents = 0,
-            };
-
-            for (self.io_pending[0..inflight]) |completion, i| {
-                const info = switch (completion.operation) {
-                    .accept => |op| [2]c_int{ op.socket, os.POLL.IN },
-                    .connect => |op| [2]c_int{ op.socket, os.POLL.OUT },
-                    .recv => |op| [2]c_int{ op.socket, os.POLL.IN },
-                    .send => |op| [2]c_int{ op.socket, os.POLL.OUT },
-                    else => @panic("invalid completion operation queued for io"),
-                };
-
-                pfds[i + 1] = .{
-                    .fd = info[0],
-                    .events = @intCast(i16, info[1]),
-                    .revents = 0,
-                };
-            }
-
-            const pfd_count = inflight + 1;
-            const ready = try os.poll(pfds[0..pfd_count], timeout_ms);
-
-            if (ready > 0) {
-                if (pfds[0].revents != 0) {
-                    var value: u64 = undefined;
-                    const bytes = try os.read(self.event_fd, std.mem.asBytes(&value));
-                    assert(bytes == @sizeOf(u64));
-                    assert(value == 1);
-                    assert(@atomicRmw(bool, &self.event_set, .Xchg, false, .Acquire));
-                }
-
-                self.io_inflight = 0;
-                for (pfds[1..pfd_count]) |pfd, i| {
-                    const completion = self.io_pending[i];
-                    if (pfd.revents != 0) {
-                        self.completed.push(completion);
-                    } else {
-                        self.io_pending[self.io_inflight] = completion;
-                        self.io_inflight += 1;
-                    }
-                }
-            }
-        }
-
-        while (!self.completed.empty()) {
-            while (self.completed.pop()) |completion| (completion.callback)(self, completion);
-            self.injector.poll(&self.completed, false);
-        }
-    }
-
-    fn flush_timeouts(self: *IO) ?u64 {
-        var min_timeout: ?u64 = null;
-        var timeouts: ?*Completion = self.timeouts.peek();
-        while (timeouts) |completion| {
-            timeouts = completion.next;
-
-            // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call.
-            const now = self.time.monotonic();
-            const expires = completion.operation.timeout.expires;
-
-            // NOTE: remove() could be O(1) here with a doubly-linked-list
-            // since we know the previous Completion.
-            if (now >= expires) {
-                self.timeouts.remove(completion);
-                self.completed.push(completion);
-                continue;
-            }
-
-            const timeout_ns = expires - now;
-            if (min_timeout) |min_ns| {
-                min_timeout = std.math.min(min_ns, timeout_ns);
-            } else {
-                min_timeout = timeout_ns;
-            }
-        }
-        return min_timeout;
-    }
-
-    /// This struct holds the data needed for a single IO operation
-    pub const Completion = struct {
-        next: ?*Completion,
-        context: ?*anyopaque,
-        callback: fn (*IO, *Completion) void,
-        operation: Operation,
+    const FlushMode = enum {
+        blocking,
+        non_blocking,
     };
 
+    fn flush(self: *IO, mode: FlushMode) !void {
+        tracer.start(
+            &self.tracer_slot_flush,
+            .io_flush,
+            @src(),
+        );
+
+        try self.flush_completions(.non_blocking);
+        try self.flush_submissions(mode);
+        try self.flush_completions(.non_blocking);
+
+        tracer.end(
+            &self.tracer_slot_flush,
+            .io_flush,
+        );
+
+        // Run completions only after all completions have been flushed:
+        // Loop until all completions are processed. Calls to complete() may queue more work
+        // and extend the duration of the loop, but this is fine as it 1) executes completions
+        // that become ready without going through another syscall from flush_submissions() and
+        // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
+        while (self.completed.pop()) |completion| completion.complete(&self.tracer_slot_callback);
+
+        // At this point, unqueued could have completions either by 1) those who didn't get an SQE
+        // during the popping of unqueued or 2) completion.complete() which start new IO. These
+        // unqueued completions will get priority to acquiring SQEs on the next flush().
+    }
+
+    fn flush_completions(self: *IO, mode: FlushMode) !void {
+        var cqes: [256]io_uring_cqe = undefined;
+        var wait_remaining: u32 = @boolToInt(mode == .blocking);
+        while (true) {
+            // Guard against waiting indefinitely (if there are too few requests inflight),
+            // especially if this is not the first time round the loop:
+            const completed = self.ring.copy_cqes(&cqes, wait_remaining) catch |err| switch (err) {
+                error.SignalInterrupt => continue,
+                else => return err,
+            };
+
+            for (cqes[0..completed]) |cqe| {
+                const completion = @intToPtr(*Completion, @intCast(usize, cqe.user_data));
+                completion.result = cqe.res;
+                // We do not run the completion here (instead appending to a linked list) to avoid:
+                // * recursion through `flush_submissions()` and `flush_completions()`,
+                // * unbounded stack usage, and
+                // * confusing stack traces.
+                self.completed.push(completion);
+            }
+
+            self.ios_in_kernel -= completed;
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_in_kernel" } },
+                @intToFloat(f64, self.ios_in_kernel),
+            );
+
+            wait_remaining -|= completed;
+            if (completed < cqes.len) break;
+        }
+    }
+
+    fn flush_submissions(self: *IO, mode: FlushMode) !void {
+        while (true) {
+            const wait_nr: u32 = @boolToInt(mode == .blocking and self.completed.empty());
+            const submitted = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
+                error.SignalInterrupt => continue,
+                // Wait for some completions and then try again:
+                // See https://github.com/axboe/liburing/issues/281 re: error.SystemResources.
+                // Be careful also that copy_cqes() will flush before entering to wait (it does):
+                // https://github.com/axboe/liburing/commit/35c199c48dfd54ad46b96e386882e7ac341314c5
+                error.CompletionQueueOvercommitted, error.SystemResources => {
+                    try self.flush_completions(.blocking);
+                    continue;
+                },
+                else => return err,
+            };
+
+            self.ios_queued -= submitted;
+            self.ios_in_kernel += submitted;
+
+            while (!self.unqueued.empty()) {
+                const sqe = self.ring.get_sqe() catch break;
+                const completion = self.unqueued.pop() orelse unreachable;
+                completion.prep(sqe);
+                self.ios_queued += 1;
+            }
+
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_queued" } },
+                @intToFloat(f64, self.ios_queued),
+            );
+            tracer.plot(
+                .{ .queue_count = .{ .queue_name = "io_in_kernel" } },
+                @intToFloat(f64, self.ios_in_kernel),
+            );
+
+            break;
+        }
+    }
+
+    fn enqueue(self: *IO, completion: *Completion) void {
+        const sqe = self.ring.get_sqe() catch |err| switch (err) {
+            error.SubmissionQueueFull => {
+                self.unqueued.push(completion);
+                return;
+            },
+        };
+        completion.prep(sqe);
+
+        self.ios_queued += 1;
+        tracer.plot(
+            .{ .queue_count = .{ .queue_name = "io_queued" } },
+            @intToFloat(f64, self.ios_queued),
+        );
+    }
+
+    /// This struct holds the data needed for a single io_uring operation
+    pub const Completion = struct {
+        io: *IO,
+        result: i32 = undefined,
+        next: ?*Completion = null,
+        operation: Operation,
+        context: ?*anyopaque,
+        callback: fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
+
+        fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
+            switch (completion.operation) {
+                .accept => |*op| {
+                    linux.io_uring_prep_accept(
+                        sqe,
+                        op.socket,
+                        &op.address,
+                        &op.address_size,
+                        os.SOCK.CLOEXEC,
+                    );
+                },
+                .close => |op| {
+                    linux.io_uring_prep_close(sqe, op.fd);
+                },
+                .connect => |*op| {
+                    linux.io_uring_prep_connect(
+                        sqe,
+                        op.socket,
+                        &op.address.any,
+                        op.address.getOsSockLen(),
+                    );
+                },
+                .read => |op| {
+                    linux.io_uring_prep_read(
+                        sqe,
+                        op.fd,
+                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        op.offset,
+                    );
+                },
+                .recv => |op| {
+                    linux.io_uring_prep_recv(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
+                },
+                .send => |op| {
+                    linux.io_uring_prep_send(sqe, op.socket, op.buffer, os.MSG.NOSIGNAL);
+                },
+                .timeout => |*op| {
+                    linux.io_uring_prep_timeout(sqe, &op.timespec, 0, os.linux.IORING_TIMEOUT_ABS);
+                },
+                .write => |op| {
+                    linux.io_uring_prep_write(
+                        sqe,
+                        op.fd,
+                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        op.offset,
+                    );
+                },
+            }
+            sqe.user_data = @ptrToInt(completion);
+        }
+
+        fn complete(completion: *Completion, tracer_slot_callback: *?tracer.SpanStart) void {
+            switch (completion.operation) {
+                .accept => {
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .AGAIN => error.WouldBlock,
+                                .BADF => error.FileDescriptorInvalid,
+                                .CONNABORTED => error.ConnectionAborted,
+                                .FAULT => unreachable,
+                                .INVAL => error.SocketNotListening,
+                                .MFILE => error.ProcessFdQuotaExceeded,
+                                .NFILE => error.SystemFdQuotaExceeded,
+                                .NOBUFS => error.SystemResources,
+                                .NOMEM => error.SystemResources,
+                                .NOTSOCK => error.FileDescriptorNotASocket,
+                                .OPNOTSUPP => error.OperationNotSupported,
+                                .PERM => error.PermissionDenied,
+                                .PROTO => error.ProtocolFailure,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(os.socket_t, completion.result);
+                        }
+                    };
+                    call_callback(completion, &result, tracer_slot_callback);
+                },
+                .close => {
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                                .BADF => error.FileDescriptorInvalid,
+                                .DQUOT => error.DiskQuota,
+                                .IO => error.InputOutput,
+                                .NOSPC => error.NoSpaceLeft,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
+                    call_callback(completion, &result, tracer_slot_callback);
+                },
+                .connect => {
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .ACCES => error.AccessDenied,
+                                .ADDRINUSE => error.AddressInUse,
+                                .ADDRNOTAVAIL => error.AddressNotAvailable,
+                                .AFNOSUPPORT => error.AddressFamilyNotSupported,
+                                .AGAIN, .INPROGRESS => error.WouldBlock,
+                                .ALREADY => error.OpenAlreadyInProgress,
+                                .BADF => error.FileDescriptorInvalid,
+                                .CONNREFUSED => error.ConnectionRefused,
+                                .CONNRESET => error.ConnectionResetByPeer,
+                                .FAULT => unreachable,
+                                .ISCONN => error.AlreadyConnected,
+                                .NETUNREACH => error.NetworkUnreachable,
+                                .NOENT => error.FileNotFound,
+                                .NOTSOCK => error.FileDescriptorNotASocket,
+                                .PERM => error.PermissionDenied,
+                                .PROTOTYPE => error.ProtocolNotSupported,
+                                .TIMEDOUT => error.ConnectionTimedOut,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
+                    call_callback(completion, &result, tracer_slot_callback);
+                },
+                .read => {
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .AGAIN => error.WouldBlock,
+                                .BADF => error.NotOpenForReading,
+                                .CONNRESET => error.ConnectionResetByPeer,
+                                .FAULT => unreachable,
+                                .INVAL => error.Alignment,
+                                .IO => error.InputOutput,
+                                .ISDIR => error.IsDir,
+                                .NOBUFS => error.SystemResources,
+                                .NOMEM => error.SystemResources,
+                                .NXIO => error.Unseekable,
+                                .OVERFLOW => error.Unseekable,
+                                .SPIPE => error.Unseekable,
+                                .TIMEDOUT => error.ConnectionTimedOut,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(usize, completion.result);
+                        }
+                    };
+                    call_callback(completion, &result, tracer_slot_callback);
+                },
+                .recv => {
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .AGAIN => error.WouldBlock,
+                                .BADF => error.FileDescriptorInvalid,
+                                .CONNREFUSED => error.ConnectionRefused,
+                                .FAULT => unreachable,
+                                .INVAL => unreachable,
+                                .NOMEM => error.SystemResources,
+                                .NOTCONN => error.SocketNotConnected,
+                                .NOTSOCK => error.FileDescriptorNotASocket,
+                                .CONNRESET => error.ConnectionResetByPeer,
+                                .TIMEDOUT => error.ConnectionTimedOut,
+                                .OPNOTSUPP => error.OperationNotSupported,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(usize, completion.result);
+                        }
+                    };
+                    call_callback(completion, &result, tracer_slot_callback);
+                },
+                .send => {
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .ACCES => error.AccessDenied,
+                                .AGAIN => error.WouldBlock,
+                                .ALREADY => error.FastOpenAlreadyInProgress,
+                                .AFNOSUPPORT => error.AddressFamilyNotSupported,
+                                .BADF => error.FileDescriptorInvalid,
+                                .CONNRESET => error.ConnectionResetByPeer,
+                                .DESTADDRREQ => unreachable,
+                                .FAULT => unreachable,
+                                .INVAL => unreachable,
+                                .ISCONN => unreachable,
+                                .MSGSIZE => error.MessageTooBig,
+                                .NOBUFS => error.SystemResources,
+                                .NOMEM => error.SystemResources,
+                                .NOTCONN => error.SocketNotConnected,
+                                .NOTSOCK => error.FileDescriptorNotASocket,
+                                .OPNOTSUPP => error.OperationNotSupported,
+                                .PIPE => error.BrokenPipe,
+                                .TIMEDOUT => error.ConnectionTimedOut,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(usize, completion.result);
+                        }
+                    };
+                    call_callback(completion, &result, tracer_slot_callback);
+                },
+                .timeout => {
+                    assert(completion.result < 0);
+                    const result = switch (@intToEnum(os.E, -completion.result)) {
+                        .INTR => {
+                            completion.io.enqueue(completion);
+                            return;
+                        },
+                        .CANCELED => error.Canceled,
+                        .TIME => {}, // A success.
+                        else => |errno| os.unexpectedErrno(errno),
+                    };
+                    call_callback(completion, &result, tracer_slot_callback);
+                },
+                .write => {
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .AGAIN => error.WouldBlock,
+                                .BADF => error.NotOpenForWriting,
+                                .DESTADDRREQ => error.NotConnected,
+                                .DQUOT => error.DiskQuota,
+                                .FAULT => unreachable,
+                                .FBIG => error.FileTooBig,
+                                .INVAL => error.Alignment,
+                                .IO => error.InputOutput,
+                                .NOSPC => error.NoSpaceLeft,
+                                .NXIO => error.Unseekable,
+                                .OVERFLOW => error.Unseekable,
+                                .PERM => error.AccessDenied,
+                                .PIPE => error.BrokenPipe,
+                                .SPIPE => error.Unseekable,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk @intCast(usize, completion.result);
+                        }
+                    };
+                    call_callback(completion, &result, tracer_slot_callback);
+                },
+            }
+        }
+    };
+
+    fn call_callback(
+        completion: *Completion,
+        result: *const anyopaque,
+        tracer_slot_callback: *?tracer.SpanStart,
+    ) void {
+        tracer.start(
+            tracer_slot_callback,
+            .io_callback,
+            @src(),
+        );
+        completion.callback(completion.context, completion, result);
+        tracer.end(
+            tracer_slot_callback,
+            .io_callback,
+        );
+    }
+
+    /// This union encodes the set of operations supported as well as their arguments.
     const Operation = union(enum) {
         accept: struct {
             socket: os.socket_t,
+            address: os.sockaddr = undefined,
+            address_size: os.socklen_t = @sizeOf(os.sockaddr),
         },
         close: struct {
             fd: os.fd_t,
@@ -317,111 +519,43 @@ pub const IO = struct {
         connect: struct {
             socket: os.socket_t,
             address: std.net.Address,
-            initiated: bool,
         },
         read: struct {
             fd: os.fd_t,
-            buf: [*]u8,
-            len: u32,
+            buffer: []u8,
             offset: u64,
-            result: ?(ReadError!usize) = null,
         },
         recv: struct {
             socket: os.socket_t,
-            buf: [*]u8,
-            len: u32,
+            buffer: []u8,
         },
         send: struct {
             socket: os.socket_t,
-            buf: [*]const u8,
-            len: u32,
+            buffer: []const u8,
         },
         timeout: struct {
-            expires: u64,
+            timespec: os.linux.kernel_timespec,
         },
         write: struct {
             fd: os.fd_t,
-            buf: [*]const u8,
-            len: u32,
+            buffer: []const u8,
             offset: u64,
-            result: ?(WriteError!usize) = null,
         },
     };
 
-    fn submit(
-        self: *IO,
-        context: anytype,
-        comptime callback: anytype,
-        completion: *Completion,
-        comptime operation_tag: std.meta.Tag(Operation),
-        operation_data: anytype,
-        comptime OperationImpl: type,
-    ) void {
-        const Context = @TypeOf(context);
-        const onCompleteFn = struct {
-            fn onComplete(io: *IO, _completion: *Completion) void {
-                // Perform the actual operaton
-                const op_data = &@field(_completion.operation, @tagName(operation_tag));
-                const result = blk: {
-                    if (@hasField(@TypeOf(op_data.*), "result")) {
-                        if (op_data.result) |r| break :blk r;
-                    }
-                    break :blk OperationImpl.do_operation(op_data);
-                };
-
-                // Requeue onto io_pending if error.WouldBlock
-                switch (operation_tag) {
-                    .accept, .connect, .send, .recv => {
-                        _ = result catch |err| switch (err) {
-                            error.WouldBlock => {
-                                _completion.next = null;
-                                io.io_pending[io.io_inflight] = _completion;
-                                io.io_inflight += 1;
-                                return;
-                            },
-                            else => {},
-                        };
-                    },
-                    .read, .write => blk: {
-                        if (op_data.result != null) break :blk;
-                        op_data.result = result;
-
-                        if (io.injector.push(_completion)) {
-                            if (!@atomicRmw(bool, &io.event_set, .Xchg, true, .Release)) {
-                                var value: u64 = 1;
-                                const wrote = os.write(io.event_fd, std.mem.asBytes(&value)) catch unreachable;
-                                assert(wrote == @sizeOf(u64));
-                            }
-                        }
-                        return;
-                    },
-                    else => {},
-                }
-
-                // Complete the Completion
-                return callback(
-                    @intToPtr(Context, @ptrToInt(_completion.context)),
-                    _completion,
-                    result,
-                );
-            }
-        }.onComplete;
-
-        completion.* = .{
-            .next = null,
-            .context = context,
-            .callback = onCompleteFn,
-            .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),
-        };
-
-        switch (operation_tag) {
-            .read, .write => self.fs_pool.submit(completion),
-            .timeout => self.timeouts.push(completion),
-            else => self.completed.push(completion),
-        }
-    }
-
-    pub const AcceptError = os.AcceptError || os.SetSockOptError;
+    pub const AcceptError = error{
+        WouldBlock,
+        FileDescriptorInvalid,
+        ConnectionAborted,
+        SocketNotListening,
+        ProcessFdQuotaExceeded,
+        SystemFdQuotaExceeded,
+        SystemResources,
+        FileDescriptorNotASocket,
+        OperationNotSupported,
+        PermissionDenied,
+        ProtocolFailure,
+    } || os.UnexpectedError;
 
     pub fn accept(
         self: *IO,
@@ -435,25 +569,27 @@ pub const IO = struct {
         completion: *Completion,
         socket: os.socket_t,
     ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .accept,
-            .{
-                .socket = socket,
-            },
-            struct {
-                fn do_operation(op: anytype) AcceptError!os.socket_t {
-                    return os.accept(
-                        op.socket,
-                        null,
-                        null,
-                        os.SOCK.NONBLOCK | os.SOCK.CLOEXEC,
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const AcceptError!os.socket_t, @ptrToInt(res)).*,
                     );
                 }
+            }.wrapper,
+            .operation = .{
+                .accept = .{
+                    .socket = socket,
+                    .address = undefined,
+                    .address_size = @sizeOf(os.sockaddr),
+                },
             },
-        );
+        };
+        self.enqueue(completion);
     }
 
     pub const CloseError = error{
@@ -475,29 +611,43 @@ pub const IO = struct {
         completion: *Completion,
         fd: os.fd_t,
     ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .close,
-            .{
-                .fd = fd,
-            },
-            struct {
-                fn do_operation(op: anytype) CloseError!void {
-                    return switch (os.errno(os.system.close(op.fd))) {
-                        .SUCCESS => {},
-                        .BADF => error.FileDescriptorInvalid,
-                        .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
-                        .IO => error.InputOutput,
-                        else => |errno| os.unexpectedErrno(errno),
-                    };
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const CloseError!void, @ptrToInt(res)).*,
+                    );
                 }
+            }.wrapper,
+            .operation = .{
+                .close = .{ .fd = fd },
             },
-        );
+        };
+        self.enqueue(completion);
     }
 
-    pub const ConnectError = os.ConnectError;
+    pub const ConnectError = error{
+        AccessDenied,
+        AddressInUse,
+        AddressNotAvailable,
+        AddressFamilyNotSupported,
+        WouldBlock,
+        OpenAlreadyInProgress,
+        FileDescriptorInvalid,
+        ConnectionRefused,
+        AlreadyConnected,
+        NetworkUnreachable,
+        FileNotFound,
+        FileDescriptorNotASocket,
+        PermissionDenied,
+        ProtocolNotSupported,
+        ConnectionTimedOut,
+        SystemResources,
+    } || os.UnexpectedError;
 
     pub fn connect(
         self: *IO,
@@ -512,30 +662,26 @@ pub const IO = struct {
         socket: os.socket_t,
         address: std.net.Address,
     ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .connect,
-            .{
-                .socket = socket,
-                .address = address,
-                .initiated = false,
-            },
-            struct {
-                fn do_operation(op: anytype) ConnectError!void {
-                    // Don't call connect after being rescheduled by io_pending as it gives EISCONN.
-                    // Instead, check the socket error to see if has been connected successfully.
-                    const result = switch (op.initiated) {
-                        true => os.getsockoptError(op.socket),
-                        else => os.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
-                    };
-
-                    op.initiated = true;
-                    return result;
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const ConnectError!void, @ptrToInt(res)).*,
+                    );
                 }
+            }.wrapper,
+            .operation = .{
+                .connect = .{
+                    .socket = socket,
+                    .address = address,
+                },
             },
-        );
+        };
+        self.enqueue(completion);
     }
 
     pub const ReadError = error{
@@ -564,51 +710,39 @@ pub const IO = struct {
         buffer: []u8,
         offset: u64,
     ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .read,
-            .{
-                .fd = fd,
-                .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
-                .offset = offset,
-            },
-            struct {
-                fn do_operation(op: anytype) ReadError!usize {
-                    while (true) {
-                        const rc = os.system.pread(
-                            op.fd,
-                            op.buf,
-                            op.len,
-                            @bitCast(isize, op.offset),
-                        );
-                        return switch (os.errno(rc)) {
-                            .SUCCESS => @intCast(usize, rc),
-                            .INTR => continue,
-                            .AGAIN => error.WouldBlock,
-                            .BADF => error.NotOpenForReading,
-                            .CONNRESET => error.ConnectionResetByPeer,
-                            .FAULT => unreachable,
-                            .INVAL => error.Alignment,
-                            .IO => error.InputOutput,
-                            .ISDIR => error.IsDir,
-                            .NOBUFS => error.SystemResources,
-                            .NOMEM => error.SystemResources,
-                            .NXIO => error.Unseekable,
-                            .OVERFLOW => error.Unseekable,
-                            .SPIPE => error.Unseekable,
-                            .TIMEDOUT => error.ConnectionTimedOut,
-                            else => |err| os.unexpectedErrno(err),
-                        };
-                    }
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const ReadError!usize, @ptrToInt(res)).*,
+                    );
                 }
+            }.wrapper,
+            .operation = .{
+                .read = .{
+                    .fd = fd,
+                    .buffer = buffer,
+                    .offset = offset,
+                },
             },
-        );
+        };
+        self.enqueue(completion);
     }
 
-    pub const RecvError = os.RecvFromError;
+    pub const RecvError = error{
+        WouldBlock,
+        FileDescriptorInvalid,
+        ConnectionRefused,
+        SystemResources,
+        SocketNotConnected,
+        FileDescriptorNotASocket,
+        ConnectionTimedOut,
+        OperationNotSupported,
+    } || os.UnexpectedError;
 
     pub fn recv(
         self: *IO,
@@ -623,25 +757,43 @@ pub const IO = struct {
         socket: os.socket_t,
         buffer: []u8,
     ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .recv,
-            .{
-                .socket = socket,
-                .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
-            },
-            struct {
-                fn do_operation(op: anytype) RecvError!usize {
-                    return os.recv(op.socket, op.buf[0..op.len], 0);
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const RecvError!usize, @ptrToInt(res)).*,
+                    );
                 }
+            }.wrapper,
+            .operation = .{
+                .recv = .{
+                    .socket = socket,
+                    .buffer = buffer,
+                },
             },
-        );
+        };
+        self.enqueue(completion);
     }
 
-    pub const SendError = os.SendError;
+    pub const SendError = error{
+        AccessDenied,
+        WouldBlock,
+        FastOpenAlreadyInProgress,
+        AddressFamilyNotSupported,
+        FileDescriptorInvalid,
+        ConnectionResetByPeer,
+        MessageTooBig,
+        SystemResources,
+        SocketNotConnected,
+        FileDescriptorNotASocket,
+        OperationNotSupported,
+        BrokenPipe,
+        ConnectionTimedOut,
+    } || os.UnexpectedError;
 
     pub fn send(
         self: *IO,
@@ -656,22 +808,26 @@ pub const IO = struct {
         socket: os.socket_t,
         buffer: []const u8,
     ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .send,
-            .{
-                .socket = socket,
-                .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
-            },
-            struct {
-                fn do_operation(op: anytype) SendError!usize {
-                    return os.send(op.socket, op.buf[0..op.len], os.MSG.NOSIGNAL);
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const SendError!usize, @ptrToInt(res)).*,
+                    );
                 }
+            }.wrapper,
+            .operation = .{
+                .send = .{
+                    .socket = socket,
+                    .buffer = buffer,
+                },
             },
-        );
+        };
+        self.enqueue(completion);
     }
 
     pub const TimeoutError = error{Canceled} || os.UnexpectedError;
@@ -688,42 +844,56 @@ pub const IO = struct {
         completion: *Completion,
         nanoseconds: u63,
     ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const TimeoutError!void, @ptrToInt(res)).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .timeout = .{
+                    .timespec = undefined,
+                },
+            },
+        };
+
         // Special case a zero timeout as a yield.
         if (nanoseconds == 0) {
-            completion.* = .{
-                .next = null,
-                .context = context,
-                .operation = undefined,
-                .callback = struct {
-                    fn on_complete(_io: *IO, _completion: *Completion) void {
-                        _ = _io;
-                        const _context = @intToPtr(Context, @ptrToInt(_completion.context));
-                        callback(_context, _completion, {});
-                    }
-                }.on_complete,
-            };
-
+            completion.result = -@intCast(i32, @enumToInt(std.os.E.TIME));
             self.completed.push(completion);
             return;
         }
 
-        self.submit(
-            context,
-            callback,
-            completion,
-            .timeout,
-            .{
-                .expires = self.time.monotonic() + nanoseconds,
-            },
-            struct {
-                fn do_operation(_: anytype) TimeoutError!void {
-                    return; // timeouts don't have errors for now
-                }
-            },
-        );
+        // Set the timeout appropriately.
+        var current: os.timespec = undefined;
+        os.clock_gettime(os.CLOCK.MONOTONIC, &current) catch unreachable;
+        completion.operation.timeout.timespec = .{
+            .tv_sec = current.tv_sec,
+            .tv_nsec = current.tv_nsec + nanoseconds,
+        };
+
+        self.enqueue(completion);
     }
 
-    pub const WriteError = os.PWriteError;
+    pub const WriteError = error{
+        WouldBlock,
+        NotOpenForWriting,
+        NotConnected,
+        DiskQuota,
+        FileTooBig,
+        Alignment,
+        InputOutput,
+        NoSpaceLeft,
+        Unseekable,
+        AccessDenied,
+        BrokenPipe,
+    } || os.UnexpectedError;
 
     pub fn write(
         self: *IO,
@@ -739,30 +909,35 @@ pub const IO = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
-        self.submit(
-            context,
-            callback,
-            completion,
-            .write,
-            .{
-                .fd = fd,
-                .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
-                .offset = offset,
-            },
-            struct {
-                fn do_operation(op: anytype) WriteError!usize {
-                    return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const WriteError!usize, @ptrToInt(res)).*,
+                    );
                 }
+            }.wrapper,
+            .operation = .{
+                .write = .{
+                    .fd = fd,
+                    .buffer = buffer,
+                    .offset = offset,
+                },
             },
-        );
+        };
+        self.enqueue(completion);
     }
 
     pub const INVALID_SOCKET = -1;
 
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(_: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
-        return os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+        _ = self;
+        return os.socket(family, sock_type, protocol);
     }
 
     /// Opens a directory with read only access.
