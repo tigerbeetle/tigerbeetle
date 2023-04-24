@@ -97,7 +97,7 @@ wget https://releases.hashicorp.com/nomad/1.5.3/nomad_1.5.3_linux_amd64.zip
 unzip nomad_1.5.3_linux_amd64.zip
 chmod +x nomad
 
-git config remote.origin.fetch '+refs/pull/*:refs/remotes/origin/pull/*'
+git config --global remote.origin.fetch '+refs/pull/*:refs/remotes/origin/pull/*'
 git clone ${var.git_url}
 cd tigerbeetle
 git checkout ${var.git_ref}
