@@ -5,16 +5,16 @@ on:
     branches:
       - 'main'
 
-  # Run on Merge queue
-  merge_group:
+  # # Run on Merge queue
+  # merge_group:
 
-  # Run CI for any PRs that target 'main' when they are opened or updated.
-  pull_request:
-    branches:
-      - 'main'
-    types:
-      - opened
-      - synchronize
+  # # Run CI for any PRs that target 'main' when they are opened or updated.
+  # pull_request:
+  #   branches:
+  #     - 'main'
+  #   types:
+  #     - opened
+  #     - synchronize
 
 jobs:
   smoke:
