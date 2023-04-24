@@ -18,5 +18,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: cd /tmp && wget https://releases.hashicorp.com/nomad/1.5.3/nomad_1.5.3_linux_amd64.zip && unzip nomad_1.5.3_linux_amd64.zip && chmod +x nomad && mv nomad /usr/bin/
+      - run: cd /tmp && wget https://releases.hashicorp.com/nomad/1.5.3/nomad_1.5.3_linux_amd64.zip && unzip nomad_1.5.3_linux_amd64.zip && chmod +x nomad && sudo mv nomad /usr/bin/
       - run: ./scripts/benchmark/orchestrate.sh 3 m6id.xlarge
