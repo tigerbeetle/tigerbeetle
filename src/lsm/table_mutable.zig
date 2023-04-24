@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
+const TableValuesType = @import("table_values.zig").TableValuesType;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 /// Range queries are not supported on the TableMutable, it must first be made immutable.
@@ -21,8 +22,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
     return struct {
         const TableMutable = @This();
 
-        const load_factor = 50;
-        const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
+        const Values = TableValuesType(Table);
 
         pub const ValuesCache = SetAssociativeCache(
             Key,
@@ -42,7 +42,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             tree_name,
         );
 
-        values: Values = .{},
+        values: Values,
 
         /// Rather than using values.count(), we count how many values we could have had if every
         /// operation had been on a different key. This means that mistakes in calculating
@@ -66,12 +66,8 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         // The value type will be []u8 and this will be shared by trees with the same value size."
         values_cache: ?*ValuesCache,
 
-        pub fn init(
-            allocator: mem.Allocator,
-            values_cache: ?*ValuesCache,
-        ) !TableMutable {
-            var values: Values = .{};
-            try values.ensureTotalCapacity(allocator, value_count_max);
+        pub fn init(allocator: mem.Allocator, values_cache: ?*ValuesCache) !TableMutable {
+            var values = try Values.init(allocator);
             errdefer values.deinit(allocator);
 
             return TableMutable{
@@ -85,7 +81,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         }
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
-            if (table.values.getKeyPtr(tombstone_from_key(key))) |value| {
+            if (table.values.find(key)) |value| {
                 return value;
             }
             if (table.values_cache) |cache| {
@@ -99,14 +95,14 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
 
-            const entry = table.values.getOrPutAssumeCapacity(value.*);
-            if (usage == .secondary_index and entry.found_existing) {
-                assert(tombstone(entry.key_ptr) == !delete);
-                return;
-            }
+            const key = key_from_value(value);
+            const entry = table.values.upsert(key);
 
-            entry.key_ptr.* = if (delete) tombstone_from_key(key_from_value(value)) else value.*;
-            assert(table.values.count() <= value_count_max);
+            if (usage == .secondary_index and entry.found_existing) {
+                assert(tombstone(entry.value) == !delete);
+            } else {
+                entry.value.* = if (delete) tombstone_from_key(key) else value.*;
+            }
         }
 
         pub inline fn put(table: *TableMutable, value: *const Value) void {
@@ -118,32 +114,33 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         }
 
         pub fn clear(table: *TableMutable) void {
-            assert(table.values.count() > 0);
+            assert(table.count() > 0);
             table.value_count_worst_case = 0;
-            table.values.clearRetainingCapacity();
-            assert(table.values.count() == 0);
+            table.values.clear();
+            assert(table.count() == 0);
         }
 
         pub fn count(table: *const TableMutable) u32 {
-            const value = @intCast(u32, table.values.count());
-            assert(value <= value_count_max);
-            return value;
+            const value_count = @intCast(u32, table.values.inserted().len);
+            assert(value_count <= value_count_max);
+            return value_count;
         }
 
         /// The returned slice is invalidated whenever this is called for any tree.
-        pub fn sort_into_values_and_clear(
-            table: *TableMutable,
-            values_max: []Value,
-        ) []const Value {
-            assert(table.count() > 0);
-            assert(table.count() <= value_count_max);
-            assert(table.count() <= values_max.len);
-            assert(values_max.len == value_count_max);
+        pub fn sort_into_and_clear(table: *TableMutable, values: *Values) void {
+            const inserted = table.values.inserted();
+            assert(inserted.len > 0);
+            assert(inserted.len <= value_count_max);
+            assert(values.inserted().len == 0);
 
-            var i: usize = 0;
-            var it = table.values.keyIterator();
-            while (it.next()) |value| : (i += 1) {
-                values_max[i] = value.*;
+            // Sort the inserted value array directly. This invalidates all subsequent uses of
+            // table.values.find/upsert/insert_no_clobber but that's fine as it will be cleared.
+            std.sort.sort(Value, inserted, {}, sort_values_by_key_in_ascending_order);
+
+            // Iterate the sorted values and insert them into the passed in TableValues.
+            // Also insert them into the cache if any.
+            for (inserted) |*value| {
+                values.insert_no_clobber(value);
 
                 if (table.values_cache) |cache| {
                     if (tombstone(value)) {
@@ -154,14 +151,9 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
                 }
             }
 
-            const values = values_max[0..i];
-            assert(values.len == table.count());
-            std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
-
+            // Finally, clear our table.
             table.clear();
             assert(table.count() == 0);
-
-            return values;
         }
 
         fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
