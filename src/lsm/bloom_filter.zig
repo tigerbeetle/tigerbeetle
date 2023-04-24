@@ -5,15 +5,16 @@ const assert = std.debug.assert;
 const mem = std.mem;
 const meta = std.meta;
 
+const stdx = @import("../stdx.zig");
+
 pub const Fingerprint = struct {
     /// Hash value used to map key to block.
     hash: u32,
     /// Mask of bits set in the block for the key.
     mask: meta.Vector(8, u32),
 
-    pub fn create(key_ptr: anytype) Fingerprint {
-        const hash = @import("../stdx.zig").fast_hash(key_ptr);
-        return create_with_hash(hash);
+    pub inline fn create(key_ptr: anytype) Fingerprint {
+        return create_with_hash(stdx.fast_hash(key_ptr));
     }
 
     fn create_with_hash(hash: u64) Fingerprint {
@@ -95,10 +96,10 @@ const test_bloom_filter = struct {
             fuzz.random_int_exponential(random, usize, iter),
         );
 
-        const keys = try std.testing.allocator.alloc(u32, keys_count);
+        const keys = try std.testing.allocator.alloc(u64, keys_count);
         defer std.testing.allocator.free(keys);
 
-        for (keys) |*key| key.* = random.int(u32);
+        for (keys) |*key| key.* = random.int(u64);
 
         // `block_size` is currently the only size bloom_filter that we use.
         const filter = try std.testing.allocator.alloc(u8, block_size);
