@@ -41,10 +41,10 @@ for i in $(seq 1 "${REPLICA_COUNT}"); do
 	REPLICA_PRIVATE_IPS+=("$(echo "${output}" | jq -r .Instances[${i}].PrivateIpAddress)":3001)
 done
 
-# Set for both client and replicas
-# TODO
-export NOMAD_VAR_git_url="https://github.com/tigerbeetledb/tigerbeetle.git" # Likely we'll only run this on our own branches and not random PRs
-export NOMAD_VAR_git_ref="cb22-arewe1mtpsyet" # For now - take as a param
+# The below are set for both client and replicas.
+# We fix our git URL, so we'll only ever run this on our own branches and not random PRs
+export NOMAD_VAR_git_url="https://github.com/tigerbeetledb/tigerbeetle.git"
+export NOMAD_VAR_git_ref="${3}"
 
 # Build the address string
 function join_by { local IFS="$1"; shift; echo "$*"; }
