@@ -377,14 +377,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             assert(reply.header.parent == self.parent);
             assert(reply.header.client == self.id);
-            assert(reply.header.context == 0);
             assert(reply.header.request == inflight.message.header.request);
             assert(reply.header.cluster == self.cluster);
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.operation == inflight.message.header.operation);
 
-            // The checksum of this reply becomes the parent of our next request:
-            self.parent = reply.header.checksum;
+            // The context of this reply becomes the parent of our next request:
+            self.parent = reply.header.context;
 
             if (reply.header.view > self.view) {
                 log.debug("{}: on_reply: newer view={}..{}", .{
