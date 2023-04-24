@@ -52,6 +52,7 @@ job "__JOB_NAME__" {
 
     task "tigerbeetle-client" {
       driver = "docker"
+      shutdown_delay = "10s"
 
       config {
         image = "debian:bullseye"
@@ -71,18 +72,22 @@ apt-get -y install git curl xz-utils unzip wget awscli
 export AWS_REGION=eu-west-1
 export AWS_DEFAULT_REGION=eu-west-1
 
+# Try do a best effort cleanup. We have TTLs and a reaper process, so there's
+# no risk of leaking machines, but no sense in letting them run longer than
+# they need to, either.
 function finish {
   # Shut down all instances - the instance role has permission to do this
-  aws ec2 terminate-instances --instance-ids "${var.replica_instance_ids}"
+  aws ec2 terminate-instances --instance-ids "${var.replica_instance_ids}" || true
 
-  # Purge Nomad jobs, then terminate this instance. Racy.
+  # Purge Nomad jobs, then terminate this instance. We have a shutdown delay of
+  # 10s which should be plenty of time.
   if [ -e /tmp/nomad ]; then
-    /tmp/nomad job status | grep tigerbeetle-${var.test_id} | awk '{print $1}' | xargs -L1 /tmp/nomad job stop -purge
+    (/tmp/nomad job status | grep tigerbeetle-${var.test_id} | awk '{print $1}' | xargs -L1 /tmp/nomad job stop -purge) || true
   else
     echo "No Nomad yet - not purging."
   fi
 
-  aws ec2 terminate-instances --instance-ids "${var.instance_id}"
+  aws ec2 terminate-instances --instance-ids ${var.instance_id} || true
 }
 trap finish EXIT
 
@@ -96,7 +101,7 @@ git clone ${var.git_url}
 cd tigerbeetle
 git checkout ${var.git_ref}
 ./scripts/install_zig.sh
-./zig/zig build benchmark -Drelease-safe=true -- --account-count 10000 --transfer-count 10000000 --transfer-count-per-second 1000000 --addresses ${var.addresses}
+./zig/zig build benchmark -Drelease-safe=true -- --account-count 10000 --transfer-count 1000000 --transfer-count-per-second 1000000 --addresses ${var.addresses}
 
 # Ensure time for results to have shipped
 sleep 10

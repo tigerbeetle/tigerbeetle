@@ -86,7 +86,7 @@ JOB_NAME="tigerbeetle-${TEST_ID}-client"
 export NOMAD_VAR_instance_id=${CLIENT_INSTANCE_ID}
 export NOMAD_VAR_test_id="${TEST_ID}"
 export NOMAD_VAR_addresses="${addresses}"
-export NOMAD_VAR_replica_instances="${REPLICA_INSTANCE_IDS}"
+export NOMAD_VAR_replica_instance_ids="${REPLICA_INSTANCE_IDS[*]}"
 
 cat client.hcl | sed "s/__JOB_NAME__/${JOB_NAME}/g" | nomad job run -detach -
 

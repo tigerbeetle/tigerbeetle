@@ -11,10 +11,10 @@ pub const StatsD = struct {
     pub fn init(allocator: std.mem.Allocator, io: *IO, address: std.net.Address) !StatsD {
         // Limit the max packet size to 1000.
         const buffer = try allocator.alloc(u8, 1000);
-        errdefer allocator.free(self.buffer);
+        errdefer allocator.free(buffer);
 
         const socket = try io.open_socket(address.any.family, std.os.SOCK.DGRAM, std.os.IPPROTO.UDP);
-        errdefer socket;
+        errdefer std.os.closeSocket(self.socket);
 
         return StatsD {
             .buffer = buffer,
@@ -26,7 +26,7 @@ pub const StatsD = struct {
 
     pub fn deinit(self: *StatsD, allocator: std.mem.Allocator) void {
         allocator.free(self.buffer);
-        os.closeSocket(self.socket);
+        std.os.closeSocket(self.socket);
     }
 
     pub fn gauge(self: *StatsD, stat: []const u8, value: usize) !void {
