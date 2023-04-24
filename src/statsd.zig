@@ -14,7 +14,7 @@ pub const StatsD = struct {
         errdefer allocator.free(buffer);
 
         const socket = try io.open_socket(address.any.family, std.os.SOCK.DGRAM, std.os.IPPROTO.UDP);
-        errdefer std.os.closeSocket(self.socket);
+        errdefer std.os.closeSocket(socket);
 
         return StatsD {
             .buffer = buffer,
