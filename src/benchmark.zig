@@ -306,11 +306,6 @@ const Benchmark = struct {
             ms_time,
         });
 
-        b.statsd.gauge("benchmark.txns", b.batch_transfers.items.len) catch {};
-        b.statsd.timing("benchmark.timings", ms_time) catch {};
-        b.statsd.gauge("benchmark.batch", b.batch_index) catch {};
-        b.statsd.gauge("benchmark.completed", b.transfers_sent) catch {};
-
         b.batch_latency_ns.appendAssumeCapacity(batch_end_ns - b.batch_start_ns);
         for (b.transfer_start_ns.items) |start_ns| {
             b.transfer_latency_ns.appendAssumeCapacity(batch_end_ns - start_ns);
@@ -318,6 +313,12 @@ const Benchmark = struct {
 
         b.batch_index += 1;
         b.transfers_sent += b.batch_transfers.items.len;
+
+        b.statsd.gauge("benchmark.txns", b.batch_transfers.items.len) catch {};
+        b.statsd.timing("benchmark.timings", ms_time) catch {};
+        b.statsd.gauge("benchmark.batch", b.batch_index) catch {};
+        b.statsd.gauge("benchmark.completed", b.transfers_sent) catch {};
+
         b.create_transfers();
     }
 
