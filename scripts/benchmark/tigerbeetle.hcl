@@ -94,6 +94,7 @@ apt-get update
 apt-get -y install git curl xz-utils unzip wget
 cd /tmp
 
+git config remote.origin.fetch '+refs/pull/*:refs/remotes/origin/pull/*'
 git clone ${var.git_url}
 cd tigerbeetle
 git checkout ${var.git_ref}
