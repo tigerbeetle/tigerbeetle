@@ -101,7 +101,7 @@ git clone ${var.git_url}
 cd tigerbeetle
 git checkout ${var.git_ref}
 ./scripts/install_zig.sh
-./zig/zig build benchmark -Drelease-safe=true -- --account-count 10000 --transfer-count 1000000 --transfer-count-per-second 10000000 --addresses ${var.addresses}
+./zig/zig build benchmark -Drelease-safe=true -- --account-count 10000 --transfer-count 10000000 --transfer-count-per-second 1000000 --addresses ${var.addresses}
 
 # Ensure time for results to have shipped
 sleep 10
