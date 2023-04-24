@@ -232,6 +232,9 @@ pub const Header = extern struct {
     /// We use this cryptographic context in various ways, for example:
     ///
     /// * A `request` sets this to the client's session number.
+    /// * A `reply` sets this to a "stable" checksum.
+    ///   Replies for a specific op may have different views (and checksums),
+    ///   but are guaranteed to have the same context.
     /// * A `prepare` sets this to the checksum of the client's request.
     /// * A `prepare_ok` sets this to the checksum of the prepare being acked.
     /// * A `commit` sets this to the checksum of the latest committed prepare.
@@ -551,7 +554,6 @@ pub const Header = extern struct {
         assert(self.command == .reply);
         // Initialization within `client.zig` asserts that client `id` is greater than zero:
         if (self.client == 0) return "client == 0";
-        if (self.context != 0) return "context != 0";
         if (self.op != self.commit) return "op != commit";
         if (self.timestamp == 0) return "timestamp == 0";
         if (self.operation == .register) {
