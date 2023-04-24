@@ -106,8 +106,7 @@ pub fn TableType(
             }
 
             pub fn hash(_: HashMapContextValue, value: Value) u64 {
-                const key = key_from_value(&value);
-                return @import("../stdx.zig").fast_hash(&key);
+                return stdx.fast_hash(&key_from_value(&value));
             }
         };
 

@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 
 const TableType = @import("table.zig").TableType;
@@ -412,7 +413,7 @@ pub fn GrooveType(
 
         const PrefetchObjectsContext = struct {
             pub fn hash(_: PrefetchObjectsContext, object: Object) u64 {
-                return @import("../stdx.zig").fast_hash(&@field(object, primary_field));
+                return stdx.fast_hash(&@field(object, primary_field));
             }
 
             pub fn eql(_: PrefetchObjectsContext, a: Object, b: Object) bool {
@@ -421,7 +422,7 @@ pub fn GrooveType(
         };
         const PrefetchObjectsAdapter = struct {
             pub fn hash(_: PrefetchObjectsAdapter, key: PrimaryKey) u64 {
-                return @import("../stdx.zig").fast_hash(&key);
+                return stdx.fast_hash(&key);
             }
 
             pub fn eql(_: PrefetchObjectsAdapter, a_key: PrimaryKey, b_object: Object) bool {

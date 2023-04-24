@@ -3,8 +3,8 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const div_ceil = @import("../stdx.zig").div_ceil;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 /// Range queries are not supported on the TableMutable, it must first be made immutable.
@@ -30,7 +30,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             Table.key_from_value,
             struct {
                 inline fn hash(key: Key) u64 {
-                    return @import("../stdx.zig").fast_hash(&key);
+                    return stdx.fast_hash(&key);
                 }
             }.hash,
             struct {
