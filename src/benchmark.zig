@@ -307,7 +307,7 @@ const Benchmark = struct {
         });
 
         b.statsd.gauge("benchmark.txns", b.batch_transfers.items.len) catch {};
-        b.statsd.gauge("benchmark.timings", ms_time) catch {};
+        b.statsd.timing("benchmark.timings", ms_time) catch {};
         b.statsd.gauge("benchmark.batch", b.batch_index) catch {};
         b.statsd.gauge("benchmark.completed", b.transfers_sent) catch {};
 
