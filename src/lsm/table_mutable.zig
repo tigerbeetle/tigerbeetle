@@ -40,134 +40,168 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         );
 
         const ValuesMap = struct {
-            const Values = struct {
-                active: [value_count_max / 8]u8,
-                items: [value_count_max]Value,
-            };
-
             const load_factor = 50;
-            const IndexMap = std.HashMapUnmanaged(u32, void, IndexMapContext, load_factor);
+            const capacity = math.ceilPowerOfTwo(u32, value_count_max * 100 / load_factor) catch unreachable;
 
-            const IndexMapContext = struct {
-                values: *const Values,
-                search_key: Key,
-                search_index: u32 = math.maxInt(u32),
+            const Slot = u24;
+            const slot_bytes = @bitSizeOf(Slot) / 8;
+            comptime {
+                assert(value_count_max <= std.math.maxInt(Slot));
+            }
 
-                inline fn key_from_index(ctx: *const IndexMapContext, index: u32) Key {
-                    if (index == ctx.search_index) return ctx.search_key;
-                    return key_from_value(&ctx.values.items[index]);
-                }
-
-                pub inline fn eql(ctx: IndexMapContext, a: u32, b: u32) bool {
-                    return compare_keys(ctx.key_from_index(a), ctx.key_from_index(b)) == .eq;
-                }
-
-                pub inline fn hash(ctx: IndexMapContext, index: u32) u64 {
-                    const key = ctx.key_from_index(index);
-                    return std.hash.Wyhash.hash(0, mem.asBytes(&key));
-                }
+            const Data = struct {
+                tags: [capacity]u8,
+                slots: [capacity * slot_bytes]u8,
+                active: [value_count_max / 8]u8,
+                values: [value_count_max]Value,
             };
 
-            index_map: IndexMap,
-            values: *Values,
-            active: u32,
+            len: u32 = 0,
+            used: u32 = 0,
+            data: *Data,
 
             pub fn init(allocator: mem.Allocator) !ValuesMap {
-                var index_map = IndexMap{};
-                try index_map.ensureTotalCapacityContext(allocator, value_count_max, undefined);
-                errdefer index_map.deinit(allocator);
-
-                const values = try allocator.create(Values);
-                errdefer allocator.destroy(values);
-
-                return ValuesMap{
-                    .index_map = index_map,
-                    .values = values,
-                    .active = 0,
-                };
+                var map = ValuesMap{ .data = try allocator.create(Data) };
+                map.clear();
+                return map;
             }
 
             pub fn deinit(map: *ValuesMap, allocator: mem.Allocator) void {
-                allocator.destroy(map.values);
-                map.index_map.deinit(allocator);
+                allocator.destroy(map.data);
             }
 
             pub inline fn count(map: *const ValuesMap) u32 {
-                return map.index_map.count();
+                return map.len;
             }
 
-            pub inline fn clear(map: *ValuesMap) void {
-                map.index_map.clearRetainingCapacity();
-                map.active = 0;
+            pub fn clear(map: *ValuesMap) void {
+                map.len = 0;
+                map.used = 0;
+                @memset(&map.data.tags, 0, @sizeOf(@TypeOf(map.data.tags)));
+                @memset(&map.data.active, 0, @sizeOf(@TypeOf(map.data.active)));
             }
 
-            pub fn find(map: *const ValuesMap, key: Key) ?*const Value {
-                const ctx = IndexMapContext{ .values = map.values, .search_key = key };
-                const index = map.index_map.getKeyAdapted(ctx.search_index, ctx) orelse return null;
-                return &map.values.items[index];
-            }
+            pub const Search = struct {
+                pos: u32,
+                tag: u8,
+                key: Key,
 
-            pub fn upsert(map: *ValuesMap, value: *const Value) *Value {
-                const ctx = IndexMapContext{ .values = map.values, .search_key = key_from_value(value) };
-                const result = map.index_map.getOrPutAssumeCapacityContext(ctx.search_index, ctx);
-                if (result.found_existing) {
-                    return &map.values.items[result.key_ptr.*];
+                pub fn create(key: Key) Search {
+                    const hash = std.hash.Wyhash.hash(0, mem.asBytes(&key));
+                    return .{
+                        .pos = @truncate(u32, hash) % capacity,
+                        .tag = @truncate(u8, hash >> (64 - 8)) | 0x80,
+                        .key = key,
+                    };
                 }
+            };
 
-                const index = @intCast(u32, map.active);
-                map.active += 1;
+            pub fn find(map: *const ValuesMap, search: *Search, intent: enum { get, put }) ?*Value {
+                const data = map.data;
+                const probe = (2 * @as(u32, search.tag)) + 1; // Double hashing / quadratic probing.
 
-                result.key_ptr.* = index;
-                map.values.active[index / 8] |= @as(u8, 1) << @intCast(u3, index % 8);
-                return &map.values.items[index];
+                while (true) : (search.pos = (search.pos +% probe) % capacity) {
+                    const slot_tag = &data.tags[search.pos];
+
+                    // Check the tag before comparing the value. This acts like a bloom filter.
+                    if (slot_tag.* == search.tag) {
+                        const slot = @ptrCast(*align(1) Slot, &data.slots[search.pos * slot_bytes]).*;
+                        assert(slot < value_count_max);
+                        assert(slot < map.used);
+
+                        const value = &data.values[slot];
+                        if (compare_keys(search.key, key_from_value(value)) == .eq) {
+                            return value;
+                        }
+
+                        // Unlikely, but two values had the same tag.
+                        // Skip checking for empty slots below and just check the next one.
+                        continue;
+                    }
+
+                    switch (intent) {
+                        // When looking for a matching value, only stop when an empty slot is found.
+                        // Keep scanning if it's removed (no 0x80) as that's a tombstone.
+                        .get => if (slot_tag.* == 0) return null,
+                        // When inserting, stop at their empty slot or removed slot to replace it.
+                        .put => if (slot_tag.* & 0x80 == 0) return null,
+                    }
+                }
             }
 
-            pub fn fetch_remove(map: *ValuesMap, value: *const Value) ?*Value {
-                const ctx = IndexMapContext{ .values = map.values, .search_key = key_from_value(value) };
-                const kv = map.index_map.fetchRemoveContext(ctx.search_index, ctx) orelse return null;
-                const index = kv.key;
+            pub fn insert(map: *ValuesMap, search: *const Search) *Value {
+                // Increment the map count.
+                const data = map.data;
+                assert(map.len < value_count_max);
+                map.len += 1;
 
-                map.values.active[index / 8] &= ~(@as(u8, 1) << @intCast(u3, index % 8));
-                return &map.values.items[index];
+                // Mark the slot as used with its tag for future find()s.
+                const slot_tag = &data.tags[search.pos];
+                assert(slot_tag.* & 0x80 == 0);
+                slot_tag.* = search.tag;
+
+                // Reserve a slot index for data.values.
+                const slot = @intCast(Slot, map.used);
+                assert(slot < value_count_max);
+                map.used += 1;
+
+                // Mark the slot index as active for iteration.
+                const mask = @as(u8, 1) << @intCast(u3, slot % 8);
+                assert(data.active[slot / 8] & mask == 0);
+                data.active[slot / 8] |= mask;
+
+                // Commit the slot index and return the value.
+                @ptrCast(*align(1) Slot, &data.slots[search.pos * slot_bytes]).* = slot;
+                return &data.values[slot];
             }
 
-            pub fn insert_no_clobber(map: *ValuesMap, value: Value) void {
-                const index = @intCast(u32, map.active);
-                map.active += 1;
+            pub fn remove(map: *ValuesMap, search: *const Search) void {
+                // Decrement the map count.
+                const data = map.data;
+                assert(map.len <= value_count_max);
+                assert(map.len > 0);
+                map.len -= 1;
 
-                const ctx = IndexMapContext{
-                    .values = map.values,
-                    .search_key = key_from_value(&value),
-                    .search_index = index,
-                };
+                // Mark the slot as deleted (no 0x80, but still not 0 for empty).
+                const slot_tag = &data.tags[search.pos];
+                assert(slot_tag.* == search.tag);
+                slot_tag.* = 0x1;
 
-                map.index_map.putAssumeCapacityNoClobberContext(ctx.search_index, {}, ctx);
-                map.values.active[index / 8] |= @as(u8, 1) << @intCast(u3, index % 8);
-                map.values.items[index] = value;
+                // Get the previously inserted slot index.
+                const slot = @ptrCast(*align(1) Slot, &data.slots[search.pos * slot_bytes]).*;
+                assert(slot < value_count_max);
+                assert(slot < map.used);
+
+                // Mark the slot index as inactive for iteration.
+                const mask = @as(u8, 1) << @intCast(u3, slot % 8);
+                assert(data.active[slot / 8] & mask != 0);
+                data.active[slot / 8] &= ~mask;
             }
 
             pub inline fn iterator(map: *const ValuesMap) Iterator {
                 return .{
-                    .index = 0,
-                    .active = map.active,
-                    .values = map.values,
+                    .slot = 0,
+                    .used = map.used,
+                    .data = map.data,
                 };
             }
 
             pub const Iterator = struct {
-                index: u32,
-                active: u32,
-                values: *const Values,
+                slot: Slot,
+                used: u32,
+                data: *const Data,
 
                 pub fn next(it: *Iterator) ?*const Value {
                     while (true) {
-                        it.active = math.sub(u32, it.active, 1) catch return null;
-                        const index = it.index;
-                        it.index += 1;
+                        it.used = math.sub(u32, it.used, 1) catch return null;
 
-                        const mask = @as(u8, 1) << @intCast(u3, index % 8);
-                        if (it.values.active[index / 8] & mask != 0) {
-                            return &it.values.items[index];
+                        const slot = it.slot;
+                        it.slot += 1;
+
+                        // Only return values that we're marked active.
+                        const mask = @as(u8, 1) << @intCast(u3, slot % 8);
+                        if (it.data.active[slot / 8] & mask != 0) {
+                            return &it.data.values[slot];
                         }
                     }
                 }
@@ -216,8 +250,11 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         }
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
-            if (table.values.find(key)) |value| {
-                return value;
+            if (table.values.count() > 0) {
+                var search = ValuesMap.Search.create(key);
+                if (table.values.find(&search, .get)) |value| {
+                    return value;
+                }
             }
             if (table.values_cache) |cache| {
                 // Check the cache after the mutable table (see `values_cache` for explanation).
@@ -229,19 +266,25 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         pub fn put(table: *TableMutable, value: *const Value) void {
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
+
+            var search = ValuesMap.Search.create(key_from_value(value));
+            const found_existing = table.values.find(&search, .put);
+
             switch (usage) {
                 .secondary_index => {
-                    if (table.values.fetch_remove(value)) |existing| {
+                    if (found_existing) |existing| {
                         // If there was a previous operation on this key then it must have been a remove.
                         // The put and remove cancel out.
                         assert(tombstone(existing));
+                        table.values.remove(&search);
                     } else {
-                        table.values.insert_no_clobber(value.*);
+                        table.values.insert(&search).* = value.*;
                     }
                 },
                 .general => {
-                    // Overwrite the old key and value if any.
-                    table.values.upsert(value).* = value.*;
+                    // Either overwrite the existing value with the new one, or insert the new one.
+                    const value_ptr = found_existing orelse table.values.insert(&search);
+                    value_ptr.* = value.*;
                 },
             }
 
@@ -252,21 +295,27 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         pub fn remove(table: *TableMutable, value: *const Value) void {
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
+
+            var search = ValuesMap.Search.create(key_from_value(value));
+            const found_existing = table.values.find(&search, .put);
+
             switch (usage) {
                 .secondary_index => {
-                    if (table.values.fetch_remove(value)) |existing| {
+                    if (found_existing) |existing| {
                         // The previous operation on this key then it must have been a put.
                         // The put and remove cancel out.
                         assert(!tombstone(existing));
+                        table.values.remove(&search);
                     } else {
                         // If the put is already on-disk, then we need to follow it with a tombstone.
                         // The put and the tombstone may cancel each other out later during compaction.
-                        table.values.insert_no_clobber(tombstone_from_key(key_from_value(value)));
+                        table.values.insert(&search).* = tombstone_from_key(search.key);
                     }
                 },
                 .general => {
-                    // Overwrite the old key and value if any.
-                    table.values.upsert(value).* = tombstone_from_key(key_from_value(value));
+                    // Either overwrite the existing value with tombstone, or insert a new tombstone.
+                    const value_ptr = found_existing orelse table.values.insert(&search);
+                    value_ptr.* = tombstone_from_key(search.key);
                 },
             }
 
