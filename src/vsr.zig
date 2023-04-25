@@ -189,7 +189,6 @@ pub const Operation = enum(u8) {
 pub const Header = extern struct {
     var checksum_empty_once = std.once(checksum_empty_init);
     var checksum_empty: u128 = undefined;
-
     fn checksum_empty_init() void {
         checksum_empty = checksum(&.{});
     }
