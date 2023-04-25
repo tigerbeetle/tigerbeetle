@@ -65,7 +65,7 @@ pub const StatsD = struct {
 
     pub fn timing(self: *StatsD, stat: []const u8, ms: usize) !void {
         var buffer_completion = self.buffer_completions_fifo.pop() orelse return error.NoSpaceLeft;
-        const statsd_packet = try std.fmt.bufPrint(buffer_completion.buffer[0..], "{s}:{}|g", .{ stat, ms });
+        const statsd_packet = try std.fmt.bufPrint(buffer_completion.buffer[0..], "{s}:{}|ms", .{ stat, ms });
 
         self.io.send(
             *StatsD,
