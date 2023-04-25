@@ -3,8 +3,9 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
+const div_ceil = stdx.div_ceil;
 const constants = @import("../constants.zig");
-const div_ceil = @import("../stdx.zig").div_ceil;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 /// Range queries are not supported on the TableMutable, it must first be made immutable.
@@ -21,8 +22,20 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
     return struct {
         const TableMutable = @This();
 
-        const load_factor = 50;
-        const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
+        const Values = Values: {
+            const Context = struct {
+                pub fn eql(_: @This(), a: Key, b: Key) bool {
+                    return compare_keys(a, b) == .eq;
+                }
+
+                pub fn hash(_: @This(), key: Key) u32 {
+                    return @truncate(u32, std.hash.Wyhash.hash(0, mem.asBytes(&key)));
+                }
+            };
+
+            const store_hash = false;
+            break :Values std.ArrayHashMapUnmanaged(Key, Value, Context, store_hash);
+        };
 
         pub const ValuesCache = SetAssociativeCache(
             Key,
@@ -85,7 +98,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         }
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
-            if (table.values.getKeyPtr(tombstone_from_key(key))) |value| {
+            if (table.values.getPtr(key)) |value| {
                 return value;
             }
             if (table.values_cache) |cache| {
@@ -98,23 +111,24 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         pub fn put(table: *TableMutable, value: *const Value) void {
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
+            const key = key_from_value(value);
             switch (usage) {
                 .secondary_index => {
-                    const existing = table.values.fetchRemove(value.*);
+                    const existing = table.values.fetchSwapRemove(key);
                     if (existing) |kv| {
                         // If there was a previous operation on this key then it must have been a remove.
                         // The put and remove cancel out.
-                        assert(tombstone(&kv.key));
+                        assert(tombstone(&kv.value));
                     } else {
-                        table.values.putAssumeCapacityNoClobber(value.*, {});
+                        table.values.putAssumeCapacityNoClobber(key, value.*);
                     }
                 },
                 .general => {
                     // If the key is already present in the hash map, the old key will not be overwritten
                     // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
                     // level getOrPut() API and manually overwrite the old key.
-                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
-                    upsert.key_ptr.* = value.*;
+                    const upsert = table.values.getOrPutAssumeCapacity(key);
+                    upsert.value_ptr.* = value.*;
                 },
             }
 
@@ -125,25 +139,26 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         pub fn remove(table: *TableMutable, value: *const Value) void {
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
+            const key = key_from_value(value);
             switch (usage) {
                 .secondary_index => {
-                    const existing = table.values.fetchRemove(value.*);
+                    const existing = table.values.fetchSwapRemove(key);
                     if (existing) |kv| {
                         // The previous operation on this key then it must have been a put.
                         // The put and remove cancel out.
-                        assert(!tombstone(&kv.key));
+                        assert(!tombstone(&kv.value));
                     } else {
                         // If the put is already on-disk, then we need to follow it with a tombstone.
                         // The put and the tombstone may cancel each other out later during compaction.
-                        table.values.putAssumeCapacityNoClobber(tombstone_from_key(key_from_value(value)), {});
+                        table.values.putAssumeCapacityNoClobber(key, tombstone_from_key(key));
                     }
                 },
                 .general => {
                     // If the key is already present in the hash map, the old key will not be overwritten
                     // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
                     // level getOrPut() API and manually overwrite the old key.
-                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
-                    upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
+                    const upsert = table.values.getOrPutAssumeCapacity(key);
+                    upsert.value_ptr.* = tombstone_from_key(key);
                 },
             }
 
@@ -174,8 +189,8 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             assert(values_max.len == value_count_max);
 
             var i: usize = 0;
-            var it = table.values.keyIterator();
-            while (it.next()) |value| : (i += 1) {
+            for (table.values.values()) |*value| {
+                defer i = i + 1;
                 values_max[i] = value.*;
 
                 if (table.values_cache) |cache| {
@@ -189,7 +204,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
             const values = values_max[0..i];
             assert(values.len == table.count());
-            std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+            stdx.sort(Key, Value, key_from_value, sort_values_by_key_in_ascending_order, values);
 
             table.clear();
             assert(table.count() == 0);
@@ -197,8 +212,8 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             return values;
         }
 
-        fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
-            return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
+        inline fn sort_values_by_key_in_ascending_order(a: Key, b: Key) bool {
+            return compare_keys(a, b) == .lt;
         }
     };
 }

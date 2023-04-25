@@ -99,20 +99,6 @@ pub fn TableType(
         pub const value_count_max = table_value_count_max;
         pub const usage = usage;
 
-        // Export hashmap context for Key and Value
-        pub const HashMapContextValue = struct {
-            pub fn eql(_: HashMapContextValue, a: Value, b: Value) bool {
-                return compare_keys(key_from_value(&a), key_from_value(&b)) == .eq;
-            }
-
-            pub fn hash(_: HashMapContextValue, value: Value) u64 {
-                // TODO(King): this erros out with "unable to hash type void" due to
-                // CompositeKey(T) struct containing .padding which may be void at comptime.
-                const key = key_from_value(&value);
-                return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
-            }
-        };
-
         const block_size = constants.block_size;
         const BlockPtr = *align(constants.sector_size) [block_size]u8;
         const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
