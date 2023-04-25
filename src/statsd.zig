@@ -16,8 +16,6 @@ pub const StatsD = struct {
     buffer_completions_fifo: FIFO(BufferCompletion) = .{ .name = "statsd" },
 
     /// Creates a statsd instance, which will send UDP packets via the IO instance provided.
-    /// Not thread safe, since it uses a single buffer shared between gauge and timing methods
-    /// with no locking.
     pub fn init(allocator: std.mem.Allocator, io: *IO, address: std.net.Address) !StatsD {
         const socket = try io.open_socket(
             address.any.family,
