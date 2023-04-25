@@ -13,8 +13,11 @@ REPLICA_INSTANCE_IDS=()
 REPLICA_PRIVATE_IPS=()
 
 # Pull down AWS creds from Nomad
-export AWS_ACCESS_KEY_ID=$(nomad var get -item=AWS_ACCESS_KEY_ID aws)
-export AWS_SECRET_ACCESS_KEY=$(nomad var get -item=AWS_SECRET_ACCESS_KEY aws)
+AWS_ACCESS_KEY_ID=$(nomad var get -item=AWS_ACCESS_KEY_ID aws)
+export AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY=$(nomad var get -item=AWS_SECRET_ACCESS_KEY aws)
+export AWS_SECRET_ACCESS_KEY
+
 export AWS_REGION=eu-west-1
 export AWS_DEFAULT_REGION=eu-west-1
 
@@ -22,6 +25,7 @@ export AWS_DEFAULT_REGION=eu-west-1
 echo "Spinning up replica EC2 instances - ${REPLICA_COUNT}..." 1>&2
 epoch_plus_hour=$(($(date +%s) + 3600))
 
+# shellcheck disable=SC2086 # we hardcode SECURITY_GROUP_IDS and need it to be multiple parameters
 output=$(aws ec2 run-instances \
 	--image-id "${AMI_ID}" \
 	--count "${REPLICA_COUNT}" \
@@ -62,11 +66,12 @@ for replica in $(seq 1 "${REPLICA_COUNT}"); do
 	export NOMAD_VAR_replica_count="${REPLICA_COUNT}"
 	export NOMAD_VAR_addresses="${addresses}"
 
-	cat tigerbeetle.hcl | sed "s/__JOB_NAME__/${JOB_NAME}/g" | nomad job run -detach - 1>&2
+	sed "s/__JOB_NAME__/${JOB_NAME}/g" < tigerbeetle.hcl | nomad job run -detach - 1>&2
 done
 
 # Spin up EC2 instance for test client
 echo "Spinning up client EC2 instance..." 1>&2
+# shellcheck disable=SC2086 # we hardcode SECURITY_GROUP_IDS and need it to be multiple parameters
 output=$(aws ec2 run-instances \
 	--image-id "${AMI_ID}" \
 	--count 1 \
@@ -88,7 +93,7 @@ export NOMAD_VAR_test_id="${TEST_ID}"
 export NOMAD_VAR_addresses="${addresses}"
 export NOMAD_VAR_replica_instance_ids="${REPLICA_INSTANCE_IDS[*]}"
 
-cat client.hcl | sed "s/__JOB_NAME__/${JOB_NAME}/g" | nomad job run -detach - 1>&2
+sed "s/__JOB_NAME__/${JOB_NAME}/g" < client.hcl | nomad job run -detach - 1>&2
 
 epoch_ms=$(date +%s%N | cut -b1-13)
 echo "https://grafana.arewe1mtpsyet.com/d/5_Y-UcE4z/test-dashboard?orgId=1&from=${epoch_ms}&to=now-30s&var-test_id=${TEST_ID}"
