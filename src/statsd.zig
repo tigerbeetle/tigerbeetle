@@ -35,23 +35,43 @@ pub const StatsD = struct {
 
     pub fn gauge(self: *StatsD, stat: []const u8, value: usize) !void {
         const statsd_packet = try std.fmt.bufPrint(self.buffer, "{s}:{}|g", .{ stat, value });
-        _ = try std.os.sendto(
-            self.socket,
-            statsd_packet,
-            0,
-            &self.address.any,
-            self.address_size,
-        );
+
+        var iovec = [_]std.os.iovec_const{.{
+            .iov_base = statsd_packet.ptr,
+            .iov_len = statsd_packet.len,
+        }};
+
+        var msg = std.os.msghdr_const{
+            .name = &self.address.any,
+            .namelen = self.address_size,
+            .iov = &iovec,
+            .iovlen = 1,
+            .control = null,
+            .controllen = 0,
+            .flags = 0,
+        };
+
+        _ = try std.os.sendmsg(self.socket, msg, 0);
     }
 
     pub fn timing(self: *StatsD, stat: []const u8, ms: usize) !void {
         const statsd_packet = try std.fmt.bufPrint(self.buffer, "{s}:{}|ms", .{ stat, ms });
-        _ = try std.os.sendto(
-            self.socket,
-            statsd_packet,
-            0,
-            &self.address.any,
-            self.address_size,
-        );
+
+        var iovec = [_]std.os.iovec_const{.{
+            .iov_base = statsd_packet.ptr,
+            .iov_len = statsd_packet.len,
+        }};
+
+        var msg = std.os.msghdr_const{
+            .name = &self.address.any,
+            .namelen = self.address_size,
+            .iov = &iovec,
+            .iovlen = 1,
+            .control = null,
+            .controllen = 0,
+            .flags = 0,
+        };
+
+        _ = try std.os.sendmsg(self.socket, msg, 0);
     }
 };
