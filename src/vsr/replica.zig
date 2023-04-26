@@ -4363,8 +4363,6 @@ pub fn ReplicaType(
                 });
             }
 
-            assert(self.commit_max <= self.op);
-
             if (self.commit_min < self.commit_max) {
                 // Try to the commit prepares we already have, even if we don't have all of them.
                 // This helps when a replica is recovering from a crash and has a mostly intact
@@ -4379,6 +4377,9 @@ pub fn ReplicaType(
                 self.primary_index(self.view) == self.replica and
                 self.commit_min == self.commit_max)
             {
+                assert(self.journal.dirty.count == 0);
+                assert(self.commit_max <= self.op);
+
                 // Repair the pipeline, which may discover faulty prepares and drive more repairs.
                 switch (self.primary_repair_pipeline()) {
                     // primary_repair_pipeline() is already working.
