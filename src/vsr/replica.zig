@@ -470,8 +470,8 @@ pub fn ReplicaType(
                 maybe(self.journal.op_maximum() > vsr_headers.slice[0].op);
             }
 
-            // Try to use vsr_headers to update our head op.
-            // Loading headers prior to the head would risk the following scenario:
+            // Try to use vsr_headers to update our head op and its header.
+            // To avoid the following scenario, don't load headers prior to the head:
             // 1. Replica A prepares[/commits] op X.
             // 2. Replica A crashes.
             // 3. Prepare X is corrupted in the WAL.
