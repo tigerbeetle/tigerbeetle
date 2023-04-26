@@ -41,6 +41,7 @@ pub const ClientRepliesType = @import("vsr/client_replies.zig").ClientRepliesTyp
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
+pub const checksum = @import("vsr/checksum.zig").checksum;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
@@ -1063,82 +1064,6 @@ pub fn sector_floor(offset: u64) u64 {
 pub fn sector_ceil(offset: u64) u64 {
     const sectors = math.divCeil(u64, offset, constants.sector_size) catch unreachable;
     return sectors * constants.sector_size;
-}
-
-pub fn checksum(source: []const u8) u128 {
-    // From std.crypto.aegis.State128L:
-    const AesBlock = std.crypto.core.aes.Block;
-    const Aegis128 = struct {
-        const State = [8]AesBlock;
-        const key = std.mem.zeroes([16]u8);
-        const nonce = std.mem.zeroes([16]u8);
-
-        // Initialize the seed state (from key and nonce) once instead of at each call to checksum.
-        var seed_once = std.once(seed_init);
-        var seed_state: State = undefined;
-
-        fn seed_init() void {
-            const c1 = AesBlock.fromBytes(&[16]u8{ 0xdb, 0x3d, 0x18, 0x55, 0x6d, 0xc2, 0x2f, 0xf1, 0x20, 0x11, 0x31, 0x42, 0x73, 0xb5, 0x28, 0xdd });
-            const c2 = AesBlock.fromBytes(&[16]u8{ 0x0, 0x1, 0x01, 0x02, 0x03, 0x05, 0x08, 0x0d, 0x15, 0x22, 0x37, 0x59, 0x90, 0xe9, 0x79, 0x62 });
-            const key_block = AesBlock.fromBytes(&key);
-            const nonce_block = AesBlock.fromBytes(&nonce);
-            seed_state = [8]AesBlock{
-                key_block.xorBlocks(nonce_block),
-                c1,
-                c2,
-                c1,
-                key_block.xorBlocks(nonce_block),
-                key_block.xorBlocks(c2),
-                key_block.xorBlocks(c1),
-                key_block.xorBlocks(c2),
-            };
-            var i: usize = 0;
-            while (i < 10) : (i += 1) update(&seed_state, nonce_block, key_block);
-        }
-
-        inline fn update(blocks: *State, d1: AesBlock, d2: AesBlock) void {
-            const tmp = blocks[7];
-            comptime var i: usize = 7;
-            inline while (i > 0) : (i -= 1) blocks[i] = blocks[i - 1].encrypt(blocks[i]);
-            blocks[0] = tmp.encrypt(blocks[0]);
-            blocks[0] = blocks[0].xorBlocks(d1);
-            blocks[4] = blocks[4].xorBlocks(d2);
-        }
-
-        fn absorb(state: *State, src: *const [32]u8) void {
-            const msg0 = AesBlock.fromBytes(src[0..16]);
-            const msg1 = AesBlock.fromBytes(src[16..32]);
-            update(state, msg0, msg1);
-        }
-
-        fn mac(blocks: *State, adlen: usize, mlen: usize) [16]u8 {
-            var sizes: [16]u8 = undefined;
-            std.mem.writeIntLittle(u64, sizes[0..8], adlen * 8);
-            std.mem.writeIntLittle(u64, sizes[8..16], mlen * 8);
-            const tmp = AesBlock.fromBytes(&sizes).xorBlocks(blocks[2]);
-            var i: usize = 0;
-            while (i < 7) : (i += 1) update(blocks, tmp, tmp);
-            return blocks[0].xorBlocks(blocks[1]).xorBlocks(blocks[2]).xorBlocks(blocks[3]).xorBlocks(blocks[4])
-                .xorBlocks(blocks[5]).xorBlocks(blocks[6]).toBytes();
-        }
-    };
-
-    // Initialize the seed state and make a local copy.
-    Aegis128.seed_once.call();
-    var state = Aegis128.seed_state;
-
-    // Encrypt the source with the state (without an output cipher).
-    var src: [32]u8 align(16) = undefined;
-    var i: usize = 0;
-    while (i + 32 <= source.len) : (i += 32) Aegis128.absorb(&state, source[i..][0..32]);
-    if (source.len % 32 != 0) {
-        std.mem.set(u8, src[0..], 0);
-        std.mem.copy(u8, src[0 .. source.len % 32], source[i .. i + source.len % 32]);
-        Aegis128.absorb(&state, &src);
-    }
-
-    // Get the mac.
-    return @bitCast(u128, Aegis128.mac(&state, 0, source.len));
 }
 
 pub fn quorums(replica_count: u8) struct {
