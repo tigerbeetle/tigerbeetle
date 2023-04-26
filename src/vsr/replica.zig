@@ -2868,6 +2868,8 @@ pub fn ReplicaType(
             assert(reply.header.epoch == 0);
 
             reply.header.set_checksum_body(reply.body());
+            // See `send_reply_message_to_client` for why we compute the checksum twice.
+            reply.header.context = reply.header.calculate_checksum();
             reply.header.set_checksum();
 
             if (self.superblock.working.vsr_state.op_compacted(prepare.header.op)) {
@@ -2896,7 +2898,7 @@ pub fn ReplicaType(
 
             if (self.primary_index(self.view) == self.replica) {
                 log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
-                self.message_bus.send_message_to_client(reply.header.client, reply);
+                self.send_reply_message_to_client(reply);
             }
         }
 
@@ -3003,7 +3005,6 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.operation == .register);
             assert(reply.header.client > 0);
-            assert(reply.header.context == 0);
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.size == @sizeOf(Header));
 
@@ -3539,7 +3540,7 @@ pub fn ReplicaType(
                         return true;
                     }
                 } else if (entry.header.request + 1 == message.header.request) {
-                    if (message.header.parent == entry.header.checksum) {
+                    if (message.header.parent == entry.header.context) {
                         // The client has proved that they received our last reply.
                         log.debug("{}: on_request: new request", .{self.replica});
                         return false;
@@ -3596,7 +3597,10 @@ pub fn ReplicaType(
             assert(message.header.request == entry.header.request);
 
             if (entry.header.size == @sizeOf(Header)) {
-                self.send_header_to_client(message.header.client, entry.header);
+                const reply = self.create_message_from_header(entry.header);
+                defer self.message_bus.unref(reply);
+
+                self.send_reply_message_to_client(reply);
                 return;
             }
 
@@ -3650,7 +3654,7 @@ pub fn ReplicaType(
                 reply.header.request,
             });
 
-            self.message_bus.send_message_to_client(reply.header.client, reply);
+            self.send_reply_message_to_client(reply);
         }
 
         /// Returns whether the replica is eligible to process this request as the primary.
@@ -5261,8 +5265,46 @@ pub fn ReplicaType(
             });
         }
 
+        fn send_reply_message_to_client(self: *Self, reply: *Message) void {
+            assert(reply.header.command == .reply);
+            assert(reply.header.view <= self.view);
+
+            // If the request committed in a different view than the one it was originally prepared
+            // in, we must inform the client about this newer view before we send it a reply.
+            // Otherwise, the client might send a next request to the old primary, which would
+            // observe a broken hash chain.
+            //
+            // To do this, we always set reply's view to the current one, and use the `context`
+            // field for hash chaining.
+
+            if (reply.header.view == self.view) {
+                // Hot path: no need to clone the message if the view is the same.
+                self.message_bus.send_message_to_client(reply.header.client, reply);
+                return;
+            }
+
+            const reply_copy = self.message_bus.get_message();
+            defer self.message_bus.unref(reply_copy);
+
+            // Copy the message and update the view.
+            // We could optimize this by using in-place modification if `reply.references == 1`.
+            // We don't bother, as that complicates reasoning on the call-site, and this is
+            // a cold path anyway.
+            stdx.copy_disjoint(
+                .inexact,
+                u8,
+                reply_copy.buffer,
+                reply.buffer[0..reply.header.size],
+            );
+            reply_copy.header.view = self.view;
+            reply_copy.header.set_checksum();
+
+            self.message_bus.send_message_to_client(reply.header.client, reply_copy);
+        }
+
         fn send_header_to_client(self: *Self, client: u128, header: Header) void {
             assert(header.cluster == self.cluster);
+            assert(header.view == self.view);
 
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
@@ -6337,14 +6379,12 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.operation != .register);
             assert(reply.header.client > 0);
-            assert(reply.header.context == 0);
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.commit > 0);
             assert(reply.header.request > 0);
 
             if (self.client_sessions().get(reply.header.client)) |entry| {
                 assert(entry.header.command == .reply);
-                assert(entry.header.context == 0);
                 assert(entry.header.op == entry.header.commit);
                 assert(entry.header.commit >= entry.session);
 
