@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const panic = std.debug.panic;
 const log = std.log;
-pub const log_level: std.log.Level = .err;
+pub const log_level: std.log.Level = .info;
 
 const constants = @import("constants.zig");
 const stdx = @import("stdx.zig");
@@ -17,6 +17,7 @@ const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const vsr = @import("vsr.zig");
 const Client = vsr.Client(StateMachine, MessageBus);
 const tb = @import("tigerbeetle.zig");
+const StatsD = @import("statsd.zig").StatsD;
 
 const account_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
@@ -38,10 +39,18 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-
     var account_count: usize = 10_000;
     var transfer_count: usize = 10_000_000;
     var transfer_count_per_second: usize = 1_000_000;
+    var print_batch_timings = false;
+    var enable_statsd = false;
+
+    var addresses = try allocator.alloc(std.net.Address, 1);
+    addresses[0] = try std.net.Address.parseIp4("127.0.0.1", constants.port);
+
+    // This will either free the above address alloc, or parse_arg_addresses will
+    // free and re-alloc internally and this will free that.
+    defer allocator.free(addresses);
 
     var args = std.process.args();
 
@@ -51,9 +60,12 @@ pub fn main() !void {
     // Parse arguments.
     while (args.next(allocator)) |arg_or_err| {
         const arg = try arg_or_err;
-        _ = (try parse_arg(allocator, &args, arg, "--account-count", &account_count)) or
-            (try parse_arg(allocator, &args, arg, "--transfer-count", &transfer_count)) or
-            (try parse_arg(allocator, &args, arg, "--transfer-count-per-second", &transfer_count_per_second)) or
+        _ = (try parse_arg_usize(allocator, &args, arg, "--account-count", &account_count)) or
+            (try parse_arg_usize(allocator, &args, arg, "--transfer-count", &transfer_count)) or
+            (try parse_arg_usize(allocator, &args, arg, "--transfer-count-per-second", &transfer_count_per_second)) or
+            (try parse_arg_addresses(allocator, &args, arg, "--addresses", &addresses)) or
+            (try parse_arg_bool(allocator, &args, arg, "--print-batch-timings", &print_batch_timings)) or
+            (try parse_arg_bool(allocator, &args, arg, "--statsd", &enable_statsd)) or
             panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
     }
 
@@ -66,20 +78,21 @@ pub fn main() !void {
 
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
-    var address = [_]std.net.Address{try std.net.Address.parseIp4("127.0.0.1", constants.port)};
 
     var io = try IO.init(32, 0);
 
     var message_pool = try MessagePool.init(allocator, .client);
 
+    std.log.info("Benchmark running against {any}", .{addresses});
+
     var client = try Client.init(
         allocator,
         client_id,
         cluster_id,
-        @intCast(u8, address.len),
+        @intCast(u8, addresses.len),
         &message_pool,
         .{
-            .configuration = address[0..],
+            .configuration = addresses,
             .io = &io,
         },
     );
@@ -103,12 +116,21 @@ pub fn main() !void {
         .transfer_arrival_rate_ns = transfer_arrival_rate_ns,
         .transfer_start_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count_per_batch),
         .batch_index = 0,
+        .transfers_sent = 0,
         .transfer_index = 0,
         .transfer_next_arrival_ns = 0,
         .message = null,
         .callback = null,
         .done = false,
+        .statsd = if (enable_statsd) &try StatsD.init(
+            allocator,
+            &io,
+            std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
+        ) else null,
+        .print_batch_timings = print_batch_timings,
     };
+
+    defer if (enable_statsd) benchmark.statsd.?.deinit(allocator);
 
     benchmark.create_accounts();
 
@@ -118,7 +140,25 @@ pub fn main() !void {
     }
 }
 
-fn parse_arg(
+fn parse_arg_addresses(
+    allocator: std.mem.Allocator,
+    args: *std.process.ArgIterator,
+    arg: []const u8,
+    arg_name: []const u8,
+    arg_value: *[]std.net.Address,
+) !bool {
+    if (!std.mem.eql(u8, arg, arg_name)) return false;
+
+    allocator.free(arg_value.*);
+
+    const address_string_or_err = args.next(allocator) orelse
+        panic("Expected an argument to {s}", .{arg_name});
+    const address_string = try address_string_or_err;
+    arg_value.* = try vsr.parse_addresses(allocator, address_string, constants.nodes_max);
+    return true;
+}
+
+fn parse_arg_usize(
     allocator: std.mem.Allocator,
     args: *std.process.ArgIterator,
     arg: []const u8,
@@ -138,6 +178,23 @@ fn parse_arg(
     return true;
 }
 
+fn parse_arg_bool(
+    allocator: std.mem.Allocator,
+    args: *std.process.ArgIterator,
+    arg: []const u8,
+    arg_name: []const u8,
+    arg_value: *bool,
+) !bool {
+    if (!std.mem.eql(u8, arg, arg_name)) return false;
+
+    const bool_string_or_err = args.next(allocator) orelse
+        panic("Expected an argument to {s}", .{arg_name});
+    const bool_string = try bool_string_or_err;
+    arg_value.* = std.mem.eql(u8, bool_string, "true");
+
+    return true;
+}
+
 const Benchmark = struct {
     io: *IO,
     message_pool: *MessagePool,
@@ -151,6 +208,7 @@ const Benchmark = struct {
     transfer_latency_ns: std.ArrayList(u64),
     batch_transfers: std.ArrayList(tb.Transfer),
     batch_start_ns: usize,
+    transfers_sent: usize,
     tranfer_index: usize,
     transfer_count: usize,
     transfer_count_per_second: usize,
@@ -162,6 +220,8 @@ const Benchmark = struct {
     message: ?*MessagePool.Message,
     callback: ?fn (*Benchmark) void,
     done: bool,
+    statsd: ?*StatsD,
+    print_batch_timings: bool,
 
     fn create_accounts(b: *Benchmark) void {
         if (b.account_index >= b.account_count) {
@@ -266,17 +326,31 @@ const Benchmark = struct {
     fn create_transfers_finish(b: *Benchmark) void {
         // Record latencies.
         const batch_end_ns = b.timer.read();
-        log.debug("batch {}: {} tx in {} ms\n", .{
-            b.batch_index,
-            b.batch_transfers.items.len,
-            @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms),
-        });
+        const ms_time = @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms);
+
+        if (b.print_batch_timings) {
+            log.info("batch {}: {} tx in {} ms\n", .{
+                b.batch_index,
+                b.batch_transfers.items.len,
+                ms_time,
+            });
+        }
+
         b.batch_latency_ns.appendAssumeCapacity(batch_end_ns - b.batch_start_ns);
         for (b.transfer_start_ns.items) |start_ns| {
             b.transfer_latency_ns.appendAssumeCapacity(batch_end_ns - start_ns);
         }
 
         b.batch_index += 1;
+        b.transfers_sent += b.batch_transfers.items.len;
+
+        if (b.statsd) |statsd| {
+            statsd.gauge("benchmark.txns", b.batch_transfers.items.len) catch {};
+            statsd.timing("benchmark.timings", ms_time) catch {};
+            statsd.gauge("benchmark.batch", b.batch_index) catch {};
+            statsd.gauge("benchmark.completed", b.transfers_sent) catch {};
+        }
+
         b.create_transfers();
     }
 
