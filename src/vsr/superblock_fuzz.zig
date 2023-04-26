@@ -91,16 +91,21 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     var sequence_states = Environment.SequenceStates.init(allocator);
     defer sequence_states.deinit();
 
-    var env = Environment{ .sequence_states = sequence_states, .superblock = &superblock, .superblock_verify = &superblock_verify, .latest_vsr_state = SuperBlockHeader.VSRState{
-        .commit_min_checksum = 0,
-        .commit_min = 0,
-        .commit_max = 0,
-        .log_view = 0,
-        .view = 0,
-        .replica_id = Environment.members()[replica],
-        .members = Environment.members(),
-        .replica_count = replica_count,
-    } };
+    var env = Environment{
+        .sequence_states = sequence_states,
+        .superblock = &superblock,
+        .superblock_verify = &superblock_verify,
+        .latest_vsr_state = SuperBlockHeader.VSRState{
+            .commit_min_checksum = 0,
+            .commit_min = 0,
+            .commit_max = 0,
+            .log_view = 0,
+            .view = 0,
+            .replica_id = Environment.members()[replica],
+            .members = Environment.members(),
+            .replica_count = replica_count,
+        },
+    };
 
     try env.format();
     while (env.pending.count() > 0) env.superblock.storage.tick();
