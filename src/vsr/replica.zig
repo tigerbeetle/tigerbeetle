@@ -4343,10 +4343,11 @@ pub fn ReplicaType(
             }
             assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
-            // Request and repair any dirty or faulty prepares:
-            if (self.journal.dirty.count > 0) return self.repair_prepares();
-
-            if (self.client_replies.faulty.findFirstSet()) |slot| {
+            if (self.journal.dirty.count > 0) {
+                // Request and repair any dirty or faulty prepares.
+                self.repair_prepares();
+            } else if (self.client_replies.faulty.findFirstSet()) |slot| {
+                // After we have all prepares, repair replys.
                 const entry = &self.client_sessions().entries[slot];
                 assert(entry.session != 0);
                 assert(!self.client_sessions().entries_free.isSet(slot));
@@ -4360,18 +4361,24 @@ pub fn ReplicaType(
                     .op = entry.header.op,
                     .context = entry.header.checksum,
                 });
-                // Don't return here — it is safe to start a view without all replies repaired.
             }
 
-            // Commit ops, which may in turn discover faulty prepares and drive more repairs:
-            if (self.commit_min < self.commit_max) {
-                assert(!self.solo());
-                self.commit_journal(self.commit_max);
-                return;
-            }
             assert(self.commit_max <= self.op);
 
-            if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
+            if (self.commit_min < self.commit_max) {
+                // Try to the commit prepares we already have, even if we don't have all of them.
+                // This helps when a replica is recovering from a crash and has a mostly intact
+                // journal, with just some prepares missing. We do have the headers and know
+                // that they form a valid hashcahin. Committing may discover more faulty prepares
+                // and drive further repairs.
+                assert(!self.solo());
+                self.commit_journal(self.commit_max);
+            }
+
+            if (self.status == .view_change and
+                self.primary_index(self.view) == self.replica and
+                self.commit_min == self.commit_max)
+            {
                 // Repair the pipeline, which may discover faulty prepares and drive more repairs.
                 switch (self.primary_repair_pipeline()) {
                     // primary_repair_pipeline() is already working.
