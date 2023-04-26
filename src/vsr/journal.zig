@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;
+const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
 
@@ -1610,15 +1611,25 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             if (journal.has(header)) {
                 assert(journal.dirty.bit(slot));
+                maybe(journal.faulty.bit(slot));
                 // Do not clear any faulty bit for the same entry.
             } else {
                 // Overwriting a new op with an old op would be a correctness bug; it could cause a
                 // message to be uncommitted.
                 assert(journal.headers[slot.index].op <= header.op);
 
+                if (journal.headers[slot.index].command == .reserved) {
+                    // The WAL might have written/prepared this exact header before crashing —
+                    // leave the entry marked faulty because we cannot safely nack it.
+                    maybe(journal.faulty.bit(slot));
+                } else {
+                    // The WAL definitely did not hold this exact header, so it is safe to reset the
+                    // faulty bit + nack this header.
+                    journal.faulty.clear(slot);
+                }
+
                 journal.headers[slot.index] = header.*;
                 journal.dirty.set(slot);
-                journal.faulty.clear(slot);
             }
         }
 
