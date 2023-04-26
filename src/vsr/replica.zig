@@ -440,77 +440,69 @@ pub fn ReplicaType(
             if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
 
             const vsr_headers = self.superblock.working.vsr_headers();
-            for (vsr_headers.slice) |*header| {
-                if (vsr.Headers.dvc_header_type(header) != .valid) continue;
-
-                const slot = .{ .index = header.op % constants.journal_slot_count };
-                if (header.op > self.op_checkpoint_trigger()) {
-                    // Ignore an op that is too far head for our journal.
-                } else if (self.journal.has(header)) {
-                    // Header is already in the WAL.
-                    assert(!self.journal.dirty.bit(slot));
-                    assert(!self.journal.faulty.bit(slot));
-                } else if (self.journal.header_for_op(header.op)) |journal_header| {
-                    assert(!self.journal.dirty.bit(slot));
-                    assert(!self.journal.faulty.bit(slot));
-
-                    if (header.op < journal_header.op) {
-                        // Don't overwrite a newer op.
-                        // (This must be a SV message because a DVC would not have a newer op).
-                        assert(self.log_view == self.view);
-                    } else {
-                        self.journal.set_header_as_dirty(header);
-                    }
-                } else {
-                    assert(self.journal.dirty.bit(slot) == self.journal.faulty.bit(slot));
-
-                    self.journal.headers[slot.index] = header.*;
-                    self.journal.dirty.set(slot);
-                    // Don't touch faulty — if it is set, we don't want to unset it. The WAL slot
-                    // may contain a corrupt version is this op, and we don't want to incorrectly
-                    // nack it. (This is why we do not call replace_header()/set_header_as_dirty()
-                    // here.)
-                }
-            }
-
             // If we were a lagging backup that installed an SV but didn't finish fast-forwarding,
             // the vsr_headers head op may be part of the checkpoint after this one.
             maybe(vsr_headers.slice[0].op > self.op_checkpoint_trigger());
 
-            var op_head = for (vsr_headers.slice) |*header| {
-                if (vsr.Headers.dvc_header_type(header) != .valid) continue;
-                if (header.op <= self.op_checkpoint_trigger()) break header.op;
-            } else op_head: {
+            var op_head: ?u64 = null;
+
+            if (self.log_view == self.view) {
+                for (self.journal.headers) |*header| {
+                    if (header.command == .prepare) {
+                        assert(header.op <= self.op_checkpoint_trigger());
+                        assert(header.view <= self.log_view);
+
+                        if (op_head == null or op_head.? < header.op) op_head = header.op;
+                    }
+                }
+            } else {
+                // Fall-through to choose op-head from vsr_headers.
+                //
+                // "Highest op from log_view in WAL" is not the correct choice for op-head when
+                // recovering with a durable DVC (though we still resort to this if there are no
+                // usable headers in the vsr_headers). It is possible that we started the view and
+                // finished some repair before updating our view_durable.
+                //
+                // To avoid special-casing this all over, we pretend this higher op doesn't
+                // exist. This is safe because we never prepared any ops in the view we joined just
+                // before the crash.
+                assert(self.log_view < self.view);
+                maybe(self.journal.op_maximum() > vsr_headers.slice[0].op);
+            }
+
+            // Try to use vsr_headers to update our head op and its header.
+            // To avoid the following scenario, don't load headers prior to the head:
+            // 1. Replica A prepares[/commits] op X.
+            // 2. Replica A crashes.
+            // 3. Prepare X is corrupted in the WAL.
+            // 4. Replica A recovers. During `Replica.open()`, Replica A loads the header
+            //    for op `X - journal_slot_count` (same slot, prior wrap) from vsr_headers
+            //    into the journal.
+            // 5. Replica A participates in a view-change, but nacks[/does not include] op X.
+            // 6. Op X is truncated.
+            for (vsr_headers.slice) |*vsr_header| {
+                if (vsr.Headers.dvc_header_type(vsr_header) == .valid and
+                    vsr_header.op <= self.op_checkpoint_trigger() and
+                    (op_head == null or op_head.? <= vsr_header.op))
+                {
+                    op_head = vsr_header.op;
+
+                    if (!self.journal.has(vsr_header)) {
+                        self.journal.set_header_as_dirty(vsr_header);
+                    }
+                    break;
+                }
+            } else {
                 // This case can only occur if we loaded an SV for its hook header, then converted
                 // that SV to a DVC (dropping the hooks; see start_view_into_do_view_change()),
                 // but never finished the view change.
-                assert(self.view > self.log_view);
-                break :op_head null;
-            };
-            assert(op_head == null or op_head.? <= self.op_checkpoint_trigger());
-
-            for (self.journal.headers) |*header| {
-                assert(header.op <= self.op_checkpoint_trigger());
-                if (header.command == .prepare) {
-                    if (op_head == null) {
-                        assert(self.log_view < self.view);
-                        op_head = header.op;
-                    } else if (op_head.? < header.op) {
-                        assert(self.log_view >= header.view);
-                        // Typically if there is an op in the WAL higher than the durable headers'
-                        // head op, we must have crashed with a durable SV, not a durable DVC.
-                        //
-                        // However, we could have joined a view and finished some repair before ever
-                        // updating our view_durable.
-                        //
-                        // To avoid special-casing this all over, we pretend this higher op doesn't
-                        // exist. This is safe because the prior view-change didn't complete.
-                        maybe(self.log_view == self.view);
-
-                        if (self.log_view == self.view) op_head = header.op;
-                    }
+                if (op_head == null) {
+                    assert(self.view > self.log_view);
+                    op_head = self.journal.op_maximum();
                 }
             }
+            assert(op_head.? <= self.op_checkpoint_trigger());
+
             self.op = op_head.?;
             self.commit_max = std.math.max(
                 self.commit_max,
@@ -4983,7 +4975,7 @@ pub fn ReplicaType(
 
             if (header.op < self.op_repair_min()) return;
 
-            // Do not set an op as dirty if we already have it exactly because:
+            // We must not set an op as dirty if we already have it exactly because:
             // 1. this would trigger a repair and delay the view change, or worse,
             // 2. prevent repairs to another replica when we have the op.
             if (!self.journal.has(header)) self.journal.set_header_as_dirty(header);
