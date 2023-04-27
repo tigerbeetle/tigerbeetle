@@ -58,6 +58,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
             len: u32 = 0,
             used: u32 = 0,
+            sorted: bool = true,
             data: *Data,
 
             pub fn init(allocator: mem.Allocator) !ValuesMap {
@@ -77,6 +78,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             pub fn clear(map: *ValuesMap) void {
                 map.len = 0;
                 map.used = 0;
+                map.sorted = true;
                 mem.set(u8, &map.data.tags, 0);
                 mem.set(u8, &map.data.active, 0);
             }
@@ -84,6 +86,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             pub const Entry = struct {
                 pos: u32,
                 tag: u8,
+                key: Key,
                 value: ?*Value,
             };
 
@@ -94,6 +97,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
                 var entry = Entry{
                     .pos = @truncate(u32, hash) % capacity,
                     .tag = @truncate(u8, hash >> (64 - 7)) | 0x80,
+                    .key = key,
                     .value = null,
                 };
 
@@ -146,6 +150,12 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
                 const slot = @intCast(Slot, map.used);
                 assert(slot < value_count_max);
                 map.used += 1;
+
+                // Update the invariant of the values being sorted.
+                if (map.sorted and slot > 0) {
+                    const prev_key = key_from_value(&data.values[slot - 1]);
+                    map.sorted = compare_keys(prev_key, entry.key) == .lt;
+                }
 
                 // Mark the slot index as active for iteration.
                 const mask = @as(u8, 1) << @intCast(u3, slot % 8);
@@ -262,10 +272,9 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
 
-            const key = key_from_value(value);
             switch (usage) {
                 .secondary_index => {
-                    const entry = table.values.find(key, .existing);
+                    const entry = table.values.find(key_from_value(value), .existing);
                     if (entry.value) |existing| {
                         // If there was a previous operation on this key then it must have been a remove.
                         // The put and remove cancel out.
@@ -277,7 +286,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
                 },
                 .general => {
                     // Either overwrite the existing value with the new one, or insert the new one.
-                    const entry = table.values.find(key, .existing_or_new);
+                    const entry = table.values.find(key_from_value(value), .existing_or_new);
                     const value_ptr = entry.value orelse table.values.insert(&entry);
                     value_ptr.* = value.*;
                 },
@@ -291,10 +300,9 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
 
-            const key = key_from_value(value);
             switch (usage) {
                 .secondary_index => {
-                    const entry = table.values.find(key, .existing);
+                    const entry = table.values.find(key_from_value(value), .existing);
                     if (entry.value) |existing| {
                         // The previous operation on this key then it must have been a put.
                         // The put and remove cancel out.
@@ -303,14 +311,14 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
                     } else {
                         // If the put is already on-disk, then we need to follow it with a tombstone.
                         // The put and the tombstone may cancel each other out later during compaction.
-                        table.values.insert(&entry).* = tombstone_from_key(key);
+                        table.values.insert(&entry).* = tombstone_from_key(entry.key);
                     }
                 },
                 .general => {
                     // Either overwrite the existing value with tombstone, or insert a new tombstone.
-                    const entry = table.values.find(key, .existing_or_new);
+                    const entry = table.values.find(key_from_value(value), .existing_or_new);
                     const value_ptr = entry.value orelse table.values.insert(&entry);
-                    value_ptr.* = tombstone_from_key(key);
+                    value_ptr.* = tombstone_from_key(entry.key);
                 },
             }
 
@@ -341,15 +349,9 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             assert(values_max.len == value_count_max);
 
             var i: usize = 0;
-            var sorted = true;
             var it = table.values.iterator();
             while (it.next()) |value| : (i += 1) {
                 values_max[i] = value.*;
-
-                if (i > 0 and sorted) {
-                    const prev_key = key_from_value(&values_max[i - 1]);
-                    sorted = compare_keys(prev_key, key_from_value(value)) != .gt;
-                }
 
                 if (table.values_cache) |cache| {
                     if (tombstone(value)) {
@@ -362,7 +364,9 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
             const values = values_max[0..i];
             assert(values.len == table.count());
-            if (!sorted) std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+            if (!table.values.sorted) {
+                std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+            }
 
             table.clear();
             assert(table.count() == 0);
