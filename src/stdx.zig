@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 pub const sort = @import("stdx/sort.zig").sort;
+pub const pdq_sort = @import("stdx/pdq_sort.zig").pdq_sort;
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {

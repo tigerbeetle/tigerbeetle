@@ -204,16 +204,12 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
             const values = values_max[0..i];
             assert(values.len == table.count());
-            stdx.sort(Key, Value, key_from_value, sort_values_by_key_in_ascending_order, values);
+            stdx.pdq_sort(Key, Value, key_from_value, compare_keys, values);
 
             table.clear();
             assert(table.count() == 0);
 
             return values;
-        }
-
-        inline fn sort_values_by_key_in_ascending_order(a: Key, b: Key) bool {
-            return compare_keys(a, b) == .lt;
         }
     };
 }
