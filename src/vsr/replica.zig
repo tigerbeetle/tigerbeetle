@@ -4369,18 +4369,14 @@ pub fn ReplicaType(
                 self.commit_journal(self.commit_max);
             }
 
-            if (self.status == .view_change and
-                self.primary_index(self.view) == self.replica and
-                self.commit_min == self.commit_max)
-            {
-                assert(self.journal.dirty.count == 0);
-                assert(self.commit_max <= self.op);
-
-                // Repair the pipeline, which may discover faulty prepares and drive more repairs.
-                switch (self.primary_repair_pipeline()) {
-                    // primary_repair_pipeline() is already working.
-                    .busy => {},
-                    .done => self.primary_start_view_as_the_new_primary(),
+            if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
+                if (self.journal.dirty.count == 0 and self.commit_min == self.commit_max) {
+                    // Repair the pipeline, which may discover faulty prepares and drive more repairs.
+                    switch (self.primary_repair_pipeline()) {
+                        // primary_repair_pipeline() is already working.
+                        .busy => {},
+                        .done => self.primary_start_view_as_the_new_primary(),
+                    }
                 }
             }
         }
