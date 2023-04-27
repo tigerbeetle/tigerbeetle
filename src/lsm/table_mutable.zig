@@ -77,68 +77,70 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             pub fn clear(map: *ValuesMap) void {
                 map.len = 0;
                 map.used = 0;
-                @memset(&map.data.tags, 0, @sizeOf(@TypeOf(map.data.tags)));
-                @memset(&map.data.active, 0, @sizeOf(@TypeOf(map.data.active)));
+                mem.set(u8, &map.data.tags, 0);
+                mem.set(u8, &map.data.active, 0);
             }
 
-            pub const Search = struct {
+            pub const Entry = struct {
                 pos: u32,
                 tag: u8,
-                key: Key,
-
-                pub fn create(key: Key) Search {
-                    const hash = std.hash.Wyhash.hash(0, mem.asBytes(&key));
-                    return .{
-                        .pos = @truncate(u32, hash) % capacity,
-                        .tag = @truncate(u8, hash >> (64 - 8)) | 0x80,
-                        .key = key,
-                    };
-                }
+                value: ?*Value,
             };
 
-            pub fn find(map: *const ValuesMap, search: *Search, intent: enum { get, put }) ?*Value {
+            pub fn find(map: *const ValuesMap, key: Key, intent: enum { existing, existing_or_new }) Entry {
                 const data = map.data;
-                const probe = (2 * @as(u32, search.tag)) + 1; // Double hashing / quadratic probing.
+                const hash = std.hash.Wyhash.hash(0, mem.asBytes(&key));
 
-                while (true) : (search.pos = (search.pos +% probe) % capacity) {
-                    const slot_tag = &data.tags[search.pos];
+                var entry = Entry{
+                    .pos = @truncate(u32, hash) % capacity,
+                    .tag = @truncate(u8, hash >> (64 - 7)) | 0x80,
+                    .value = null,
+                };
+
+                const probe = (2 * @as(u32, entry.tag)) + 1; // Double hashing / quadratic probing.
+                while (true) : (entry.pos = (entry.pos +% probe) % capacity) {
+                    const tag_ptr = &data.tags[entry.pos];
 
                     // Check the tag before comparing the value. This acts like a bloom filter.
-                    if (slot_tag.* == search.tag) {
-                        const slot = @ptrCast(*align(1) Slot, &data.slots[search.pos * slot_bytes]).*;
+                    if (tag_ptr.* == entry.tag) {
+                        const slot = @ptrCast(*align(1) Slot, &data.slots[entry.pos * slot_bytes]).*;
                         assert(slot < value_count_max);
                         assert(slot < map.used);
 
+                        const mask = @as(u8, 1) << @intCast(u3, slot % 8);
+                        assert(data.active[slot / 8] & mask != 0);
+
                         const value = &data.values[slot];
-                        if (compare_keys(search.key, key_from_value(value)) == .eq) {
-                            return value;
+                        if (compare_keys(key, key_from_value(value)) == .eq) {
+                            entry.value = value;
+                            return entry;
                         }
 
                         // Unlikely, but two values had the same tag.
-                        // Skip checking for empty slots below and just check the next one.
+                        // Skip checking for empty slots below and just check the next tag instead.
                         continue;
                     }
 
                     switch (intent) {
-                        // When looking for a matching value, only stop when an empty slot is found.
+                        // When looking for an existing value, only stop when an empty slot is found.
                         // Keep scanning if it's removed (no 0x80) as that's a tombstone.
-                        .get => if (slot_tag.* == 0) return null,
-                        // When inserting, stop at their empty slot or removed slot to replace it.
-                        .put => if (slot_tag.* & 0x80 == 0) return null,
+                        .existing => if (tag_ptr.* == 0) return entry,
+                        // When inserting, stop at an empty slot OR a removed slot to replace it.
+                        .existing_or_new => if (tag_ptr.* & 0x80 == 0) return entry,
                     }
                 }
             }
 
-            pub fn insert(map: *ValuesMap, search: *const Search) *Value {
+            pub fn insert(map: *ValuesMap, entry: *const Entry) *Value {
                 // Increment the map count.
                 const data = map.data;
                 assert(map.len < value_count_max);
                 map.len += 1;
 
-                // Mark the slot as used with its tag for future find()s.
-                const slot_tag = &data.tags[search.pos];
-                assert(slot_tag.* & 0x80 == 0);
-                slot_tag.* = search.tag;
+                // Mark the tag with that of the entry's for future find()s.
+                const tag_ptr = &data.tags[entry.pos];
+                assert(tag_ptr.* & 0x80 == 0);
+                tag_ptr.* = entry.tag;
 
                 // Reserve a slot index for data.values.
                 const slot = @intCast(Slot, map.used);
@@ -151,24 +153,24 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
                 data.active[slot / 8] |= mask;
 
                 // Commit the slot index and return the value.
-                @ptrCast(*align(1) Slot, &data.slots[search.pos * slot_bytes]).* = slot;
+                @ptrCast(*align(1) Slot, &data.slots[entry.pos * slot_bytes]).* = slot;
                 return &data.values[slot];
             }
 
-            pub fn remove(map: *ValuesMap, search: *const Search) void {
+            pub fn remove(map: *ValuesMap, entry: *const Entry) void {
                 // Decrement the map count.
                 const data = map.data;
                 assert(map.len <= value_count_max);
                 assert(map.len > 0);
                 map.len -= 1;
 
-                // Mark the slot as deleted (no 0x80, but still not 0 for empty).
-                const slot_tag = &data.tags[search.pos];
-                assert(slot_tag.* == search.tag);
-                slot_tag.* = 0x1;
+                // Mark the tag as deleted (no 0x80 bit, but still not 0 for empty).
+                const tag_ptr = &data.tags[entry.pos];
+                assert(tag_ptr.* == entry.tag);
+                tag_ptr.* = 0x1;
 
                 // Get the previously inserted slot index.
-                const slot = @ptrCast(*align(1) Slot, &data.slots[search.pos * slot_bytes]).*;
+                const slot = @ptrCast(*align(1) Slot, &data.slots[entry.pos * slot_bytes]).*;
                 assert(slot < value_count_max);
                 assert(slot < map.used);
 
@@ -179,29 +181,23 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             }
 
             pub inline fn iterator(map: *const ValuesMap) Iterator {
-                return .{
-                    .slot = 0,
-                    .used = map.used,
-                    .data = map.data,
-                };
+                return .{ .used = map.used, .data = map.data };
             }
 
             pub const Iterator = struct {
-                slot: Slot,
+                slot: Slot = 0,
                 used: u32,
                 data: *const Data,
 
                 pub fn next(it: *Iterator) ?*const Value {
                     while (true) {
-                        it.used = math.sub(u32, it.used, 1) catch return null;
-
-                        const slot = it.slot;
-                        it.slot += 1;
+                        if (it.slot == it.used) return null;
+                        defer it.slot += 1;
 
                         // Only return values that we're marked active.
-                        const mask = @as(u8, 1) << @intCast(u3, slot % 8);
-                        if (it.data.active[slot / 8] & mask != 0) {
-                            return &it.data.values[slot];
+                        const mask = @as(u8, 1) << @intCast(u3, it.slot % 8);
+                        if (it.data.active[it.slot / 8] & mask != 0) {
+                            return &it.data.values[it.slot];
                         }
                     }
                 }
@@ -251,8 +247,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
             if (table.values.count() > 0) {
-                var search = ValuesMap.Search.create(key);
-                if (table.values.find(&search, .get)) |value| {
+                if (table.values.find(key, .existing).value) |value| {
                     return value;
                 }
             }
@@ -267,23 +262,23 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
 
-            var search = ValuesMap.Search.create(key_from_value(value));
-            const found_existing = table.values.find(&search, .put);
-
+            const key = key_from_value(value);
             switch (usage) {
                 .secondary_index => {
-                    if (found_existing) |existing| {
+                    const entry = table.values.find(key, .existing);
+                    if (entry.value) |existing| {
                         // If there was a previous operation on this key then it must have been a remove.
                         // The put and remove cancel out.
                         assert(tombstone(existing));
-                        table.values.remove(&search);
+                        table.values.remove(&entry);
                     } else {
-                        table.values.insert(&search).* = value.*;
+                        table.values.insert(&entry).* = value.*;
                     }
                 },
                 .general => {
                     // Either overwrite the existing value with the new one, or insert the new one.
-                    const value_ptr = found_existing orelse table.values.insert(&search);
+                    const entry = table.values.find(key, .existing_or_new);
+                    const value_ptr = entry.value orelse table.values.insert(&entry);
                     value_ptr.* = value.*;
                 },
             }
@@ -296,26 +291,26 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
 
-            var search = ValuesMap.Search.create(key_from_value(value));
-            const found_existing = table.values.find(&search, .put);
-
+            const key = key_from_value(value);
             switch (usage) {
                 .secondary_index => {
-                    if (found_existing) |existing| {
+                    const entry = table.values.find(key, .existing);
+                    if (entry.value) |existing| {
                         // The previous operation on this key then it must have been a put.
                         // The put and remove cancel out.
                         assert(!tombstone(existing));
-                        table.values.remove(&search);
+                        table.values.remove(&entry);
                     } else {
                         // If the put is already on-disk, then we need to follow it with a tombstone.
                         // The put and the tombstone may cancel each other out later during compaction.
-                        table.values.insert(&search).* = tombstone_from_key(search.key);
+                        table.values.insert(&entry).* = tombstone_from_key(key);
                     }
                 },
                 .general => {
                     // Either overwrite the existing value with tombstone, or insert a new tombstone.
-                    const value_ptr = found_existing orelse table.values.insert(&search);
-                    value_ptr.* = tombstone_from_key(search.key);
+                    const entry = table.values.find(key, .existing_or_new);
+                    const value_ptr = entry.value orelse table.values.insert(&entry);
+                    value_ptr.* = tombstone_from_key(key);
                 },
             }
 
