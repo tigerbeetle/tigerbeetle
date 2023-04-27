@@ -81,10 +81,16 @@ fn run_fuzz(
     });
     defer superblock_verify.deinit(allocator);
 
-    var grid = try Grid.init(allocator, &superblock);
+    var grid = try Grid.init(allocator, .{
+        .superblock = &superblock,
+        .on_read_fault = on_grid_read_fault,
+    });
     defer grid.deinit(allocator);
 
-    var grid_verify = try Grid.init(allocator, &superblock_verify);
+    var grid_verify = try Grid.init(allocator, .{
+        .superblock = &superblock_verify,
+        .on_read_fault = on_grid_read_fault,
+    });
     defer grid_verify.deinit(allocator);
 
     var env = try Environment.init(allocator, .{
@@ -114,6 +120,12 @@ fn run_fuzz(
             .noop => {},
         }
     }
+}
+
+fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
+    _ = grid;
+    _ = read;
+    unreachable;
 }
 
 const ManifestEvent = union(enum) {
@@ -464,7 +476,10 @@ const Environment = struct {
             );
 
             test_grid.deinit(env.allocator);
-            test_grid.* = try Grid.init(env.allocator, test_superblock);
+            test_grid.* = try Grid.init(env.allocator, .{
+                .superblock = test_superblock,
+                .on_read_fault = on_grid_read_fault,
+            });
 
             test_manifest_log.deinit(env.allocator);
             test_manifest_log.* = try ManifestLog.init(

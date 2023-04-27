@@ -660,7 +660,10 @@ pub fn ReplicaType(
             );
             errdefer self.message_bus.deinit(allocator);
 
-            self.grid = try Grid.init(allocator, &self.superblock);
+            self.grid = try Grid.init(allocator, .{
+                .superblock = &self.superblock,
+                .on_read_fault = on_grid_read_fault,
+            });
             errdefer self.grid.deinit(allocator);
 
             self.state_machine = try StateMachine.init(
@@ -6630,6 +6633,20 @@ pub fn ReplicaType(
                 .pipeline => self.repair(),
                 .fix => unreachable,
             }
+        }
+
+        fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
+            // `read` is *not* a BlockRead.read; we cannot use @fieldParentPtr() on it.
+            const self = @fieldParentPtr(Self, "grid", grid);
+            assert(!self.grid.read_faulty_queue.empty());
+            assert(!self.superblock.free_set.is_free(read.address));
+
+            log.warn("{}: on_grid_read_fault: address={} checksum={} block_type={}", .{
+                self.replica,
+                read.address,
+                read.checksum,
+                read.block_type,
+            });
         }
     };
 }

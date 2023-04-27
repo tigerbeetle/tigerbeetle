@@ -106,7 +106,10 @@ const Environment = struct {
             .storage_size_limit = constants.storage_size_max,
         });
 
-        env.grid = try Grid.init(allocator, &env.superblock);
+        env.grid = try Grid.init(allocator, .{
+            .superblock = &env.superblock,
+            .on_read_fault = on_grid_read_fault,
+        });
 
         env.forest = undefined;
         env.checkpoint_op = null;
@@ -116,6 +119,12 @@ const Environment = struct {
     fn deinit(env: *Environment) void {
         env.superblock.deinit(allocator);
         env.grid.deinit(allocator);
+    }
+
+    fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
+        _ = grid;
+        _ = read;
+        unreachable;
     }
 
     pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
