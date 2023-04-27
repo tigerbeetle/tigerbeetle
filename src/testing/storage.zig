@@ -439,11 +439,31 @@ pub const Storage = struct {
     fn fault_sector(storage: *Storage, zone: vsr.Zone, sector: usize) void {
         storage.faults.set(sector);
         if (storage.options.replica_index) |replica_index| {
-            log.debug("{}: corrupting sector at zone={} offset={}", .{
-                replica_index,
-                zone,
-                sector * constants.sector_size - zone.offset(0),
-            });
+            const offset = sector * constants.sector_size - zone.offset(0);
+            switch (zone) {
+                .wal_prepares => {
+                    comptime assert(constants.message_size_max % constants.sector_size == 0);
+                    const slot = @divFloor(offset, constants.message_size_max);
+                    log.err(
+                        "{}: corrupting sector at zone={} offset={} slot={}\n",
+                        .{ replica_index, zone, offset, slot },
+                    );
+                },
+                .wal_headers => {
+                    comptime assert(constants.sector_size % @sizeOf(vsr.Header) == 0);
+                    const slot = @divFloor(offset, @sizeOf(vsr.Header));
+                    log.err(
+                        "{}: corrupting sector at zone={} offset={} slot={}\n",
+                        .{ replica_index, zone, offset, slot },
+                    );
+                },
+                .superblock, .client_replies, .grid => {
+                    log.err(
+                        "{}: corrupting sector at zone={} offset={}\n",
+                        .{ replica_index, zone, offset },
+                    );
+                },
+            }
         }
     }
 
