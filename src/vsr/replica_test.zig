@@ -664,7 +664,7 @@ const TestContext = struct {
                 .faulty_wal_prepares = false,
                 .faulty_client_replies = false,
             },
-            .state_machine = .{},
+            .state_machine = .{ .lsm_forest_node_count = 4096 },
         });
         errdefer cluster.deinit();
 
