@@ -1397,7 +1397,10 @@ const TestContext = struct {
         ctx.superblock.opened = true;
         ctx.superblock.working.vsr_state.commit_min = 0;
 
-        ctx.grid = try Grid.init(allocator, &ctx.superblock);
+        ctx.grid = try Grid.init(allocator, .{
+            .superblock = &ctx.superblock,
+            .on_read_fault = on_grid_read_fault,
+        });
         errdefer ctx.grid.deinit(allocator);
 
         ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
@@ -1415,6 +1418,12 @@ const TestContext = struct {
         ctx.grid.deinit(allocator);
         ctx.state_machine.deinit(allocator);
         ctx.* = undefined;
+    }
+
+    fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
+        _ = grid;
+        _ = read;
+        unreachable;
     }
 };
 
