@@ -697,11 +697,11 @@ pub const ClusterFaultAtlas = struct {
             }
         }
 
-        // A cluster-of-2 is special-cased to mirror the special case in replica.zig.
-        // See repair_prepare().
         const quorums = vsr.quorums(replica_count);
-        const faults_max = if (replica_count == 2) 1 else replica_count - quorums.replication;
+        const faults_max = quorums.replication - 1;
         assert(faults_max < replica_count);
+        assert(faults_max < quorums.replication);
+        assert(faults_max < quorums.view_change);
         assert(faults_max > 0 or replica_count == 1);
 
         var sector: usize = 0;
