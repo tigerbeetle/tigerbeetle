@@ -440,77 +440,69 @@ pub fn ReplicaType(
             if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
 
             const vsr_headers = self.superblock.working.vsr_headers();
-            for (vsr_headers.slice) |*header| {
-                if (vsr.Headers.dvc_header_type(header) != .valid) continue;
-
-                const slot = .{ .index = header.op % constants.journal_slot_count };
-                if (header.op > self.op_checkpoint_trigger()) {
-                    // Ignore an op that is too far head for our journal.
-                } else if (self.journal.has(header)) {
-                    // Header is already in the WAL.
-                    assert(!self.journal.dirty.bit(slot));
-                    assert(!self.journal.faulty.bit(slot));
-                } else if (self.journal.header_for_op(header.op)) |journal_header| {
-                    assert(!self.journal.dirty.bit(slot));
-                    assert(!self.journal.faulty.bit(slot));
-
-                    if (header.op < journal_header.op) {
-                        // Don't overwrite a newer op.
-                        // (This must be a SV message because a DVC would not have a newer op).
-                        assert(self.log_view == self.view);
-                    } else {
-                        self.journal.set_header_as_dirty(header);
-                    }
-                } else {
-                    assert(self.journal.dirty.bit(slot) == self.journal.faulty.bit(slot));
-
-                    self.journal.headers[slot.index] = header.*;
-                    self.journal.dirty.set(slot);
-                    // Don't touch faulty — if it is set, we don't want to unset it. The WAL slot
-                    // may contain a corrupt version is this op, and we don't want to incorrectly
-                    // nack it. (This is why we do not call replace_header()/set_header_as_dirty()
-                    // here.)
-                }
-            }
-
             // If we were a lagging backup that installed an SV but didn't finish fast-forwarding,
             // the vsr_headers head op may be part of the checkpoint after this one.
             maybe(vsr_headers.slice[0].op > self.op_checkpoint_trigger());
 
-            var op_head = for (vsr_headers.slice) |*header| {
-                if (vsr.Headers.dvc_header_type(header) != .valid) continue;
-                if (header.op <= self.op_checkpoint_trigger()) break header.op;
-            } else op_head: {
+            var op_head: ?u64 = null;
+
+            if (self.log_view == self.view) {
+                for (self.journal.headers) |*header| {
+                    if (header.command == .prepare) {
+                        assert(header.op <= self.op_checkpoint_trigger());
+                        assert(header.view <= self.log_view);
+
+                        if (op_head == null or op_head.? < header.op) op_head = header.op;
+                    }
+                }
+            } else {
+                // Fall-through to choose op-head from vsr_headers.
+                //
+                // "Highest op from log_view in WAL" is not the correct choice for op-head when
+                // recovering with a durable DVC (though we still resort to this if there are no
+                // usable headers in the vsr_headers). It is possible that we started the view and
+                // finished some repair before updating our view_durable.
+                //
+                // To avoid special-casing this all over, we pretend this higher op doesn't
+                // exist. This is safe because we never prepared any ops in the view we joined just
+                // before the crash.
+                assert(self.log_view < self.view);
+                maybe(self.journal.op_maximum() > vsr_headers.slice[0].op);
+            }
+
+            // Try to use vsr_headers to update our head op and its header.
+            // To avoid the following scenario, don't load headers prior to the head:
+            // 1. Replica A prepares[/commits] op X.
+            // 2. Replica A crashes.
+            // 3. Prepare X is corrupted in the WAL.
+            // 4. Replica A recovers. During `Replica.open()`, Replica A loads the header
+            //    for op `X - journal_slot_count` (same slot, prior wrap) from vsr_headers
+            //    into the journal.
+            // 5. Replica A participates in a view-change, but nacks[/does not include] op X.
+            // 6. Op X is truncated.
+            for (vsr_headers.slice) |*vsr_header| {
+                if (vsr.Headers.dvc_header_type(vsr_header) == .valid and
+                    vsr_header.op <= self.op_checkpoint_trigger() and
+                    (op_head == null or op_head.? <= vsr_header.op))
+                {
+                    op_head = vsr_header.op;
+
+                    if (!self.journal.has(vsr_header)) {
+                        self.journal.set_header_as_dirty(vsr_header);
+                    }
+                    break;
+                }
+            } else {
                 // This case can only occur if we loaded an SV for its hook header, then converted
                 // that SV to a DVC (dropping the hooks; see start_view_into_do_view_change()),
                 // but never finished the view change.
-                assert(self.view > self.log_view);
-                break :op_head null;
-            };
-            assert(op_head == null or op_head.? <= self.op_checkpoint_trigger());
-
-            for (self.journal.headers) |*header| {
-                assert(header.op <= self.op_checkpoint_trigger());
-                if (header.command == .prepare) {
-                    if (op_head == null) {
-                        assert(self.log_view < self.view);
-                        op_head = header.op;
-                    } else if (op_head.? < header.op) {
-                        assert(self.log_view >= header.view);
-                        // Typically if there is an op in the WAL higher than the durable headers'
-                        // head op, we must have crashed with a durable SV, not a durable DVC.
-                        //
-                        // However, we could have joined a view and finished some repair before ever
-                        // updating our view_durable.
-                        //
-                        // To avoid special-casing this all over, we pretend this higher op doesn't
-                        // exist. This is safe because the prior view-change didn't complete.
-                        maybe(self.log_view == self.view);
-
-                        if (self.log_view == self.view) op_head = header.op;
-                    }
+                if (op_head == null) {
+                    assert(self.view > self.log_view);
+                    op_head = self.journal.op_maximum();
                 }
             }
+            assert(op_head.? <= self.op_checkpoint_trigger());
+
             self.op = op_head.?;
             self.commit_max = std.math.max(
                 self.commit_max,
@@ -2868,6 +2860,8 @@ pub fn ReplicaType(
             assert(reply.header.epoch == 0);
 
             reply.header.set_checksum_body(reply.body());
+            // See `send_reply_message_to_client` for why we compute the checksum twice.
+            reply.header.context = reply.header.calculate_checksum();
             reply.header.set_checksum();
 
             if (self.superblock.working.vsr_state.op_compacted(prepare.header.op)) {
@@ -2896,7 +2890,7 @@ pub fn ReplicaType(
 
             if (self.primary_index(self.view) == self.replica) {
                 log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
-                self.message_bus.send_message_to_client(reply.header.client, reply);
+                self.send_reply_message_to_client(reply);
             }
         }
 
@@ -3003,7 +2997,6 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.operation == .register);
             assert(reply.header.client > 0);
-            assert(reply.header.context == 0);
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.size == @sizeOf(Header));
 
@@ -3539,7 +3532,7 @@ pub fn ReplicaType(
                         return true;
                     }
                 } else if (entry.header.request + 1 == message.header.request) {
-                    if (message.header.parent == entry.header.checksum) {
+                    if (message.header.parent == entry.header.context) {
                         // The client has proved that they received our last reply.
                         log.debug("{}: on_request: new request", .{self.replica});
                         return false;
@@ -3596,7 +3589,10 @@ pub fn ReplicaType(
             assert(message.header.request == entry.header.request);
 
             if (entry.header.size == @sizeOf(Header)) {
-                self.send_header_to_client(message.header.client, entry.header);
+                const reply = self.create_message_from_header(entry.header);
+                defer self.message_bus.unref(reply);
+
+                self.send_reply_message_to_client(reply);
                 return;
             }
 
@@ -3650,7 +3646,7 @@ pub fn ReplicaType(
                 reply.header.request,
             });
 
-            self.message_bus.send_message_to_client(reply.header.client, reply);
+            self.send_reply_message_to_client(reply);
         }
 
         /// Returns whether the replica is eligible to process this request as the primary.
@@ -4343,10 +4339,11 @@ pub fn ReplicaType(
             }
             assert(self.valid_hash_chain_between(self.op_repair_min(), self.op));
 
-            // Request and repair any dirty or faulty prepares:
-            if (self.journal.dirty.count > 0) return self.repair_prepares();
-
-            if (self.client_replies.faulty.findFirstSet()) |slot| {
+            if (self.journal.dirty.count > 0) {
+                // Request and repair any dirty or faulty prepares.
+                self.repair_prepares();
+            } else if (self.client_replies.faulty.findFirstSet()) |slot| {
+                // After we have all prepares, repair replys.
                 const entry = &self.client_sessions().entries[slot];
                 assert(entry.session != 0);
                 assert(!self.client_sessions().entries_free.isSet(slot));
@@ -4360,18 +4357,25 @@ pub fn ReplicaType(
                     .op = entry.header.op,
                     .context = entry.header.checksum,
                 });
-                // Don't return here — it is safe to start a view without all replies repaired.
             }
 
-            // Commit ops, which may in turn discover faulty prepares and drive more repairs:
             if (self.commit_min < self.commit_max) {
+                // Try to the commit prepares we already have, even if we don't have all of them.
+                // This helps when a replica is recovering from a crash and has a mostly intact
+                // journal, with just some prepares missing. We do have the headers and know
+                // that they form a valid hashcahin. Committing may discover more faulty prepares
+                // and drive further repairs.
                 assert(!self.solo());
                 self.commit_journal(self.commit_max);
-                return;
             }
-            assert(self.commit_max <= self.op);
 
-            if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
+            if (self.status == .view_change and
+                self.primary_index(self.view) == self.replica and
+                self.commit_min == self.commit_max)
+            {
+                assert(self.journal.dirty.count == 0);
+                assert(self.commit_max <= self.op);
+
                 // Repair the pipeline, which may discover faulty prepares and drive more repairs.
                 switch (self.primary_repair_pipeline()) {
                     // primary_repair_pipeline() is already working.
@@ -4979,7 +4983,7 @@ pub fn ReplicaType(
 
             if (header.op < self.op_repair_min()) return;
 
-            // Do not set an op as dirty if we already have it exactly because:
+            // We must not set an op as dirty if we already have it exactly because:
             // 1. this would trigger a repair and delay the view change, or worse,
             // 2. prevent repairs to another replica when we have the op.
             if (!self.journal.has(header)) self.journal.set_header_as_dirty(header);
@@ -5261,8 +5265,46 @@ pub fn ReplicaType(
             });
         }
 
+        fn send_reply_message_to_client(self: *Self, reply: *Message) void {
+            assert(reply.header.command == .reply);
+            assert(reply.header.view <= self.view);
+
+            // If the request committed in a different view than the one it was originally prepared
+            // in, we must inform the client about this newer view before we send it a reply.
+            // Otherwise, the client might send a next request to the old primary, which would
+            // observe a broken hash chain.
+            //
+            // To do this, we always set reply's view to the current one, and use the `context`
+            // field for hash chaining.
+
+            if (reply.header.view == self.view) {
+                // Hot path: no need to clone the message if the view is the same.
+                self.message_bus.send_message_to_client(reply.header.client, reply);
+                return;
+            }
+
+            const reply_copy = self.message_bus.get_message();
+            defer self.message_bus.unref(reply_copy);
+
+            // Copy the message and update the view.
+            // We could optimize this by using in-place modification if `reply.references == 1`.
+            // We don't bother, as that complicates reasoning on the call-site, and this is
+            // a cold path anyway.
+            stdx.copy_disjoint(
+                .inexact,
+                u8,
+                reply_copy.buffer,
+                reply.buffer[0..reply.header.size],
+            );
+            reply_copy.header.view = self.view;
+            reply_copy.header.set_checksum();
+
+            self.message_bus.send_message_to_client(reply.header.client, reply_copy);
+        }
+
         fn send_header_to_client(self: *Self, client: u128, header: Header) void {
             assert(header.cluster == self.cluster);
+            assert(header.view == self.view);
 
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
@@ -6337,14 +6379,12 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.operation != .register);
             assert(reply.header.client > 0);
-            assert(reply.header.context == 0);
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.commit > 0);
             assert(reply.header.request > 0);
 
             if (self.client_sessions().get(reply.header.client)) |entry| {
                 assert(entry.header.command == .reply);
-                assert(entry.header.context == 0);
                 assert(entry.header.op == entry.header.commit);
                 assert(entry.header.commit >= entry.session);
 

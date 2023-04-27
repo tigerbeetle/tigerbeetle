@@ -235,6 +235,8 @@ pub fn main() !void {
         simulator.tick();
         if (simulator.done()) break;
     } else {
+        output.info("no liveness, final cluster state:", .{});
+        simulator.cluster.log_cluster();
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
