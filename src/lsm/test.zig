@@ -85,7 +85,6 @@ const Environment = struct {
 
         env.grid = try Grid.init(allocator, .{
             .superblock = &env.superblock,
-            .on_read_fault = on_grid_read_fault,
         });
         errdefer env.grid.deinit(allocator);
 
@@ -110,12 +109,6 @@ const Environment = struct {
         env.io.deinit();
         std.os.close(env.fd);
         std.os.close(env.dir_fd);
-    }
-
-    fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
-        _ = grid;
-        _ = read;
-        unreachable;
     }
 
     fn tick(env: *Environment) !void {

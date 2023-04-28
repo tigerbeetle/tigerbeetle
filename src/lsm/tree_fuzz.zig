@@ -149,7 +149,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.grid = try Grid.init(allocator, .{
                 .superblock = &env.superblock,
-                .on_read_fault = on_grid_read_fault,
             });
             defer env.grid.deinit(allocator);
 
@@ -161,12 +160,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.checkpoint_op = null;
 
             try env.open_then_apply(fuzz_ops);
-        }
-
-        fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
-            _ = grid;
-            _ = read;
-            unreachable;
         }
 
         fn change_state(env: *Environment, current_state: State, next_state: State) void {

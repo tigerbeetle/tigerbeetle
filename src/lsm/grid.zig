@@ -166,11 +166,11 @@ pub fn GridType(comptime Storage: type) type {
         // True if there's a read thats resolving callbacks. If so, the read cache must not be invalidated.
         read_resolving: bool = false,
 
-        on_read_fault: fn (*Grid, *Grid.Read) void,
+        on_read_fault: ?fn (*Grid, *Grid.Read) void,
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
-            on_read_fault: fn (*Grid, *Grid.Read) void,
+            on_read_fault: ?fn (*Grid, *Grid.Read) void = null,
         }) !Grid {
             // TODO Determine this at runtime based on runtime configured maximum
             // memory usage of tigerbeetle.
@@ -710,7 +710,11 @@ pub fn GridType(comptime Storage: type) type {
                 // to recovery queue. Future reads on the same address will see the "root" read in the
                 // recovery queue and enqueue to it.
                 grid.read_faulty_queue.push(read);
-                grid.on_read_fault(grid, read);
+                if (grid.on_read_fault) |on_read_fault| {
+                    on_read_fault(grid, read);
+                } else {
+                    @panic("Grid.on_read_fault not set");
+                }
             }
         }
 
