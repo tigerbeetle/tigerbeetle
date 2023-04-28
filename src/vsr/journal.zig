@@ -829,22 +829,24 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const journal = read.journal;
             const replica = @fieldParentPtr(Replica, "journal", journal);
             const op = read.op;
+            const callback = read.callback;
             const checksum = read.checksum;
+            const destination_replica = read.destination_replica;
+            const message = read.message;
+            defer replica.message_bus.unref(message);
+
             assert(journal.status == .recovered);
 
-            defer {
-                if (read.destination_replica == null) {
-                    journal.reads_commit_count -= 1;
-                } else {
-                    journal.reads_repair_count -= 1;
-                }
-                replica.message_bus.unref(read.message);
-                journal.reads.release(read);
+            if (destination_replica == null) {
+                journal.reads_commit_count -= 1;
+            } else {
+                journal.reads_repair_count -= 1;
             }
+            journal.reads.release(read);
 
             if (op > replica.op) {
                 journal.read_prepare_log(op, checksum, "beyond replica.op");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
@@ -852,7 +854,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const checksum_match = journal.prepare_checksums[journal.slot_for_op(op).index] == checksum;
             if (!checksum_inhabited or !checksum_match) {
                 journal.read_prepare_log(op, checksum, "prepare changed during read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
@@ -862,19 +864,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // * The in-memory header is reserved+faulty; the read was via `prepare_checksums`
             const slot = journal.slot_with_op_and_checksum(op, checksum);
 
-            if (!read.message.header.valid_checksum()) {
+            if (!message.header.valid_checksum()) {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
                 }
 
                 journal.read_prepare_log(op, checksum, "corrupt header after read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
-            assert(read.message.header.invalid() == null);
+            assert(message.header.invalid() == null);
 
-            if (read.message.header.cluster != replica.cluster) {
+            if (message.header.cluster != replica.cluster) {
                 // This could be caused by a misdirected read or write.
                 // Though when a prepare spans multiple sectors, a misdirected read/write will
                 // likely manifest as a checksum failure instead.
@@ -884,11 +886,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
 
                 journal.read_prepare_log(op, checksum, "wrong cluster");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
-            if (read.message.header.op != op) {
+            if (message.header.op != op) {
                 // Possible causes:
                 // * The prepare was rewritten since the read began.
                 // * Misdirected read/write.
@@ -903,31 +905,31 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(slot == null);
 
                 journal.read_prepare_log(op, checksum, "op changed during read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
-            if (read.message.header.checksum != checksum) {
+            if (message.header.checksum != checksum) {
                 // This can also be caused by a misdirected read/write.
                 assert(slot == null);
 
                 journal.read_prepare_log(op, checksum, "checksum changed during read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
-            if (!read.message.header.valid_checksum_body(read.message.body())) {
+            if (!message.header.valid_checksum_body(message.body())) {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
                 }
 
                 journal.read_prepare_log(op, checksum, "corrupt body after read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
-            read.callback(replica, read.message, read.destination_replica);
+            callback(replica, message, destination_replica);
         }
 
         fn read_prepare_log(journal: *Journal, op: u64, checksum: ?u128, notice: []const u8) void {
