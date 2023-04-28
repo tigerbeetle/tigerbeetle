@@ -225,6 +225,17 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Statically allocated read IO operation context data.
         reads: IOPS(Read, constants.journal_iops_read_max) = .{},
 
+        /// Count of reads currently acquired on the repair path.
+        reads_repair_count: u6 = 0,
+        /// Limit on the number of repair reads.
+        /// This keeps at least one commit read available, so that an assymetrically
+        /// partitioned replica cannot starve the cluster with request_prepare messages.
+        reads_repair_count_max: u6 = constants.journal_iops_read_max - 1,
+        /// Count of reads currently acquired on the commit path.
+        reads_commit_count: u6 = 0,
+        /// We need at most one read on the commit path, so this is used only for asserting.
+        reads_commit_count_max: u6 = 1,
+
         /// Statically allocated write IO operation context data.
         writes: IOPS(Write, constants.journal_iops_write_max) = .{},
 
@@ -706,6 +717,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ) void {
             assert(journal.status == .recovered);
             assert(checksum != 0);
+            if (destination_replica == null) {
+                assert(journal.reads.available() > 0);
+            }
 
             const replica = @fieldParentPtr(Replica, "journal", journal);
             if (op > replica.op) {
@@ -743,6 +757,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.status == .recovered);
             assert(journal.prepare_inhabited[slot.index]);
             assert(journal.prepare_checksums[slot.index] == checksum);
+            if (destination_replica == null) {
+                assert(journal.reads.available() > 0);
+            }
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
@@ -766,11 +783,21 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
             }
 
-            const read = journal.reads.acquire() orelse {
-                journal.read_prepare_log(op, checksum, "waiting for IOP");
-                callback(replica, null, null);
-                return;
-            };
+            if (destination_replica == null) {
+                journal.reads_commit_count += 1;
+            } else {
+                if (journal.reads_repair_count == journal.reads_repair_count_max) {
+                    journal.read_prepare_log(op, checksum, "waiting for IOP");
+                    callback(replica, null, null);
+                    return;
+                }
+                journal.reads_repair_count += 1;
+            }
+
+            assert(journal.reads_repair_count <= journal.reads_repair_count_max);
+            assert(journal.reads_commit_count <= journal.reads_commit_count_max);
+
+            const read = journal.reads.acquire() orelse unreachable;
 
             read.* = .{
                 .journal = journal,
@@ -806,6 +833,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.status == .recovered);
 
             defer {
+                if (read.destination_replica == null) {
+                    journal.reads_commit_count -= 1;
+                } else {
+                    journal.reads_repair_count -= 1;
+                }
                 replica.message_bus.unref(read.message);
                 journal.reads.release(read);
             }
