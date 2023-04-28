@@ -108,7 +108,6 @@ const Environment = struct {
 
         env.grid = try Grid.init(allocator, .{
             .superblock = &env.superblock,
-            .on_read_fault = on_grid_read_fault,
         });
 
         env.forest = undefined;
@@ -119,12 +118,6 @@ const Environment = struct {
     fn deinit(env: *Environment) void {
         env.superblock.deinit(allocator);
         env.grid.deinit(allocator);
-    }
-
-    fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
-        _ = grid;
-        _ = read;
-        unreachable;
     }
 
     pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
