@@ -83,7 +83,9 @@ const Environment = struct {
         env.superblock_context = undefined;
         errdefer env.superblock.deinit(allocator);
 
-        env.grid = try Grid.init(allocator, &env.superblock);
+        env.grid = try Grid.init(allocator, .{
+            .superblock = &env.superblock,
+        });
         errdefer env.grid.deinit(allocator);
 
         // Forest must be initialized with an open superblock.
