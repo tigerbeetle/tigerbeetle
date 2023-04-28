@@ -1,9 +1,9 @@
-name: "Release (weekly)"
+name: "Release (latest)"
 
 on:
-  schedule:
-    # Every Monday at 14:00
-    - cron: "0 14 * * 1"
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v3
 
       # Explicitly pass in the sha, even though it's very likely to be HEAD.
-      - run: hub release create --prerelease --message "Weekly automated build. Do not use in production." -t ${{ github.sha }} "$(date +%Y-%m-%d)-weekly"
+      - run: hub release create --prerelease --message "Automated build. Do not use in production." -t ${{ github.sha }} "release-$(date +%Y%m%d.%H%M)"
 
         # Propagate token into environment
         env:
