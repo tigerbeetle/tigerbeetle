@@ -298,8 +298,11 @@ pub const Storage = struct {
 
         verify_alignment(buffer);
 
-        var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
-        while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
+        if (zone != .grid) {
+            // Grid repairs can read blocks that have not ever been written.
+            var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
+            while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
+        }
 
         read.* = .{
             .callback = callback,
