@@ -129,7 +129,7 @@ pub fn main() !void {
             .faulty_client_replies = replica_count > 1,
         },
         .state_machine = switch (state_machine) {
-            .testing => .{},
+            .testing => .{ .lsm_forest_node_count = 4096 },
             .accounting => .{
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = if (random.boolean()) 0 else 2048,
