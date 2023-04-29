@@ -1,3 +1,17 @@
+# Glossary
+
+- _checkpoint_: Ensure that all updates from the past wrap of the WAL are durable in the _grid_, then advance the replica's recovery point by updating the superblock. After a checkpoint, the checkpointed WAL entries are safe to be overwritten by the next wrap. (Sidenote: in consensus literature this is sometimes called snapshotting. But we use that term to mean something else.)
+- _grid_: The zone on disk where LSM trees and metadata for them reside.
+- _header_: Identifier for many kinds of messages, including each entry in the VSR log. Passed around instead of the entry when the full entry is not needed (such as view change).
+- _journal_: The in-memory data structure that manages the WAL.
+- _nack_: Short for negative acknowledgement. Used to determine (during a view change) which entries can be dropped from the log. See [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf).
+- _op_: Short for op-number. An op is assigned to each request that is submitted by the user before being stored in the log. An op is a monotonically increasing integer identifying each message to be handled by consensus. When messages with the same op in different views conflict, view change picks one version to commit. Each user batch (which may contain many batch entries) corresponds to one op. Each op is identified (once inside the VSR log) by a _header_.
+- _state sync_: The process of syncing not WAL entries but long-term storage (for us, the _grid_). If the WAL has been truncated and a lagging replica wants to catch up, syncing the WAL is not sufficient it must also sync what is in the long-term storage. What has been _checkpoint_-ed.
+- _superblock_: All local state for the replica that cannot be replicated remotely. Loss is protected against by storing `config.superblock_copies` copies of the superblock.
+- _zone_: The TigerBeetle data file is made up of zones. The superblock is one zone.
+- _view_: A replica is _primary_ for one view. Views are monotonically increasing integers that are incremented each time a new primary is selected.
+- _WAL_: Write-ahead log. It is implemented as two ring buffers where entries are only ever overwritten after they have been checkpointed.
+
 # Protocols
 
 ### Commands
@@ -209,7 +223,7 @@ See also:
 
 TODO (Unimplemented)
 
-## Protocol: Repair: State Transfer
+## Protocol: Repair: State Sync
 
 TODO (Unimplemented)
 
@@ -235,3 +249,8 @@ See also:
 
   - `constants.quorum_replication_max` for configuration.
   - [Flexible Paxos](https://fpaxos.github.io/)
+
+## Further reading
+
+* [Viewstamped Replication Revisited](https://pmg.csail.mit.edu/papers/vr-revisited.pdf)
+* [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf)
