@@ -21,8 +21,151 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
     return struct {
         const TableMutable = @This();
 
-        const load_factor = 50;
-        const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
+        const ValuesMap = struct {
+            const levels_max = constants.lsm_levels;
+            const segment_max = 16;
+
+            const MemTableIndex = blk: {
+                if (segment_max < math.maxInt(u8)) break :blk u8;
+                if (segment_max < math.maxInt(u16)) break :blk u16;
+                assert(segment_max < math.maxInt(u32));
+                break :blk u32;
+            };
+
+            const Filter = [32]u8;
+            const Segment = [segment_max]Value;
+
+            const Data = struct {
+                mem_table: struct {
+                    links: [segment_max][2]MemTableID,
+                    stack: [segment_max]MemTableIndex,
+                    levels: [segment_max]u8,
+                },
+                index: [levels_max]Index,
+                filters: [levels_max]Filter,
+                active: [@divExact(value_count_max, 8)]u8,
+                segments: [@divExact(value_count_max, segment_max)]Segment,
+            };
+
+            mem_table: struct {
+                root: u32 = 0,
+                size: u32 = 0,
+                segment: u32 = 0,
+            },
+
+            fn mem_table_find(data: *Data, root: u32, segment: u32, key: Key) ?*const Value {
+                var index = root;
+                const values = &data.segments[segment];
+                while (true) {
+                    const slot = math.sub(u32, index, 1) catch return null;
+                    const value = &values[slot];
+                    switch (compare_keys(key, key_from_value(value))) {
+                        .eq => return if (mem_table_active(data, segment, slot)) value else null,
+                        else => |cmp| index = data.mem_table.links[slot][@boolToInt(cmp == .gt)],
+                    }
+                }
+            }
+
+            const Entry = struct {
+                value: *Value,
+                exists: bool,
+                removed: bool,
+            };
+
+            fn mem_table_entry(data: *Data, segment: u32, index: u32, new_slot: u32, key: Key, entry: *Entry) u32 {
+                const values = &data.segments[segment];
+                const slot = math.sub(u32, index, 1) catch {
+                    data.mem_table.links[new_slot] = .{0, 0};
+                    data.mem_table.levels[new_slot] = 1;
+
+                    entry.value = &values[new_slot];
+                    entry.exists = false;
+                    entry.removed = false;
+                    return new_slot + 1;
+                };
+
+                entry.value = &values[slot];
+                const cmp = compare_keys(key, key_from_value(entry.value));
+                entry.exists = cmp == .eq;
+                if (entry.exists) {
+                    entry.removed = !mem_table_active(data, segment, slot);
+                    return index;
+                }
+
+                const link = &data.mem_table.links[slot][@boolToInt(cmp == .gt)];
+                link.* = mem_table_upsert(data, segment, link.*, new_slot, key, entry);
+                return mem_table_split(data, mem_table_skew(data, index));
+            }
+
+            inline fn mem_table_skew(data: *const Data, index: u32) u32 {
+                const slot = math.sub(u32, index, 1) catch unreachable;
+
+                const left_link = &data.mem_table.links[slot][0];
+                const left_index = left_link.*;
+                const left_slot = math.sub(u32, left_index, 1) catch return index;
+                if (data.mem_table.levels[left_slot] != data.mem_table.levels[slot]) return index;
+
+                left_link.* = index;
+                mem.swap(u32, left_link, &data.mem_table.links[left_slot][1]);
+                return left_index;
+            }
+
+            inline fn mem_table_split(data: *const Data, index: u32) u32 {
+                const slot = math.sub(u32, index, 1) catch unreachable;
+
+                const right_link = &data.mem_table.links[slot][1];
+                const right_index = right_link.*;
+                const right_slot = math.sub(u32, right_index, 1) catch return index;
+
+                const rr_index = data.mem_table.links[right_slot][1];
+                const rr_slot = math.sub(u32, rr_index, 1) catch return index;
+                if (data.mem_table.levels[rr_slot] != data.mem_table.levels[slot]) return index;
+
+                right_link.* = index;
+                mem.swap(u32, right_link, &data.mem_table.links[right_slot][0]);
+                data.mem_table.levels[right_slot] += 1;
+                return right_index;
+            }
+
+            fn mem_table_update(data: *Data, segment: u32, value: *Value, inserted: bool) void {
+                const offset = @ptrToInt(value) - @ptrToInt(&data.segments[segment]);
+                const slot = @intCast(u32, @divExact(offset, @sizeOf(Value)));
+                assert(slot < segment_max);
+
+                const mask = @as(u8, 1) << @intCast(u3, slot % 8);
+                const byte = &data.active[((segment * segment_max) + slot) / 8];
+                byte.* = if (inserted) (byte | mask) else (byte & ~mask);
+            }
+
+            inline fn mem_table_active(data: *Data, segment: u32, slot: MemTableIndex) bool {
+                const mask = @as(u8, 1) << @intCast(u3, slot % 8);
+                const byte = &data.active[((segment * segment_max) + slot) / 8];
+                return (byte.* & mask != 0);
+            }
+
+            fn mem_table_sort_into(data: *const MemTable, segment: u32, root: u32, values: []Value) u32 {
+                var top: u32 = 0;
+                var size: u32 = 0;
+                var current = root;
+                const values = &data.segments[segment];
+                
+                while (true) {
+                    while (math.sub(u32, current, 1) catch null) |slot| {
+                        data.mem_table.stack[top] = slot;
+                        top += 1;
+                        current = data.mem_table.links[slot][0];
+                    }
+
+                    top = math.sub(u32, top, 1) catch return size;
+                    const slot = data.mem_table.stack[top];
+                    current = data.mem_table.links[slot][1];
+
+                    if (!mem_table_active(data, segment, slot)) continue;
+                    values_max[len] = values[slot];
+                    size += 1;
+                }
+            }
+        };
 
         pub const ValuesCache = SetAssociativeCache(
             Key,
