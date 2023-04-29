@@ -22,6 +22,8 @@ pub const MessageBus = struct {
     cluster: u32,
     process: Process,
 
+    perm: ?[]const u8 = null,
+
     /// The callback to be called when a message is received.
     on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
 
@@ -35,8 +37,10 @@ pub const MessageBus = struct {
         process: Process,
         message_pool: *MessagePool,
         on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
+        resolve_replica_callback: fn (message_bus: *MessageBus, header: *const Header) ?u8,
         options: Options,
     ) !MessageBus {
+        _ = resolve_replica_callback;
         return MessageBus{
             .network = options.network,
             .pool = message_pool,
@@ -62,10 +66,15 @@ pub const MessageBus = struct {
     pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
         // Messages sent by a process to itself should never be passed to the message bus
         if (bus.process == .replica) assert(replica != bus.process.replica);
+        var target = replica;
+        if (bus.perm) |perm| {
+            assert(bus.process == .client);
+            target = perm[target];
+        }
 
         bus.network.send_message(message, .{
             .source = bus.process,
-            .target = .{ .replica = replica },
+            .target = .{ .replica = target },
         });
     }
 

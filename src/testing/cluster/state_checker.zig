@@ -147,8 +147,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 assert(commit.header.op == i);
                 if (i > 0) {
                     const previous = state_checker.commits.items[i - 1].header;
-                    assert(commit.header.parent == previous.checksum);
-                    assert(commit.header.view >= previous.view);
+                    assert(previous.checksum == commit.header.parent);
+                    assert(vsr.view_order_or_eql(previous, commit.header));
                 }
             }
             return true;

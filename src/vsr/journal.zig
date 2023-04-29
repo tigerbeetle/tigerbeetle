@@ -640,20 +640,20 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         // repair_header() may put a newer view to the left of an older view.
 
                         // A exists and B exists:
-                        if (range) |*r| {
-                            assert(b.op == r.op_min);
+                        if (range) |*r| { // 1
+                            assert(b.op == r.op_min); // 1
                             if (a.op == op_min) {
                                 // A is committed, because we pass `commit_min` as `op_min`:
                                 // Do not add A to range because A cannot be a break if committed.
                                 break;
                             } else if (a.checksum == b.parent) {
                                 // A is connected to B, but B is disconnected, add A to range:
-                                assert(a.view <= b.view);
+                                assert(vsr.view_order_or_eql(a, b));
                                 r.op_min = a.op;
-                            } else if (a.view < b.view) {
+                            } else if (vsr.view_order_strict(a, b)) { // FIXME: reconfig view order
                                 // A is not connected to B, and A is older than B, add A to range:
                                 r.op_min = a.op;
-                            } else if (a.view > b.view) {
+                            } else if (vsr.view_order_strict(b, a)) {
                                 // A is not connected to B, but A is newer than B, close range:
                                 break;
                             } else {
@@ -662,8 +662,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                             }
                         } else if (a.checksum == b.parent) {
                             // A is connected to B, and B is connected or B is op_max.
-                            assert(a.view <= b.view);
-                        } else if (a.view != b.view) {
+                            assert(vsr.view_order_or_eql(a, b));
+                        } else if (a.epoch != b.epoch or a.view != b.view) {
                             // A is not connected to B, open range:
                             assert(b.op <= op_max);
                             range = .{ .op_min = a.op, .op_max = a.op };

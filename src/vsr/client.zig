@@ -68,6 +68,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Used to locate the current primary, and provide more information to a partitioned primary.
         view: u32 = 0,
 
+        epoch: u32 = 0,
+
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
         request_queue: RingBuffer(Request, constants.client_request_queue_max, .array) = .{},
@@ -109,6 +111,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .{ .client = id },
                 message_pool,
                 Self.on_message,
+                Self.resolve_replica,
                 message_bus_options,
             );
             errdefer message_bus.deinit(allocator);
@@ -142,6 +145,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 self.message_bus.unref(inflight.message);
             }
             self.message_bus.deinit(allocator);
+        }
+
+        fn resolve_replica(message_bus: *MessageBus, header: *const Header) ?u8 {
+            const self = @fieldParentPtr(Self, "message_bus", message_bus);
+            if (header.epoch == self.epoch) return header.replica;
+            return null;
         }
 
         pub fn on_message(message_bus: *MessageBus, message: *Message) void {
@@ -193,7 +202,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message: *Message,
             message_body_size: usize,
         ) void {
-            assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
+            assert(operation == .reconfigure or @enumToInt(operation) >= constants.vsr_operations_reserved);
 
             self.register();
             assert(self.request_number > 0);
