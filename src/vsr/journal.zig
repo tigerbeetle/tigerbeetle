@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;
+const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
 
@@ -96,6 +97,13 @@ const prepares_size = constants.journal_size_prepares;
 
 pub const write_ahead_log_zone_size = headers_size + prepares_size;
 
+/// Limit on the number of repair reads.
+/// This keeps at least one commit read available, so that an assymetrically
+/// partitioned replica cannot starve the cluster with request_prepare messages.
+const reads_repair_count_max: u6 = constants.journal_iops_read_max - 1;
+/// We need at most one read on the commit path, so this is used only for asserting.
+const reads_commit_count_max: u6 = 1;
+
 comptime {
     assert(slot_count > 0);
     assert(slot_count % 2 == 0);
@@ -111,6 +119,9 @@ comptime {
     assert(prepares_size > 0);
     assert(prepares_size % constants.sector_size == 0);
     assert(prepares_size % constants.message_size_max == 0);
+
+    assert(reads_repair_count_max > 0);
+    assert(reads_repair_count_max + reads_commit_count_max == constants.journal_iops_read_max);
 }
 
 pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
@@ -223,6 +234,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         /// Statically allocated read IO operation context data.
         reads: IOPS(Read, constants.journal_iops_read_max) = .{},
+        /// Count of reads currently acquired on the repair path.
+        reads_repair_count: u6 = 0,
+        /// Count of reads currently acquired on the commit path.
+        reads_commit_count: u6 = 0,
 
         /// Statically allocated write IO operation context data.
         writes: IOPS(Write, constants.journal_iops_write_max) = .{},
@@ -705,6 +720,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ) void {
             assert(journal.status == .recovered);
             assert(checksum != 0);
+            if (destination_replica == null) {
+                assert(journal.reads.available() > 0);
+            }
 
             const replica = @fieldParentPtr(Replica, "journal", journal);
             if (op > replica.op) {
@@ -742,6 +760,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.status == .recovered);
             assert(journal.prepare_inhabited[slot.index]);
             assert(journal.prepare_checksums[slot.index] == checksum);
+            if (destination_replica == null) {
+                assert(journal.reads.available() > 0);
+            }
 
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
@@ -765,11 +786,21 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
             }
 
-            const read = journal.reads.acquire() orelse {
-                journal.read_prepare_log(op, checksum, "waiting for IOP");
-                callback(replica, null, null);
-                return;
-            };
+            if (destination_replica == null) {
+                journal.reads_commit_count += 1;
+            } else {
+                if (journal.reads_repair_count == reads_repair_count_max) {
+                    journal.read_prepare_log(op, checksum, "waiting for IOP");
+                    callback(replica, null, null);
+                    return;
+                }
+                journal.reads_repair_count += 1;
+            }
+
+            assert(journal.reads_repair_count <= reads_repair_count_max);
+            assert(journal.reads_commit_count <= reads_commit_count_max);
+
+            const read = journal.reads.acquire().?;
 
             read.* = .{
                 .journal = journal,
@@ -801,17 +832,24 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const journal = read.journal;
             const replica = @fieldParentPtr(Replica, "journal", journal);
             const op = read.op;
+            const callback = read.callback;
             const checksum = read.checksum;
+            const destination_replica = read.destination_replica;
+            const message = read.message;
+            defer replica.message_bus.unref(message);
+
             assert(journal.status == .recovered);
 
-            defer {
-                replica.message_bus.unref(read.message);
-                journal.reads.release(read);
+            if (destination_replica == null) {
+                journal.reads_commit_count -= 1;
+            } else {
+                journal.reads_repair_count -= 1;
             }
+            journal.reads.release(read);
 
             if (op > replica.op) {
                 journal.read_prepare_log(op, checksum, "beyond replica.op");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
@@ -819,7 +857,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const checksum_match = journal.prepare_checksums[journal.slot_for_op(op).index] == checksum;
             if (!checksum_inhabited or !checksum_match) {
                 journal.read_prepare_log(op, checksum, "prepare changed during read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
@@ -829,19 +867,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // * The in-memory header is reserved+faulty; the read was via `prepare_checksums`
             const slot = journal.slot_with_op_and_checksum(op, checksum);
 
-            if (!read.message.header.valid_checksum()) {
+            if (!message.header.valid_checksum()) {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
                 }
 
                 journal.read_prepare_log(op, checksum, "corrupt header after read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
-            assert(read.message.header.invalid() == null);
+            assert(message.header.invalid() == null);
 
-            if (read.message.header.cluster != replica.cluster) {
+            if (message.header.cluster != replica.cluster) {
                 // This could be caused by a misdirected read or write.
                 // Though when a prepare spans multiple sectors, a misdirected read/write will
                 // likely manifest as a checksum failure instead.
@@ -851,11 +889,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
 
                 journal.read_prepare_log(op, checksum, "wrong cluster");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
-            if (read.message.header.op != op) {
+            if (message.header.op != op) {
                 // Possible causes:
                 // * The prepare was rewritten since the read began.
                 // * Misdirected read/write.
@@ -870,31 +908,31 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(slot == null);
 
                 journal.read_prepare_log(op, checksum, "op changed during read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
-            if (read.message.header.checksum != checksum) {
+            if (message.header.checksum != checksum) {
                 // This can also be caused by a misdirected read/write.
                 assert(slot == null);
 
                 journal.read_prepare_log(op, checksum, "checksum changed during read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
-            if (!read.message.header.valid_checksum_body(read.message.body())) {
+            if (!message.header.valid_checksum_body(message.body())) {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
                 }
 
                 journal.read_prepare_log(op, checksum, "corrupt body after read");
-                read.callback(replica, null, null);
+                callback(replica, null, null);
                 return;
             }
 
-            read.callback(replica, read.message, read.destination_replica);
+            callback(replica, message, destination_replica);
         }
 
         fn read_prepare_log(journal: *Journal, op: u64, checksum: ?u128, notice: []const u8) void {
@@ -942,7 +980,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
-            const chunk_read = journal.reads.acquire() orelse unreachable;
+            const chunk_read = journal.reads.acquire().?;
             chunk_read.* = .{
                 .journal = journal,
                 .completion = undefined,
@@ -1069,7 +1107,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const message = replica.message_bus.get_message();
             defer replica.message_bus.unref(message);
 
-            const read = journal.reads.acquire() orelse unreachable;
+            const read = journal.reads.acquire().?;
             read.* = .{
                 .journal = journal,
                 .completion = undefined,
@@ -1610,15 +1648,25 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             if (journal.has(header)) {
                 assert(journal.dirty.bit(slot));
+                maybe(journal.faulty.bit(slot));
                 // Do not clear any faulty bit for the same entry.
             } else {
                 // Overwriting a new op with an old op would be a correctness bug; it could cause a
                 // message to be uncommitted.
                 assert(journal.headers[slot.index].op <= header.op);
 
+                if (journal.headers[slot.index].command == .reserved) {
+                    // The WAL might have written/prepared this exact header before crashing —
+                    // leave the entry marked faulty because we cannot safely nack it.
+                    maybe(journal.faulty.bit(slot));
+                } else {
+                    // The WAL definitely did not hold this exact header, so it is safe to reset the
+                    // faulty bit + nack this header.
+                    journal.faulty.clear(slot);
+                }
+
                 journal.headers[slot.index] = header.*;
                 journal.dirty.set(slot);
-                journal.faulty.clear(slot);
             }
         }
 

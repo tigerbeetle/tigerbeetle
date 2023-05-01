@@ -24,6 +24,8 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
+// TODO Test grid corruption
+
 const Key = packed struct {
     id: u64 align(@alignOf(u64)),
 
@@ -145,7 +147,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             });
             defer env.superblock.deinit(allocator);
 
-            env.grid = try Grid.init(allocator, &env.superblock);
+            env.grid = try Grid.init(allocator, .{
+                .superblock = &env.superblock,
+            });
             defer env.grid.deinit(allocator);
 
             env.node_pool = try NodePool.init(allocator, node_count);

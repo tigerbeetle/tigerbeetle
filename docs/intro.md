@@ -67,7 +67,7 @@ To understand TigerBeetle's data model, see:
 
 * [Watch our talks, listen to our podcasts](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/TALKS.md)
 * [Read HISTORY.md](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/HISTORY.md)
-* [Read DESIGN.md](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/HISTORY.md)
+* [Read DESIGN.md](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/DESIGN.md)
 * [Read DEEP_DIVE.md](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/DEEP_DIVE.md)
 * [Read TIGER_STYLE.md](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/TIGER_STYLE.md)
 * [Read HACKING.md](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/HACKING.md)

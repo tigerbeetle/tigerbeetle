@@ -1,10 +1,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const log = std.log.scoped(.state_machine);
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const log = std.log.scoped(.state_machine);
+const GrooveType = @import("../lsm/groove.zig").GrooveType;
+const ForestType = @import("../lsm/forest.zig").ForestType;
 
 pub fn StateMachineType(
     comptime Storage: type,
@@ -28,39 +30,79 @@ pub fn StateMachineType(
             echo = config.vsr_operations_reserved + 0,
         };
 
-        pub const Options = struct {};
+        pub const Options = struct {
+            lsm_forest_node_count: u32,
+        };
+
+        const Forest = ForestType(Storage, .{ .things = ThingGroove });
+
+        const ThingGroove = GrooveType(
+            Storage,
+            Thing,
+            .{
+                .value_count_max = .{
+                    .timestamp = config.lsm_batch_multiple,
+                    .id = config.lsm_batch_multiple,
+                    .value = config.lsm_batch_multiple,
+                },
+                .ignored = &[_][]const u8{},
+                .derived = .{},
+            },
+        );
+
+        const Thing = extern struct {
+            timestamp: u64,
+            value: u64,
+            id: u128,
+        };
 
         options: Options,
-        grid: *Grid,
-        grid_block: Grid.BlockPtr,
-        grid_write: Grid.Write = undefined,
+        forest: Forest,
+
         prepare_timestamp: u64 = 0,
         commit_timestamp: u64 = 0,
 
+        prefetch_context: ThingGroove.PrefetchContext = undefined,
         callback: ?fn (state_machine: *StateMachine) void = null,
 
         pub fn init(allocator: std.mem.Allocator, grid: *Grid, options: Options) !StateMachine {
-            const grid_block = try allocator.alignedAlloc(
-                u8,
-                constants.sector_size,
-                constants.block_size,
+            var forest = try Forest.init(
+                allocator,
+                grid,
+                options.lsm_forest_node_count,
+                .{
+                    .things = .{
+                        .prefetch_entries_max = 1,
+                        .tree_options_object = .{ .cache_entries_max = 2048 },
+                        .tree_options_id = .{ .cache_entries_max = 2048 },
+                        .tree_options_index = .{ .value = .{} },
+                    },
+                },
             );
-            errdefer allocator.free(grid_block);
-            std.mem.set(u8, grid_block, 0);
+            errdefer forest.deinit(allocator);
 
             return StateMachine{
                 .options = options,
-                .grid = grid,
-                .grid_block = grid_block[0..constants.block_size],
+                .forest = forest,
             };
         }
 
         pub fn deinit(state_machine: *StateMachine, allocator: std.mem.Allocator) void {
-            allocator.free(state_machine.grid_block);
+            state_machine.forest.deinit(allocator);
         }
 
-        // TODO Grid.next_tick
         pub fn open(state_machine: *StateMachine, callback: fn (*StateMachine) void) void {
+            assert(state_machine.callback == null);
+
+            state_machine.callback = callback;
+            state_machine.forest.open(open_callback);
+        }
+
+        fn open_callback(forest: *Forest) void {
+            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
+            const callback = state_machine.callback.?;
+            state_machine.callback = null;
+
             callback(state_machine);
         }
 
@@ -86,7 +128,21 @@ pub fn StateMachineType(
             _ = operation;
             _ = input;
 
-            state_machine.next_tick(callback);
+            assert(state_machine.callback == null);
+            state_machine.callback = callback;
+
+            // TODO(Snapshots) Pass in the target snapshot.
+            state_machine.forest.grooves.things.prefetch_setup(null);
+            state_machine.forest.grooves.things.prefetch_enqueue(123);
+            state_machine.forest.grooves.things.prefetch(prefetch_callback, &state_machine.prefetch_context);
+        }
+
+        fn prefetch_callback(completion: *ThingGroove.PrefetchContext) void {
+            const state_machine = @fieldParentPtr(StateMachine, "prefetch_context", completion);
+            const callback = state_machine.callback.?;
+            state_machine.callback = null;
+
+            callback(state_machine);
         }
 
         pub fn commit(
@@ -98,69 +154,63 @@ pub fn StateMachineType(
             input: []const u8,
             output: []u8,
         ) usize {
-            _ = state_machine;
             _ = client;
-            _ = timestamp;
-            _ = input;
-            _ = output;
             assert(op != 0);
 
             switch (operation) {
                 .reserved, .root => unreachable,
                 .register => return 0,
                 .echo => {
+                    const thing = state_machine.forest.grooves.things.get(123);
+                    const key: u64 = if (thing) |t| t.timestamp else timestamp;
+
+                    state_machine.forest.grooves.things.put(&.{
+                        .timestamp = key,
+                        .id = 123,
+                        .value = @truncate(u64, vsr.checksum(input)),
+                    });
+
                     stdx.copy_disjoint(.inexact, u8, output, input);
                     return input.len;
                 },
             }
         }
 
-        // TODO(Grid Recovery): Actually write blocks so that this state machine can be used
-        // to test grid recovery.
         pub fn compact(
             state_machine: *StateMachine,
             callback: fn (*StateMachine) void,
             op: u64,
         ) void {
-            _ = op;
-            state_machine.next_tick(callback);
+            assert(op != 0);
+            assert(state_machine.callback == null);
+
+            state_machine.callback = callback;
+            state_machine.forest.compact(compact_callback, op);
+        }
+
+        fn compact_callback(forest: *Forest) void {
+            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
+            const callback = state_machine.callback.?;
+            state_machine.callback = null;
+
+            callback(state_machine);
         }
 
         pub fn checkpoint(
             state_machine: *StateMachine,
             callback: fn (*StateMachine) void,
         ) void {
-            state_machine.next_tick(callback);
-        }
-
-        // TODO Replace with Grid.next_tick()
-        fn next_tick(state_machine: *StateMachine, callback: fn (*StateMachine) void) void {
-            // TODO This is a hack to defer till the next tick; use Grid.next_tick instead.
-            var free_set = state_machine.grid.superblock.free_set;
-            const reservation = free_set.reserve(1).?;
-            defer free_set.forfeit(reservation);
-
-            const address = free_set.acquire(reservation).?;
-            const header = std.mem.bytesAsValue(
-                vsr.Header,
-                state_machine.grid_block[0..@sizeOf(vsr.Header)],
-            );
-            header.op = address;
-
             assert(state_machine.callback == null);
+
             state_machine.callback = callback;
-            state_machine.grid.write_block(
-                next_tick_callback,
-                &state_machine.grid_write,
-                &state_machine.grid_block,
-                address,
-            );
+            state_machine.forest.checkpoint(checkpoint_callback);
         }
 
-        fn next_tick_callback(write: *Grid.Write) void {
-            const state_machine = @fieldParentPtr(StateMachine, "grid_write", write);
+        fn checkpoint_callback(forest: *Forest) void {
+            const state_machine = @fieldParentPtr(StateMachine, "forest", forest);
             const callback = state_machine.callback.?;
             state_machine.callback = null;
+
             callback(state_machine);
         }
     };

@@ -129,7 +129,7 @@ pub fn main() !void {
             .faulty_client_replies = replica_count > 1,
         },
         .state_machine = switch (state_machine) {
-            .testing => .{},
+            .testing => .{ .lsm_forest_node_count = 4096 },
             .accounting => .{
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = if (random.boolean()) 0 else 2048,
@@ -235,6 +235,8 @@ pub fn main() !void {
         simulator.tick();
         if (simulator.done()) break;
     } else {
+        output.info("no liveness, final cluster state:", .{});
+        simulator.cluster.log_cluster();
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
