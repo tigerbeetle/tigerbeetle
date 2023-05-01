@@ -81,10 +81,14 @@ fn run_fuzz(
     });
     defer superblock_verify.deinit(allocator);
 
-    var grid = try Grid.init(allocator, &superblock);
+    var grid = try Grid.init(allocator, .{
+        .superblock = &superblock,
+    });
     defer grid.deinit(allocator);
 
-    var grid_verify = try Grid.init(allocator, &superblock_verify);
+    var grid_verify = try Grid.init(allocator, .{
+        .superblock = &superblock_verify,
+    });
     defer grid_verify.deinit(allocator);
 
     var env = try Environment.init(allocator, .{
@@ -464,7 +468,9 @@ const Environment = struct {
             );
 
             test_grid.deinit(env.allocator);
-            test_grid.* = try Grid.init(env.allocator, test_superblock);
+            test_grid.* = try Grid.init(env.allocator, .{
+                .superblock = test_superblock,
+            });
 
             test_manifest_log.deinit(env.allocator);
             test_manifest_log.* = try ManifestLog.init(

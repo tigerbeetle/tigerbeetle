@@ -106,7 +106,9 @@ const Environment = struct {
             .storage_size_limit = constants.storage_size_max,
         });
 
-        env.grid = try Grid.init(allocator, &env.superblock);
+        env.grid = try Grid.init(allocator, .{
+            .superblock = &env.superblock,
+        });
 
         env.forest = undefined;
         env.checkpoint_op = null;

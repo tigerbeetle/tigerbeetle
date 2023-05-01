@@ -1397,7 +1397,9 @@ const TestContext = struct {
         ctx.superblock.opened = true;
         ctx.superblock.working.vsr_state.commit_min = 0;
 
-        ctx.grid = try Grid.init(allocator, &ctx.superblock);
+        ctx.grid = try Grid.init(allocator, .{
+            .superblock = &ctx.superblock,
+        });
         errdefer ctx.grid.deinit(allocator);
 
         ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{

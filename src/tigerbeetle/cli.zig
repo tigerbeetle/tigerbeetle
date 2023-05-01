@@ -203,12 +203,18 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
             };
         },
         .format => {
+            const replica_count_parsed = parse_replica_count(
+                replica_count orelse fatal("required: --replica-count", .{}),
+            );
             return Command{
                 .format = .{
                     .args_allocated = args_allocated,
                     .cluster = parse_cluster(cluster orelse fatal("required: --cluster", .{})),
-                    .replica = parse_replica(replica orelse fatal("required: --replica", .{})),
-                    .replica_count = parse_replica_count(replica_count orelse fatal("required: --replica-count", .{})),
+                    .replica = parse_replica(
+                        replica_count_parsed,
+                        replica orelse fatal("required: --replica", .{}),
+                    ),
+                    .replica_count = replica_count_parsed,
                     .path = path orelse fatal("required: <path>", .{}),
                 },
             };
@@ -399,16 +405,16 @@ fn parse_size_to_count(comptime T: type, string_opt: ?[]const u8, comptime defau
     return result;
 }
 
-fn parse_replica(raw_replica: []const u8) u8 {
+fn parse_replica(replica_count: u8, raw_replica: []const u8) u8 {
     comptime assert(constants.nodes_max <= std.math.maxInt(u8));
     const replica = fmt.parseUnsigned(u8, raw_replica, 10) catch |err| switch (err) {
         error.Overflow => fatal("--replica: value exceeds an 8-bit unsigned integer", .{}),
         error.InvalidCharacter => fatal("--replica: value contains an invalid character", .{}),
     };
-    if (replica >= constants.nodes_max) {
+    if (replica >= constants.standbys_max + replica_count) {
         fatal(
             "--replica: value is too large ({}), at most {} is allowed",
-            .{ replica, constants.nodes_max - 1 },
+            .{ replica, constants.standbys_max + replica_count - 1 },
         );
     }
     return replica;
