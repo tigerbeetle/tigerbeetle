@@ -555,10 +555,9 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
 
             assert(grid.superblock.opened);
-            // We *could* try to read the block even when it is free — if we recently release it,
+            // We try to read the block even when it is free — if we recently released it,
             // it might be found on disk anyway.
-            // But what would preclude the TestStorage's "memory_written.isSet" assertion.
-            assert(!grid.superblock.free_set.is_free(address));
+            maybe(grid.superblock.free_set.is_free(address));
             // The caller will not attempt to help another replica repair a block that
             // we are already trying to repair ourselves.
             assert(!grid.faulty(address, null));

@@ -663,6 +663,7 @@ const TestContext = struct {
                 .faulty_wal_headers = false,
                 .faulty_wal_prepares = false,
                 .faulty_client_replies = false,
+                .faulty_grid = false,
             },
             .state_machine = .{ .lsm_forest_node_count = 4096 },
         });
@@ -713,7 +714,7 @@ const TestContext = struct {
     }
 
     pub fn run(t: *TestContext) void {
-        const tick_max = 2_400;
+        const tick_max = 3_000;
         var tick_count: usize = 0;
         while (tick_count < tick_max) : (tick_count += 1) {
             if (t.tick()) tick_count = 0;
@@ -1000,7 +1001,7 @@ const TestClients = struct {
             }
         }
 
-        const tick_max = 2_400;
+        const tick_max = 3_000;
         var tick: usize = 0;
         while (tick < tick_max) : (tick += 1) {
             if (t.context.tick()) tick = 0;

@@ -129,7 +129,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             );
             errdefer network.deinit();
 
-            // TODO(Zig) @returnAddress()
             var storage_fault_atlas = try allocator.create(StorageFaultAtlas);
             errdefer allocator.destroy(storage_fault_atlas);
 
