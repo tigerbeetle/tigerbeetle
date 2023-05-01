@@ -13,7 +13,13 @@ jobs:
       - uses: actions/checkout@v3
 
       # Explicitly pass in the sha, even though it's very likely to be HEAD.
-      - run: hub release create --prerelease --message "Automated build. Do not use in production." -t ${{ github.sha }} "release-$(date +%Y%m%d.%H%M)"
+      - run: |
+          export VERSION="$(./scripts/next_version.sh)"
+          hub release create \
+            --prerelease \
+            --message "$(./scripts/generate_release_message.sh $VERSION)" \
+            -t ${{ github.sha }} \
+            "$VERSION"
 
         # Propagate token into environment
         env:
