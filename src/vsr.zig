@@ -128,7 +128,7 @@ pub const Command = enum(u8) {
 
     eviction,
 
-    request_block,
+    request_blocks,
     block,
 };
 
@@ -381,10 +381,10 @@ pub const Header = extern struct {
             .request_headers => self.invalid_request_headers(),
             .request_prepare => self.invalid_request_prepare(),
             .request_reply => self.invalid_request_reply(),
-            .request_block => null, // TODO
+            .request_blocks => self.invalid_request_blocks(),
             .headers => self.invalid_headers(),
             .eviction => self.invalid_eviction(),
-            .block => null, // TODO
+            .block => self.invalid_block(),
         };
     }
 
@@ -681,6 +681,23 @@ pub const Header = extern struct {
         return null;
     }
 
+    fn invalid_request_blocks(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_blocks);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.request != 0) return "request != 0";
+        if (self.op != 0) return "op != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
+        if ((self.size - @sizeOf(Header)) % @sizeOf(BlockRequest) != 0) {
+            return "size multiple invalid";
+        }
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
     fn invalid_headers(self: *const Header) ?[]const u8 {
         assert(self.command == .headers);
         if (self.parent != 0) return "parent != 0";
@@ -704,6 +721,18 @@ pub const Header = extern struct {
         if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_block(self: *const Header) ?[]const u8 {
+        assert(self.command == .block);
+        if (self.parent != 0) return "parent != 0";
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.op == 0) return "op == 0"; // address ≠ 0
+        if (self.replica != 0) return "replica != 0";
+        if (self.operation == .reserved) return "operation == .reserved";
         return null;
     }
 
@@ -752,6 +781,17 @@ pub const Header = extern struct {
         header.set_checksum();
         assert(header.invalid() == null);
         return header;
+    }
+};
+
+pub const BlockRequest = extern struct {
+    block_checksum: u128,
+    block_address: u64,
+    reserved: [8]u8 = [_]u8{0} ** 8,
+
+    comptime {
+        assert(@sizeOf(BlockRequest) == 32);
+        assert(@bitSizeOf(BlockRequest) == @sizeOf(BlockRequest) * 8);
     }
 };
 
