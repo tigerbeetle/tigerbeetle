@@ -663,6 +663,7 @@ const TestContext = struct {
                 .faulty_wal_headers = false,
                 .faulty_wal_prepares = false,
                 .faulty_client_replies = false,
+                .faulty_grid = false,
             },
             .state_machine = .{ .lsm_forest_node_count = 4096 },
         });
