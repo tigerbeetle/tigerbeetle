@@ -371,7 +371,7 @@ const superblock_trailer_manifest_size_max = blk: {
 };
 
 const superblock_trailer_free_set_size_max = blk: {
-    const encode_size_max = SuperBlockFreeSet.encode_size_max(block_count_max);
+    const encode_size_max = SuperBlockFreeSet.encode_size_max(grid_blocks_max);
     assert(encode_size_max > 0);
 
     break :blk vsr.sector_ceil(encode_size_max);
@@ -389,7 +389,7 @@ pub const data_file_size_min = blk: {
 };
 
 /// The maximum number of blocks in the grid.
-const block_count_max = blk: {
+pub const grid_blocks_max = blk: {
     var size = constants.storage_size_max;
     size -= constants.superblock_copies * @sizeOf(SuperBlockHeader);
     size -= constants.superblock_copies * superblock_trailer_client_sessions_size_max;
@@ -411,8 +411,8 @@ const block_count_max = blk: {
 };
 
 comptime {
-    assert(block_count_max > 0);
-    assert(block_count_max * constants.block_size + data_file_size_min <= constants.storage_size_max);
+    assert(grid_blocks_max > 0);
+    assert(grid_blocks_max * constants.block_size + data_file_size_min <= constants.storage_size_max);
 }
 
 /// This table shows the sequence number progression of the SuperBlock's headers.
@@ -546,7 +546,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 constants.block_size * FreeSet.shard_bits,
             ));
             const block_count_limit = shard_count_limit * FreeSet.shard_bits;
-            assert(block_count_limit <= block_count_max);
+            assert(block_count_limit <= grid_blocks_max);
 
             const a = try allocator.allocAdvanced(SuperBlockHeader, constants.sector_size, 1, .exact);
             errdefer allocator.free(a);
@@ -1430,7 +1430,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 log.debug("open: read_free_set: acquired blocks: {}/{}/{}", .{
                     superblock.free_set.count_acquired(),
                     superblock.block_count_limit,
-                    block_count_max,
+                    grid_blocks_max,
                 });
 
                 superblock.verify_manifest_blocks_are_acquired_in_free_set();

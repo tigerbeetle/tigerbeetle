@@ -127,6 +127,9 @@ pub fn main() !void {
             .faulty_wal_headers = replica_count > 1,
             .faulty_wal_prepares = replica_count > 1,
             .faulty_client_replies = replica_count > 1,
+            // TODO State sync: Enable faults when grid repair can fall back to state sync.
+            // (Without state sync it can get stuck.)
+            .faulty_grid = false,
         },
         .state_machine = switch (state_machine) {
             .testing => .{ .lsm_forest_node_count = 4096 },
