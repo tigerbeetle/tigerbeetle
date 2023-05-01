@@ -71,6 +71,9 @@ const ConfigProcess = struct {
     clock_synchronization_window_max_ms: u64 = 20000,
     grid_iops_read_max: u64 = 16,
     grid_iops_write_max: u64 = 16,
+    grid_repair_request_max: usize = 4,
+    grid_repair_reads_max: usize = 4,
+    grid_repair_writes_max: usize = 1,
     aof_record: bool = false,
     aof_recovery: bool = false,
 };
