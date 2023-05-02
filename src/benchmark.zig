@@ -50,7 +50,7 @@ pub fn main() !void {
     var transfer_count_per_second: usize = 1_000_000;
     var print_batch_timings = false;
     var enable_statsd = false;
-    var transfer_id_mode: TransferIdMode = .reverse_sequential;
+    var transfer_id_mode: TransferIdMode = .random;
 
     var addresses = try allocator.alloc(std.net.Address, 1);
     addresses[0] = try std.net.Address.parseIp4("127.0.0.1", constants.port);
