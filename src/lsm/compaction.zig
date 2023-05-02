@@ -43,6 +43,7 @@ const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
 const GridType = @import("grid.zig").GridType;
+const BlockType = @import("grid.zig").BlockType;
 const alloc_block = @import("grid.zig").alloc_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
@@ -700,12 +701,18 @@ pub fn CompactionType(
                         .filter => &compaction.table_builder.filter_block,
                         .index => &compaction.table_builder.index_block,
                     };
+                    const block_type = switch (write_block_field) {
+                        .data => BlockType.data,
+                        .filter => BlockType.filter,
+                        .index => BlockType.index,
+                    };
                     compaction.state.writing.pending += 1;
                     compaction.context.grid.write_block(
                         on_write,
                         write,
                         block,
                         Table.block_address(block.*),
+                        block_type,
                     );
                 }
 

@@ -73,6 +73,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             repair: bool,
             block: *BlockPtr,
+            block_type: BlockType,
 
             /// Link for the Grid.write_queue linked list.
             next: ?*Write = null,
@@ -345,6 +346,7 @@ pub fn GridType(comptime Storage: type) type {
             write: *Grid.Write,
             block: *BlockPtr,
             address: u64,
+            block_type: BlockType,
         ) void {
             assert(address > 0);
             assert(grid.writing(address, block.*) == .none);
@@ -364,6 +366,7 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .repair = false,
                 .block = block,
+                .block_type = block_type,
             };
 
             const iop = grid.write_iops.acquire() orelse {
@@ -443,10 +446,15 @@ pub fn GridType(comptime Storage: type) type {
             assert(!grid.read_resolving);
 
             // Insert the write block into the cache, and give the evicted block to the writer.
-            const cache_index = grid.cache.insert_index(&completed_write.address);
-            const cache_block = &grid.cache_blocks[cache_index];
-            std.mem.swap(BlockPtr, cache_block, completed_write.block);
-            std.mem.set(u8, completed_write.block.*, 0);
+            var cache_block: *BlockPtr = undefined;
+            if (completed_write.block_type != .data) {
+                const cache_index = grid.cache.insert_index(&completed_write.address);
+                cache_block = &grid.cache_blocks[cache_index];
+                std.mem.swap(BlockPtr, cache_block, completed_write.block);
+                std.mem.set(u8, completed_write.block.*, 0);
+            } else {
+                std.mem.set(u8, completed_write.block.*, 0);
+            }
 
             const write_iop_index = grid.write_iops.index(iop);
             tracer.end(

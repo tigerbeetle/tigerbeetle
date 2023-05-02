@@ -103,7 +103,7 @@ cd tigerbeetle
 git checkout ${var.git_ref}
 ./scripts/install_zig.sh
 
-cmd="./zig/zig build benchmark -Drelease-safe=true -- --account-count 10000 --transfer-count 100000000 --transfer-count-per-second 1000000 --addresses ${var.addresses} --statsd true --print-batch-timings true --transfer-id-mode random"
+cmd="./zig/zig build benchmark -Drelease-safe=true -- --account-count 10000 --transfer-count 100000000 --transfer-count-per-second 1000000 --addresses ${var.addresses} --statsd true --print-batch-timings true"
 echo "TigerBeetle Benchmark Command: ${cmd}"
 $cmd
 
