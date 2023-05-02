@@ -28,6 +28,12 @@ const transfer_count_per_batch = @divExact(
     @sizeOf(tb.Transfer),
 );
 
+const TransferIdMode = enum {
+    sequential,
+    reverse_sequential,
+    random,
+};
+
 pub fn main() !void {
     const stderr = std.io.getStdErr().writer();
 
@@ -44,6 +50,7 @@ pub fn main() !void {
     var transfer_count_per_second: usize = 1_000_000;
     var print_batch_timings = false;
     var enable_statsd = false;
+    var transfer_id_mode: TransferIdMode = .reverse_sequential;
 
     var addresses = try allocator.alloc(std.net.Address, 1);
     addresses[0] = try std.net.Address.parseIp4("127.0.0.1", constants.port);
@@ -66,6 +73,7 @@ pub fn main() !void {
             (try parse_arg_addresses(allocator, &args, arg, "--addresses", &addresses)) or
             (try parse_arg_bool(allocator, &args, arg, "--print-batch-timings", &print_batch_timings)) or
             (try parse_arg_bool(allocator, &args, arg, "--statsd", &enable_statsd)) or
+            (try parse_arg_enum(TransferIdMode, allocator, &args, arg, "--transfer-id-mode", &transfer_id_mode)) or
             panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
     }
 
@@ -115,6 +123,7 @@ pub fn main() !void {
         .transfer_count_per_second = transfer_count_per_second,
         .transfer_arrival_rate_ns = transfer_arrival_rate_ns,
         .transfer_start_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count_per_batch),
+        .transfer_id_mode = transfer_id_mode,
         .batch_index = 0,
         .transfers_sent = 0,
         .transfer_index = 0,
@@ -195,6 +204,34 @@ fn parse_arg_bool(
     return true;
 }
 
+fn parse_arg_enum(
+    comptime Enum: type,
+    allocator: std.mem.Allocator,
+    args: *std.process.ArgIterator,
+    arg: []const u8,
+    arg_name: []const u8,
+    arg_value: *Enum,
+) !bool {
+    if (!std.mem.eql(u8, arg, arg_name)) return false;
+
+    const fields = @typeInfo(Enum).Enum.fields;
+
+    const enum_string_or_err = args.next(allocator) orelse
+        panic("Expected an argument to {s}", .{arg_name});
+    const enum_string = try enum_string_or_err;
+
+    inline for (fields) |field| {
+        if (std.mem.eql(u8, enum_string, field.name)) {
+            arg_value.* = @intToEnum(Enum, field.value);
+            break;
+        }
+    } else {
+        panic("Invalid argument {s} for {}.", .{ arg_name, Enum });
+    }
+
+    return true;
+}
+
 const Benchmark = struct {
     io: *IO,
     message_pool: *MessagePool,
@@ -214,6 +251,7 @@ const Benchmark = struct {
     transfer_count_per_second: usize,
     transfer_arrival_rate_ns: usize,
     transfer_start_ns: std.ArrayList(u64),
+    transfer_id_mode: TransferIdMode,
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
@@ -290,10 +328,16 @@ const Benchmark = struct {
             if (debit_account_index == credit_account_index) {
                 credit_account_index = (credit_account_index + 1) % b.account_count;
             }
+            const id = switch (b.transfer_id_mode) {
+                .sequential => b.transfer_index + 1,
+                .reverse_sequential => @bitReverse(u128, b.transfer_index + 1),
+                .random => std.crypto.random.int(u128),
+            };
+
             assert(debit_account_index != credit_account_index);
             b.batch_transfers.appendAssumeCapacity(.{
                 // Reverse the bits to stress non-append-only index for `id`.
-                .id = @bitReverse(u128, b.transfer_index + 1),
+                .id = id,
                 .debit_account_id = @bitReverse(u128, debit_account_index + 1),
                 .credit_account_id = @bitReverse(u128, credit_account_index + 1),
                 .user_data = random.int(u128),
