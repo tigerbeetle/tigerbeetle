@@ -98,11 +98,12 @@ const prepares_size = constants.journal_size_prepares;
 pub const write_ahead_log_zone_size = headers_size + prepares_size;
 
 /// Limit on the number of repair reads.
-/// This keeps at least one commit read available, so that an assymetrically
+/// This keeps some reads available for commit path, so that an asymmetrically
 /// partitioned replica cannot starve the cluster with request_prepare messages.
-const reads_repair_count_max: u6 = constants.journal_iops_read_max - 1;
-/// We need at most one read on the commit path, so this is used only for asserting.
-const reads_commit_count_max: u6 = 1;
+const reads_repair_count_max: u6 = constants.journal_iops_read_max - reads_commit_count_max;
+/// We need at most two reads on commit path: one for commit_journal, and one for
+/// primary_repair_pipeline_read.
+const reads_commit_count_max: u6 = 2;
 
 comptime {
     assert(slot_count > 0);
