@@ -161,6 +161,7 @@ pub fn ReplicaType(
         grid_reads: IOPS(BlockRead, constants.grid_repair_reads_max) = .{},
         grid_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_write_blocks: [constants.grid_repair_writes_max]Grid.BlockPtr,
+        grid_read_fault_next_tick: Grid.NextTick = undefined,
 
         opened: bool,
 
@@ -2081,7 +2082,7 @@ pub fn ReplicaType(
                 };
 
                 self.grid.read_block_repair(
-                    on_block_read_repair,
+                    on_request_blocks_read_repair,
                     &read.read,
                     request.block_address,
                     request.block_checksum,
@@ -2089,8 +2090,46 @@ pub fn ReplicaType(
             }
         }
 
+        fn on_request_blocks_read_repair(grid_read: *Grid.Read, block_: ?Grid.BlockPtrConst) void {
+            const read = @fieldParentPtr(BlockRead, "read", grid_read);
+            const self = read.replica;
+            defer self.grid_reads.release(read);
+
+            assert(read.destination != self.replica);
+
+            const block = block_ orelse {
+                log.debug("{}: on_request_blocks: block not found " ++
+                    "(address={} checksum={} destination={})", .{
+                    self.replica,
+                    grid_read.address,
+                    grid_read.checksum,
+                    read.destination,
+                });
+                return;
+            };
+
+            log.debug("{}: on_request_blocks: block found " ++
+                "(address={} checksum={} destination={})", .{
+                self.replica,
+                grid_read.address,
+                grid_read.checksum,
+                read.destination,
+            });
+
+            var message = self.message_bus.get_message();
+            defer self.message_bus.unref(message);
+
+            stdx.copy_disjoint(.inexact, u8, message.buffer, block);
+            assert(message.header.command == .block);
+            assert(message.header.op == grid_read.address);
+            assert(message.header.checksum == grid_read.checksum);
+            assert(message.header.size <= constants.block_size);
+
+            self.send_message_to_replica(read.destination, message);
+        }
+
         fn on_block(self: *Self, message: *const Message) void {
-            maybe(!self.state_machine_opened);
+            maybe(self.state_machine_opened);
             assert(message.header.command == .block);
             assert(message.header.size <= constants.block_size);
             assert(message.header.op > 0); // op holds the block's address.
@@ -2148,44 +2187,6 @@ pub fn ReplicaType(
                 block,
                 message.header.op,
             );
-        }
-
-        fn on_block_read_repair(grid_read: *Grid.Read, block_: ?Grid.BlockPtrConst) void {
-            const read = @fieldParentPtr(BlockRead, "read", grid_read);
-            const self = read.replica;
-            defer self.grid_reads.release(read);
-
-            assert(read.destination != self.replica);
-
-            const block = block_ orelse {
-                log.debug("{}: on_request_blocks: block not found " ++
-                    "(address={} checksum={} destination={})", .{
-                    self.replica,
-                    grid_read.address,
-                    grid_read.checksum,
-                    read.destination,
-                });
-                return;
-            };
-
-            log.debug("{}: on_request_blocks: block found " ++
-                "(address={} checksum={} destination={})", .{
-                self.replica,
-                grid_read.address,
-                grid_read.checksum,
-                read.destination,
-            });
-
-            var message = self.message_bus.get_message();
-            defer self.message_bus.unref(message);
-
-            stdx.copy_disjoint(.inexact, u8, message.buffer, block);
-            assert(message.header.command == .block);
-            assert(message.header.op == grid_read.address);
-            assert(message.header.checksum == grid_read.checksum);
-            assert(message.header.size <= constants.block_size);
-
-            self.send_message_to_replica(read.destination, message);
         }
 
         fn on_block_write_repair(grid_write: *Grid.Write) void {
@@ -2450,52 +2451,10 @@ pub fn ReplicaType(
         fn on_grid_repair_message_timeout(self: *Self) void {
             assert(self.grid_repair_message_timeout.ticking);
             assert(!self.grid.read_faulty_queue.empty());
-            maybe(!self.state_machine_opened);
+            maybe(self.state_machine_opened);
 
             self.grid_repair_message_timeout.reset();
-
-            var message = self.message_bus.get_message();
-            defer self.message_bus.unref(message);
-
-            var requests_count: usize = 0;
-            var requests = std.mem.bytesAsSlice(
-                vsr.BlockRequest,
-                message.buffer[@sizeOf(Header)..],
-            );
-
-            var reads = self.grid.read_faulty_queue.peek();
-            while (reads) |read| : (reads = read.next) {
-                assert(read.address > 0);
-                assert(!self.superblock.free_set.is_free(read.address));
-
-                log.debug("{}: on_grid_repair_message_timeout: request address={} checksum={}", .{
-                    self.replica,
-                    read.address,
-                    read.checksum,
-                });
-
-                requests[requests_count] = .{
-                    .block_checksum = read.checksum,
-                    .block_address = read.address,
-                };
-                requests_count += 1;
-
-                if (requests_count == constants.grid_repair_request_max) break;
-            }
-            assert(requests_count > 0);
-            assert(requests_count <= constants.grid_repair_request_max);
-
-            message.header.* = .{
-                .command = .request_blocks,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = self.view,
-                .size = @sizeOf(Header) + @intCast(u32, requests_count) * @sizeOf(vsr.BlockRequest),
-            };
-            message.header.set_checksum_body(message.body());
-            message.header.set_checksum();
-
-            self.send_message_to_replica(self.choose_any_other_replica(), message);
+            self.send_request_blocks();
         }
 
         fn primary_receive_do_view_change(self: *Self, message: *Message) void {
@@ -6978,6 +6937,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(!self.grid.read_faulty_queue.empty());
             assert(!self.superblock.free_set.is_free(read.address));
+            maybe(self.state_machine_opened);
 
             log.warn("{}: on_grid_read_fault: address={} checksum={} block_type={}", .{
                 self.replica,
@@ -6992,8 +6952,71 @@ pub fn ReplicaType(
                 assert(self.grid.read_faulty_queue.count == 1);
 
                 self.grid_repair_message_timeout.start();
-                self.on_grid_repair_message_timeout();
+                self.send_request_blocks();
+                self.grid.on_next_tick(
+                    on_grid_read_fault_next_tick,
+                    &self.grid_read_fault_next_tick,
+                );
             }
+        }
+
+        fn on_grid_read_fault_next_tick(next_tick: *Grid.NextTick) void {
+            const self = @fieldParentPtr(Self, "grid_read_fault_next_tick", next_tick);
+            if (self.grid.read_faulty_queue.empty()) {
+                // Very unlikely, but possibly we wrote the block before next_tick fired.
+            } else {
+                self.send_request_blocks();
+            }
+        }
+
+        fn send_request_blocks(self: *Self) void {
+            assert(!self.solo());
+            assert(self.grid_repair_message_timeout.ticking);
+            assert(!self.grid.read_faulty_queue.empty());
+            maybe(self.state_machine_opened);
+
+            var message = self.message_bus.get_message();
+            defer self.message_bus.unref(message);
+
+            var requests_count: u32 = 0;
+            var requests = std.mem.bytesAsSlice(
+                vsr.BlockRequest,
+                message.buffer[@sizeOf(Header)..],
+            );
+
+            var reads = self.grid.read_faulty_queue.peek();
+            while (reads) |read| : (reads = read.next) {
+                assert(read.address > 0);
+                assert(!self.superblock.free_set.is_free(read.address));
+
+                log.debug("{}: send_request_blocks: request address={} checksum={}", .{
+                    self.replica,
+                    read.address,
+                    read.checksum,
+                });
+
+                requests[requests_count] = .{
+                    .block_checksum = read.checksum,
+                    .block_address = read.address,
+                };
+                requests_count += 1;
+
+                if (requests_count == constants.grid_repair_request_max) break;
+            }
+            assert(requests_count > 0);
+            assert(requests_count <= constants.grid_repair_request_max);
+
+            message.header.* = .{
+                .command = .request_blocks,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .size = @sizeOf(Header) + requests_count * @sizeOf(vsr.BlockRequest),
+            };
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
+
+            self.send_message_to_replica(self.choose_any_other_replica(), message);
         }
     };
 }
