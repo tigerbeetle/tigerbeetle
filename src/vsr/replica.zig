@@ -5123,15 +5123,10 @@ pub fn ReplicaType(
             }
 
             assert(self.status == .normal);
-            // After a view change, replicas send prepare_oks for uncommitted ops with older views:
+            // After a view change, replicas send prepare_oks for ops with older views.
             // However, we only send to the primary of the current view (see below where we send).
             assert(header.view <= self.view);
             assert(header.op <= self.op);
-
-            if (header.op <= self.commit_max) {
-                log.debug("{}: send_prepare_ok: not sending (committed)", .{self.replica});
-                return;
-            }
 
             if (self.journal.has_clean(header)) {
                 log.debug("{}: send_prepare_ok: op={} checksum={}", .{
