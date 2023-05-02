@@ -385,7 +385,7 @@ pub fn TableType(
             // There should not be more data blocks per filter block than there are data blocks:
             assert(filter.data_block_count_max <= data_block_count_max);
 
-            const filter_bytes_per_key = 2;
+            const filter_bytes_per_key = 1;
             assert(filter_block_count_max * filter.filter_size >=
                 data_block_count_max * data.block_value_count_max * filter_bytes_per_key);
 
