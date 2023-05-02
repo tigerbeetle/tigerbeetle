@@ -83,9 +83,10 @@ pub fn ReplicaType(
         const Clock = vsr.ClockType(Time);
 
         const BlockRead = struct {
-            read: Grid.Read,
+            read: Grid.ReadRepair,
             replica: *Self,
             destination: u8,
+            message: *Message,
         };
 
         const BlockWrite = struct {
@@ -875,6 +876,9 @@ pub fn ReplicaType(
             } else {
                 assert(self.commit_callback == null);
             }
+
+            var grid_reads = self.grid_reads.iterate();
+            while (grid_reads.next()) |read| self.message_bus.unref(read.message);
 
             for (self.grid_write_blocks) |block| allocator.free(block);
 
@@ -2075,29 +2079,37 @@ pub fn ReplicaType(
                     request.block_checksum,
                 });
 
+                const reply = self.message_bus.get_message();
+                defer self.message_bus.unref(reply);
+
                 read.* = .{
                     .replica = self,
                     .destination = message.header.replica,
                     .read = undefined,
+                    .message = reply.ref(),
                 };
 
                 self.grid.read_block_repair(
                     on_request_blocks_read_repair,
                     &read.read,
+                    reply.buffer[0..constants.block_size],
                     request.block_address,
                     request.block_checksum,
                 );
             }
         }
 
-        fn on_request_blocks_read_repair(grid_read: *Grid.Read, block_: ?Grid.BlockPtrConst) void {
+        fn on_request_blocks_read_repair(grid_read: *Grid.ReadRepair, result: error{BlockNotFound}!void) void {
             const read = @fieldParentPtr(BlockRead, "read", grid_read);
             const self = read.replica;
-            defer self.grid_reads.release(read);
+            defer {
+                self.message_bus.unref(read.message);
+                self.grid_reads.release(read);
+            }
 
             assert(read.destination != self.replica);
 
-            const block = block_ orelse {
+            result catch {
                 log.debug("{}: on_request_blocks: block not found " ++
                     "(address={} checksum={} destination={})", .{
                     self.replica,
@@ -2116,16 +2128,12 @@ pub fn ReplicaType(
                 read.destination,
             });
 
-            var message = self.message_bus.get_message();
-            defer self.message_bus.unref(message);
+            assert(read.message.header.command == .block);
+            assert(read.message.header.op == grid_read.address);
+            assert(read.message.header.checksum == grid_read.checksum);
+            assert(read.message.header.size <= constants.block_size);
 
-            stdx.copy_disjoint(.inexact, u8, message.buffer, block);
-            assert(message.header.command == .block);
-            assert(message.header.op == grid_read.address);
-            assert(message.header.checksum == grid_read.checksum);
-            assert(message.header.size <= constants.block_size);
-
-            self.send_message_to_replica(read.destination, message);
+            self.send_message_to_replica(read.destination, read.message);
         }
 
         fn on_block(self: *Self, message: *const Message) void {
