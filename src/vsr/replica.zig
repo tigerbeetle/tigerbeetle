@@ -2601,19 +2601,22 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
 
             if (self.status == .normal and self.primary()) {
-                const prepare = self.pipeline.queue.pop_prepare().?;
+                {
+                    const prepare = self.pipeline.queue.pop_prepare().?;
+                    defer self.message_bus.unref(prepare.message);
+
+                    assert(prepare.message.header.command == .prepare);
+                    assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
+                    assert(prepare.message.header.op == self.commit_min);
+                    assert(prepare.message.header.op == self.commit_max);
+                }
+
                 if (self.pipeline.queue.pop_request()) |request| {
                     // Start preparing the next request in the queue (if any).
                     self.primary_pipeline_prepare(request);
                 }
 
                 assert(self.commit_min == self.commit_max);
-                assert(prepare.message.header.command == .prepare);
-                assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
-                assert(prepare.message.header.op == self.commit_min);
-                assert(prepare.message.header.op == self.commit_max);
-
-                self.message_bus.unref(prepare.message);
 
                 if (self.pipeline.queue.prepare_queue.head_ptr()) |next| {
                     assert(next.message.header.op == self.commit_min + 1);
@@ -4126,6 +4129,8 @@ pub fn ReplicaType(
             self.pipeline.queue.verify();
 
             const message = request.message;
+            defer self.message_bus.unref(message);
+
             assert(!self.ignore_request_message(message));
 
             log.debug("{}: primary_pipeline_next: request checksum={} client={}", .{
@@ -4625,7 +4630,7 @@ pub fn ReplicaType(
                 assert(prepare.header.parent == parent);
                 assert(self.journal.has(prepare.header));
 
-                pipeline_queue.push_prepare(prepare.ref());
+                pipeline_queue.push_prepare(prepare);
                 parent = prepare.header.checksum;
             }
             assert(self.commit_max + pipeline_queue.prepare_queue.count == self.op);
@@ -7338,7 +7343,7 @@ const PipelineQueue = struct {
             assert(pipeline.request_queue.empty());
         }
 
-        pipeline.prepare_queue.push_assume_capacity(.{ .message = message });
+        pipeline.prepare_queue.push_assume_capacity(.{ .message = message.ref() });
         if (constants.verify) pipeline.verify();
     }
 };
