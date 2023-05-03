@@ -179,7 +179,7 @@ pub fn GridType(comptime Storage: type) type {
         }) !Grid {
             // TODO Determine this at runtime based on runtime configured maximum
             // memory usage of tigerbeetle.
-            const cache_blocks_count = 1638400;
+            const cache_blocks_count = 1092266;
 
             const cache_blocks = try allocator.alloc(BlockPtr, cache_blocks_count);
             errdefer allocator.free(cache_blocks);
