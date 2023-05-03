@@ -20,6 +20,7 @@ const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const Storage = vsr.storage.Storage;
 const AOF = vsr.aof.AOF;
+const StatsD = vsr.statsd.StatsD;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
@@ -167,10 +168,17 @@ const Command = struct {
                 .configuration = args.addresses,
                 .io = &command.io,
             },
+            .statsd = if (true) &try StatsD.init(
+                allocator,
+                &command.io,
+                std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
+            ) else null,
         }) catch |err| switch (err) {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => |e| return e,
         };
+
+        try replica.statsd.?.emit_internal_counters();
 
         // Calculate how many bytes are allocated inside `arena`.
         // TODO This does not account for the fact that any allocations will be rounded up to the nearest page by `std.heap.page_allocator`.

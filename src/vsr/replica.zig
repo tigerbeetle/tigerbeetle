@@ -12,6 +12,7 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
+const StatsD = @import("../statsd.zig").StatsD;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -353,6 +354,7 @@ pub fn ReplicaType(
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
 
         aof: *AOF,
+        statsd: ?*StatsD,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -363,6 +365,7 @@ pub fn ReplicaType(
             aof: *AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
+            statsd: ?*StatsD,
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -417,6 +420,7 @@ pub fn ReplicaType(
                 .message_pool = options.message_pool,
                 .state_machine_options = options.state_machine_options,
                 .message_bus_options = options.message_bus_options,
+                .statsd = options.statsd,
             });
 
             // Disable all dynamic allocation from this point onwards.
@@ -579,6 +583,7 @@ pub fn ReplicaType(
             message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
+            statsd: ?*StatsD,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -663,6 +668,7 @@ pub fn ReplicaType(
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
                 .on_read_fault = on_grid_read_fault,
+                .statsd = options.statsd,
             });
             errdefer self.grid.deinit(allocator);
 
@@ -762,6 +768,7 @@ pub fn ReplicaType(
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
                 .aof = options.aof,
+                .statsd = options.statsd
             };
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={}", .{

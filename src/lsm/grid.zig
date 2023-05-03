@@ -12,6 +12,7 @@ const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 const stdx = @import("../stdx.zig");
+const StatsD = @import("../statsd.zig").StatsD;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
@@ -169,9 +170,12 @@ pub fn GridType(comptime Storage: type) type {
 
         on_read_fault: ?fn (*Grid, *Grid.Read) void,
 
+        statsd: ?*StatsD,
+
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
             on_read_fault: ?fn (*Grid, *Grid.Read) void = null,
+            statsd: ?*StatsD,
         }) !Grid {
             // TODO Determine this at runtime based on runtime configured maximum
             // memory usage of tigerbeetle.
@@ -203,6 +207,7 @@ pub fn GridType(comptime Storage: type) type {
                 .cache = cache,
                 .read_iop_blocks = read_iop_blocks,
                 .on_read_fault = options.on_read_fault,
+                .statsd = options.statsd,
             };
         }
 
@@ -369,6 +374,16 @@ pub fn GridType(comptime Storage: type) type {
                 .block_type = block_type,
             };
 
+            const stat_name = switch (block_type) {
+                .manifest => "grid.write.manifest",
+                .index => "grid.write.index",
+                .filter => "grid.write.filter",
+                .data => "grid.write.data",
+                else => @panic("unknown block type"),
+            };
+
+            if (grid.statsd) |statsd| statsd.internal_counter(stat_name, 1) catch {};
+
             const iop = grid.write_iops.acquire() orelse {
                 grid.write_queue.push(write);
                 return;
@@ -447,14 +462,10 @@ pub fn GridType(comptime Storage: type) type {
 
             // Insert the write block into the cache, and give the evicted block to the writer.
             var cache_block: *BlockPtr = undefined;
-            // if (completed_write.block_type != .data) {
             const cache_index = grid.cache.insert_index(&completed_write.address);
             cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
             std.mem.set(u8, completed_write.block.*, 0);
-            // } else {
-            //     std.mem.set(u8, completed_write.block.*, 0);
-            // }
 
             const write_iop_index = grid.write_iops.index(iop);
             tracer.end(
@@ -613,6 +624,15 @@ pub fn GridType(comptime Storage: type) type {
                 // Remove the "root" read so that the address is no longer actively reading / locked.
                 grid.read_queue.remove(read);
 
+                const stat_name = switch (read.block_type.?) {
+                    .manifest => "grid.read.hit.manifest",
+                    .index => "grid.read.hit.index",
+                    .filter => "grid.read.hit.filter",
+                    .data => "grid.read.hit.data",
+                    else => @panic("unknown block type"),
+                };
+                if (grid.statsd) |statsd| statsd.internal_counter(stat_name, 1) catch {};
+
                 if (header.checksum == read.checksum) {
                     maybe(read.repair);
                     grid.read_block_resolve(read, cache_block);
@@ -622,6 +642,15 @@ pub fn GridType(comptime Storage: type) type {
                 }
                 return;
             }
+
+            const stat_name = switch (read.block_type.?) {
+                .manifest => "grid.read.miss.manifest",
+                .index => "grid.read.miss.index",
+                .filter => "grid.read.miss.filter",
+                .data => "grid.read.miss.data",
+                else => @panic("unknown block type"),
+            };
+            if (grid.statsd) |statsd| statsd.internal_counter(stat_name, 1) catch {};
 
             // Grab an IOP to resolve the block from storage.
             // Failure to do so means the read is queued to receive an IOP when one finishes.

@@ -51,6 +51,7 @@ pub fn main() !void {
     var print_batch_timings = false;
     var enable_statsd = false;
     var transfer_id_mode: TransferIdMode = .random;
+    var skip_create_accounts = false;
 
     var addresses = try allocator.alloc(std.net.Address, 1);
     addresses[0] = try std.net.Address.parseIp4("127.0.0.1", constants.port);
@@ -73,6 +74,7 @@ pub fn main() !void {
             (try parse_arg_addresses(allocator, &args, arg, "--addresses", &addresses)) or
             (try parse_arg_bool(allocator, &args, arg, "--print-batch-timings", &print_batch_timings)) or
             (try parse_arg_bool(allocator, &args, arg, "--statsd", &enable_statsd)) or
+            (try parse_arg_bool(allocator, &args, arg, "--skip-create-accounts", &skip_create_accounts)) or
             (try parse_arg_enum(TransferIdMode, allocator, &args, arg, "--transfer-id-mode", &transfer_id_mode)) or
             panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
     }
@@ -141,7 +143,11 @@ pub fn main() !void {
 
     defer if (enable_statsd) benchmark.statsd.?.deinit(allocator);
 
-    benchmark.create_accounts();
+    if (skip_create_accounts) {
+        benchmark.create_transfers();
+    } else {
+        benchmark.create_accounts();
+    }
 
     while (!benchmark.done) {
         benchmark.client.tick();
@@ -373,7 +379,7 @@ const Benchmark = struct {
         const ms_time = @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms);
 
         if (b.print_batch_timings) {
-            log.info("batch {}: {} tx in {} ms\n", .{
+            log.info("batch {}: {} tx in {} ms", .{
                 b.batch_index,
                 b.batch_transfers.items.len,
                 ms_time,
@@ -389,10 +395,10 @@ const Benchmark = struct {
         b.transfers_sent += b.batch_transfers.items.len;
 
         if (b.statsd) |statsd| {
-            statsd.gauge("benchmark.txns", b.batch_transfers.items.len) catch {};
+            statsd.gauge("benchmark.txns", @intCast(i64, b.batch_transfers.items.len)) catch {};
             statsd.timing("benchmark.timings", ms_time) catch {};
-            statsd.gauge("benchmark.batch", b.batch_index) catch {};
-            statsd.gauge("benchmark.completed", b.transfers_sent) catch {};
+            statsd.gauge("benchmark.batch", @intCast(i64, b.batch_index)) catch {};
+            statsd.gauge("benchmark.completed", @intCast(i64, b.transfers_sent)) catch {};
         }
 
         b.create_transfers();
