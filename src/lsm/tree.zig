@@ -409,6 +409,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         .{ .filter_block_hits = .{ .tree_name = tree_name } },
                         @intToFloat(f64, context.tree.filter_block_hits),
                     );
+                    context.tree.grid.statsd.?.internal_counter("tree.bloom_filter.may_contain", 1) catch {};
 
                     context.tree.grid.read_block(
                         read_data_block_callback,
@@ -423,6 +424,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         .{ .filter_block_misses = .{ .tree_name = tree_name } },
                         @intToFloat(f64, context.tree.filter_block_misses),
                     );
+                    context.tree.grid.statsd.?.internal_counter("tree.bloom_filter.negative", 1) catch {};
 
                     // The key is not present in this table, check the next level.
                     context.advance_to_next_level();
@@ -452,6 +454,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
                 context.index_block += 1;
                 if (context.index_block == context.index_block_count) {
+                    context.tree.grid.statsd.?.internal_counter("tree.level_bottom", 1) catch {};
                     context.callback(context, null);
                     return;
                 }
