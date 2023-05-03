@@ -728,6 +728,17 @@ pub fn GridType(comptime Storage: type) type {
         /// If the block is not present (or corrupt), we do not attempt to repair it — the repair's
         /// address/checksum is not assumed to match what "should" be in our block.
         /// Relatedly we still attempt to read free blocks — they might still hold the requested data.
+        ///
+        /// Even though this block is the block we expected to read, we can't safely
+        /// cache this result:
+        /// 1. Replica A write block X₁ to address X.
+        /// 2. Replica A write block X₂ to address X (write is lost/misdirected).
+        /// 3. Replica B requests block X₁ from replica A.
+        /// It is safe for A to send back X₁, but A must not allow it to poison its cache.
+        ///
+        /// Additionally, we don't cache these reads for performance reasons:
+        /// - it would fill the cache with non-temporally-local blocks, and
+        /// - it would force an extra memcpy.
         pub fn read_block_repair(
             grid: *Grid,
             callback: fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
@@ -755,13 +766,6 @@ pub fn GridType(comptime Storage: type) type {
                 .grid = grid,
             };
 
-            grid.on_next_tick(read_block_repair_tick_callback, &read.next_tick);
-        }
-
-        fn read_block_repair_tick_callback(next_tick: *Grid.NextTick) void {
-            const read = @fieldParentPtr(ReadRepair, "next_tick", next_tick);
-            const grid = read.grid;
-
             if (grid.cache.get_index(read.address)) |cache_index| {
                 const cache_block = grid.cache_blocks[cache_index];
 
@@ -771,10 +775,13 @@ pub fn GridType(comptime Storage: type) type {
 
                 if (header.checksum == read.checksum) {
                     stdx.copy_disjoint(.inexact, u8, read.block, cache_block[0..header.size]);
-                    read.callback(read, {});
                 } else {
-                    read.callback(read, error.BlockNotFound);
+                    // Signal to read_block_repair_tick_callback() that we found a block,
+                    // but not the one we wanted.
+                    std.mem.set(u8, read.block[0..header.size], 0);
                 }
+
+                grid.on_next_tick(read_block_repair_tick_callback, &read.next_tick);
             } else {
                 grid.superblock.storage.read_sectors(
                     read_block_repair_callback,
@@ -786,6 +793,17 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
+        fn read_block_repair_tick_callback(next_tick: *Grid.NextTick) void {
+            const read = @fieldParentPtr(ReadRepair, "next_tick", next_tick);
+            const header = mem.bytesAsValue(vsr.Header, read.block[0..@sizeOf(vsr.Header)]);
+
+            if (header.op > 0) {
+                read.callback(read, {});
+            } else {
+                read.callback(read, error.BlockNotFound);
+            }
+        }
+
         fn read_block_repair_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(ReadRepair, "completion", completion);
 
@@ -794,12 +812,6 @@ pub fn GridType(comptime Storage: type) type {
                 .checksum = read.checksum,
                 .block_type = null,
             })) {
-                // Even though this block is the block we expected to read, we can't safely
-                // cache this result:
-                // 1. Replica A write block X₁ to address X.
-                // 2. Replica A write block X₂ to address X (write is lost/misdirected).
-                // 3. Replica B requests block X₁ from replica A.
-                // It is safe for A to send back X₁, but A must not allow it to poison its cache.
                 read.callback(read, {});
             } else {
                 read.callback(read, error.BlockNotFound);
