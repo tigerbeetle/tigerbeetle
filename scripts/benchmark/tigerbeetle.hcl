@@ -74,7 +74,7 @@ job "__JOB_NAME__" {
         image = "debian:bullseye"
         entrypoint = ["/local/tigerbeetle.sh"]
         network_mode = "host"
-        memory_hard_limit = 60000
+        memory_hard_limit = 512000
 
         mounts = [
           {

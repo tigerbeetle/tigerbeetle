@@ -75,7 +75,7 @@ echo "Spinning up client EC2 instance..." 1>&2
 output=$(aws ec2 run-instances \
 	--image-id "${AMI_ID}" \
 	--count 1 \
-	--instance-type "t3.xlarge" \
+	--instance-type "t3.2xlarge" \
 	--security-group-ids ${SECURITY_GROUP_IDS} \
 	--subnet-id "${SUBNET_ID}" \
 	--associate-public-ip-address \
