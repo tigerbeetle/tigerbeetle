@@ -1,7 +1,66 @@
+const std = @import("std");
+
 const Docs = @import("../docs_types.zig").Docs;
+const run = @import("../shutil.zig").run;
+
+// Caller is responsible for resetting to a good cwd after this completes.
+fn find_node_client_tar(arena: *std.heap.ArenaAllocator, root: []const u8) ![]const u8 {
+    var tries: usize = 2;
+    while (tries > 0) {
+        try std.os.chdir(root);
+
+        const node_dir = try std.fs.cwd().realpathAlloc(arena.allocator(), "src/clients/node");
+
+        var dir = try std.fs.cwd().openDir(node_dir, .{ .iterate = true });
+        defer dir.close();
+
+        var walker = try dir.walk(arena.allocator());
+        defer walker.deinit();
+
+        while (try walker.next()) |entry| {
+            if (std.mem.startsWith(u8, entry.path, "tigerbeetle-node-") and std.mem.endsWith(u8, entry.path, ".tgz")) {
+                return std.fmt.allocPrint(
+                    arena.allocator(),
+                    "{s}/{s}",
+                    .{ node_dir, entry.path },
+                );
+            }
+        }
+
+        try std.os.chdir(node_dir);
+        try run(arena, &[_][]const u8{ "npm", "install" });
+        try run(arena, &[_][]const u8{ "npm", "pack" });
+        tries -= 1;
+    }
+
+    std.debug.print("Could not find src/clients/node/tigerbeetle-node-*.tgz, run npm install && npm pack in src/clients/node\n", .{});
+    return error.PackageNotFound;
+}
+
+fn node_current_commit_post_install_hook(
+    arena: *std.heap.ArenaAllocator,
+    sample_dir: []const u8,
+    root: []const u8,
+) !void {
+    const package = try find_node_client_tar(arena, root);
+
+    try std.os.chdir(sample_dir);
+
+    // Swap out the normal tigerbeetle-node with our local version.
+    try run(arena, &[_][]const u8{
+        "npm",
+        "uninstall",
+        "tigerbeetle-node",
+    });
+    try run(arena, &[_][]const u8{
+        "npm",
+        "install",
+        package,
+    });
+}
 
 pub const NodeDocs = Docs{
-    .readme = "node/README.md",
+    .directory = "node",
 
     .markdown_name = "javascript",
     .extension = "js",
@@ -33,16 +92,17 @@ pub const NodeDocs = Docs{
     \\console.log("Import ok!");
     ,
 
-    .install_sample_file_build_commands = "npm install typescript @types/node && npx tsc --allowJs --noEmit test.js",
-    .install_sample_file_test_commands = "node run test.js",
-
-    .current_commit_pre_install_commands = "",
-    .current_commit_post_install_commands = 
-    \\npm remove tigerbeetle-node
-    \\npm install ./tigerbeetle/src/clients/node/tigerbeetle-node-*.tgz
-    ,
-
     .install_commands = "npm install tigerbeetle-node",
+    .build_commands = "npm install typescript @types/node && npx tsc --allowJs --noEmit main.js",
+    .run_commands = "node main.js",
+
+    .current_commit_install_commands_hook = null,
+    .current_commit_build_commands_hook = null,
+    .current_commit_run_commands_hook = null,
+
+    .current_commit_pre_install_hook = null,
+    .current_commit_post_install_hook = node_current_commit_post_install_hook,
+
     .install_documentation = 
     \\If you run into issues, check out the distribution-specific install
     \\steps that are run in CI to test support:
@@ -67,7 +127,7 @@ pub const NodeDocs = Docs{
     .client_object_example = 
     \\const client = createClient({
     \\  cluster_id: 0,
-    \\  replica_addresses: ['3001', '3002', '3003']
+    \\  replica_addresses: [process.env.TB_ADDRESS || '3000']
     \\});
     ,
     .client_object_documentation = "",
@@ -101,15 +161,75 @@ pub const NodeDocs = Docs{
     ,
 
     .account_flags_example = 
-    \\let account0 = { /* ... account values ... */ };
-    \\let account1 = { /* ... account values ... */ };
+    \\let account0 = {
+    \\  id: 100n,
+    \\  reserved: Buffer.alloc(48, 0),
+    \\  user_data: 0n,
+    \\  ledger: 1,
+    \\  code: 1,
+    \\  debits_pending: 0n,
+    \\  debits_posted: 0n,
+    \\  credits_pending: 0n,
+    \\  credits_posted: 0n,
+    \\  timestamp: 0n,
+    \\  flags: 0,
+    \\};
+    \\let account1 = {
+    \\  id: 101n,
+    \\  user_data: 0n,
+    \\  reserved: Buffer.alloc(48, 0),
+    \\  ledger: 1,
+    \\  code: 1,
+    \\  debits_pending: 0n,
+    \\  debits_posted: 0n,
+    \\  credits_pending: 0n,
+    \\  credits_posted: 0n,
+    \\  timestamp: 0n,
+    \\  flags: 0,
+    \\};
     \\account0.flags = AccountFlags.linked | AccountFlags.debits_must_not_exceed_credits;
     \\accountErrors = await client.createAccounts([account0, account1]);
     ,
     .create_accounts_errors_example = 
-    \\let account2 = { /* ... account values ... */ };
-    \\let account3 = { /* ... account values ... */ };
-    \\let account4 = { /* ... account values ... */ };
+    \\let account2 = {
+    \\  id: 102n,
+    \\  reserved: Buffer.alloc(48, 0),
+    \\  user_data: 0n,
+    \\  ledger: 1,
+    \\  code: 1,
+    \\  debits_pending: 0n,
+    \\  debits_posted: 0n,
+    \\  credits_pending: 0n,
+    \\  credits_posted: 0n,
+    \\  timestamp: 0n,
+    \\  flags: 0,
+    \\};
+    \\let account3 = {
+    \\  id: 103n,
+    \\  user_data: 0n,
+    \\  reserved: Buffer.alloc(48, 0),
+    \\  ledger: 1,
+    \\  code: 1,
+    \\  debits_pending: 0n,
+    \\  debits_posted: 0n,
+    \\  credits_pending: 0n,
+    \\  credits_posted: 0n,
+    \\  timestamp: 0n,
+    \\  flags: 0,
+    \\};
+    \\let account4 = {
+    \\  id: 104n,
+    \\  user_data: 0n,
+    \\  reserved: Buffer.alloc(48, 0),
+    \\  ledger: 1,
+    \\  code: 1,
+    \\  debits_pending: 0n,
+    \\  debits_posted: 0n,
+    \\  credits_pending: 0n,
+    \\  credits_posted: 0n,
+    \\  timestamp: 0n,
+    \\  flags: 0,
+    \\};
     \\accountErrors = await client.createAccounts([account2, account3, account4]);
     \\for (const error of accountErrors) {
     \\  switch (error.result) {
@@ -151,8 +271,8 @@ pub const NodeDocs = Docs{
     \\let transfer = {
     \\  id: 1n,
     \\  pending_id: 0n,
-    \\  debit_account_id: 1n,
-    \\  credit_account_id: 2n,
+    \\  debit_account_id: 102n,
+    \\  credit_account_id: 103n,
     \\  user_data: 0n,
     \\  reserved: 0n,
     \\  timeout: 0n,
@@ -209,29 +329,103 @@ pub const NodeDocs = Docs{
     \\* `TransferFlags.void_pending_transfer`
     ,
     .transfer_flags_link_example = 
-    \\transfer0 = { /* ... transfer values ... */ };
-    \\transfer1 = { /* ... transfer values ... */ };
+    \\let transfer0 = {
+    \\  id: 2n,
+    \\  pending_id: 0n,
+    \\  debit_account_id: 102n,
+    \\  credit_account_id: 103n,
+    \\  user_data: 0n,
+    \\  reserved: 0n,
+    \\  timeout: 0n,
+    \\  ledger: 1,
+    \\  code: 720,
+    \\  flags: 0,
+    \\  amount: 10n,
+    \\  timestamp: 0n,
+    \\};
+    \\let transfer1 = {
+    \\  id: 3n,
+    \\  pending_id: 0n,
+    \\  debit_account_id: 102n,
+    \\  credit_account_id: 103n,
+    \\  user_data: 0n,
+    \\  reserved: 0n,
+    \\  timeout: 0n,
+    \\  ledger: 1,
+    \\  code: 720,
+    \\  flags: 0,
+    \\  amount: 10n,
+    \\  timestamp: 0n,
+    \\};
     \\transfer0.flags = TransferFlags.linked;
     \\// Create the transfer
     \\transferErrors = await client.createTransfers([transfer0, transfer1]);
     ,
     .transfer_flags_post_example = 
-    \\transfer = {
-    \\  id: 2n,
-    \\  pending_id: 1n,
-    \\  flags: TransferFlags.post_pending_transfer,
+    \\let transfer2 = {
+    \\  id: 4n,
+    \\  pending_id: 0n,
+    \\  debit_account_id: 102n,
+    \\  credit_account_id: 103n,
+    \\  user_data: 0n,
+    \\  reserved: 0n,
+    \\  timeout: 0n,
+    \\  ledger: 1,
+    \\  code: 720,
+    \\  flags: TransferFlags.pending,
+    \\  amount: 10n,
     \\  timestamp: 0n,
     \\};
-    \\transferErrors = await client.createTransfers([transfer]);
+    \\transferErrors = await client.createTransfers([transfer2]);
+    \\
+    \\let transfer3 = {
+    \\  id: 5n,
+    \\  pending_id: 4n,
+    \\  debit_account_id: 102n,
+    \\  credit_account_id: 103n,
+    \\  user_data: 0n,
+    \\  reserved: 0n,
+    \\  timeout: 0n,
+    \\  ledger: 1,
+    \\  code: 720,
+    \\  flags: TransferFlags.post_pending_transfer,
+    \\  amount: 10n,
+    \\  timestamp: 0n,
+    \\};
+    \\transferErrors = await client.createTransfers([transfer3]);
     ,
     .transfer_flags_void_example = 
-    \\transfer = {
-    \\  id: 2n,
-    \\  pending_id: 1n,
-    \\  flags: TransferFlags.void_pending_transfer,
+    \\let transfer4 = {
+    \\  id: 4n,
+    \\  pending_id: 0n,
+    \\  debit_account_id: 102n,
+    \\  credit_account_id: 103n,
+    \\  user_data: 0n,
+    \\  reserved: 0n,
+    \\  timeout: 0n,
+    \\  ledger: 1,
+    \\  code: 720,
+    \\  flags: TransferFlags.pending,
+    \\  amount: 10n,
     \\  timestamp: 0n,
     \\};
-    \\transferErrors = await client.createTransfers([transfer]);
+    \\transferErrors = await client.createTransfers([transfer4]);
+    \\
+    \\let transfer5 = {
+    \\  id: 7n,
+    \\  pending_id: 6n,
+    \\  debit_account_id: 102n,
+    \\  credit_account_id: 103n,
+    \\  user_data: 0n,
+    \\  reserved: 0n,
+    \\  timeout: 0n,
+    \\  ledger: 1,
+    \\  code: 720,
+    \\  flags: TransferFlags.void_pending_transfer,
+    \\  amount: 10n,
+    \\  timestamp: 0n,
+    \\};
+    \\transferErrors = await client.createTransfers([transfer5]);
     ,
 
     .lookup_transfers_example = 
@@ -241,8 +435,8 @@ pub const NodeDocs = Docs{
     \\ * [{
     \\ *   id: 1n,
     \\ *   pending_id: 0n,
-    \\ *   debit_account_id: 1n,
-    \\ *   credit_account_id: 2n,
+    \\ *   debit_account_id: 102n,
+    \\ *   credit_account_id: 103n,
     \\ *   user_data: 0n,
     \\ *   reserved: 0n,
     \\ *   timeout: 0n,
@@ -258,7 +452,7 @@ pub const NodeDocs = Docs{
     .linked_events_example = 
     \\const batch = [];
     \\let linkedFlag = 0;
-    \\linkedFlag |= CreateTransferFlags.linked;
+    \\linkedFlag |= TransferFlags.linked;
     \\
     \\// An individual transfer (successful):
     \\batch.push({ id: 1n /* , ... */ });
@@ -300,20 +494,27 @@ pub const NodeDocs = Docs{
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_sh_commands = 
-    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
-    \\./scripts/install_zig.sh
     \\cd src/clients/node
     \\npm install --include dev
     \\npm pack
     ,
 
+    // TODO(phil): node tests are the only ones that expect to have a TigerBeetle instance running.
+    // From what I can tell they were never running in CI since I was the first person to add anything Node to CI.
+    // Soon what it tests will be replaced with sample code that is integration tested anyway.
+    // \\if [ "$TEST" = "true" ]; then npm test; else echo "Skipping client unit tests"; fi
+
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_pwsh_commands = "",
     .test_main_prefix = 
-    \\const { createClient } = require("tigerbeetle-node");
+    \\const {
+    \\  createClient,
+    \\  AccountFlags,
+    \\  TransferFlags,
+    \\  CreateTransferError,
+    \\  CreateAccountError,
+    \\} = require("tigerbeetle-node");
     \\
     \\async function main() {
     ,

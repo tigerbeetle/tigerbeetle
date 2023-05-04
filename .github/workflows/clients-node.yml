@@ -80,7 +80,8 @@ jobs:
     needs: build
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        # Windows not yet supported.
+        os: [ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
         sample: [basic, two-phase]
 
     defaults:
@@ -102,3 +103,26 @@ jobs:
 
       - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node --sample ${{ matrix.sample }}
+
+  docs:
+    strategy:
+      matrix:
+        # Windows not yet supported.
+        os: [ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+
+      # Grab Zig
+      - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
+
+      - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_docs
+      - run: ./zig-out/bin/client_${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node
+
+      - if: matrix.os == 'ubuntu-latest'
+        run: ./scripts/fail_on_diff.sh

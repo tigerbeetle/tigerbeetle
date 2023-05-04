@@ -108,3 +108,37 @@ jobs:
       # Build and run the integration tests
       - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language go --sample ${{ matrix.sample }}
+
+  docs:
+    # We use self hosted runners for M1 here. See macos.yml for an explaination
+    permissions:
+      contents: read
+
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+
+      # Grab Zig
+      - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
+
+      - if: matrix.os != 'windows-latest'
+        run: |
+          # Specifically for self-hosted M1 runners, OK if this fails on other envs.
+          rm -rf /Users/macos/Library/Caches/go-build
+
+          ./scripts/build.sh client_docs -- --language go
+
+      # Set CC='zig.exe cc' for Windows.
+      - if: matrix.os == 'windows-latest'
+        run: |
+          $env:CC = "$(pwd)\zig\zig.exe cc"
+          .\scripts\build.bat client_docs
+          .\zig-out\bin\client_docs --language go
+      
+      - if: matrix.os == 'ubuntu-latest'
+        run: ./scripts/fail_on_diff.sh
+
