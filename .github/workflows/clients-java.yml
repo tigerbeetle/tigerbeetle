@@ -166,6 +166,7 @@ jobs:
     - name: Run validation
       run: |
         docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java
+
   samples_integration_test:
     needs: build
 

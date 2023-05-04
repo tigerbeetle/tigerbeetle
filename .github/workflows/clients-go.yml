@@ -22,7 +22,7 @@ jobs:
 
   publish:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [binaries, tests, samples_integration_test]
+    needs: [binaries, docs, samples_integration_test]
     runs-on: ubuntu-latest
     defaults:
       run:
