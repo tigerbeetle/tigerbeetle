@@ -479,7 +479,7 @@ $ git submodule update --init --recursive
 $ ./scripts/install_zig.sh
 $ ./scripts/build.sh go_client -Drelease-safe
 $ cd src/clients/go
-$ if [ "$TEST" = "true" ]; then ./zgo.sh test; else echo "Skipping client unit tests"; fi
+$ if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
 ```
 
 ### On Windows
@@ -492,6 +492,6 @@ $ cd tigerbeetle
 $ git submodule update --init --recursive
 $ .\scripts\install_zig.bat
 $ .\scripts\build.bat go_client -Drelease-safe
-$ if ($env:TEST -eq 'true') { .\zgo.bat test } else { echo "Skipping client unit test" }
+$ if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
 ```
 

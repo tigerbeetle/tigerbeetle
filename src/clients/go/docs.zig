@@ -365,7 +365,7 @@ pub const GoDocs = Docs{
     .developer_setup_sh_commands = 
     \\./scripts/build.sh go_client -Drelease-safe
     \\cd src/clients/go
-    \\if [ "$TEST" = "true" ]; then ./zgo.sh test; else echo "Skipping client unit tests"; fi
+    \\if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
     ,
 
     .current_commit_pre_install_hook = null,
@@ -376,7 +376,7 @@ pub const GoDocs = Docs{
     .developer_setup_pwsh_commands = 
     \\.\scripts\build.bat go_client -Drelease-safe
     // \\cd src\clients\go
-    \\if ($env:TEST -eq 'true') { .\zgo.bat test } else { echo "Skipping client unit test" }
+    \\if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
     ,
 
     .test_main_prefix = 
