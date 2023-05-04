@@ -13,49 +13,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const run = @import("./docs_generate.zig").run;
-const TmpDir = @import("./docs_generate.zig").TmpDir;
-const git_root = @import("./docs_generate.zig").git_root;
-const path_exists = @import("./docs_generate.zig").path_exists;
-
-pub fn file_or_directory_exists(arena: *std.heap.ArenaAllocator, f_or_d: []const u8) bool {
-    _ = std.fs.cwd().realpathAlloc(arena.allocator(), f_or_d) catch {
-        return false;
-    };
-
-    return true;
-}
-
-// Makes sure a local script name has the platform-appropriate folder
-// character and extension. This is particularly important in Windows
-// when you are calling a program. arg0 must be a well-formed path
-// otherwise you have to pass it through powershell -c '...' and that's a
-// waste.
-pub fn script_filename(arena: *std.heap.ArenaAllocator, parts: []const []const u8) ![]const u8 {
-    var file_name = std.ArrayList(u8).init(arena.allocator());
-    const sep = if (builtin.os.tag == .windows) '\\' else '/';
-    _ = try file_name.append('.');
-    for (parts) |part| {
-        _ = try file_name.append(sep);
-        _ = try file_name.appendSlice(part);
-    }
-
-    _ = try file_name.appendSlice(if (builtin.os.tag == .windows) ".bat" else ".sh");
-    return file_name.items;
-}
-
-pub fn binary_filename(arena: *std.heap.ArenaAllocator, parts: []const []const u8) ![]const u8 {
-    var file_name = std.ArrayList(u8).init(arena.allocator());
-    const sep = if (builtin.os.tag == .windows) '\\' else '/';
-    _ = try file_name.append('.');
-    for (parts) |part| {
-        _ = try file_name.append(sep);
-        _ = try file_name.appendSlice(part);
-    }
-
-    _ = try file_name.appendSlice(if (builtin.os.tag == .windows) ".exe" else "");
-    return file_name.items;
-}
+const run = @import("./shutil.zig").run;
+const run_with_env = @import("./shutil.zig").run_with_env;
+const TmpDir = @import("./shutil.zig").TmpDir;
+const git_root = @import("./shutil.zig").git_root;
+const path_exists = @import("./shutil.zig").path_exists;
+const script_filename = @import("./shutil.zig").script_filename;
+const binary_filename = @import("./shutil.zig").binary_filename;
+const file_or_directory_exists = @import("./shutil.zig").file_or_directory_exists;
 
 fn free_port() !u16 {
     var port: u16 = 1025;
@@ -131,28 +96,13 @@ pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8
     try cp.spawn();
 
     std.debug.print("Running commands: {s}\n", .{commands});
-    const cmdCp = try std.ChildProcess.init(
-        commands,
-        arena.allocator(),
-    );
-    var env = try std.process.getEnvMap(arena.allocator());
-    try env.put(
-        "TB_PORT",
+
+    try std.os.chdir(cwd);
+
+    try run_with_env(arena, commands, &[_][]const u8{
+        "TB_ADDRESS",
         try std.fmt.allocPrint(arena.allocator(), "{}", .{port}),
-    );
-    cmdCp.env_map = &env;
-    cmdCp.cwd = cwd;
-
-    var res = try cmdCp.spawnAndWait();
-    switch (res) {
-        .Exited => |code| {
-            if (code != 0) {
-                return error.ProxiedCommandFailed;
-            }
-        },
-
-        else => return error.UnknownCase,
-    }
+    });
 }
 
 fn error_main() !void {
@@ -187,7 +137,7 @@ pub fn main() !void {
     if (error_main()) {
         // fine
     } else |err| switch (err) {
-        error.ProxiedCommandFailed => std.os.exit(1),
+        error.RunCommandFailed => std.os.exit(1),
         else => return err,
     }
 }
