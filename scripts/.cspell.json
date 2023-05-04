@@ -127,6 +127,7 @@
 	"threadpools",
 	"snapshotting",
 	"checkpointing",
-	"checkpointed"
+	"checkpointed",
+        "freeset"
     ]
 }
