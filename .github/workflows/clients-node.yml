@@ -122,7 +122,7 @@ jobs:
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
       - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_docs
-      - run: ./zig-out/bin/client_${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node
+      - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node
 
       - if: matrix.os == 'ubuntu-latest'
         run: ./scripts/fail_on_diff.sh
