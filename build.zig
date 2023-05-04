@@ -259,11 +259,18 @@ pub fn build(b: *std.build.Builder) void {
             tracer_backend,
         );
         run_with_tb(
+            allocator,
             b,
             mode,
             target,
         );
         client_integration(
+            allocator,
+            b,
+            mode,
+            target,
+        );
+        client_docs(
             allocator,
             b,
             mode,
@@ -788,49 +795,27 @@ fn c_client_sample(
     c_sample_build.dependOn(&install_step.step);
 }
 
-// See src/clients/README.md for documentation.
-fn run_with_tb(
+// Allows a build step to run the command it builds after it builds it if the user passes --.
+// e.g.: ./scripts/build.sh docs_generate --
+// Whereas `./scripts/build.sh docs_generate` would not run the command.
+fn maybe_execute(
     b: *std.build.Builder,
-    mode: Mode,
-    target: CrossTarget,
-) void {
-    const run_with_tb_build = b.step("run_with_tb", "Build the run_with_tb helper");
-    const binary = b.addExecutable("run_with_tb", "src/clients/run_with_tb.zig");
-    binary.setBuildMode(mode);
-    binary.setTarget(target);
-    run_with_tb_build.dependOn(&binary.step);
-
-    const install_step = b.addInstallArtifact(binary);
-    run_with_tb_build.dependOn(&install_step.step);
-}
-
-// See src/clients/README.md for documentation.
-fn client_integration(
     allocator: std.mem.Allocator,
-    b: *std.build.Builder,
-    mode: Mode,
-    target: CrossTarget,
+    step: *std.build.Step,
+    binary_name: []const u8,
 ) void {
-    const client_integration_build = b.step("client_integration", "Run sample integration tests for a client library");
-    const binary = b.addExecutable("client_integration", "src/clients/integration.zig");
-    binary.setBuildMode(mode);
-    binary.setTarget(target);
-    client_integration_build.dependOn(&binary.step);
-
-    const install_step = b.addInstallArtifact(binary);
-    client_integration_build.dependOn(&install_step.step);
-
     var to_run = std.ArrayList([]const u8).init(allocator);
     const sep = if (builtin.os.tag == .windows) "\\" else "/";
     const ext = if (builtin.os.tag == .windows) ".exe" else "";
     to_run.append(
         std.fmt.allocPrint(
             allocator,
-            ".{s}zig-out{s}bin{s}client_integration{s}",
+            ".{s}zig-out{s}bin{s}{s}{s}",
             .{
                 sep,
                 sep,
                 sep,
+                binary_name,
                 ext,
             },
         ) catch unreachable,
@@ -852,6 +837,63 @@ fn client_integration(
 
     if (build_and_run) {
         const run = b.addSystemCommand(to_run.items);
-        client_integration_build.dependOn(&run.step);
+        step.dependOn(&run.step);
     }
+}
+
+// See src/clients/README.md for documentation.
+fn run_with_tb(
+    allocator: std.mem.Allocator,
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const run_with_tb_build = b.step("run_with_tb", "Build the run_with_tb helper");
+    const binary = b.addExecutable("run_with_tb", "src/clients/run_with_tb.zig");
+    binary.setBuildMode(mode);
+    binary.setTarget(target);
+    run_with_tb_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary);
+    run_with_tb_build.dependOn(&install_step.step);
+
+    maybe_execute(b, allocator, run_with_tb_build, "run_with_tb");
+}
+
+// See src/clients/README.md for documentation.
+fn client_integration(
+    allocator: std.mem.Allocator,
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const client_integration_build = b.step("client_integration", "Run sample integration tests for a client library");
+    const binary = b.addExecutable("client_integration", "src/clients/integration.zig");
+    binary.setBuildMode(mode);
+    binary.setTarget(target);
+    client_integration_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary);
+    client_integration_build.dependOn(&install_step.step);
+
+    maybe_execute(b, allocator, client_integration_build, "client_integration");
+}
+
+// See src/clients/README.md for documentation.
+fn client_docs(
+    allocator: std.mem.Allocator,
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const client_docs_build = b.step("client_docs", "Run sample integration tests for a client library");
+    const binary = b.addExecutable("client_docs", "src/clients/docs_generate.zig");
+    binary.setBuildMode(mode);
+    binary.setTarget(target);
+    client_docs_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary);
+    client_docs_build.dependOn(&install_step.step);
+
+    maybe_execute(b, allocator, client_docs_build, "client_docs");
 }

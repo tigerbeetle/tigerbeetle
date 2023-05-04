@@ -19,11 +19,24 @@ Existing `Docs` struct implementations are in:
 
 ### Run
 
-To run the generator:
+Go to the repo root.
+
+If you don't already have the TigerBeetle version of `zig` run:
 
 ```console
-$ ../../zig/zig run docs_generate.zig # ../../zig/zig to get the standard TigerBeetle Zig binary
+$ ./scripts/install_zig.[sh|bat]
 ```
+
+Use the `.sh` script if you're on macOS or Linux. Use the `.bat`
+script on Windows.
+
+To build and run the client docs generator:
+
+```console
+$ ./scripts/build.[sh|bat] client_docs --
+```
+
+Note: Omitting the `--` will only build, not run the client_docs script.
 
 ### Skip validation
 
@@ -32,7 +45,7 @@ minutes. You can skip validation when you are adding things to docs
 that can't break (such as more documentation, not code).
 
 ```console
-$ ../../zig/zig run docs_generate.zig -- --no-validate
+$ ./scripts/build.[sh|bat] client_docs -- --no-validate
 ```
 
 ### Just one language
@@ -40,11 +53,11 @@ $ ../../zig/zig run docs_generate.zig -- --no-validate
 To run the generator only for a certain language (defined by `.markdown_name`):
 
 ```console
-$ ../../zig/zig run docs_generate.zig -- --only javascript
+$ ./scripts/build.[sh|bat] client_docs -- --language node
 ```
 
 ```console
-$ ../../zig/zig run docs_generate.zig -- --only javascript,go
+$ ./scripts/build.[sh|bat] client_docs -- --language node,go
 ```
 
 Docs are only regenerated/modified when there would be a diff so the
@@ -52,10 +65,10 @@ mtime of each README changes only as needed.
 
 ### Format files
 
-To format all Zig files:
+To format all Zig files (again, run from the repo root):
 
 ```console
-../../zig/zig fmt .
+./zig/zig fmt .
 ```
 
 
@@ -69,7 +82,7 @@ server using `run_with_tb` (described below).
 Examples:
 
 ```bash
-$ ./scripts/build.sh client_integration -- --language java --sample basic
+$ ./scripts/build.[sh|bat] client_integration -- --language java --sample basic
 ```
 
 This corresponds to setting up the sample code in
@@ -82,14 +95,6 @@ it would take a long time to rebuild all of these every time.
 
 If you're experience weirdness, try `git clean -xfd` (kind of drastic,
 but still) and rebuild TigerBeetle and clients.
-
-Additionally, the Java JAR step is not yet working on Windows. So you
-may need to copy the JAR built from another machine into the right
-location. For example:
-
-```bash
-$ scp server:~/tigerbeetle/src/clients/java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar .\src\clients\java\target\
-```
 
 And finally, it assumes you have the dependencies like `maven` and
 `java` installed when you are running that language's sample code.
@@ -107,7 +112,7 @@ directory where the sample code is copied into and where munging takes
 place.
 
 ```bash
-$ ./scripts/build.sh client_integration -- --language java --sample basic --keep-tmp
+$ ./scripts/build.[sh|bat] client_integration -- --language java --sample basic --keep-tmp
 ```
 
 ## run_with_tb.zig / run_with_tb
@@ -117,20 +122,20 @@ to it. Specifically, it:
 
 * Creates a random temporary directory and formats TigerBeetle's data file there
 * Spins up a TigerBeetle server on an open port
-* Sets the port in the `TB_PORT` environment variable
+* Sets the port in the `TB_ADDRESS` environment variable
 * Calls the commands passed on the CLI
 * Turns off the server and deletes the temporary directory
 
 Example:
 
 ```bash
-$ ./scripts/build.sh run_with_tb -- node $(pwd)/myscript.js
+$ ./scripts/build.[sh|bat] run_with_tb -- node $(pwd)/myscript.js
 ```
 
 If you need to run multiple commands you can wrap in `bash -c " ... "`:
 
 ```bash
-$ ./scripts/build.sh run_with_tb -- bash -c "stuff && otherstuff"
+$ ./scripts/build.[sh|bat] run_with_tb -- bash -c "stuff && otherstuff"
 ```
 
 NOTE: All relative file paths in the proxied commands should be
@@ -143,5 +148,5 @@ Since you often need to `cd` to a directory to run a command, there's
 a shorthand via the `R_CWD` environment variable.
 
 ```bash
-$ R_CWD=$(pwd)/src/clients/go/samples/two-phase ./zig/zig run ./src/clients/run_with_tb.zig -- go run main.go
+$ R_CWD=$(pwd)/src/clients/go/samples/two-phase ./scripts/build.[sh|bat] run_with_tb -- go run main.go
 ```
