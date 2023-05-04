@@ -576,6 +576,55 @@ test "Cluster: repair: corrupt reply" {
     try expectEqual(c.replies(), 21);
 }
 
+test "Cluster: repair: ack committed prepare" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    const p = t.replica(.A0);
+    const b1 = t.replica(.B1);
+    const b2 = t.replica(.B2);
+
+    // A0 commits 21.
+    // B1 prepares 21, but does not commit.
+    t.replica(.R_).drop(.R_, .bidirectional, .start_view_change);
+    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    p.drop(.__, .outgoing, .commit);
+    b2.drop(.__, .incoming, .prepare);
+    try c.request(21, 21);
+    try expectEqual(p.commit(), 21);
+    try expectEqual(b1.commit(), 20);
+    try expectEqual(b2.commit(), 20);
+
+    try expectEqual(p.op_head(), 21);
+    try expectEqual(b1.op_head(), 21);
+    try expectEqual(b2.op_head(), 20);
+
+    // Change views. B1/B2 participate. Don't allow B2 to repair op=21.
+    t.replica(.R_).pass(.R_, .bidirectional, .start_view_change);
+    t.replica(.R_).pass(.R_, .bidirectional, .do_view_change);
+    p.drop(.__, .bidirectional, .prepare);
+    p.drop(.__, .bidirectional, .do_view_change);
+    t.run();
+    try expectEqual(b1.commit(), 20);
+    try expectEqual(b2.commit(), 20);
+
+    // But other than that, heal A0/B1, but partition B2 completely.
+    // (Prevent another view change.)
+    p.pass_all(.__, .bidirectional);
+    b1.pass_all(.__, .bidirectional);
+    b2.drop_all(.__, .bidirectional);
+    t.replica(.R_).drop(.R_, .bidirectional, .start_view_change);
+    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    t.run();
+
+    // A0 acks op=21 even though it already committed it.
+    try expectEqual(b1.commit(), 21);
+}
+
 test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header succeed" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();

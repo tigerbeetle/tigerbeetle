@@ -537,15 +537,14 @@ pub const Header = extern struct {
         switch (self.operation) {
             .reserved => return "operation == .reserved",
             .root => {
+                const root_checksum = Header.root_prepare(self.cluster).checksum;
                 if (self.parent != 0) return "root: parent != 0";
                 if (self.client != 0) return "root: client != 0";
-                if (self.context != 0) return "root: context != 0";
+                if (self.context != root_checksum) return "root: context != expected";
                 if (self.request != 0) return "root: request != 0";
-                if (self.view != 0) return "root: view != 0";
                 if (self.op != 0) return "root: op != 0";
                 if (self.commit != 0) return "root: commit != 0";
                 if (self.timestamp != 0) return "root: timestamp != 0";
-                if (self.replica != 0) return "root: replica != 0";
             },
             else => {
                 if (self.client == 0) return "client == 0";
