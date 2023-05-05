@@ -5,6 +5,7 @@ const Docs = @import("./docs_types.zig").Docs;
 const go = @import("./go/docs.zig").GoDocs;
 const node = @import("./node/docs.zig").NodeDocs;
 const java = @import("./java/docs.zig").JavaDocs;
+const dotnet = @import("./dotnet/docs.zig").DotnetDocs;
 const samples = @import("./docs_samples.zig").samples;
 const TmpDir = @import("./shutil.zig").TmpDir;
 const git_root = @import("./shutil.zig").git_root;
@@ -15,7 +16,7 @@ const write_shell_newlines_into_single_line = @import("./shutil.zig").write_shel
 const run_shell_with_env = @import("./shutil.zig").run_shell_with_env;
 const run_with_tb = @import("./run_with_tb.zig").run_with_tb;
 
-const languages = [_]Docs{ go, node, java };
+const languages = [_]Docs{ go, node, java, dotnet };
 
 const MarkdownWriter = struct {
     buf: *std.ArrayList(u8),

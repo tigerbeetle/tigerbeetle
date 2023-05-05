@@ -62,7 +62,6 @@ pub const GoDocs = Docs{
     .extension = "go",
     .proper_name = "Go",
 
-    .test_linux_docker_image = "golang:1.18-alpine",
     .test_source_path = "",
 
     .name = "tigerbeetle-go",

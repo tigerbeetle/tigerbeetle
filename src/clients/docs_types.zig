@@ -112,10 +112,6 @@ pub const Docs = struct {
     developer_setup_sh_commands: Code,
     developer_setup_pwsh_commands: Code,
 
-    // Docker image to use to build and run commands in. (Not shown to
-    // user.)
-    test_linux_docker_image: String,
-
     // Optional prefix if test code must be in a certain directory
     // (e.g. Java and `src/main/java`).
     test_source_path: String,
