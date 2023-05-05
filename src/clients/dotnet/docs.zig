@@ -10,7 +10,7 @@ const write_shell_newlines_into_single_line = @import("../shutil.zig").write_she
 pub const DotnetDocs = Docs{
     .directory = "dotnet",
 
-    .markdown_name = "csharp",
+    .markdown_name = "cs",
     .extension = "cs",
     .proper_name = ".NET",
 

@@ -26,7 +26,7 @@ $ dotnet add package tigerbeetle-dotnet
 
 Now, create `Program.cs` and copy this into it:
 
-```csharp
+```cs
 using System;
 
 using TigerBeetle;
@@ -74,7 +74,7 @@ In this example the cluster ID is `0` and there is one
 replica. The address is read from the `TB_ADDRESS`
 environment variable and defaults to port `3000`.
 
-```csharp
+```cs
 var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
 var client = new Client(
   clusterID: 0,
@@ -101,7 +101,7 @@ The following are valid addresses:
 See details for account fields in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/accounts).
 
-```csharp
+```cs
 var accounts = new[] {
   new Account
   {
@@ -155,7 +155,7 @@ not necessarily the same as the order of IDs in the
 request. You can refer to the ID field in the response to
 distinguish accounts.
 
-```csharp
+```cs
 accounts = client.LookupAccounts(new[] { 137, 138 });
 ```
 
@@ -166,7 +166,7 @@ This creates a journal entry between two accounts.
 See details for transfer fields in the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfers).
 
-```csharp
+```cs
 var transfers = new[] {
   new Transfer
   {
@@ -272,7 +272,7 @@ transfer. So the order of transfers in the response is not necessarily
 the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
-```csharp
+```cs
 transfers = client.LookupTransfers(new[] {1, 2});
 ```
 
