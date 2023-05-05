@@ -122,8 +122,6 @@ pub const JavaDocs = Docs{
     .extension = "java",
     .proper_name = "Java",
 
-    .test_linux_docker_image = "alpine",
-
     .test_source_path = "src/main/java/",
 
     .name = "tigerbeetle-java",
