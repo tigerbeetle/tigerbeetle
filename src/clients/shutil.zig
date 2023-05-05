@@ -93,9 +93,16 @@ pub fn shell_wrap(arena: *std.heap.ArenaAllocator, cmd: []const u8) ![]const []c
                 u8,
                 arena.allocator(),
                 cmd,
-                "\"",
-                "\\\"",
+                ";",
+                "; if(!$?) { Exit $LASTEXITCODE }; ",
             )},
+            // .{try std.mem.replaceOwned(
+            //     u8,
+            //     arena.allocator(),
+            //     cmd,
+            //     "\"",
+            //     "\\\"",
+            // )},
         ));
     } else {
         try wrapped.append(cmd);
