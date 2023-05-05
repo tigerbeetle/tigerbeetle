@@ -834,7 +834,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert((tree.compaction_op + 1) % constants.lsm_batch_multiple == 0);
             assert(tree.compaction_op + 1 == tree.lookup_snapshot_max);
 
-            if (tree.table_mutable.count() == 0) return;
+            if (tree.table_mutable.empty()) return;
 
             // Sort the mutable table values directly into the immutable table's array.
             const values_max = tree.table_immutable.values_max();
@@ -849,7 +849,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // tables.
             tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max, values);
 
-            assert(tree.table_mutable.count() == 0);
+            assert(tree.table_mutable.empty());
             assert(!tree.table_immutable.free);
         }
 

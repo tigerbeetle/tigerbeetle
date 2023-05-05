@@ -3,8 +3,9 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const div_ceil = @import("../stdx.zig").div_ceil;
+const binary_search = @import("binary_search.zig");
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 /// Range queries are not supported on the TableMutable, it must first be made immutable.
@@ -21,149 +22,302 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
     return struct {
         const TableMutable = @This();
 
-        const ValuesMap = struct {
-            const levels_max = constants.lsm_levels;
-            const segment_max = 16;
+        const ValuesTree = struct {
+            const levels_max = 4; // constants.lsm_levels;
+            const mem_table_size = 16;
 
-            const MemTableIndex = blk: {
-                if (segment_max < math.maxInt(u8)) break :blk u8;
-                if (segment_max < math.maxInt(u16)) break :blk u16;
-                assert(segment_max < math.maxInt(u32));
-                break :blk u32;
-            };
+            const KeyRange = struct {
+                min_max: ?[2]Key = null,
 
-            const Filter = [32]u8;
-            const Segment = [segment_max]Value;
-
-            const Data = struct {
-                mem_table: struct {
-                    links: [segment_max][2]MemTableID,
-                    stack: [segment_max]MemTableIndex,
-                    levels: [segment_max]u8,
-                },
-                index: [levels_max]Index,
-                filters: [levels_max]Filter,
-                active: [@divExact(value_count_max, 8)]u8,
-                segments: [@divExact(value_count_max, segment_max)]Segment,
-            };
-
-            mem_table: struct {
-                root: u32 = 0,
-                size: u32 = 0,
-                segment: u32 = 0,
-            },
-
-            fn mem_table_find(data: *Data, root: u32, segment: u32, key: Key) ?*const Value {
-                var index = root;
-                const values = &data.segments[segment];
-                while (true) {
-                    const slot = math.sub(u32, index, 1) catch return null;
-                    const value = &values[slot];
-                    switch (compare_keys(key, key_from_value(value))) {
-                        .eq => return if (mem_table_active(data, segment, slot)) value else null,
-                        else => |cmp| index = data.mem_table.links[slot][@boolToInt(cmp == .gt)],
-                    }
+                fn empty(range: *const KeyRange) bool {
+                    return range.min_max == null;
                 }
+
+                fn may_contain(range: *const KeyRange, key: Key) bool {
+                    const kr = range.min_max orelse return false;
+                    if (compare_keys(key, kr[0]) == .lt) return false;
+                    if (compare_keys(key, kr[1]) == .gt) return false;
+                    return true;
+                }
+
+                fn add_key(range: *KeyRange, key: Key) void {
+                    const min_max: ?[2]Key = [2]Key{ key, key };
+                    const other = KeyRange{ .min_max = min_max };
+                    range.add_range(&other);
+                }
+
+                fn add_range(range: *KeyRange, other: *const KeyRange) void {
+                    const other_kr = other.min_max orelse return;
+                    if (range.min_max == null) {
+                        range.min_max = other_kr;
+                        return;
+                    }
+
+                    const kr = &range.min_max.?;
+                    kr[0] = if (compare_keys(kr[0], other_kr[0]) == .lt) kr[0] else other_kr[0];
+                    kr[1] = if (compare_keys(kr[1], other_kr[1]) == .gt) kr[1] else other_kr[1];
+                }
+            };
+
+            const ValueRange = struct {
+                keys: KeyRange = .{},
+                buf: []Value,
+                len: u32 = 0,
+            };
+
+            const MemTable = struct {
+                keys: KeyRange = .{},
+                buf: []Value,
+                bottom: u32 = mem_table_size,
+            };
+
+            level_count: u32 = 0,
+            bloom_filter: KeyRange = .{},
+            mem_table: MemTable,
+            compaction: ValueRange,
+            merge_buf: []Value,
+            levels: [levels_max]ValueRange,
+
+            pub fn init(allocator: mem.Allocator) !ValuesTree {
+                const mem_table = MemTable{ .buf = try allocator.alloc(Value, mem_table_size) };
+                errdefer allocator.free(mem_table.buf);
+
+                const compaction = ValueRange{ .buf = try allocator.alloc(Value, value_count_max) };
+                errdefer allocator.free(compaction.buf);
+
+                const merge_buf = try allocator.alloc(Value, value_count_max);
+                errdefer allocator.free(merge_buf);
+
+                var levels: [levels_max]ValueRange = undefined;
+                for (levels) |*level, i| {
+                    // Each level is half the size of the next.
+                    // The last level size is value_count_max.
+                    const level_size = value_count_max >> @intCast(u6, levels_max - 1 - i);
+
+                    errdefer for (levels[0..i]) |*l| allocator.free(l.buf);
+                    level.* = ValueRange{ .buf = try allocator.alloc(Value, level_size) };
+                }
+                errdefer for (levels) |*l| allocator.free(l.buf);
+
+                return ValuesTree{
+                    .mem_table = mem_table,
+                    .compaction = compaction,
+                    .merge_buf = merge_buf,
+                    .levels = levels,
+                };
             }
 
-            const Entry = struct {
-                value: *Value,
-                exists: bool,
-                removed: bool,
-            };
+            pub fn deinit(tree: *ValuesTree, allocator: mem.Allocator) void {
+                for (tree.levels) |*l| allocator.free(l.buf);
+                allocator.free(tree.merge_buf);
+                allocator.free(tree.compaction.buf);
+                allocator.free(tree.mem_table.buf);
+            }
 
-            fn mem_table_entry(data: *Data, segment: u32, index: u32, new_slot: u32, key: Key, entry: *Entry) u32 {
-                const values = &data.segments[segment];
-                const slot = math.sub(u32, index, 1) catch {
-                    data.mem_table.links[new_slot] = .{0, 0};
-                    data.mem_table.levels[new_slot] = 1;
+            pub inline fn empty(tree: *const ValuesTree) bool {
+                return tree.bloom_filter.empty();
+            }
 
-                    entry.value = &values[new_slot];
-                    entry.exists = false;
-                    entry.removed = false;
-                    return new_slot + 1;
+            pub fn clear(tree: *ValuesTree) void {
+                for (tree.levels) |*l| l.* = .{ .buf = l.buf };
+                tree.* = .{
+                    .mem_table = .{ .buf = tree.mem_table.buf },
+                    .compaction = .{ .buf = tree.compaction.buf },
+                    .merge_buf = tree.merge_buf,
+                    .levels = tree.levels,
+                };
+            }
+
+            pub fn find(tree: *const ValuesTree, key: Key) ?*Value {
+                // Check bloom filter first before searching below.
+                if (!tree.bloom_filter.may_contain(key)) return null;
+
+                // Check the mem table before the levels with a linear scan.
+                if (tree.mem_table.keys.may_contain(key)) {
+                    for (tree.mem_table.buf[tree.mem_table.bottom..]) |*value| {
+                        if (compare_keys(key, key_from_value(value)) == .eq) {
+                            return value;
+                        }
+                    }
+                }
+
+                // Check the other levels with a binary search.
+                var level: u32 = 0;
+                while (level < tree.level_count) : (level += 1) {
+                    const vr = &tree.levels[level];
+                    if (!vr.keys.may_contain(key)) continue;
+
+                    const values = vr.buf[0..vr.len];
+                    const result = binary_search.binary_search_values(
+                        Key,
+                        Value,
+                        key_from_value,
+                        compare_keys,
+                        values,
+                        key,
+                        .{},
+                    );
+
+                    if (result.exact) {
+                        const value = &values[result.index];
+                        if (constants.verify) assert(compare_keys(key, key_from_value(value)) == .eq);
+                        return value;
+                    }
+                }
+
+                return null;
+            }
+
+            pub fn append(tree: *ValuesTree, op: enum { insert, remove }, value: *const Value) void {
+                // Reserve an index in the mem_table.
+                // This happens in reverse to detect newer values while iterating in flush_into().
+                tree.mem_table.bottom = math.sub(u32, tree.mem_table.bottom, 1) catch blk: {
+                    tree.flush_into(.first_fit_level);
+                    assert(tree.mem_table.bottom > 0);
+                    break :blk tree.mem_table.bottom - 1;
                 };
 
-                entry.value = &values[slot];
-                const cmp = compare_keys(key, key_from_value(entry.value));
-                entry.exists = cmp == .eq;
-                if (entry.exists) {
-                    entry.removed = !mem_table_active(data, segment, slot);
-                    return index;
+                // Add the key to the mem_table KeyRange and the bloom filter for all KeyRanges.
+                const key = key_from_value(value);
+                tree.mem_table.keys.add_key(key);
+                tree.bloom_filter.add_key(key);
+
+                // Append the Value to the mem_table.
+                tree.mem_table.buf[tree.mem_table.bottom] = switch (op) {
+                    .insert => value.*,
+                    .remove => tombstone_from_key(key),
+                };
+            }
+
+            fn flush_into(tree: *ValuesTree, target: enum { first_fit_level, compaction_buf }) void {
+                assert(tree.compaction.len == 0);
+                assert(tree.compaction.keys.empty());
+
+                // Flush mem_table into compaction buffer, getting rid of duplicates along the way.
+                mem_table: for (tree.mem_table.buf[tree.mem_table.bottom..]) |*current| {
+                    for (tree.compaction.buf[0..tree.compaction.len]) |*existing| {
+                        switch (compare_keys(key_from_value(current), key_from_value(existing))) {
+                            .eq => continue :mem_table, // Duplicates in mem_table_values. Skip it.
+                            .gt => continue, // Search the next value.
+                            .lt => mem.swap(Value, current, existing), // Insertion sort.
+                        }
+                    }
+                    tree.compaction.buf[tree.compaction.len] = current.*;
+                    tree.compaction.len += 1;
                 }
 
-                const link = &data.mem_table.links[slot][@boolToInt(cmp == .gt)];
-                link.* = mem_table_upsert(data, segment, link.*, new_slot, key, entry);
-                return mem_table_split(data, mem_table_skew(data, index));
-            }
+                // Mark mem_table as consumed into compaction buffer.
+                tree.compaction.keys.add_range(&tree.mem_table.keys);
+                tree.mem_table = .{ .buf = tree.mem_table.buf };
 
-            inline fn mem_table_skew(data: *const Data, index: u32) u32 {
-                const slot = math.sub(u32, index, 1) catch unreachable;
+                // Then merge it with other levels.
+                var vr_out_level: u32 = 0;
+                while (true) : (vr_out_level += 1) {
+                    assert(vr_out_level < levels_max);
 
-                const left_link = &data.mem_table.links[slot][0];
-                const left_index = left_link.*;
-                const left_slot = math.sub(u32, left_index, 1) catch return index;
-                if (data.mem_table.levels[left_slot] != data.mem_table.levels[slot]) return index;
+                    // Bump level_count for find() depending on how deep we compact.
+                    tree.level_count = @maximum(tree.level_count, vr_out_level + 1);
+                    assert(tree.level_count <= levels_max);
 
-                left_link.* = index;
-                mem.swap(u32, left_link, &data.mem_table.links[left_slot][1]);
-                return left_index;
-            }
+                    // Consume and merge vr_in and vr_out into tree.compaction buffer.
+                    const vr_out = &tree.levels[vr_out_level];
+                    tree.compact(vr_out);
 
-            inline fn mem_table_split(data: *const Data, index: u32) u32 {
-                const slot = math.sub(u32, index, 1) catch unreachable;
-
-                const right_link = &data.mem_table.links[slot][1];
-                const right_index = right_link.*;
-                const right_slot = math.sub(u32, right_index, 1) catch return index;
-
-                const rr_index = data.mem_table.links[right_slot][1];
-                const rr_slot = math.sub(u32, rr_index, 1) catch return index;
-                if (data.mem_table.levels[rr_slot] != data.mem_table.levels[slot]) return index;
-
-                right_link.* = index;
-                mem.swap(u32, right_link, &data.mem_table.links[right_slot][0]);
-                data.mem_table.levels[right_slot] += 1;
-                return right_index;
-            }
-
-            fn mem_table_update(data: *Data, segment: u32, value: *Value, inserted: bool) void {
-                const offset = @ptrToInt(value) - @ptrToInt(&data.segments[segment]);
-                const slot = @intCast(u32, @divExact(offset, @sizeOf(Value)));
-                assert(slot < segment_max);
-
-                const mask = @as(u8, 1) << @intCast(u3, slot % 8);
-                const byte = &data.active[((segment * segment_max) + slot) / 8];
-                byte.* = if (inserted) (byte | mask) else (byte & ~mask);
-            }
-
-            inline fn mem_table_active(data: *Data, segment: u32, slot: MemTableIndex) bool {
-                const mask = @as(u8, 1) << @intCast(u3, slot % 8);
-                const byte = &data.active[((segment * segment_max) + slot) / 8];
-                return (byte.* & mask != 0);
-            }
-
-            fn mem_table_sort_into(data: *const MemTable, segment: u32, root: u32, values: []Value) u32 {
-                var top: u32 = 0;
-                var size: u32 = 0;
-                var current = root;
-                const values = &data.segments[segment];
-                
-                while (true) {
-                    while (math.sub(u32, current, 1) catch null) |slot| {
-                        data.mem_table.stack[top] = slot;
-                        top += 1;
-                        current = data.mem_table.links[slot][0];
+                    switch (target) {
+                        // Compact the next level if compaction buffer overflows vr_out.
+                        .first_fit_level => if (vr_out.buf.len < tree.compaction.len) continue,
+                        // Compact all the levels until we reach the end, then return
+                        .compaction_buf => if (vr_out_level < tree.level_count - 1) continue else return,
                     }
 
-                    top = math.sub(u32, top, 1) catch return size;
-                    const slot = data.mem_table.stack[top];
-                    current = data.mem_table.links[slot][1];
+                    // Move/copy the compaction buffer into vr_out as its final destination.
+                    return {
+                        const sorted_values = tree.compaction.buf[0..tree.compaction.len];
+                        stdx.copy_disjoint(.inexact, Value, vr_out.buf, sorted_values);
 
-                    if (!mem_table_active(data, segment, slot)) continue;
-                    values_max[len] = values[slot];
-                    size += 1;
+                        mem.swap(KeyRange, &vr_out.keys, &tree.compaction.keys);
+                        assert(tree.compaction.keys.empty());
+                        assert(!vr_out.keys.empty());
+
+                        mem.swap(u32, &vr_out.len, &tree.compaction.len);
+                        assert(tree.compaction.len == 0);
+                        assert(vr_out.len > 0);
+                    };
                 }
+            }
+
+            fn compact(tree: *ValuesTree, vr: *ValueRange) void {
+                // Bail if there's nothing to merge.
+                if (vr.len == 0) {
+                    assert(vr.keys.empty());
+                    return;
+                }
+
+                const values_a = tree.merge_buf[0..tree.compaction.len];
+                const values_b = vr.buf[0..vr.len];
+                const values_out = tree.compaction.buf;
+
+                // Copy existing compaction buffer values into merge_buf as we'll overwrite below.
+                const values_in = tree.compaction.buf[0..tree.compaction.len];
+                stdx.copy_disjoint(.exact, Value, values_a, values_in);
+
+                var index_a: u32 = 0;
+                var index_b: u32 = 0;
+                var index_out: u32 = 0;
+
+                const values_copy = while (true) {
+                    // Keep merging until we can just memcpy one of the values arrays.
+                    if (index_a == values_a.len) break values_b[index_b..];
+                    if (index_b == values_b.len) break values_a[index_a..];
+
+                    const value_merge = blk: {
+                        const value_a = &values_a[index_a];
+                        const value_b = &values_b[index_b];
+                        switch (compare_keys(key_from_value(value_a), key_from_value(value_b))) {
+                            .lt => {
+                                index_a += 1;
+                                break :blk value_a;
+                            },
+                            .gt => {
+                                index_b += 1;
+                                break :blk value_b;
+                            },
+                            .eq => {
+                                index_a += 1;
+                                index_b += 1;
+                                if (usage == .secondary_index) {
+                                    // A new remove() and previous put() cancel out as a delete.
+                                    if (tombstone(value_a) and !tombstone(value_b)) continue;
+                                }
+                                break :blk value_a; // Always prefer the newer (value_a) Value.
+                            },
+                        }
+                    };
+
+                    assert(index_out < values_out.len);
+                    values_out[index_out] = value_merge.*;
+                    index_out += 1;
+                } else unreachable;
+
+                // Copy Values from the remaining values array if any.
+                stdx.copy_disjoint(.inexact, Value, values_out[index_out..], values_copy);
+                index_out += @intCast(u32, values_copy.len);
+                assert(index_out <= values_out.len);
+
+                // Consume the merged values and the passed in *ValueRange into tree.compaction.
+                tree.compaction.keys.add_range(&vr.keys);
+                tree.compaction.len = index_out;
+                vr.* = .{ .buf = vr.buf };
+            }
+
+            pub fn sort_into_and_clear(tree: *ValuesTree, values_max: []Value) []const Value {
+                tree.flush_into(.compaction_buf);
+
+                const sorted_values = tree.compaction.buf[0..tree.compaction.len];
+                stdx.copy_disjoint(.inexact, Value, values_max, sorted_values);
+
+                tree.clear();
+                return values_max[0..sorted_values.len];
             }
         };
 
@@ -185,7 +339,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             tree_name,
         );
 
-        values: Values = .{},
+        values: ValuesTree,
 
         /// Rather than using values.count(), we count how many values we could have had if every
         /// operation had been on a different key. This means that mistakes in calculating
@@ -209,12 +363,8 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         // The value type will be []u8 and this will be shared by trees with the same value size."
         values_cache: ?*ValuesCache,
 
-        pub fn init(
-            allocator: mem.Allocator,
-            values_cache: ?*ValuesCache,
-        ) !TableMutable {
-            var values: Values = .{};
-            try values.ensureTotalCapacity(allocator, value_count_max);
+        pub fn init(allocator: mem.Allocator, values_cache: ?*ValuesCache) !TableMutable {
+            var values = try ValuesTree.init(allocator);
             errdefer values.deinit(allocator);
 
             return TableMutable{
@@ -228,7 +378,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         }
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
-            if (table.values.getKeyPtr(tombstone_from_key(key))) |value| {
+            if (table.values.find(key)) |value| {
                 return value;
             }
             if (table.values_cache) |cache| {
@@ -241,69 +391,17 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         pub fn put(table: *TableMutable, value: *const Value) void {
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
-            switch (usage) {
-                .secondary_index => {
-                    const existing = table.values.fetchRemove(value.*);
-                    if (existing) |kv| {
-                        // If there was a previous operation on this key then it must have been a remove.
-                        // The put and remove cancel out.
-                        assert(tombstone(&kv.key));
-                    } else {
-                        table.values.putAssumeCapacityNoClobber(value.*, {});
-                    }
-                },
-                .general => {
-                    // If the key is already present in the hash map, the old key will not be overwritten
-                    // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
-                    // level getOrPut() API and manually overwrite the old key.
-                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
-                    upsert.key_ptr.* = value.*;
-                },
-            }
-
-            // The hash map's load factor may allow for more capacity because of rounding:
-            assert(table.values.count() <= value_count_max);
+            table.values.append(.insert, value);
         }
 
         pub fn remove(table: *TableMutable, value: *const Value) void {
             assert(table.value_count_worst_case < value_count_max);
             table.value_count_worst_case += 1;
-            switch (usage) {
-                .secondary_index => {
-                    const existing = table.values.fetchRemove(value.*);
-                    if (existing) |kv| {
-                        // The previous operation on this key then it must have been a put.
-                        // The put and remove cancel out.
-                        assert(!tombstone(&kv.key));
-                    } else {
-                        // If the put is already on-disk, then we need to follow it with a tombstone.
-                        // The put and the tombstone may cancel each other out later during compaction.
-                        table.values.putAssumeCapacityNoClobber(tombstone_from_key(key_from_value(value)), {});
-                    }
-                },
-                .general => {
-                    // If the key is already present in the hash map, the old key will not be overwritten
-                    // by the new one if using e.g. putAssumeCapacity(). Instead we must use the lower
-                    // level getOrPut() API and manually overwrite the old key.
-                    const upsert = table.values.getOrPutAssumeCapacity(value.*);
-                    upsert.key_ptr.* = tombstone_from_key(key_from_value(value));
-                },
-            }
-
-            assert(table.values.count() <= value_count_max);
+            table.values.append(.remove, value);
         }
 
-        pub fn clear(table: *TableMutable) void {
-            assert(table.values.count() > 0);
-            table.value_count_worst_case = 0;
-            table.values.clearRetainingCapacity();
-            assert(table.values.count() == 0);
-        }
-
-        pub fn count(table: *const TableMutable) u32 {
-            const value = @intCast(u32, table.values.count());
-            assert(value <= value_count_max);
-            return value;
+        pub fn empty(table: *const TableMutable) bool {
+            return table.values.empty();
         }
 
         /// The returned slice is invalidated whenever this is called for any tree.
@@ -311,17 +409,14 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
             table: *TableMutable,
             values_max: []Value,
         ) []const Value {
-            assert(table.count() > 0);
-            assert(table.count() <= value_count_max);
-            assert(table.count() <= values_max.len);
+            assert(!table.empty());
             assert(values_max.len == value_count_max);
 
-            var i: usize = 0;
-            var it = table.values.keyIterator();
-            while (it.next()) |value| : (i += 1) {
-                values_max[i] = value.*;
+            const values = table.values.sort_into_and_clear(values_max);
+            assert(table.empty());
 
-                if (table.values_cache) |cache| {
+            if (table.values_cache) |cache| {
+                for (values) |*value| {
                     if (tombstone(value)) {
                         cache.remove(key_from_value(value));
                     } else {
@@ -330,18 +425,8 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
                 }
             }
 
-            const values = values_max[0..i];
-            assert(values.len == table.count());
-            std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
-
-            table.clear();
-            assert(table.count() == 0);
-
+            table.value_count_worst_case = 0;
             return values;
-        }
-
-        fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
-            return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
         }
     };
 }
