@@ -82,17 +82,23 @@ pub fn StorageCheckerType(comptime Replica: type) type {
         }
 
         pub fn replica_compact(checker: *Self, replica: *const Replica) !void {
-            // TODO(Beat Compaction) Remove when deterministic beat compaction is fixed.
-            // Until then this is too noisy.
-            if (1 == 1) return;
-
             // If we are recovering from a crash, don't test the checksum until we are caught up.
             // Until then our grid's checksum is too far ahead.
             if (replica.superblock.working.vsr_state.op_compacted(replica.commit_min)) return;
 
-            // TODO(Beat Compaction) Remove when deterministic beat compaction is implemented.
             const half_measure_beat_count = @divExact(constants.lsm_batch_multiple, 2);
             if ((replica.commit_min + 1) % half_measure_beat_count != 0) return;
+
+            // TODO(Unified Manifest) The issue is:
+            // 1. Open manifest log blocks are acquired from the freeset but not written yet.
+            // 2. We can't defer acquiring manifest log block addresses until close-time.
+            //    This is because `append()` needs the block address in order to update the
+            //    superblock manifest table extents.
+            // 3. We can't defer the superblock manifest table extent updates because then they
+            //    would be out of order with respect to the table extent *removes* performed
+            //    during manifest compaction.
+            // Hopefully with a unified manifest another approach will open up.
+            if (1 == 1) return;
 
             const checksum = checksum_grid(replica);
             log.debug("{}: replica_compact: op={} area=grid checksum={x:>32}", .{
