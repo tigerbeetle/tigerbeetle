@@ -48,6 +48,7 @@ pub fn main() !void {
     defer allocator.free(events);
 
     try run_fuzz(allocator, prng.random(), events);
+    log.info("Passed!", .{});
 }
 
 fn run_fuzz(
