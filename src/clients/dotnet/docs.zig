@@ -103,7 +103,14 @@ pub const DotnetDocs = Docs{
     \\* `AccountFlags.CreditsMustNotExceedDebits`
     ,
 
-    .account_flags_example = "",
+    .account_flags_example = 
+    \\var account0 = new Account{ /* ... account values ... */ };
+    \\var account1 = new Account{ /* ... account values ... */ };
+    \\account0.Flags = AccountFlags.Linked;
+    \\
+    \\errors = client.CreateAccounts(new []Account{account0, account1});
+    \\Debug.Assert(errors.Length == 0);
+    ,
 
     .create_accounts_errors_example = "",
 
