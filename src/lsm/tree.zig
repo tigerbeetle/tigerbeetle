@@ -607,6 +607,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
                     tree.manifest.reserve();
 
+                    // Compact the manifest.
+                    tree.compaction_io_pending += 1;
+                    tree.manifest.compact(compact_manifest_callback);
+
                     // Maybe start compacting the immutable table.
                     const even_levels = compaction_beat < half_bar_beat_count;
                     if (even_levels) {
@@ -639,6 +643,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                     tree.compact_finish_join();
                 },
             }
+        }
+
+        fn compact_manifest_callback(manifest: *Manifest) void {
+            const tree = @fieldParentPtr(Tree, "manifest", manifest);
+            tree.compaction_io_pending -= 1;
+            tree.compact_finish_join();
         }
 
         fn compact_start_table_immutable(tree: *Tree, op_min: u64) void {
@@ -753,108 +763,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             if (tree.compaction_callback != .awaiting) return;
 
             log.debug(tree_name ++ ": finished all compactions", .{});
-
-            tree.lookup_snapshot_max = tree.compaction_op + 1;
-
-            // All compactions have finished for the current half-bar.
-            // We couldn't remove the (invisible) input tables until now because prefetch()
-            // needs a complete set of tables for lookups to avoid missing data.
-
-            // Reset the immutable table Compaction.
-            // Also clear any tables made invisible by the compaction.
-            const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
-            const even_levels = compaction_beat < half_bar_beat_count;
-            const compacted_levels_odd = compaction_beat == constants.lsm_batch_multiple - 1;
-            if (!even_levels) {
-                switch (tree.compaction_table_immutable.state) {
-                    // The compaction wasn't started for this half bar.
-                    .idle => assert(tree.table_immutable.free),
-                    .done => {
-                        tree.manifest.remove_invisible_tables(
-                            tree.compaction_table_immutable.context.level_b,
-                            tree.lookup_snapshot_max,
-                            tree.compaction_table_immutable.context.range_b.key_min,
-                            tree.compaction_table_immutable.context.range_b.key_max,
-                        );
-                        tree.compaction_table_immutable.reset();
-                        tree.table_immutable.clear();
-                    },
-                    else => unreachable,
-                }
-            }
-
-            // Reset all the other Compactions.
-            // Also clear any tables made invisible by the compactions.
-            var it = CompactionTableIterator{ .tree = tree };
-            while (it.next()) |context| {
-                switch (context.compaction.state) {
-                    .idle => {}, // The compaction wasn't started for this half bar.
-                    .done => {
-                        tree.manifest.remove_invisible_tables(
-                            context.compaction.context.level_b,
-                            tree.lookup_snapshot_max,
-                            context.compaction.context.range_b.key_min,
-                            context.compaction.context.range_b.key_max,
-                        );
-                        if (context.compaction.context.level_b > 0) {
-                            tree.manifest.remove_invisible_tables(
-                                context.compaction.context.level_b - 1,
-                                tree.lookup_snapshot_max,
-                                context.compaction.context.range_b.key_min,
-                                context.compaction.context.range_b.key_max,
-                            );
-                        }
-                        context.compaction.reset();
-                    },
-                    else => unreachable,
-                }
-            }
-
-            assert(tree.compaction_table_immutable.state == .idle);
-            it = CompactionTableIterator{ .tree = tree };
-            while (it.next()) |context| {
-                assert(context.compaction.state == .idle);
-            }
-
-            if (compacted_levels_odd) {
-                // Assert all visible tables haven't overflowed their max per level.
-                tree.manifest.assert_level_table_counts();
-
-                // Convert mutable table to immutable table for next bar.
-                tree.compact_mutable_table_into_immutable();
-            }
-
-            // Compact the manifest.
-            tree.manifest.compact(compact_manifest_callback);
-        }
-
-        /// Called after the last beat of a full compaction bar.
-        fn compact_mutable_table_into_immutable(tree: *Tree) void {
-            assert(tree.table_immutable.free);
-            assert((tree.compaction_op + 1) % constants.lsm_batch_multiple == 0);
-            assert(tree.compaction_op + 1 == tree.lookup_snapshot_max);
-
-            if (tree.table_mutable.count() == 0) return;
-
-            // Sort the mutable table values directly into the immutable table's array.
-            const values_max = tree.table_immutable.values_max();
-            const values = tree.table_mutable.sort_into_values_and_clear(values_max);
-            assert(values.ptr == values_max.ptr);
-
-            // The immutable table must be visible to the next bar — setting its snapshot_min to
-            // lookup_snapshot_max guarantees.
-            //
-            // In addition, the immutable table is conceptually an output table of this compaction
-            // bar, and now its snapshot_min matches the snapshot_min of the Compactions' output
-            // tables.
-            tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max, values);
-
-            assert(tree.table_mutable.count() == 0);
-            assert(!tree.table_immutable.free);
-        }
-
-        fn compact_manifest_callback(manifest: *Manifest) void {
-            const tree = @fieldParentPtr(Tree, "manifest", manifest);
             tree.compact_finish();
         }
 
@@ -888,6 +796,115 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             const callback = tree.compaction_callback.awaiting;
             tree.compaction_callback = .none;
             callback(tree);
+        }
+
+        pub fn compact_end(tree: *Tree) void {
+            // Only run if compact() actually compacted.
+            if (tree.compaction_op < constants.lsm_batch_multiple or
+                tree.grid.superblock.working.vsr_state.op_compacted(tree.compaction_op))
+            {
+                return;
+            }
+
+            // Only run at the end of each half-bar.
+            const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
+            const compacted_levels_odd = compaction_beat == constants.lsm_batch_multiple - 1;
+            const compacted_levels_even = compaction_beat == half_bar_beat_count - 1;
+            if (!compacted_levels_odd and !compacted_levels_even) return;
+
+            tree.lookup_snapshot_max = tree.compaction_op + 1;
+
+            // All compactions have finished for the current half-bar.
+            // We couldn't remove the (invisible) input tables until now because prefetch()
+            // needs a complete set of tables for lookups to avoid missing data.
+
+            // Reset the immutable table Compaction.
+            // Also clear any tables made invisible by the compaction.
+            const even_levels = compaction_beat < half_bar_beat_count;
+            if (!even_levels) {
+                switch (tree.compaction_table_immutable.state) {
+                    // The compaction wasn't started for this half bar.
+                    .idle => assert(tree.table_immutable.free),
+                    .done => {
+                        tree.compaction_table_immutable.finish();
+                        tree.manifest.remove_invisible_tables(
+                            tree.compaction_table_immutable.context.level_b,
+                            tree.lookup_snapshot_max,
+                            tree.compaction_table_immutable.context.range_b.key_min,
+                            tree.compaction_table_immutable.context.range_b.key_max,
+                        );
+                        tree.table_immutable.clear();
+                    },
+                    else => unreachable,
+                }
+            }
+
+            // Reset all the other Compactions.
+            // Also clear any tables made invisible by the compactions.
+            var it = CompactionTableIterator{ .tree = tree };
+            while (it.next()) |context| {
+                switch (context.compaction.state) {
+                    .idle => {}, // The compaction wasn't started for this half bar.
+                    .done => {
+                        context.compaction.finish();
+                        tree.manifest.remove_invisible_tables(
+                            context.compaction.context.level_b,
+                            tree.lookup_snapshot_max,
+                            context.compaction.context.range_b.key_min,
+                            context.compaction.context.range_b.key_max,
+                        );
+                        if (context.compaction.context.level_b > 0) {
+                            tree.manifest.remove_invisible_tables(
+                                context.compaction.context.level_b - 1,
+                                tree.lookup_snapshot_max,
+                                context.compaction.context.range_b.key_min,
+                                context.compaction.context.range_b.key_max,
+                            );
+                        }
+                    },
+                    else => unreachable,
+                }
+            }
+            tree.manifest.forfeit();
+
+            assert(tree.compaction_table_immutable.state == .idle);
+            it = CompactionTableIterator{ .tree = tree };
+            while (it.next()) |context| {
+                assert(context.compaction.state == .idle);
+            }
+
+            if (compacted_levels_odd) {
+                // Assert all visible tables haven't overflowed their max per level.
+                tree.manifest.assert_level_table_counts();
+
+                // Convert mutable table to immutable table for next bar.
+                tree.compact_mutable_table_into_immutable();
+            }
+        }
+
+        /// Called after the last beat of a full compaction bar.
+        fn compact_mutable_table_into_immutable(tree: *Tree) void {
+            assert(tree.table_immutable.free);
+            assert((tree.compaction_op + 1) % constants.lsm_batch_multiple == 0);
+            assert(tree.compaction_op + 1 == tree.lookup_snapshot_max);
+
+            if (tree.table_mutable.count() == 0) return;
+
+            // Sort the mutable table values directly into the immutable table's array.
+            const values_max = tree.table_immutable.values_max();
+            const values = tree.table_mutable.sort_into_values_and_clear(values_max);
+            assert(values.ptr == values_max.ptr);
+
+            // The immutable table must be visible to the next bar — setting its snapshot_min to
+            // lookup_snapshot_max guarantees.
+            //
+            // In addition, the immutable table is conceptually an output table of this compaction
+            // bar, and now its snapshot_min matches the snapshot_min of the Compactions' output
+            // tables.
+            tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max, values);
+
+            assert(tree.table_mutable.count() == 0);
+            assert(!tree.table_immutable.free);
         }
 
         pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
