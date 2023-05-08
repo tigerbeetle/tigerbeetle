@@ -399,6 +399,7 @@ const Environment = struct {
         env.manifest_log.compact(compact_callback);
         env.wait(&env.manifest_log);
 
+        env.manifest_log.forfeit();
         env.manifest_log_reserved = false;
     }
 
