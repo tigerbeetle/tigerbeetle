@@ -25,8 +25,22 @@ pub const DotnetDocs = Docs{
     \\* .NET >= 6.0
     ,
 
-    .project_file_name = "",
-    .project_file = "",
+    .project_file_name = "Test.csproj",
+    .project_file = 
+    \\<Project Sdk="Microsoft.NET.Sdk">
+    \\  <PropertyGroup>
+    \\    <OutputType>Exe</OutputType>
+    \\    <TargetFramework>net7.0</TargetFramework>
+    \\    <ImplicitUsings>enable</ImplicitUsings>
+    \\    <Nullable>enable</Nullable>
+    \\  </PropertyGroup>
+    \\
+    \\  <ItemGroup>
+    \\    <PackageReference Include="tigerbeetle" Version="0.0.1.3814" />
+    \\  </ItemGroup>
+    \\
+    \\</Project>
+    ,
 
     .test_file_name = "Program",
 
@@ -46,7 +60,7 @@ pub const DotnetDocs = Docs{
     .current_commit_pre_install_hook = null,
     .current_commit_post_install_hook = null,
 
-    .install_commands = "dotnet add package tigerbeetle-dotnet",
+    .install_commands = "",
     .build_commands = "dotnet build",
     .run_commands = "dotnet run",
 
@@ -175,13 +189,13 @@ pub const DotnetDocs = Docs{
     .developer_setup_sh_commands = 
     \\cd src/clients/dotnet
     \\dotnet build
-    \\if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
+    \\if [ "$TEST" = "true" ]; then dotnet clean; dotnet test; else echo "Skipping client unit tests"; fi
     ,
 
     .developer_setup_pwsh_commands = 
     \\cd src/clients/dotnet
     \\dotnet build
-    \\if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
+    \\if ($env:TEST -eq 'true') { dotnet clean; dotnet test } else { echo "Skipping client unit test" }
     ,
 
     .test_main_prefix = 

@@ -298,6 +298,13 @@ const Generator = struct {
     fn validate_aggregate(self: Generator, keepTmp: bool) !void {
         // Test major parts of sample code
         var sample = try self.make_aggregate_sample();
+        self.print("Aggregate");
+        var line_no: u32 = 0;
+        var lines = std.mem.split(u8, sample, "\n");
+        while (lines.next()) |line| {
+            line_no += 1;
+            std.debug.print("{}\t\t{s}\n", .{ line_no, line });
+        }
         self.print("Building aggregate sample file");
         var tmp_dir = try TmpDir.init(self.arena);
         defer if (!keepTmp) tmp_dir.deinit();
