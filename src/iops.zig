@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 /// Take a u6 to limit to 64 items max (2^6 = 64)
-pub fn IOPS(comptime T: type, comptime size: u6) type {
+pub fn IOPS(comptime T: type, comptime size: u8) type {
     const Map = std.StaticBitSet(size);
     return struct {
         const Self = @This();
