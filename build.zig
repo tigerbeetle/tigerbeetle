@@ -21,6 +21,12 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     options.addOption(
+        ?[]const u8,
+        "git_tag",
+        if (git_tag(allocator)) |tag| tag.constSlice() else null,
+    );
+
+    options.addOption(
         config.ConfigBase,
         "config_base",
         b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
@@ -462,6 +468,24 @@ fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
     var output: [40]u8 = undefined;
     std.mem.copy(u8, &output, exec_result.stdout[0..40]);
     return output;
+}
+
+fn git_tag(allocator: std.mem.Allocator) ?std.BoundedArray(u8, 100) {
+    const exec_result = std.ChildProcess.exec(.{
+        .allocator = allocator,
+        .argv = &.{ "git", "describe", "--tags" },
+    }) catch return null;
+    defer allocator.free(exec_result.stdout);
+    defer allocator.free(exec_result.stderr);
+
+    if (exec_result.stderr.len != 0) return null;
+
+    var tag = std.BoundedArray(u8, 100){ .buffer = undefined };
+    tag.appendSlice(exec_result.stdout) catch {
+        std.debug.print("`git describe --tags` output too long.\n", .{});
+        return null;
+    };
+    return tag;
 }
 
 fn link_tracer_backend(
