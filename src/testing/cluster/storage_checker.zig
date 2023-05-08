@@ -127,10 +127,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 .checksum_superblock_free_set = 0,
                 .checksum_superblock_client_sessions = 0,
                 .checksum_client_replies = checksum_client_replies(storage),
-                // TODO(Beat Compaction) Enable grid check when deterministic storage is fixed.
-                // Until then this is too noisy.
-                // checksum_grid(replica),
-                .checksum_grid = 0,
+                .checksum_grid = checksum_grid(replica),
             };
 
             inline for (.{ .manifest, .free_set, .client_sessions }) |trailer| {
