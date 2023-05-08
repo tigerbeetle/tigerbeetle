@@ -274,6 +274,9 @@ pub fn build(b: *std.build.Builder) void {
     {
         const simulator_options = b.addOptions();
 
+        // When running without a SEED, default to release.
+        const simulator_mode = if (b.args == null) .ReleaseSafe else mode;
+
         const StateMachine = enum { testing, accounting };
         simulator_options.addOption(
             StateMachine,
@@ -285,8 +288,21 @@ pub fn build(b: *std.build.Builder) void {
             ) orelse .accounting,
         );
 
+        const SimulatorLog = enum { full, short };
+        const default_simulator_log = if (simulator_mode == .ReleaseSafe) SimulatorLog.short else .full;
+        simulator_options.addOption(
+            SimulatorLog,
+            "log",
+            b.option(
+                SimulatorLog,
+                "simulator-log",
+                "Log only state transitions (short) or everything (full).",
+            ) orelse default_simulator_log,
+        );
+
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
+        simulator.setBuildMode(simulator_mode);
         // Ensure that we get stack traces even in release builds.
         simulator.omit_frame_pointer = false;
         simulator.addOptions("vsr_options", options);
@@ -297,9 +313,6 @@ pub fn build(b: *std.build.Builder) void {
 
         if (b.args) |args| {
             run_cmd.addArgs(args);
-            simulator.setBuildMode(mode);
-        } else {
-            simulator.setBuildMode(.ReleaseSafe);
         }
 
         const install_step = b.addInstallArtifact(simulator);
