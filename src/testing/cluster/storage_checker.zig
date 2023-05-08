@@ -183,7 +183,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
 
         fn checksum_grid(replica: *const Replica) u128 {
             const storage = replica.superblock.storage;
-            var acquired = replica.superblock.free_set.blocks.iterator(.{ .kind = .unset });
+            var acquired = replica.superblock.free_set.blocks.iterator(.{});
             var checksum: u128 = 0;
             while (acquired.next()) |address_index| {
                 const block = storage.grid_block(address_index + 1);
