@@ -6253,7 +6253,7 @@ pub fn ReplicaType(
                 const dvc_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
                 for (dvc_headers.slice) |*header, i| {
                     log.debug(
-                        "{}: {s}: dvc: header: replica={} op={} checksum={} nack={}",
+                        "{}: {s}: dvc: header: replica={} op={} checksum={} nack={} type={s}",
                         .{
                             self.replica,
                             context,
@@ -6261,6 +6261,7 @@ pub fn ReplicaType(
                             header.op,
                             header.checksum,
                             dvc_nacks.isSet(i),
+                            @tagName(vsr.Headers.dvc_header_type(header)),
                         },
                     );
                 }
