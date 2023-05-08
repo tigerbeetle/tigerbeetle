@@ -95,7 +95,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             if ((replica.commit_min + 1) % half_measure_beat_count != 0) return;
 
             const checksum = checksum_grid(replica);
-            log.debug("{}: replica_compact: op={} area=grid checksum={}", .{
+            log.debug("{}: replica_compact: op={} area=grid checksum={x:>32}", .{
                 replica.replica,
                 replica.commit_min,
                 checksum,
@@ -108,7 +108,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             } else {
                 const checksum_expect = checker.compactions.items[compactions_index];
                 if (checksum_expect != checksum) {
-                    log.err("{}: replica_compact: mismatch area=grid expect={} actual={}", .{
+                    log.err("{}: replica_compact: mismatch area=grid expect={x:>32} actual={x:>32}", .{
                         replica.replica,
                         checksum_expect,
                         checksum,
@@ -144,7 +144,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             }
 
             inline for (std.meta.fields(Checkpoint)) |field| {
-                log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={}", .{
+                log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={x:>32}", .{
                     replica.replica,
                     replica.op_checkpoint(),
                     field.name,
@@ -164,7 +164,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 const field_expect = @field(checkpoint_expect, field.name);
                 if (!std.meta.eql(field_expect, field_actual)) {
                     fail = true;
-                    log.debug("{}: replica_checkpoint: mismatch area={s} expect={} actual={}", .{
+                    log.err("{}: replica_checkpoint: mismatch area={s} expect={x:>32} actual={x:>32}", .{
                         replica.replica,
                         field.name,
                         @field(checkpoint_expect, field.name),
