@@ -303,7 +303,7 @@ const Generator = struct {
         var lines = std.mem.split(u8, sample, "\n");
         while (lines.next()) |line| {
             line_no += 1;
-            std.debug.print("{}\t\t{s}\n", .{ line_no, line });
+            std.debug.print("{: >3} {s}\n", .{ line_no, line });
         }
         self.print("Building aggregate sample file");
         var tmp_dir = try TmpDir.init(self.arena);
