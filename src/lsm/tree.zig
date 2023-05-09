@@ -679,7 +679,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .grid = tree.grid,
                 .tree = tree,
                 .op_min = op_min,
-                .table_info_a = .{ .immutable = tree.table_immutable.values },
+                .table_info_a = .{ .immutable = tree.table_immutable.iterator() },
                 .level_b = level_b,
                 .range_b = range,
                 .callback = compact_table_finish,

@@ -123,70 +123,21 @@ pub fn TableImmutableType(comptime Table: type) type {
 
             return null;
         }
-    };
-}
 
-pub fn TableImmutableIteratorType(comptime Table: type, comptime Storage: type) type {
-    _ = Storage;
-
-    return struct {
-        const TableImmutableIterator = @This();
-        const TableImmutable = TableImmutableType(Table);
-
-        table: *const TableImmutable,
-        values_index: u32,
-
-        pub fn init(allocator: mem.Allocator) !TableImmutableIterator {
-            _ = allocator; // This only iterates an existing immutable table.
-
-            return TableImmutableIterator{
-                .table = undefined,
-                .values_index = undefined,
-            };
+        pub fn iterator(table: *const TableImmutable) Iterator {
+            return .{ .values_max = table.values };
         }
 
-        pub fn deinit(it: *TableImmutableIterator, allocator: mem.Allocator) void {
-            _ = allocator; // No memory allocation was initially performed.
-            it.* = undefined;
-        }
+        pub const Iterator = struct {
+            values_max: []const Value,
 
-        pub const Context = struct {
-            table: *const TableImmutable,
+            pub inline fn peek(it: *const Iterator) ?*const Value {
+                return if (it.values_max.len > 0) &it.values_max[0] else null;
+            }
+
+            pub inline fn pop(it: *Iterator) void {
+                it.values_max = it.values_max[1..];
+            }
         };
-
-        pub fn start(
-            it: *TableImmutableIterator,
-            context: Context,
-            read_done: fn (*TableImmutableIterator) void,
-        ) void {
-            _ = read_done; // No asynchronous operations are performed.
-            it.* = .{
-                .table = context.table,
-                .values_index = 0,
-            };
-        }
-
-        pub fn tick(it: *const TableImmutableIterator) bool {
-            assert(!it.table.free);
-            return false; // No I/O is performed as it's all in memory.
-        }
-
-        pub fn buffered_all_values(it: *const TableImmutableIterator) bool {
-            assert(!it.table.free);
-            return true; // All values are "buffered" in memory.
-        }
-
-        pub fn peek(it: *const TableImmutableIterator) error{ Empty, Drained }!Table.Key {
-            // NOTE: This iterator is never Drained as all values are in memory (tick is a no-op).
-            assert(!it.table.free);
-            if (it.values_index == it.table.values.len) return error.Empty;
-            return Table.key_from_value(&it.table.values[it.values_index]);
-        }
-
-        pub fn pop(it: *TableImmutableIterator) Table.Value {
-            assert(!it.table.free);
-            defer it.values_index += 1;
-            return it.table.values[it.values_index];
-        }
     };
 }
