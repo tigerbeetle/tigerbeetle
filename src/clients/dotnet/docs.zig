@@ -76,7 +76,7 @@ pub const DotnetDocs = Docs{
     \\var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
     \\var client = new Client(
     \\  clusterID: 0,
-    \\  replicaAddresses: new[] {tbAddress.Length > 0 ? tbAddress : "3000"}
+    \\  addresses: new[] {tbAddress.Length > 0 ? tbAddress : "3000"}
     \\);
     ,
 
@@ -102,7 +102,7 @@ pub const DotnetDocs = Docs{
     \\  },     
     \\};
     \\
-    \\var errors = client.CreateAccounts(accounts);
+    \\var createAccountsErrors = client.CreateAccounts(accounts);
     ,
 
     .create_accounts_documentation = "",
@@ -122,7 +122,7 @@ pub const DotnetDocs = Docs{
     \\var account1 = new Account{ /* ... account values ... */ };
     \\account0.Flags = AccountFlags.Linked;
     \\
-    \\errors = client.CreateAccounts(new []Account{account0, account1});
+    \\errors = client.CreateAccounts(new []{account0, account1});
     \\Debug.Assert(errors.Length == 0);
     ,
 
@@ -131,7 +131,7 @@ pub const DotnetDocs = Docs{
     .create_accounts_errors_documentation = "",
 
     .lookup_accounts_example = 
-    \\accounts = client.LookupAccounts(new[] { 137, 138 });
+    \\accounts = client.LookupAccounts(new UInt128[] { 137, 138 });
     ,
 
     .create_transfers_example = 
@@ -141,16 +141,16 @@ pub const DotnetDocs = Docs{
     \\    Id = 1,
     \\    DebitAccountId = 1,
     \\    CreditAccountId = 2,
-    \\    Timeout: 0,
-    \\    UserData: 2,
+    \\    Timeout = 0,
+    \\    UserData = 2,
     \\    Ledger = 1,
     \\    Code = 1,
     \\    Flags = 0,
     \\    Amount = 10,
-    \\  },
-    \\}
+    \\  }
+    \\};
     \\
-    \\var errors = client.CreateTransfers(transfers);
+    \\var createTransfersErrors = client.CreateTransfers(transfers);
     ,
 
     .create_transfers_documentation = "",
@@ -181,7 +181,7 @@ pub const DotnetDocs = Docs{
     .transfer_flags_void_example = "",
 
     .lookup_transfers_example = 
-    \\transfers = client.LookupTransfers(new[] {1, 2});
+    \\transfers = client.LookupTransfers(new UInt128[] {1, 2});
     ,
 
     .linked_events_example = "",
@@ -200,6 +200,7 @@ pub const DotnetDocs = Docs{
 
     .test_main_prefix = 
     \\using System;
+    \\using System.Diagnostics;
     \\
     \\using TigerBeetle;
     \\
