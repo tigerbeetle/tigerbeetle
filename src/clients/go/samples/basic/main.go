@@ -27,7 +27,7 @@ func assert(a, b interface{}, field string) {
 }
 
 func main() {
-	port := os.Getenv("TB_PORT")
+	port := os.Getenv("TB_ADDRESS")
 	if port == "" {
 		port = "3000"
 	}
