@@ -46,6 +46,7 @@ const GridType = @import("grid.zig").GridType;
 const alloc_block = @import("grid.zig").alloc_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
+const TableImmutableType = @import("table_immutable.zig").TableImmutableType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 const LevelDataIteratorType = @import("level_data_iterator.zig").LevelDataIteratorType;
 
@@ -66,6 +67,7 @@ pub fn CompactionType(
         const CompactionRange = Manifest.CompactionRange;
         const TableDataIterator = TableDataIteratorType(Storage);
         const LevelDataIterator = LevelDataIteratorType(Table, Storage);
+        const TableImmutableIterator = TableImmutableType(Table).Iterator;
 
         const Key = Table.Key;
         const Value = Table.Value;
@@ -74,7 +76,7 @@ pub fn CompactionType(
         const tombstone = Table.tombstone;
 
         pub const TableInfoA = union(enum) {
-            immutable: []const Value,
+            immutable: TableImmutableIterator,
             disk: TableInfo,
         };
 
@@ -315,8 +317,7 @@ pub fn CompactionType(
                 });
 
                 switch (context.table_info_a) {
-                    .immutable => |values| {
-                        compaction.values_in[0] = values;
+                    .immutable => {
                         compaction.loop_start();
                     },
                     .disk => |table_info| {
@@ -467,11 +468,21 @@ pub fn CompactionType(
             }
         }
 
+        const ArrayIterator = struct {
+            values: []const Value,
+
+            inline fn peek(it: *const ArrayIterator) ?*const Value {
+                return if (it.values.len > 0) &it.values[0] else null;
+            }
+
+            inline fn pop(it: *ArrayIterator) void {
+                it.values = it.values[1..];
+            }
+        };
+
         fn compact(compaction: *Compaction) void {
             assert(compaction.state == .compacting);
             assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
-
-            const values_in = compaction.values_in;
 
             var tracer_slot: ?tracer.SpanStart = null;
             tracer.start(
@@ -483,18 +494,17 @@ pub fn CompactionType(
                 @src(),
             );
 
-            if (values_in[0].len == 0 and values_in[1].len == 0) {
-                compaction.input_state = .exhausted;
-            } else if (values_in[0].len == 0) {
-                compaction.copy(.b);
-            } else if (values_in[1].len == 0) {
-                if (compaction.drop_tombstones) {
-                    compaction.copy_drop_tombstones();
-                } else {
-                    compaction.copy(.a);
+            {
+                var a_iterator = ArrayIterator{ .values = compaction.values_in[0] };
+                defer compaction.values_in[0] = a_iterator.values;
+
+                var b_iterator = ArrayIterator{ .values = compaction.values_in[1] };
+                defer compaction.values_in[1] = b_iterator.values;
+
+                switch (compaction.context.table_info_a) {
+                    .immutable => |*it| compaction.compact_with(it, &b_iterator),
+                    .disk => compaction.compact_with(&a_iterator, &b_iterator),
                 }
-            } else {
-                compaction.merge();
             }
 
             tracer.end(
@@ -508,122 +518,112 @@ pub fn CompactionType(
             compaction.write_blocks();
         }
 
-        fn copy(compaction: *Compaction, input_level: InputLevel) void {
+        fn compact_with(compaction: *Compaction, a_iterator: anytype, b_iterator: anytype) void {
             assert(compaction.state == .compacting);
-            assert(compaction.values_in[@enumToInt(input_level) +% 1].len == 0);
             assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
 
-            const values_in = compaction.values_in[@enumToInt(input_level)];
-            const values_out = compaction.table_builder.data_block_values();
-            var values_out_index = compaction.table_builder.value_count;
+            const a_empty = a_iterator.peek() == null;
+            const b_empty = b_iterator.peek() == null;
 
-            assert(values_in.len > 0);
-
-            const len = @minimum(values_in.len, values_out.len - values_out_index);
-            assert(len > 0);
-            stdx.copy_disjoint(
-                .exact,
-                Value,
-                values_out[values_out_index..][0..len],
-                values_in[0..len],
-            );
-
-            compaction.values_in[@enumToInt(input_level)] = values_in[len..];
-            compaction.table_builder.value_count += @intCast(u32, len);
+            if (a_empty and b_empty) {
+                compaction.input_state = .exhausted;
+            } else if (a_empty) {
+                compaction.copy(b_iterator, false);
+            } else if (b_empty) {
+                compaction.copy(a_iterator, compaction.drop_tombstones);
+            } else {
+                compaction.merge(a_iterator, b_iterator);
+            }
         }
 
-        fn copy_drop_tombstones(compaction: *Compaction) void {
+        fn copy(compaction: *Compaction, value_iterator: anytype, drop_tombstones: bool) void {
             assert(compaction.state == .compacting);
-            assert(compaction.values_in[1].len == 0);
+            assert(value_iterator.peek() != null);
             assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
 
-            // Copy variables locally to ensure a tight loop.
-            const values_in_a = compaction.values_in[0];
             const values_out = compaction.table_builder.data_block_values();
-            var values_in_a_index: usize = 0;
             var values_out_index = compaction.table_builder.value_count;
+            defer compaction.table_builder.value_count = values_out_index;
 
-            // Merge as many values as possible.
-            while (values_in_a_index < values_in_a.len and
-                values_out_index < values_out.len)
-            {
-                const value_a = &values_in_a[values_in_a_index];
-                values_in_a_index += 1;
-                if (tombstone(value_a)) {
-                    continue;
+            // Specialize on ArrayIterator to do a memcpy when possible.
+            if (@TypeOf(value_iterator) == *ArrayIterator) {
+                if (!drop_tombstones) {
+                    const values_in: []const Value = value_iterator.values;
+                    const len = @minimum(values_in.len, values_out.len - values_out_index);
+                    assert(len > 0);
+
+                    stdx.copy_disjoint(
+                        .exact,
+                        Value,
+                        values_out[values_out_index..][0..len],
+                        values_in[0..len],
+                    );
+
+                    value_iterator.values = values_in[len..];
+                    values_out_index += @intCast(u32, len);
+                    return;
                 }
-                values_out[values_out_index] = value_a.*;
+            }
+
+            while (values_out_index < values_out.len) {
+                const value = value_iterator.peek() orelse break;
+                value_iterator.pop();
+
+                if (drop_tombstones and tombstone(value)) continue;
+                values_out[values_out_index] = value.*;
                 values_out_index += 1;
             }
-
-            // Copy variables back out.
-            compaction.values_in[0] = values_in_a[values_in_a_index..];
-            compaction.table_builder.value_count = values_out_index;
         }
 
-        fn merge(compaction: *Compaction) void {
-            assert(compaction.values_in[0].len > 0);
-            assert(compaction.values_in[1].len > 0);
+        fn merge(compaction: *Compaction, value_iterator_a: anytype, value_iterator_b: anytype) void {
+            assert(compaction.state == .compacting);
+            assert(value_iterator_a.peek() != null);
+            assert(value_iterator_b.peek() != null);
             assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
 
-            // Copy variables locally to ensure a tight loop.
-            const values_in_a = compaction.values_in[0];
-            const values_in_b = compaction.values_in[1];
             const values_out = compaction.table_builder.data_block_values();
-            var values_in_a_index: usize = 0;
-            var values_in_b_index: usize = 0;
             var values_out_index = compaction.table_builder.value_count;
+            defer compaction.table_builder.value_count = values_out_index;
 
-            // Merge as many values as possible.
-            while (values_in_a_index < values_in_a.len and
-                values_in_b_index < values_in_b.len and
-                values_out_index < values_out.len)
-            {
-                const value_a = &values_in_a[values_in_a_index];
-                const value_b = &values_in_b[values_in_b_index];
-                switch (compare_keys(key_from_value(value_a), key_from_value(value_b))) {
-                    .lt => {
-                        values_in_a_index += 1;
-                        if (compaction.drop_tombstones and
-                            tombstone(value_a))
-                        {
-                            continue;
-                        }
-                        values_out[values_out_index] = value_a.*;
-                        values_out_index += 1;
-                    },
-                    .gt => {
-                        values_in_b_index += 1;
-                        values_out[values_out_index] = value_b.*;
-                        values_out_index += 1;
-                    },
-                    .eq => {
-                        values_in_a_index += 1;
-                        values_in_b_index += 1;
-                        if (Table.usage == .secondary_index) {
-                            if (tombstone(value_a)) {
-                                assert(!tombstone(value_b));
+            while (values_out_index < values_out.len) {
+                const value = blk: {
+                    const value_a = value_iterator_a.peek() orelse break;
+                    const value_b = value_iterator_b.peek() orelse break;
+                    switch (compare_keys(key_from_value(value_a), key_from_value(value_b))) {
+                        .lt => {
+                            value_iterator_a.pop();
+                            if (compaction.drop_tombstones and tombstone(value_a)) continue;
+                            break :blk value_a;
+                        },
+                        .gt => {
+                            value_iterator_b.pop();
+                            break :blk value_b;
+                        },
+                        .eq => {
+                            value_iterator_a.pop();
+                            value_iterator_b.pop();
+                            if (Table.usage == .secondary_index) {
+                                // A newer remove cancels out an existing insert.
+                                if (tombstone(value_a)) {
+                                    assert(!tombstone(value_b));
+                                    continue;
+                                }
+                                // An existing remove cancels out a newer insert.
+                                if (tombstone(value_b)) {
+                                    assert(!tombstone(value_a));
+                                    continue;
+                                }
+                            } else if (compaction.drop_tombstones and tombstone(value_a)) {
                                 continue;
                             }
-                            if (tombstone(value_b)) {
-                                assert(!tombstone(value_a));
-                                continue;
-                            }
-                        } else if (compaction.drop_tombstones) {
-                            if (tombstone(value_a)) {
-                                continue;
-                            }
-                        }
-                        values_out[values_out_index] = value_a.*;
-                        values_out_index += 1;
-                    },
-                }
+                            break :blk value_a;
+                        },
+                    }
+                };
+
+                values_out[values_out_index] = value.*;
+                values_out_index += 1;
             }
-
-            // Copy variables back out.
-            compaction.values_in[0] = values_in_a[values_in_a_index..];
-            compaction.values_in[1] = values_in_b[values_in_b_index..];
-            compaction.table_builder.value_count = values_out_index;
         }
 
         fn write_blocks(compaction: *Compaction) void {
