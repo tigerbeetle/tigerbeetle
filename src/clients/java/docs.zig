@@ -1,7 +1,122 @@
+const builtin = @import("builtin");
+const std = @import("std");
+
 const Docs = @import("../docs_types.zig").Docs;
+const run = @import("../shutil.zig").run;
+const run_shell = @import("../shutil.zig").run_shell;
+const script_filename = @import("../shutil.zig").script_filename;
+const write_shell_newlines_into_single_line = @import("../shutil.zig").write_shell_newlines_into_single_line;
+
+// Caller is responsible for resetting to a good cwd after this completes.
+fn find_tigerbeetle_client_jar(arena: *std.heap.ArenaAllocator, root: []const u8) ![]const u8 {
+    try std.os.chdir(root);
+
+    var tries: usize = 2;
+    var java_target_path: []const u8 = "";
+    while (tries > 0) {
+        if (std.fs.cwd().realpathAlloc(arena.allocator(), "src/clients/java/target")) |path| {
+            std.debug.print("Found jar.\n", .{});
+            java_target_path = path;
+            break;
+        } else |err| switch (err) {
+            else => {
+                std.debug.print("Could not find jar, rebuilding.\n", .{});
+
+                var cmd = std.ArrayList(u8).init(arena.allocator());
+                // First run general setup within already cloned repo
+                try write_shell_newlines_into_single_line(&cmd, if (builtin.os.tag == .windows)
+                    JavaDocs.developer_setup_pwsh_commands
+                else
+                    JavaDocs.developer_setup_sh_commands);
+
+                try run_shell(arena, cmd.items);
+
+                // Retry opening the directory now that we've run the install script.
+                try std.os.chdir(root);
+                tries -= 1;
+            },
+        }
+    }
+
+    var dir = try std.fs.cwd().openDir(java_target_path, .{ .iterate = true });
+    defer dir.close();
+
+    var walker = try dir.walk(arena.allocator());
+    defer walker.deinit();
+
+    while (try walker.next()) |entry| {
+        if (std.mem.endsWith(u8, entry.path, "-SNAPSHOT.jar")) {
+            return std.fmt.allocPrint(
+                arena.allocator(),
+                "{s}/{s}",
+                .{ java_target_path, entry.path },
+            );
+        }
+    }
+
+    std.debug.print("Could not find src/clients/java/target/**/*-SNAPSHOT.jar, run: cd src/clients/java && ./scripts/install.X)\n", .{});
+    return error.JarFileNotfound;
+}
+
+fn java_current_commit_pre_install_hook(
+    arena: *std.heap.ArenaAllocator,
+    sample_root: []const u8,
+    root: []const u8,
+) !void {
+    const jar_file = try find_tigerbeetle_client_jar(arena, root);
+    // Generate a local maven package from a JAR.
+    try run(arena, &[_][]const u8{
+        "mvn",
+        "deploy:deploy-file",
+        try std.fmt.allocPrint(arena.allocator(), "-Durl=file://{s}", .{sample_root}),
+        try std.fmt.allocPrint(arena.allocator(), "-Dfile={s}", .{jar_file}),
+        "-DgroupId=com.tigerbeetle",
+        "-DartifactId=tigerbeetle-java",
+        "-Dpackaging=jar",
+        "-Dversion=0.0.1-3431",
+    });
+
+    // Write out the local-settings.xml that points maven out our local package.
+    const local_settings_xml_path = try std.fmt.allocPrint(
+        arena.allocator(),
+        "{s}/local-settings.xml",
+        .{sample_root},
+    );
+    var local_settings_xml = try std.fs.cwd().createFile(
+        local_settings_xml_path,
+        .{ .truncate = true },
+    );
+    defer local_settings_xml.close();
+    _ = try local_settings_xml.write(
+        try std.fmt.allocPrint(
+            arena.allocator(),
+            \\<settings
+            \\  xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+            \\  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            \\  xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd"
+            \\>
+            \\  <localRepository>
+            \\    {s}
+            \\  </localRepository>
+            \\</settings>
+        ,
+            .{sample_root},
+        ),
+    );
+}
+
+fn local_command_hook(arena: *std.heap.ArenaAllocator, cmd: []const u8) ![]const u8 {
+    return try std.mem.replaceOwned(
+        u8,
+        arena.allocator(),
+        cmd,
+        "mvn",
+        "mvn -s local-settings.xml",
+    );
+}
 
 pub const JavaDocs = Docs{
-    .readme = "java/README.md",
+    .directory = "java",
 
     .markdown_name = "java",
     .extension = "java",
@@ -31,8 +146,8 @@ pub const JavaDocs = Docs{
     \\         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     \\  <modelVersion>4.0.0</modelVersion>
     \\
-    \\  <groupId>api</groupId>
-    \\  <artifactId>api</artifactId>
+    \\  <groupId>com.tigerbeetle</groupId>
+    \\  <artifactId>samples</artifactId>
     \\  <version>1.0-SNAPSHOT</version>
     \\
     \\  <properties>
@@ -58,7 +173,7 @@ pub const JavaDocs = Docs{
     \\        <artifactId>exec-maven-plugin</artifactId>
     \\        <version>1.6.0</version>
     \\        <configuration>
-    \\          <mainClass>Main</mainClass>
+    \\          <mainClass>com.tigerbeetle.samples.Main</mainClass>
     \\        </configuration>
     \\      </plugin>
     \\    </plugins>
@@ -78,7 +193,7 @@ pub const JavaDocs = Docs{
     .test_file_name = "Main",
 
     .install_sample_file = 
-    \\package com.tigerbeetle.examples;
+    \\package com.tigerbeetle.samples;
     \\
     \\import com.tigerbeetle.*;
     \\
@@ -91,31 +206,26 @@ pub const JavaDocs = Docs{
 
     .install_prereqs = "apk add -U maven openjdk11",
 
-    .current_commit_pre_install_commands = 
-    \\mvn deploy:deploy-file -Durl=file://$(pwd) -Dfile=$(find . -name '*-SNAPSHOT.jar') -DgroupId=com.tigerbeetle -DartifactId=tigerbeetle-java -Dpackaging=jar -Dversion=0.0.1-3431
-    \\mkdir -p $HOME/.m2/
-    \\echo '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd"><localRepository>'$(pwd)'</localRepository></settings>' > $HOME/.m2/settings.xml
-    ,
+    .current_commit_pre_install_hook = java_current_commit_pre_install_hook,
+    .current_commit_post_install_hook = null,
 
-    .current_commit_post_install_commands = "",
+    .install_commands = "mvn install",
+    .build_commands = "mvn compile",
+    .run_commands = "mvn exec:java",
 
-    .install_commands = 
-    \\mvn install
-    ,
-
-    .install_sample_file_build_commands = 
-    \\mvn compile
-    ,
-    .install_sample_file_test_commands = "mvn exec:java",
+    .current_commit_install_commands_hook = local_command_hook,
+    .current_commit_build_commands_hook = local_command_hook,
+    .current_commit_run_commands_hook = local_command_hook,
 
     .install_documentation = "",
 
     .examples = "",
 
     .client_object_example = 
+    \\var tbAddress = System.getenv("TB_ADDRESS");
     \\Client client = new Client(
     \\  0,
-    \\  new String[] {"3001", "3002", "3003"}
+    \\  new String[] {tbAddress.length() > 0 ? tbAddress : "3000"}
     \\);
     ,
 
@@ -389,18 +499,19 @@ pub const JavaDocs = Docs{
     ,
 
     .developer_setup_sh_commands = 
-    \\git clone https://github.com/tigerbeetledb/tigerbeetle
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
     \\cd src/clients/java
     \\./scripts/install.sh
-    \\[ "$TEST" = "true" ] && mvn test || echo "Skipping client unit tests"
+    \\if [ "$TEST" = "true" ]; then mvn test; else echo "Skipping client unit tests"; fi
     ,
 
-    .developer_setup_pwsh_commands = "",
+    .developer_setup_pwsh_commands = 
+    \\cd src/clients/java
+    \\.\scripts\install.bat
+    \\if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
+    ,
 
     .test_main_prefix = 
-    \\package com.tigerbeetle.examples;
+    \\package com.tigerbeetle.samples;
     \\
     \\import com.tigerbeetle.*;
     \\public final class Main {
