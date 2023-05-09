@@ -18,10 +18,28 @@ support. But for ease of development we also support macOS and Windows.
 
 First, create a directory for your project and `cd` into the directory.
 
+Then create `Test.csproj` and copy this into it:
+
+```cs
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net7.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="tigerbeetle" Version="0.0.1.3814" />
+  </ItemGroup>
+
+</Project>
+```
+
 Then, install the TigerBeetle client:
 
 ```console
-$ dotnet add package tigerbeetle-dotnet
+$ 
 ```
 
 Now, create `Program.cs` and copy this into it:
@@ -78,7 +96,7 @@ environment variable and defaults to port `3000`.
 var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
 var client = new Client(
   clusterID: 0,
-  replicaAddresses: new[] {tbAddress.Length > 0 ? tbAddress : "3000"}
+  addresses: new[] {tbAddress.Length > 0 ? tbAddress : "3000"}
 );
 ```
 
@@ -112,7 +130,7 @@ var accounts = new[] {
   },     
 };
 
-var errors = client.CreateAccounts(accounts);
+var createAccountsErrors = client.CreateAccounts(accounts);
 ```
 
 ### Account Flags
@@ -131,6 +149,15 @@ To toggle behavior for an account, combine enum values stored in the
 
 For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
+
+```cs
+var account0 = new Account{ /* ... account values ... */ };
+var account1 = new Account{ /* ... account values ... */ };
+account0.Flags = AccountFlags.Linked;
+
+errors = client.CreateAccounts(new []{account0, account1});
+Debug.Assert(errors.Length == 0);
+```
 
 ### Response and Errors
 
@@ -156,7 +183,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```cs
-accounts = client.LookupAccounts(new[] { 137, 138 });
+accounts = client.LookupAccounts(new UInt128[] { 137, 138 });
 ```
 
 ## Create Transfers
@@ -173,16 +200,16 @@ var transfers = new[] {
     Id = 1,
     DebitAccountId = 1,
     CreditAccountId = 2,
-    Timeout: 0,
-    UserData: 2,
+    Timeout = 0,
+    UserData = 2,
     Ledger = 1,
     Code = 1,
     Flags = 0,
     Amount = 10,
-  },
-}
+  }
+};
 
-var errors = client.CreateTransfers(transfers);
+var createTransfersErrors = client.CreateTransfers(transfers);
 ```
 
 ### Response and Errors
@@ -273,7 +300,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```cs
-transfers = client.LookupTransfers(new[] {1, 2});
+transfers = client.LookupTransfers(new UInt128[] {1, 2});
 ```
 
 ## Linked Events
@@ -307,7 +334,7 @@ $ git submodule update --init --recursive
 $ ./scripts/install_zig.sh
 $ cd src/clients/dotnet
 $ dotnet build
-$ if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
+$ if [ "$TEST" = "true" ]; then dotnet clean; dotnet test; else echo "Skipping client unit tests"; fi
 ```
 
 ### On Windows
@@ -321,6 +348,6 @@ $ git submodule update --init --recursive
 $ .\scripts\install_zig.bat
 $ cd src/clients/dotnet
 $ dotnet build
-$ if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
+$ if ($env:TEST -eq 'true') { dotnet clean; dotnet test } else { echo "Skipping client unit test" }
 ```
 

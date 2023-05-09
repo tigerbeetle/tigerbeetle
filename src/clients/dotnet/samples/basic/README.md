@@ -18,7 +18,7 @@ First, clone this repo and `cd` into `tigerbeetle/src/clients/dotnet/samples/bas
 Then, install the TigerBeetle client:
 
 ```console
-$ dotnet add package tigerbeetle-dotnet
+$ 
 ```
 
 ## Start the TigerBeetle server
