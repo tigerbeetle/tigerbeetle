@@ -464,6 +464,18 @@ pub fn ReplicaType(
             // the vsr_headers head op may be part of the checkpoint after this one.
             maybe(vsr_headers.slice[0].op > self.op_checkpoint_trigger());
 
+            // Given on-disk state, try to recover the head op after a restart.
+            //
+            // If the replica crashed in status == .normal (view == log_view), the head is generally
+            // the last record in WAL. As a special case, during  the first open the last (and the
+            // only) record in WAL is the root prepare.
+            //
+            // Otherwise, the head is recovered from the superblock. When transitioninig to a
+            // view_change, replicas encode the current head into vsr_headers.
+            //
+            // It is a possibility that the head can't be recovered from the local data.
+            // In this case, the replica transitions to .recovering_head and waits for a .start_view
+            // message from a primary to reset its head.
             var op_head: ?u64 = null;
 
             if (self.log_view == self.view) {
