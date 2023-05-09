@@ -154,7 +154,8 @@ pub fn CompactionType(
                 pending: usize,
             },
             next_tick,
-            done,
+            done_writing_tables,
+            done_applied_manifest,
         },
 
         next_tick: Grid.NextTick = undefined,
@@ -218,27 +219,11 @@ pub fn CompactionType(
             compaction.iterator_a.deinit(allocator);
         }
 
-        pub fn apply_to_manifest(compaction: *Compaction) void {
-            assert(compaction.state == .done);
+        pub fn reset(compaction: *Compaction) void {
+            assert(compaction.state == .done_applied_manifest);
 
-            // Each compaction's manifest (log) updates are deferred to the end of the last
-            // half-beat to ensure they are ordered deterministically relative to one
-            // another.
-            // TODO: If compaction is sequential, deferring manifest updates is unnecessary.
-            const manifest = &compaction.context.tree.manifest;
-            const level_b = compaction.context.level_b;
-            const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
-            for (compaction.manifest_entries.slice()) |*entry| {
-                switch (entry.operation) {
-                    .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
-                    .update_in_level_a => manifest.update_table(level_b - 1, snapshot_max, &entry.table),
-                    .update_in_level_b => manifest.update_table(level_b, snapshot_max, &entry.table),
-                    .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
-                }
-            }
-
-            compaction.manifest_entries.len = 0;
             compaction.state = .idle;
+            compaction.manifest_entries.len = 0;
             if (compaction.grid_reservation) |grid_reservation| {
                 compaction.grid_reservation = null;
                 compaction.context.grid.forfeit(grid_reservation);
@@ -817,7 +802,7 @@ pub fn CompactionType(
             const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
             assert(compaction.state == .next_tick);
 
-            compaction.state = .done;
+            compaction.state = .done_writing_tables;
 
             tracer.end(
                 &compaction.tracer_slot,
@@ -829,6 +814,28 @@ pub fn CompactionType(
 
             const callback = compaction.context.callback;
             callback(compaction);
+        }
+
+        pub fn apply_to_manifest(compaction: *Compaction) void {
+            assert(compaction.state == .done_writing_tables);
+
+            compaction.state = .done_applied_manifest;
+
+            // Each compaction's manifest (log) updates are deferred to the end of the last
+            // half-beat to ensure they are ordered deterministically relative to one
+            // another.
+            // TODO: If compaction is sequential, deferring manifest updates is unnecessary.
+            const manifest = &compaction.context.tree.manifest;
+            const level_b = compaction.context.level_b;
+            const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
+            for (compaction.manifest_entries.slice()) |*entry| {
+                switch (entry.operation) {
+                    .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
+                    .update_in_level_a => manifest.update_table(level_b - 1, snapshot_max, &entry.table),
+                    .update_in_level_b => manifest.update_table(level_b, snapshot_max, &entry.table),
+                    .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
+                }
+            }
         }
     };
 }
