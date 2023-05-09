@@ -5836,11 +5836,12 @@ pub fn ReplicaType(
                     return;
                 }
 
-                // For DVCs and SVCs we must wait for the log_view to be durable:
+                // For DVCs, SVCs, and prepare_oks we must wait for the log_view to be durable:
                 // - A DVC includes the log_view.
-                // - A SV implies the log_view.
+                // - A SV or a prepare_ok imply the log_view.
                 if (message.header.command == .do_view_change or
-                    message.header.command == .start_view)
+                    message.header.command == .start_view or
+                    message.header.command == .prepare_ok)
                 {
                     if (self.log_view_durable() < self.log_view) {
                         log.debug("{}: send_message_to_replica: dropped {s} " ++
