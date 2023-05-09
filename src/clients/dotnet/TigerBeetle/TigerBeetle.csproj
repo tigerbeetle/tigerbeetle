@@ -30,6 +30,6 @@
     <Content Include="runtimes\**\*.dll">
       <PackagePath>%(Identity)</PackagePath>
       <Pack>true</Pack>
-    </Content>    
+    </Content>
   </ItemGroup>
 </Project>
