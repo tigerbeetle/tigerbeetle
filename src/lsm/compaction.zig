@@ -50,6 +50,22 @@ const TableImmutableType = @import("table_immutable.zig").TableImmutableType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 const LevelDataIteratorType = @import("level_data_iterator.zig").LevelDataIteratorType;
 
+pub fn ArrayIteratorType(comptime Value: type) type {
+    return struct {
+        const Iterator = @This();
+
+        values: []const Value,
+
+        pub inline fn peek(it: *const Iterator) ?*const Value {
+            return if (it.values.len > 0) &it.values[0] else null;
+        }
+
+        pub inline fn pop(it: *Iterator) void {
+            it.values = it.values[1..];
+        }
+    };
+}
+
 pub fn CompactionType(
     comptime Table: type,
     comptime Tree: type,
@@ -65,6 +81,7 @@ pub fn CompactionType(
         const TableInfo = TableInfoType(Table);
         const Manifest = ManifestType(Table, Storage);
         const CompactionRange = Manifest.CompactionRange;
+        const ArrayIterator = ArrayIteratorType(Table.Value);
         const TableDataIterator = TableDataIteratorType(Storage);
         const LevelDataIterator = LevelDataIteratorType(Table, Storage);
         const TableImmutableIterator = TableImmutableType(Table).Iterator;
@@ -467,18 +484,6 @@ pub fn CompactionType(
                 .b => compaction.compact(),
             }
         }
-
-        const ArrayIterator = struct {
-            values: []const Value,
-
-            inline fn peek(it: *const ArrayIterator) ?*const Value {
-                return if (it.values.len > 0) &it.values[0] else null;
-            }
-
-            inline fn pop(it: *ArrayIterator) void {
-                it.values = it.values[1..];
-            }
-        };
 
         fn compact(compaction: *Compaction) void {
             assert(compaction.state == .compacting);

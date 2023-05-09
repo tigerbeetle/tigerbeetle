@@ -124,20 +124,11 @@ pub fn TableImmutableType(comptime Table: type) type {
             return null;
         }
 
+        // TODO: Use custom Iterator tailored to TableImmutable in the future.
+        pub const Iterator = @import("compaction.zig").ArrayIteratorType(Value);
+
         pub fn iterator(table: *const TableImmutable) Iterator {
-            return .{ .values_max = table.values };
+            return .{ .values = table.values };
         }
-
-        pub const Iterator = struct {
-            values_max: []const Value,
-
-            pub inline fn peek(it: *const Iterator) ?*const Value {
-                return if (it.values_max.len > 0) &it.values_max[0] else null;
-            }
-
-            pub inline fn pop(it: *Iterator) void {
-                it.values_max = it.values_max[1..];
-            }
-        };
     };
 }
