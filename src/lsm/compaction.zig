@@ -111,17 +111,19 @@ pub fn CompactionType(
         table_builder: Table.Builder,
         last_keys_in: [2]?Key = .{ null, null },
 
-        /// Manifest log appends are queued up until `finish()` is expicitly called to ensure
-        /// they are applied consistently relative to other concurrent compactions.
+        /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
+        /// they are applied deterministically relative to other concurrent compactions.
         manifest_entries: std.BoundedArray(struct {
-            operation: union(enum) {
-                move,
-                insert,
-                update: struct { level: u8 },
+            operation: enum {
+                insert_to_level_b,
+                update_in_level_a,
+                update_in_level_b,
+                move_to_level_b,
             },
             table: TableInfo,
         }, manifest_entries_max: {
             // Worst-case manifest updates:
+            // See lsm/README.md "Compaction Table Overlap" for more detail.
             var count = 0;
             count += 1; // Update the input table from level A.
             count += constants.lsm_growth_factor; // Update the input tables from level B.
@@ -216,37 +218,30 @@ pub fn CompactionType(
             compaction.iterator_a.deinit(allocator);
         }
 
-        pub fn finish(compaction: *Compaction) void {
+        pub fn apply_to_manifest(compaction: *Compaction) void {
             assert(compaction.state == .done);
 
             // Each compaction's manifest (log) updates are deferred to the end of the last
             // half-beat to ensure they are ordered deterministically relative to one
             // another.
             // TODO: If compaction is sequential, deferring manifest updates is unnecessary.
+            const manifest = &compaction.context.tree.manifest;
+            const level_b = compaction.context.level_b;
+            const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
-                    .insert => compaction.context.tree.manifest.insert_table(
-                        compaction.context.level_b,
-                        &entry.table,
-                    ),
-                    .update => |update| compaction.context.tree.manifest.update_table(
-                        update.level,
-                        snapshot_max_for_table_input(compaction.context.op_min),
-                        &entry.table,
-                    ),
-                    .move => {
-                        const level_b = compaction.context.level_b;
-                        const level_a = level_b - 1;
-                        compaction.context.tree.manifest.move_table(level_a, level_b, &entry.table);
-                    },
+                    .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
+                    .update_in_level_a => manifest.update_table(level_b - 1, snapshot_max, &entry.table),
+                    .update_in_level_b => manifest.update_table(level_b, snapshot_max, &entry.table),
+                    .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
                 }
             }
 
-            compaction.state = .idle;
             compaction.manifest_entries.len = 0;
+            compaction.state = .idle;
             if (compaction.grid_reservation) |grid_reservation| {
-                compaction.context.grid.forfeit(grid_reservation);
                 compaction.grid_reservation = null;
+                compaction.context.grid.forfeit(grid_reservation);
             }
         }
 
@@ -336,7 +331,7 @@ pub fn CompactionType(
                 assert(table_a.snapshot_max >= snapshot_max);
 
                 compaction.manifest_entries.appendAssumeCapacity(.{
-                    .operation = .move,
+                    .operation = .move_to_level_b,
                     .table = table_a.*,
                 });
 
@@ -442,7 +437,7 @@ pub fn CompactionType(
 
             // Tables that we've compacted should become invisible at the end of this half-bar.
             compaction.manifest_entries.appendAssumeCapacity(.{
-                .operation = .{ .update = .{ .level = compaction.context.level_b } },
+                .operation = .update_in_level_b,
                 .table = table_info,
             });
 
@@ -719,7 +714,7 @@ pub fn CompactionType(
                 });
                 // Make this table visible at the end of this half-bar.
                 compaction.manifest_entries.appendAssumeCapacity(.{
-                    .operation = .insert,
+                    .operation = .insert_to_level_b,
                     .table = table,
                 });
                 WriteBlock(.index).write_block(compaction);
@@ -797,13 +792,10 @@ pub fn CompactionType(
                     // TODO: Release the grid blocks associated with level_a as well
                     switch (compaction.context.table_info_a) {
                         .immutable => {},
-                        .disk => |table| {
-                            const level_a = compaction.context.level_b - 1;
-                            compaction.manifest_entries.appendAssumeCapacity(.{
-                                .operation = .{ .update = .{ .level = level_a } },
-                                .table = table,
-                            });
-                        },
+                        .disk => |table| compaction.manifest_entries.appendAssumeCapacity(.{
+                            .operation = .update_in_level_a,
+                            .table = table,
+                        }),
                     }
 
                     compaction.state = .next_tick;
