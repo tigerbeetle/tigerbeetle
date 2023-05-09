@@ -4,6 +4,7 @@
     <TargetFramework>net6.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <UseCurrentRuntimeIdentifier>true</UseCurrentRuntimeIdentifier>
+		<RollForward>LatestMajor</RollForward>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\TigerBeetle\TigerBeetle.csproj" />
