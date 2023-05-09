@@ -237,6 +237,9 @@ pub const Header = extern struct {
     /// detecting whether a session has been evicted is solved by the session number.
     ///
     /// * A `request_reply` sets this to the client of the reply being requested.
+    /// * A `do_view_change` sets this to a bitset of "present" prepares. If a bit is set, then
+    ///   the corresponding header is not "blank", the replica has the prepare, and the prepare
+    ///   is not known to be faulty.
     client: u128 = 0,
 
     /// The checksum of the message to which this message refers.
@@ -610,7 +613,6 @@ pub const Header = extern struct {
     fn invalid_do_view_change(self: *const Header) ?[]const u8 {
         assert(self.command == .do_view_change);
         if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
