@@ -53,23 +53,23 @@
     <profile>
       <id>Windows</id>
       <activation>
-	<os>
-	  <family>Windows</family>
-	</os>
+        <os>
+          <family>Windows</family>
+        </os>
       </activation>
       <properties>
-	<script.extension>.bat</script.extension>
+        <script.extension>.bat</script.extension>
       </properties>
     </profile>
     <profile>
       <id>unix</id>
       <activation>
-	<os>
-	  <family>unix</family>
-	</os>
+        <os>
+          <family>unix</family>
+        </os>
       </activation>
       <properties>
-	<script.extension>.sh</script.extension>
+        <script.extension>.sh</script.extension>
       </properties>
     </profile>
   </profiles>
@@ -139,7 +139,7 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-gpg-plugin</artifactId>
           <version>3.0.1</version>
-        </plugin>                 
+        </plugin>
         <plugin>
           <groupId>org.jacoco</groupId>
           <artifactId>jacoco-maven-plugin</artifactId>
@@ -302,7 +302,7 @@
         <executions>
             <execution>
                 <id>sign-artifacts</id>
-                <phase>verify</phase>
+                <phase>deploy</phase>
                 <goals>
                     <goal>sign</goal>
                 </goals>
