@@ -1,7 +1,62 @@
+const std = @import("std");
+
 const Docs = @import("../docs_types.zig").Docs;
+const run = @import("../shutil.zig").run;
+const file_or_directory_exists = @import("../shutil.zig").file_or_directory_exists;
+const script_filename = @import("../shutil.zig").script_filename;
+
+fn go_current_commit_post_install_hook(
+    arena: *std.heap.ArenaAllocator,
+    sample_dir: []const u8,
+    root: []const u8,
+) !void {
+    try std.os.chdir(root);
+    if (!file_or_directory_exists(arena, "src/clients/go/pkg/native/x86_64-linux")) {
+        try run(arena, &[_][]const u8{
+            try script_filename(arena, &[_][]const u8{ "scripts", "build" }),
+            "go_client",
+        });
+    }
+
+    try std.os.chdir(sample_dir);
+    const go_mod = try std.fs.cwd().openFile(
+        "go.mod",
+        .{ .write = true, .read = true },
+    );
+    defer go_mod.close();
+
+    const file_size = try go_mod.getEndPos();
+    var go_mod_contents = try arena.allocator().alloc(u8, file_size);
+
+    _ = try go_mod.read(go_mod_contents);
+
+    go_mod_contents = try std.mem.replaceOwned(
+        u8,
+        arena.allocator(),
+        go_mod_contents,
+        "require",
+        try std.fmt.allocPrint(
+            arena.allocator(),
+            "replace github.com/tigerbeetledb/tigerbeetle-go => {s}/src/clients/go\n\nrequire",
+            .{root},
+        ),
+    );
+
+    // First truncate.
+    try go_mod.setEndPos(0);
+    // Reset cursor.
+    try go_mod.seekTo(0);
+    try go_mod.writeAll(go_mod_contents);
+
+    try run(arena, &[_][]const u8{
+        "go",
+        "mod",
+        "tidy",
+    });
+}
 
 pub const GoDocs = Docs{
-    .readme = "go/README.md",
+    .directory = "go",
 
     .markdown_name = "go",
     .extension = "go",
@@ -22,6 +77,11 @@ pub const GoDocs = Docs{
 
     .prerequisites = 
     \\* Go >= 1.17
+    \\
+    \\**Additionally on Windows**: you must install [Zig
+    \\0.9.1](https://ziglang.org/download/#release-0.9.1) and set the
+    \\`CC` environment variable to `zig.exe cc`. Use the full path for
+    \\`zig.exe`.
     ,
 
     .project_file = "",
@@ -46,9 +106,12 @@ pub const GoDocs = Docs{
     \\go mod init tbtest
     \\go mod tidy
     ,
+    .build_commands = "go build main.go",
+    .run_commands = "go run main.go",
 
-    .install_sample_file_build_commands = "go build test.go",
-    .install_sample_file_test_commands = "go run test.go",
+    .current_commit_install_commands_hook = null,
+    .current_commit_build_commands_hook = null,
+    .current_commit_run_commands_hook = null,
 
     .install_documentation = "",
 
@@ -72,7 +135,11 @@ pub const GoDocs = Docs{
     ,
 
     .client_object_example = 
-    \\client, err := tb.NewClient(0, []string{"3001", "3002", "3003"}, 1)
+    \\tbAddress := os.Getenv("TB_ADDRESS")
+    \\if len(tbAddress) == 0 {
+    \\  tbAddress = "3000"
+    \\} 
+    \\client, err := tb.NewClient(0, []string{tbAddress}, 1)
     \\if err != nil {
     \\	log.Printf("Error creating client: %s", err)
     \\	return
@@ -296,37 +363,27 @@ pub const GoDocs = Docs{
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_sh_commands = 
-    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
-    \\./scripts/install_zig.sh
     \\./scripts/build.sh go_client -Drelease-safe
     \\cd src/clients/go
-    \\[ "$TEST" = "true" ] && ./zgo.sh test || echo "Skipping client unit tests"
+    \\if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
     ,
 
-    .current_commit_pre_install_commands = "",
-    .current_commit_post_install_commands = 
-    \\printf 'module tbtest\nreplace github.com/tigerbeetledb/tigerbeetle-go => '$(pwd)'/tigerbeetle/src/clients/go\ngo 1.18' > go.mod
-    \\go mod tidy
-    ,
+    .current_commit_pre_install_hook = null,
+    .current_commit_post_install_hook = go_current_commit_post_install_hook,
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_pwsh_commands = 
-    \\git clone https://github.com/${GITHUB_REPOSITY:-tigerbeetledb/tigerbeetle}
-    \\cd tigerbeetle
-    \\git checkout $GIT_SHA
-    \\./scripts/install_zig.bat
-    \\./scripts/build.bat go_client -Drelease-safe
-    \\cd tigerbeetle/src/clients/go
-    \\[ "$TEST" = "true" ] && ./zgo.bat test || echo "Skipping client unit tests"
+    \\.\scripts\build.bat go_client -Drelease-safe
+    \\cd src\clients\go
+    \\if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
     ,
 
     .test_main_prefix = 
     \\package main
     \\
     \\import "log"
+    \\import "os"
     \\
     \\import tb "github.com/tigerbeetledb/tigerbeetle-go"
     \\import tb_types "github.com/tigerbeetledb/tigerbeetle-go/pkg/types"

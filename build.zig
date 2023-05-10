@@ -21,6 +21,12 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     options.addOption(
+        ?[]const u8,
+        "git_tag",
+        if (git_tag(allocator)) |tag| tag.constSlice() else null,
+    );
+
+    options.addOption(
         config.ConfigBase,
         "config_base",
         b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
@@ -259,6 +265,7 @@ pub fn build(b: *std.build.Builder) void {
             tracer_backend,
         );
         run_with_tb(
+            allocator,
             b,
             mode,
             target,
@@ -269,10 +276,19 @@ pub fn build(b: *std.build.Builder) void {
             mode,
             target,
         );
+        client_docs(
+            allocator,
+            b,
+            mode,
+            target,
+        );
     }
 
     {
         const simulator_options = b.addOptions();
+
+        // When running without a SEED, default to release.
+        const simulator_mode = if (b.args == null) .ReleaseSafe else mode;
 
         const StateMachine = enum { testing, accounting };
         simulator_options.addOption(
@@ -285,8 +301,21 @@ pub fn build(b: *std.build.Builder) void {
             ) orelse .accounting,
         );
 
+        const SimulatorLog = enum { full, short };
+        const default_simulator_log = if (simulator_mode == .ReleaseSafe) SimulatorLog.short else .full;
+        simulator_options.addOption(
+            SimulatorLog,
+            "log",
+            b.option(
+                SimulatorLog,
+                "simulator-log",
+                "Log only state transitions (short) or everything (full).",
+            ) orelse default_simulator_log,
+        );
+
         const simulator = b.addExecutable("simulator", "src/simulator.zig");
         simulator.setTarget(target);
+        simulator.setBuildMode(simulator_mode);
         // Ensure that we get stack traces even in release builds.
         simulator.omit_frame_pointer = false;
         simulator.addOptions("vsr_options", options);
@@ -297,9 +326,6 @@ pub fn build(b: *std.build.Builder) void {
 
         if (b.args) |args| {
             run_cmd.addArgs(args);
-            simulator.setBuildMode(mode);
-        } else {
-            simulator.setBuildMode(.ReleaseSafe);
         }
 
         const install_step = b.addInstallArtifact(simulator);
@@ -449,6 +475,24 @@ fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
     var output: [40]u8 = undefined;
     std.mem.copy(u8, &output, exec_result.stdout[0..40]);
     return output;
+}
+
+fn git_tag(allocator: std.mem.Allocator) ?std.BoundedArray(u8, 100) {
+    const exec_result = std.ChildProcess.exec(.{
+        .allocator = allocator,
+        .argv = &.{ "git", "describe", "--tags" },
+    }) catch return null;
+    defer allocator.free(exec_result.stdout);
+    defer allocator.free(exec_result.stderr);
+
+    if (exec_result.stderr.len != 0) return null;
+
+    var tag = std.BoundedArray(u8, 100){ .buffer = undefined };
+    tag.appendSlice(exec_result.stdout) catch {
+        std.debug.print("`git describe --tags` output too long.\n", .{});
+        return null;
+    };
+    return tag;
 }
 
 fn link_tracer_backend(
@@ -788,49 +832,27 @@ fn c_client_sample(
     c_sample_build.dependOn(&install_step.step);
 }
 
-// See src/clients/README.md for documentation.
-fn run_with_tb(
+// Allows a build step to run the command it builds after it builds it if the user passes --.
+// e.g.: ./scripts/build.sh docs_generate --
+// Whereas `./scripts/build.sh docs_generate` would not run the command.
+fn maybe_execute(
     b: *std.build.Builder,
-    mode: Mode,
-    target: CrossTarget,
-) void {
-    const run_with_tb_build = b.step("run_with_tb", "Build the run_with_tb helper");
-    const binary = b.addExecutable("run_with_tb", "src/clients/run_with_tb.zig");
-    binary.setBuildMode(mode);
-    binary.setTarget(target);
-    run_with_tb_build.dependOn(&binary.step);
-
-    const install_step = b.addInstallArtifact(binary);
-    run_with_tb_build.dependOn(&install_step.step);
-}
-
-// See src/clients/README.md for documentation.
-fn client_integration(
     allocator: std.mem.Allocator,
-    b: *std.build.Builder,
-    mode: Mode,
-    target: CrossTarget,
+    step: *std.build.Step,
+    binary_name: []const u8,
 ) void {
-    const client_integration_build = b.step("client_integration", "Run sample integration tests for a client library");
-    const binary = b.addExecutable("client_integration", "src/clients/integration.zig");
-    binary.setBuildMode(mode);
-    binary.setTarget(target);
-    client_integration_build.dependOn(&binary.step);
-
-    const install_step = b.addInstallArtifact(binary);
-    client_integration_build.dependOn(&install_step.step);
-
     var to_run = std.ArrayList([]const u8).init(allocator);
     const sep = if (builtin.os.tag == .windows) "\\" else "/";
     const ext = if (builtin.os.tag == .windows) ".exe" else "";
     to_run.append(
         std.fmt.allocPrint(
             allocator,
-            ".{s}zig-out{s}bin{s}client_integration{s}",
+            ".{s}zig-out{s}bin{s}{s}{s}",
             .{
                 sep,
                 sep,
                 sep,
+                binary_name,
                 ext,
             },
         ) catch unreachable,
@@ -852,6 +874,63 @@ fn client_integration(
 
     if (build_and_run) {
         const run = b.addSystemCommand(to_run.items);
-        client_integration_build.dependOn(&run.step);
+        step.dependOn(&run.step);
     }
+}
+
+// See src/clients/README.md for documentation.
+fn run_with_tb(
+    allocator: std.mem.Allocator,
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const run_with_tb_build = b.step("run_with_tb", "Build the run_with_tb helper");
+    const binary = b.addExecutable("run_with_tb", "src/clients/run_with_tb.zig");
+    binary.setBuildMode(mode);
+    binary.setTarget(target);
+    run_with_tb_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary);
+    run_with_tb_build.dependOn(&install_step.step);
+
+    maybe_execute(b, allocator, run_with_tb_build, "run_with_tb");
+}
+
+// See src/clients/README.md for documentation.
+fn client_integration(
+    allocator: std.mem.Allocator,
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const client_integration_build = b.step("client_integration", "Run sample integration tests for a client library");
+    const binary = b.addExecutable("client_integration", "src/clients/integration.zig");
+    binary.setBuildMode(mode);
+    binary.setTarget(target);
+    client_integration_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary);
+    client_integration_build.dependOn(&install_step.step);
+
+    maybe_execute(b, allocator, client_integration_build, "client_integration");
+}
+
+// See src/clients/README.md for documentation.
+fn client_docs(
+    allocator: std.mem.Allocator,
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const client_docs_build = b.step("client_docs", "Run sample integration tests for a client library");
+    const binary = b.addExecutable("client_docs", "src/clients/docs_generate.zig");
+    binary.setBuildMode(mode);
+    binary.setTarget(target);
+    client_docs_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary);
+    client_docs_build.dependOn(&install_step.step);
+
+    maybe_execute(b, allocator, client_docs_build, "client_docs");
 }

@@ -12,9 +12,6 @@ pub fn StateMachineType(
     comptime Storage: type,
     comptime config: constants.StateMachineConfig,
 ) type {
-    _ = Storage;
-    _ = config;
-
     return struct {
         const StateMachine = @This();
         const Grid = @import("../lsm/grid.zig").GridType(Storage);
@@ -276,7 +273,6 @@ fn WorkloadType(comptime StateMachine: type) type {
             request_body: []align(@alignOf(vsr.Header)) const u8,
             reply_body: []align(@alignOf(vsr.Header)) const u8,
         ) void {
-            _ = workload;
             _ = client_index;
             _ = timestamp;
 

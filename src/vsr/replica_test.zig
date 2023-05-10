@@ -160,6 +160,50 @@ test "Cluster: recovery: WAL torn prepare, standby with intact prepare (R=1 S=1)
     try expectEqual(t.replica(.S0).commit(), 30);
 }
 
+test "Cluster: recovery: grid corruption (disjoint)" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+
+    // Checkpoint to ensure that the replicas will actually use the grid to recover.
+    // All replicas must be at the same commit to ensure grid repair won't fail and
+    // fall back to state sync.
+    try c.request(checkpoint_trigger_1, checkpoint_trigger_1);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_trigger_1);
+
+    t.replica(.R_).stop();
+
+    // Corrupt the whole grid.
+    // Manifest log blocks will be repaired as each replica opens its forest.
+    // Table index/filter/data blocks will be repaired as the replica commits/compacts.
+    for ([_]TestReplicas{
+        t.replica(.R0),
+        t.replica(.R1),
+        t.replica(.R2),
+    }) |replica, i| {
+        var address = 1 + i; // Addresses start at 1.
+        while (address <= vsr.superblock.grid_blocks_max) : (address += 3) {
+            // Leave every third address un-corrupt.
+            // Each block exists intact on exactly one replica.
+            replica.corrupt(.{ .grid_block = address + 1 });
+            replica.corrupt(.{ .grid_block = address + 2 });
+        }
+    }
+
+    try expectEqual(t.replica(.R_).open(), .ok);
+    t.run();
+
+    try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_trigger_1);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+
+    try c.request(checkpoint_trigger_2, checkpoint_trigger_2);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_trigger_2);
+}
+
 test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
@@ -517,7 +561,7 @@ test "Cluster: repair: corrupt reply" {
     try c.request(21, 20);
 
     // Corrupt all of the primary's saved replies.
-    // (Its easier than figuring out the reply's actual slot.)
+    // (This is easier than figuring out the reply's actual slot.)
     var slot: usize = 0;
     while (slot < constants.clients_max) : (slot += 1) {
         t.replica(.A0).corrupt(.{ .client_reply = slot });
@@ -530,6 +574,55 @@ test "Cluster: repair: corrupt reply" {
     t.run();
 
     try expectEqual(c.replies(), 21);
+}
+
+test "Cluster: repair: ack committed prepare" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    const p = t.replica(.A0);
+    const b1 = t.replica(.B1);
+    const b2 = t.replica(.B2);
+
+    // A0 commits 21.
+    // B1 prepares 21, but does not commit.
+    t.replica(.R_).drop(.R_, .bidirectional, .start_view_change);
+    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    p.drop(.__, .outgoing, .commit);
+    b2.drop(.__, .incoming, .prepare);
+    try c.request(21, 21);
+    try expectEqual(p.commit(), 21);
+    try expectEqual(b1.commit(), 20);
+    try expectEqual(b2.commit(), 20);
+
+    try expectEqual(p.op_head(), 21);
+    try expectEqual(b1.op_head(), 21);
+    try expectEqual(b2.op_head(), 20);
+
+    // Change views. B1/B2 participate. Don't allow B2 to repair op=21.
+    t.replica(.R_).pass(.R_, .bidirectional, .start_view_change);
+    t.replica(.R_).pass(.R_, .bidirectional, .do_view_change);
+    p.drop(.__, .bidirectional, .prepare);
+    p.drop(.__, .bidirectional, .do_view_change);
+    t.run();
+    try expectEqual(b1.commit(), 20);
+    try expectEqual(b2.commit(), 20);
+
+    // But other than that, heal A0/B1, but partition B2 completely.
+    // (Prevent another view change.)
+    p.pass_all(.__, .bidirectional);
+    b1.pass_all(.__, .bidirectional);
+    b2.drop_all(.__, .bidirectional);
+    t.replica(.R_).drop(.R_, .bidirectional, .start_view_change);
+    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    t.run();
+
+    // A0 acks op=21 even though it already committed it.
+    try expectEqual(b1.commit(), 21);
 }
 
 test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header succeed" {
@@ -663,6 +756,7 @@ const TestContext = struct {
                 .faulty_wal_headers = false,
                 .faulty_wal_prepares = false,
                 .faulty_client_replies = false,
+                .faulty_grid = false,
             },
             .state_machine = .{ .lsm_forest_node_count = 4096 },
         });
@@ -713,7 +807,7 @@ const TestContext = struct {
     }
 
     pub fn run(t: *TestContext) void {
-        const tick_max = 2_400;
+        const tick_max = 3_000;
         var tick_count: usize = 0;
         while (tick_count < tick_max) : (tick_count += 1) {
             if (t.tick()) tick_count = 0;
@@ -792,6 +886,7 @@ const TestReplicas = struct {
 
     pub fn stop(t: *TestReplicas) void {
         for (t.replicas.constSlice()) |r| {
+            log.info("{}: crash replica", .{r});
             t.cluster.crash_replica(r);
         }
     }
@@ -799,6 +894,7 @@ const TestReplicas = struct {
     // TODO(Zig) Return ?anyerror when "unable to make error union out of null literal" is fixed.
     pub fn open(t: *TestReplicas) enum { ok, WALInvalid, WALCorrupt } {
         for (t.replicas.constSlice()) |r| {
+            log.info("{}: restart replica", .{r});
             t.cluster.restart_replica(r) catch |err| {
                 assert(t.replicas.len == 1);
                 return switch (err) {
@@ -895,6 +991,7 @@ const TestReplicas = struct {
             wal_header: usize, // slot
             wal_prepare: usize, // slot
             client_reply: usize, // slot
+            grid_block: u64, // address
         },
     ) void {
         switch (target) {
@@ -913,6 +1010,13 @@ const TestReplicas = struct {
             },
             .client_reply => |slot| {
                 const fault_offset = vsr.Zone.client_replies.offset(slot * constants.message_size_max);
+                const fault_sector = @divExact(fault_offset, constants.sector_size);
+                for (t.replicas.constSlice()) |r| {
+                    t.cluster.storages[r].faults.set(fault_sector);
+                }
+            },
+            .grid_block => |address| {
+                const fault_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
                 const fault_sector = @divExact(fault_offset, constants.sector_size);
                 for (t.replicas.constSlice()) |r| {
                     t.cluster.storages[r].faults.set(fault_sector);
@@ -1000,7 +1104,7 @@ const TestClients = struct {
             }
         }
 
-        const tick_max = 2_400;
+        const tick_max = 3_000;
         var tick: usize = 0;
         while (tick < tick_max) : (tick += 1) {
             if (t.context.tick()) tick = 0;

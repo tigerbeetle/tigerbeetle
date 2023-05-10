@@ -85,14 +85,10 @@ pub fn GridType(comptime Storage: type) type {
         };
 
         pub const Read = struct {
-            callback: union(enum) {
-                normal: fn (*Grid.Read, BlockPtrConst) void, // repair == false
-                repair: fn (*Grid.Read, ?BlockPtrConst) void, // repair == true
-            },
+            callback: fn (*Grid.Read, BlockPtrConst) void,
             address: u64,
             checksum: u128,
-            block_type: ?BlockType,
-            repair: bool,
+            block_type: BlockType,
 
             pending: ReadPending = .{},
             resolves: FIFO(ReadPending) = .{ .name = null },
@@ -102,6 +98,16 @@ pub fn GridType(comptime Storage: type) type {
 
             /// Link for Grid.read_queue/Grid.read_faulty_queue linked lists.
             next: ?*Read = null,
+        };
+
+        pub const ReadRepair = struct {
+            callback: fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
+            address: u64,
+            checksum: u128,
+            block: BlockPtr,
+            grid: *Grid,
+            next_tick: Grid.NextTick = undefined,
+            completion: Storage.Read = undefined,
         };
 
         const ReadPending = struct {
@@ -267,8 +273,6 @@ pub fn GridType(comptime Storage: type) type {
 
             var it = grid.read_faulty_queue.peek();
             while (it) |faulty_read| : (it = faulty_read.next) {
-                assert(!faulty_read.repair);
-
                 if (faulty_read.address == address) {
                     assert(grid.cache.get_index(address) == null);
                     assert(!grid.superblock.free_set.is_free(address));
@@ -315,7 +319,7 @@ pub fn GridType(comptime Storage: type) type {
             return result;
         }
 
-        /// Assert that the address is not currently being read from.
+        /// Assert that the address is not currently being read from (disregarding repairs).
         /// Assert that the block pointer is not being used for any read if non-null.
         fn assert_not_reading(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
             assert(address > 0);
@@ -325,13 +329,13 @@ pub fn GridType(comptime Storage: type) type {
             }) |queue| {
                 var it = queue.peek();
                 while (it) |queued_read| : (it = queued_read.next) {
-                    assert(address != queued_read.address or queued_read.repair);
+                    assert(address != queued_read.address);
                 }
             }
             {
                 var it = grid.read_iops.iterate();
                 while (it.next()) |iop| {
-                    assert(address != iop.read.address or iop.read.repair);
+                    assert(address != iop.read.address);
                     const iop_block = grid.read_iop_blocks[grid.read_iops.index(iop)];
                     assert(block != iop_block);
                 }
@@ -471,8 +475,6 @@ pub fn GridType(comptime Storage: type) type {
 
                 var read_ = grid.read_faulty_queue.peek();
                 while (read_) |read| : (read_ = read.next) {
-                    assert(!read.repair);
-
                     if (read.checksum == header.checksum and
                         read.address == completed_write.address)
                     {
@@ -511,11 +513,10 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.writing(address, null) != .init);
 
             read.* = .{
-                .callback = .{ .normal = callback },
+                .callback = callback,
                 .address = address,
                 .checksum = checksum,
                 .block_type = block_type,
-                .repair = false,
                 .grid = grid,
             };
 
@@ -526,62 +527,12 @@ pub fn GridType(comptime Storage: type) type {
             }) |queue| {
                 var it = queue.peek();
                 while (it) |queued_read| : (it = queued_read.next) {
-                    // To simplify read-resolution, don't queue up behind repairs.
-                    if (!queued_read.repair and queued_read.address == address) {
+                    if (queued_read.address == address) {
                         assert(checksum == queued_read.checksum);
-                        assert(block_type == queued_read.block_type.?);
+                        assert(block_type == queued_read.block_type);
                         queued_read.resolves.push(&read.pending);
                         return;
                     }
-                }
-            }
-
-            // Become the "root" read thats fetching the block for the given address.
-            // The fetch happens asynchronously to avoid stack-overflow and nested cache invalidation.
-            grid.read_queue.push(read);
-            grid.on_next_tick(read_block_tick_callback, &read.next_tick);
-        }
-
-        /// If the block is not present (or corrupt), we do not attempt to repair it — the repair's
-        /// address/checksum is not assumed to match what "should" be in our block.
-        /// Relatedly we still attempt to read free blocks — they might still hold the requested data.
-        pub fn read_block_repair(
-            grid: *Grid,
-            callback: fn (*Grid.Read, ?BlockPtrConst) void,
-            read: *Grid.Read,
-            address: u64,
-            checksum: u128,
-        ) void {
-            assert(address > 0);
-
-            assert(grid.superblock.opened);
-            // We *could* try to read the block even when it is free — if we recently release it,
-            // it might be found on disk anyway.
-            // But what would preclude the TestStorage's "memory_written.isSet" assertion.
-            assert(!grid.superblock.free_set.is_free(address));
-            // The caller will not attempt to help another replica repair a block that
-            // we are already trying to repair ourselves.
-            assert(!grid.faulty(address, null));
-            maybe(grid.writing(address, null) == .init);
-
-            read.* = .{
-                .callback = .{ .repair = callback },
-                .address = address,
-                .checksum = checksum,
-                .block_type = null,
-                .repair = true,
-                .grid = grid,
-            };
-
-            // Check if a repair-read is already processing and merge with it.
-            var it = grid.read_queue.peek();
-            while (it) |queued_read| : (it = queued_read.next) {
-                if (queued_read.repair and
-                    queued_read.address == address and
-                    queued_read.checksum == checksum)
-                {
-                    queued_read.resolves.push(&read.pending);
-                    return;
                 }
             }
 
@@ -601,18 +552,12 @@ pub fn GridType(comptime Storage: type) type {
 
                 const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
                 assert(header.op == read.address);
+                assert(header.checksum == read.checksum);
                 if (constants.verify) grid.verify_read(read.address, cache_block);
 
                 // Remove the "root" read so that the address is no longer actively reading / locked.
                 grid.read_queue.remove(read);
-
-                if (header.checksum == read.checksum) {
-                    maybe(read.repair);
-                    grid.read_block_resolve(read, cache_block);
-                } else {
-                    assert(read.repair);
-                    grid.read_block_resolve(read, null);
-                }
+                grid.read_block_resolve(read, cache_block);
                 return;
             }
 
@@ -685,43 +630,37 @@ pub fn GridType(comptime Storage: type) type {
             grid.read_queue.remove(read);
 
             // A valid block filled by storage means the reads for the address can be resolved.
-            if (read_block_valid(read, cache_block.*)) {
+            if (read_block_valid(cache_block.*, .{
+                .address = read.address,
+                .checksum = read.checksum,
+                .block_type = read.block_type,
+            })) {
                 grid.read_block_resolve(read, cache_block.*);
-
-                if (read.repair) {
-                    // Even though this block is the block we expected to read, we can't safely
-                    // cache this result:
-                    // 1. Replica A write block X₁ to address X.
-                    // 2. Replica A write block X₂ to address X (write is lost/misdirected).
-                    // 3. Replica B requests block X₁ from replica A.
-                    // It is safe for A to send back X₁, but A must not allow it to poison its cache.
-                    grid.cache.remove(read.address);
-                }
                 return;
             }
 
             // Don't cache a corrupt or incorrect block.
             grid.cache.remove(read.address);
 
-            if (read.repair) {
-                grid.read_block_resolve(read, null);
+            // On the result of an invalid block, move the "root" read (and all others it resolves)
+            // to recovery queue. Future reads on the same address will see the "root" read in the
+            // recovery queue and enqueue to it.
+            grid.read_faulty_queue.push(read);
+            if (grid.on_read_fault) |on_read_fault| {
+                on_read_fault(grid, read);
             } else {
-                // On the result of an invalid block, move the "root" read (and all others it resolves)
-                // to recovery queue. Future reads on the same address will see the "root" read in the
-                // recovery queue and enqueue to it.
-                grid.read_faulty_queue.push(read);
-                if (grid.on_read_fault) |on_read_fault| {
-                    on_read_fault(grid, read);
-                } else {
-                    @panic("Grid.on_read_fault not set");
-                }
+                @panic("Grid.on_read_fault not set");
             }
         }
 
-        fn read_block_valid(read: *const Grid.Read, block: BlockPtrConst) bool {
-            const address = read.address;
-            const checksum = read.checksum;
-            const block_type = read.block_type;
+        fn read_block_valid(block: BlockPtrConst, expect: struct {
+            address: u64,
+            checksum: u128,
+            block_type: ?BlockType,
+        }) bool {
+            const address = expect.address;
+            const checksum = expect.checksum;
+            const block_type = expect.block_type;
 
             const header_bytes = block[0..@sizeOf(vsr.Header)];
             const header = mem.bytesAsValue(vsr.Header, header_bytes);
@@ -739,7 +678,7 @@ pub fn GridType(comptime Storage: type) type {
             if (header.checksum != checksum) {
                 log.err(
                     "expected address={} checksum={} block_type={}, " ++
-                        "found address={} checksum={} block_type={} (repair={})",
+                        "found address={} checksum={} block_type={}",
                     .{
                         address,
                         checksum,
@@ -747,7 +686,6 @@ pub fn GridType(comptime Storage: type) type {
                         header.op,
                         header.checksum,
                         @enumToInt(header.operation),
-                        read.repair,
                     },
                 );
                 return false;
@@ -760,7 +698,7 @@ pub fn GridType(comptime Storage: type) type {
             return true;
         }
 
-        fn read_block_resolve(grid: *Grid, read: *Grid.Read, block: ?BlockPtrConst) void {
+        fn read_block_resolve(grid: *Grid, read: *Grid.Read, block: BlockPtrConst) void {
             // Guard to make sure the cache cannot be updated by any read.callbacks() below.
             assert(!grid.read_resolving);
             grid.read_resolving = true;
@@ -769,33 +707,114 @@ pub fn GridType(comptime Storage: type) type {
                 grid.read_resolving = false;
             }
 
-            if (block) |b| {
-                const header = mem.bytesAsValue(vsr.Header, b[0..@sizeOf(vsr.Header)]);
-                assert(header.op == read.address);
-                assert(header.checksum == read.checksum);
-                maybe(read.repair);
-            } else {
-                assert(read.repair);
-            }
+            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            assert(header.op == read.address);
+            assert(header.checksum == read.checksum);
 
             // Resolve all reads queued to the address with the block.
             while (read.resolves.pop()) |pending| {
                 const pending_read = @fieldParentPtr(Read, "pending", pending);
                 assert(pending_read.address == read.address);
                 assert(pending_read.checksum == read.checksum);
-                assert(pending_read.repair == read.repair);
 
-                switch (pending_read.callback) {
-                    .normal => |callback| callback(pending_read, block.?),
-                    .repair => |callback| callback(pending_read, block),
-                }
+                pending_read.callback(pending_read, block);
             }
 
             // Then invoke the callback with the cache block (which should be valid for the duration
             // of the callback as any nested Grid calls cannot synchronously update the cache).
-            switch (read.callback) {
-                .normal => |callback| callback(read, block.?),
-                .repair => |callback| callback(read, block),
+            read.callback(read, block);
+        }
+
+        /// If the block is not present (or corrupt), we do not attempt to repair it — the repair's
+        /// address/checksum is not assumed to match what "should" be in our block.
+        /// Relatedly we still attempt to read free blocks — they might still hold the requested data.
+        ///
+        /// Even though this block is the block we expected to read, we can't safely
+        /// cache this result:
+        /// 1. Replica A write block X₁ to address X.
+        /// 2. Replica A write block X₂ to address X (write is lost/misdirected).
+        /// 3. Replica B requests block X₁ from replica A.
+        /// It is safe for A to send back X₁, but A must not allow it to poison its cache.
+        ///
+        /// Additionally, we don't cache these reads for performance reasons:
+        /// - it would fill the cache with non-temporally-local blocks, and
+        /// - it would force an extra memcpy.
+        pub fn read_block_repair(
+            grid: *Grid,
+            callback: fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
+            read: *Grid.ReadRepair,
+            block: BlockPtr,
+            address: u64,
+            checksum: u128,
+        ) void {
+            assert(address > 0);
+
+            assert(grid.superblock.opened);
+            // We try to read the block even when it is free — if we recently released it,
+            // it might be found on disk anyway.
+            maybe(grid.superblock.free_set.is_free(address));
+            // The caller will not attempt to help another replica repair a block that
+            // we are already trying to repair ourselves.
+            assert(!grid.faulty(address, null));
+            maybe(grid.writing(address, null) == .init);
+
+            read.* = .{
+                .callback = callback,
+                .address = address,
+                .checksum = checksum,
+                .block = block,
+                .grid = grid,
+            };
+
+            if (grid.cache.get_index(read.address)) |cache_index| {
+                const cache_block = grid.cache_blocks[cache_index];
+
+                const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
+                assert(header.op == read.address);
+                if (constants.verify) grid.verify_read(read.address, cache_block);
+
+                if (header.checksum == read.checksum) {
+                    stdx.copy_disjoint(.inexact, u8, read.block, cache_block[0..header.size]);
+                } else {
+                    // Signal to read_block_repair_tick_callback() that we found a block,
+                    // but not the one we wanted.
+                    std.mem.set(u8, read.block[0..header.size], 0);
+                }
+
+                grid.on_next_tick(read_block_repair_tick_callback, &read.next_tick);
+            } else {
+                grid.superblock.storage.read_sectors(
+                    read_block_repair_callback,
+                    &read.completion,
+                    read.block,
+                    .grid,
+                    block_offset(read.address),
+                );
+            }
+        }
+
+        fn read_block_repair_tick_callback(next_tick: *Grid.NextTick) void {
+            const read = @fieldParentPtr(ReadRepair, "next_tick", next_tick);
+            const header = mem.bytesAsValue(vsr.Header, read.block[0..@sizeOf(vsr.Header)]);
+
+            if (header.op > 0) {
+                read.callback(read, {});
+            } else {
+                read.callback(read, error.BlockNotFound);
+            }
+        }
+
+        fn read_block_repair_callback(completion: *Storage.Read) void {
+            const read = @fieldParentPtr(ReadRepair, "completion", completion);
+
+            if (read_block_valid(read.block, .{
+                .address = read.address,
+                .checksum = read.checksum,
+                .block_type = null,
+            })) {
+                read.callback(read, {});
+            } else {
+                read.callback(read, error.BlockNotFound);
             }
         }
 

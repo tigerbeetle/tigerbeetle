@@ -4,7 +4,7 @@ const { createClient, TransferFlags } = require("tigerbeetle-node");
 
 const client = createClient({
   cluster_id: 0,
-  replica_addresses: [process.env.TB_PORT || '3000'],
+  replica_addresses: [process.env.TB_ADDRESS || '3000'],
 });
 
 async function main() {
@@ -60,6 +60,7 @@ async function main() {
 
   // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
   let accounts = await client.lookupAccounts([1n, 2n]);
+  assert.equal(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
       assert.equal(account.debits_posted, 0);
@@ -97,6 +98,7 @@ async function main() {
 
   // Validate the contents of all transfers
   let transfers = await client.lookupTransfers([1n, 2n]);
+  assert.equal(transfers.length, 2);
   for (let transfer of transfers) {
     if (transfer.id === 1n) {
       assert.equal(transfer.flags, TransferFlags.pending);
@@ -109,6 +111,7 @@ async function main() {
 
   // Validate accounts pending and posted debits/credits after finishing the two-phase transfer
   accounts = await client.lookupAccounts([1n, 2n]);
+  assert.equal(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
       assert.equal(account.debits_posted, 500);

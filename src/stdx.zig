@@ -148,9 +148,9 @@ pub fn maybe(ok: bool) void {
     assert(ok or !ok);
 }
 
-/// Signal that something is not yet fully implemnted, and abort the process.
+/// Signal that something is not yet fully implemented, and abort the process.
 ///
-/// In VOPR, this will exist with status 0, to make it easy to find "real" failures by running
+/// In VOPR, this will exit with status 0, to make it easy to find "real" failures by running
 /// the simulator in a loop.
 pub fn unimplemented(comptime message: []const u8) noreturn {
     const full_message = "unimplemented: " ++ message;

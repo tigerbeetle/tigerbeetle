@@ -7,7 +7,9 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
 const StaticAllocator = @import("../static_allocator.zig");
+const alloc_block = @import("../lsm/grid.zig").alloc_block;
 const GridType = @import("../lsm/grid.zig").GridType;
+const IOPS = @import("../iops.zig").IOPS;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
@@ -80,6 +82,18 @@ pub fn ReplicaType(
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
 
+        const BlockRead = struct {
+            read: Grid.ReadRepair,
+            replica: *Self,
+            destination: u8,
+            message: *Message,
+        };
+
+        const BlockWrite = struct {
+            write: Grid.Write,
+            replica: *Self,
+        };
+
         /// We use this allocator during open/init and then disable it.
         /// An accidental dynamic allocation after open/init will cause an assertion failure.
         static_allocator: StaticAllocator,
@@ -132,6 +146,10 @@ pub fn ReplicaType(
         /// For executing service up-calls after an operation has been committed:
         state_machine: StateMachine,
 
+        /// Set to true once StateMachine.open() completes.
+        /// When false, the replica must not commit/compact/checkpoint.
+        state_machine_opened: bool = false,
+
         /// Durably store VSR state, the "root" of the LSM tree, and other replica metadata.
         superblock: SuperBlock,
 
@@ -141,6 +159,11 @@ pub fn ReplicaType(
         superblock_context_view_change: SuperBlock.Context = undefined,
 
         grid: Grid,
+        grid_reads: IOPS(BlockRead, constants.grid_repair_reads_max) = .{},
+        grid_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
+        grid_write_blocks: [constants.grid_repair_writes_max]Grid.BlockPtr,
+        grid_read_fault_next_tick: Grid.NextTick = undefined,
+
         opened: bool,
 
         /// The current view.
@@ -319,6 +342,10 @@ pub fn ReplicaType(
         /// (status=normal or (status=view-change and primary))
         repair_timeout: Timeout,
 
+        /// The number of ticks before sending a command=request_blocks.
+        /// (grid.read_faulty_queue.count>0)
+        grid_repair_message_timeout: Timeout,
+
         /// Used to provide deterministic entropy to `choose_any_other_replica()`.
         /// Incremented whenever `choose_any_other_replica()` is called.
         choose_any_other_replica_ticks: u64 = 0,
@@ -425,13 +452,6 @@ pub fn ReplicaType(
             initialized = true;
             errdefer self.deinit(allocator);
 
-            // Open the (Forest inside) StateMachine:
-            // TODO If this encounters corruption (in the ManifestLog) we must repair + resume it later.
-            // And maybe transition to a different status — but it may coincide with recovering_head...
-            self.opened = false;
-            self.state_machine.open(state_machine_open_callback);
-            while (!self.opened) self.superblock.storage.tick();
-
             self.opened = false;
             self.journal.recover(journal_recover_callback);
             while (!self.opened) self.superblock.storage.tick();
@@ -444,6 +464,18 @@ pub fn ReplicaType(
             // the vsr_headers head op may be part of the checkpoint after this one.
             maybe(vsr_headers.slice[0].op > self.op_checkpoint_trigger());
 
+            // Given on-disk state, try to recover the head op after a restart.
+            //
+            // If the replica crashed in status == .normal (view == log_view), the head is generally
+            // the last record in WAL. As a special case, during  the first open the last (and the
+            // only) record in WAL is the root prepare.
+            //
+            // Otherwise, the head is recovered from the superblock. When transitioninig to a
+            // view_change, replicas encode the current head into vsr_headers.
+            //
+            // It is a possibility that the head can't be recovered from the local data.
+            // In this case, the replica transitions to .recovering_head and waits for a .start_view
+            // message from a primary to reset its head.
             var op_head: ?u64 = null;
 
             if (self.log_view == self.view) {
@@ -519,11 +551,17 @@ pub fn ReplicaType(
                 // Solo replicas must increment their view after recovery.
                 // Otherwise, two different versions of an op could exist within a single view
                 // (the former version truncated as a torn write).
+                //
+                // on_request() will ignore incoming requests until the view_durable_update()
+                // completes.
                 self.log_view += 1;
                 self.view += 1;
                 self.primary_update_view_headers();
                 self.view_durable_update();
-                // Recovery will resume in view_durable_update_callback.
+
+                if (self.commit_min == self.op) {
+                    self.transition_to_normal_from_recovering_status();
+                }
             } else {
                 // Even if op_head_certain() returns false, a DVC always has a certain head op.
                 if (self.log_view < self.view or self.op_head_certain()) {
@@ -548,6 +586,10 @@ pub fn ReplicaType(
                     self.status == .view_change or
                     self.status == .recovering_head,
             );
+
+            // Asynchronously open the (Forest inside) StateMachine so that we can repair grid
+            // blocks if necessary:
+            self.state_machine.open(state_machine_open_callback);
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -556,16 +598,41 @@ pub fn ReplicaType(
             self.opened = true;
         }
 
-        fn state_machine_open_callback(state_machine: *StateMachine) void {
-            const self = @fieldParentPtr(Self, "state_machine", state_machine);
-            assert(!self.opened);
-            self.opened = true;
-        }
-
         fn journal_recover_callback(journal: *Journal) void {
             const self = @fieldParentPtr(Self, "journal", journal);
             assert(!self.opened);
             self.opened = true;
+        }
+
+        fn state_machine_open_callback(state_machine: *StateMachine) void {
+            const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(!self.state_machine_opened);
+            assert(!self.committing);
+
+            log.debug("{}: state_machine_open_callback", .{self.replica});
+
+            self.state_machine_opened = true;
+
+            if (self.solo()) {
+                if (self.commit_min < self.op) {
+                    self.commit_journal(self.op);
+
+                    // Recovery will complete when commit_journal finishes.
+                    assert(self.status == .recovering);
+                } else {
+                    assert(self.status == .normal);
+                }
+            } else {
+                if (self.status == .normal and self.primary()) {
+                    if (self.pipeline.queue.prepare_queue.count > 0) {
+                        self.commit_pipeline();
+                    }
+                } else {
+                    if (self.status != .recovering_head) {
+                        self.commit_journal(self.commit_max);
+                    }
+                }
+            }
         }
 
         const Options = struct {
@@ -666,6 +733,12 @@ pub fn ReplicaType(
             });
             errdefer self.grid.deinit(allocator);
 
+            for (self.grid_write_blocks) |*block, i| {
+                errdefer for (self.grid_write_blocks[0..i]) |b| allocator.free(b);
+                block.* = try alloc_block(allocator);
+            }
+            errdefer for (self.grid_write_blocks) |b| allocator.free(b);
+
             self.state_machine = try StateMachine.init(
                 allocator,
                 &self.grid,
@@ -693,6 +766,7 @@ pub fn ReplicaType(
                 .state_machine = self.state_machine,
                 .superblock = self.superblock,
                 .grid = self.grid,
+                .grid_write_blocks = self.grid_write_blocks,
                 .opened = self.opened,
                 .view = self.superblock.working.vsr_state.view,
                 .log_view = self.superblock.working.vsr_state.log_view,
@@ -759,6 +833,11 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
+                .grid_repair_message_timeout = Timeout{
+                    .name = "grid_repair_message_timeout",
+                    .id = replica_index,
+                    .after = 50,
+                },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
                 .aof = options.aof,
@@ -810,6 +889,11 @@ pub fn ReplicaType(
                 assert(self.commit_callback == null);
             }
 
+            var grid_reads = self.grid_reads.iterate();
+            while (grid_reads.next()) |read| self.message_bus.unref(read.message);
+
+            for (self.grid_write_blocks) |block| allocator.free(block);
+
             for (self.do_view_change_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
             }
@@ -845,6 +929,7 @@ pub fn ReplicaType(
             self.do_view_change_message_timeout.tick();
             self.request_start_view_message_timeout.tick();
             self.repair_timeout.tick();
+            self.grid_repair_message_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
@@ -857,6 +942,7 @@ pub fn ReplicaType(
             if (self.do_view_change_message_timeout.fired()) self.on_do_view_change_message_timeout();
             if (self.request_start_view_message_timeout.fired()) self.on_request_start_view_message_timeout();
             if (self.repair_timeout.fired()) self.on_repair_timeout();
+            if (self.grid_repair_message_timeout.fired()) self.on_grid_repair_message_timeout();
 
             // None of the on_timeout() functions above should send a message to this replica.
             assert(self.loopback_queue == null);
@@ -921,6 +1007,8 @@ pub fn ReplicaType(
                 .request_headers => self.on_request_headers(message),
                 .request_reply => self.on_request_reply(message),
                 .headers => self.on_headers(message),
+                .request_blocks => self.on_request_blocks(message),
+                .block => self.on_block(message),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
@@ -929,8 +1017,6 @@ pub fn ReplicaType(
                     });
                     return;
                 },
-                .request_block => unreachable, // TODO
-                .block => unreachable, // TODO
                 .reserved => unreachable,
             }
 
@@ -1939,6 +2025,207 @@ pub fn ReplicaType(
             self.repair();
         }
 
+        fn on_request_blocks(self: *Self, message: *const Message) void {
+            assert(message.header.command == .request_blocks);
+
+            if (message.header.replica == self.replica) {
+                log.warn("{}: on_request_blocks: ignoring; misdirected message (self)", .{self.replica});
+                return;
+            }
+
+            if (self.standby()) {
+                log.warn("{}: on_request_blocks: ignoring; misdirected message (standby)", .{self.replica});
+                return;
+            }
+
+            // TODO Rate limit replicas that keep requesting the same blocks (maybe via checksum_body?)
+            // to avoid unnecessary work in the presence of an asymmetric partition.
+            const requests = std.mem.bytesAsSlice(vsr.BlockRequest, message.body());
+            assert(requests.len > 0);
+
+            request_loop: for (requests) |*request, i| {
+                if (self.grid.faulty(request.block_address, null)) {
+                    log.warn("{}: on_request_blocks: ignoring block request; faulty " ++
+                        "(replica={} address={} checksum={})", .{
+                        self.replica,
+                        message.header.replica,
+                        request.block_address,
+                        request.block_checksum,
+                    });
+                    continue;
+                }
+
+                var reads = self.grid_reads.iterate();
+                while (reads.next()) |read| {
+                    if (read.read.address == request.block_address and
+                        read.read.checksum == request.block_checksum and
+                        read.destination == message.header.replica)
+                    {
+                        log.debug("{}: on_request_blocks: ignoring block request;" ++
+                            " already reading (replica={} address={} checksum={})", .{
+                            self.replica,
+                            message.header.replica,
+                            request.block_address,
+                            request.block_checksum,
+                        });
+                        continue :request_loop;
+                    }
+                }
+
+                const read = self.grid_reads.acquire() orelse {
+                    log.debug("{}: on_request_blocks: ignoring remaining blocks; busy " ++
+                        "(replica={} ignored={}/{})", .{
+                        self.replica,
+                        message.header.replica,
+                        requests.len - i,
+                        requests.len,
+                    });
+                    return;
+                };
+
+                log.debug("{}: on_request_blocks: reading block " ++
+                    "(replica={} address={} checksum={})", .{
+                    self.replica,
+                    message.header.replica,
+                    request.block_address,
+                    request.block_checksum,
+                });
+
+                const reply = self.message_bus.get_message();
+                defer self.message_bus.unref(reply);
+
+                read.* = .{
+                    .replica = self,
+                    .destination = message.header.replica,
+                    .read = undefined,
+                    .message = reply.ref(),
+                };
+
+                self.grid.read_block_repair(
+                    on_request_blocks_read_repair,
+                    &read.read,
+                    reply.buffer[0..constants.block_size],
+                    request.block_address,
+                    request.block_checksum,
+                );
+            }
+        }
+
+        fn on_request_blocks_read_repair(grid_read: *Grid.ReadRepair, result: error{BlockNotFound}!void) void {
+            const read = @fieldParentPtr(BlockRead, "read", grid_read);
+            const self = read.replica;
+            defer {
+                self.message_bus.unref(read.message);
+                self.grid_reads.release(read);
+            }
+
+            assert(read.destination != self.replica);
+
+            result catch {
+                log.debug("{}: on_request_blocks: block not found " ++
+                    "(address={} checksum={} destination={})", .{
+                    self.replica,
+                    grid_read.address,
+                    grid_read.checksum,
+                    read.destination,
+                });
+                return;
+            };
+
+            log.debug("{}: on_request_blocks: block found " ++
+                "(address={} checksum={} destination={})", .{
+                self.replica,
+                grid_read.address,
+                grid_read.checksum,
+                read.destination,
+            });
+
+            assert(read.message.header.command == .block);
+            assert(read.message.header.op == grid_read.address);
+            assert(read.message.header.checksum == grid_read.checksum);
+            assert(read.message.header.size <= constants.block_size);
+
+            self.send_message_to_replica(read.destination, read.message);
+        }
+
+        fn on_block(self: *Self, message: *const Message) void {
+            maybe(self.state_machine_opened);
+            assert(message.header.command == .block);
+            assert(message.header.size <= constants.block_size);
+            assert(message.header.op > 0); // op holds the block's address.
+
+            // TODO State sync
+
+            if (!self.grid.faulty(message.header.op, message.header.checksum)) {
+                log.debug("{}: on_block: ignoring; block not repairing (address={} checksum={})", .{
+                    self.replica,
+                    message.header.op,
+                    message.header.checksum,
+                });
+                return;
+            }
+
+            switch (self.grid.writing(message.header.op, null)) {
+                .init => unreachable,
+                .repair => {
+                    log.debug("{}: on_block: ignoring; already writing block (address={} checksum={})", .{
+                        self.replica,
+                        message.header.op,
+                        message.header.checksum,
+                    });
+                    return;
+                },
+                .none => {},
+            }
+
+            const write = self.grid_writes.acquire() orelse {
+                log.debug("{}: on_block: ignoring; no write available (address={} checksum={})", .{
+                    self.replica,
+                    message.header.op,
+                    message.header.checksum,
+                });
+                return;
+            };
+
+            log.debug("{}: on_block: repairing block (address={} checksum={})", .{
+                self.replica,
+                message.header.op,
+                message.header.checksum,
+            });
+
+            write.* = .{
+                .replica = self,
+                .write = undefined,
+            };
+
+            const block = &self.grid_write_blocks[self.grid_writes.index(write)];
+            stdx.copy_disjoint(.inexact, u8, block.*, message.buffer[0..message.header.size]);
+
+            self.grid.write_block_repair(
+                on_block_write_repair,
+                &write.write,
+                block,
+                message.header.op,
+            );
+        }
+
+        fn on_block_write_repair(grid_write: *Grid.Write) void {
+            const write = @fieldParentPtr(BlockWrite, "write", grid_write);
+            const self = write.replica;
+            assert(self.grid_repair_message_timeout.ticking);
+
+            defer self.grid_writes.release(write);
+
+            log.debug("{}: on_block: wrote address={}", .{
+                self.replica,
+                grid_write.address,
+            });
+
+            if (self.grid.read_faulty_queue.empty()) {
+                self.grid_repair_message_timeout.stop();
+            }
+        }
+
         fn on_ping_timeout(self: *Self) void {
             self.ping_timeout.reset();
 
@@ -2181,6 +2468,15 @@ pub fn ReplicaType(
             self.repair();
         }
 
+        fn on_grid_repair_message_timeout(self: *Self) void {
+            assert(self.grid_repair_message_timeout.ticking);
+            assert(!self.grid.read_faulty_queue.empty());
+            maybe(self.state_machine_opened);
+
+            self.grid_repair_message_timeout.reset();
+            self.send_request_blocks();
+        }
+
         fn primary_receive_do_view_change(self: *Self, message: *Message) void {
             assert(!self.solo());
             assert(self.status == .view_change);
@@ -2406,6 +2702,11 @@ pub fn ReplicaType(
                 self.commit_max = commit;
             }
 
+            if (!self.state_machine_opened) {
+                assert(!self.committing);
+                return;
+            }
+
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.committing) {
                 log.debug("{}: commit_journal: already committing...", .{self.replica});
@@ -2551,6 +2852,7 @@ pub fn ReplicaType(
             callback: fn (*Self) void,
         ) void {
             assert(self.committing);
+            assert(self.state_machine_opened);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.commit_prepare == null);
@@ -2601,19 +2903,22 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
 
             if (self.status == .normal and self.primary()) {
-                const prepare = self.pipeline.queue.pop_prepare().?;
+                {
+                    const prepare = self.pipeline.queue.pop_prepare().?;
+                    defer self.message_bus.unref(prepare.message);
+
+                    assert(prepare.message.header.command == .prepare);
+                    assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
+                    assert(prepare.message.header.op == self.commit_min);
+                    assert(prepare.message.header.op == self.commit_max);
+                }
+
                 if (self.pipeline.queue.pop_request()) |request| {
                     // Start preparing the next request in the queue (if any).
                     self.primary_pipeline_prepare(request);
                 }
 
                 assert(self.commit_min == self.commit_max);
-                assert(prepare.message.header.command == .prepare);
-                assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
-                assert(prepare.message.header.op == self.commit_min);
-                assert(prepare.message.header.op == self.commit_max);
-
-                self.message_bus.unref(prepare.message);
 
                 if (self.pipeline.queue.prepare_queue.head_ptr()) |next| {
                     assert(next.message.header.op == self.commit_min + 1);
@@ -2665,6 +2970,10 @@ pub fn ReplicaType(
                 );
                 if (self.on_checkpoint_start) |on_checkpoint| on_checkpoint(self);
 
+                assert(self.grid.read_faulty_queue.empty());
+                assert(self.grid.write_queue.empty());
+                assert(self.grid.write_iops.executing() == 0);
+
                 self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
             } else {
                 self.commit_op_done();
@@ -2678,6 +2987,9 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
+            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.write_queue.empty());
+            assert(self.grid.write_iops.executing() == 0);
 
             self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
         }
@@ -2689,6 +3001,9 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
+            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.write_queue.empty());
+            assert(self.grid.write_iops.executing() == 0);
 
             // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
             //
@@ -2905,6 +3220,11 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.pipeline.queue.prepare_queue.count > 0);
 
+            if (!self.state_machine_opened) {
+                assert(!self.committing);
+                return;
+            }
+
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.committing) {
                 log.debug("{}: commit_pipeline: already committing...", .{self.replica});
@@ -3090,7 +3410,14 @@ pub fn ReplicaType(
             const BitSet = std.bit_set.IntegerBitSet(128);
             comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
 
+            // Collect nack and presence bits for the headers, so that the new primary can run CTRL
+            // protocol to truncate uncomitted headers. When:
+            // - a header has quorum of nacks -- the header is truncated
+            // - a header isn't truncated and is present -- the header gets into the next view
+            // - a header is neither truncated nor present -- the primary waits for more
+            //   DVC messages to decide whether to keep or truncate the header.
             var nacks = BitSet.initEmpty();
+            var present = BitSet.initEmpty();
             if (command == .do_view_change) {
                 for (self.view_headers.array.constSlice()) |*header, i| {
                     const slot = self.journal.slot_for_op(header.op);
@@ -3113,6 +3440,13 @@ pub fn ReplicaType(
                     // Case 3: We don't have a prepare at all, and that's not due to a fault.
                     if (journal_header == null and !faulty) {
                         nacks.set(i);
+                    }
+
+                    if (journal_header != null and journal_header.?.checksum == header.checksum and
+                        !faulty)
+                    {
+                        maybe(nacks.isSet(i));
+                        present.set(i);
                     }
                 }
             }
@@ -3138,6 +3472,8 @@ pub fn ReplicaType(
                 .commit = self.commit_min,
                 // DVC: Signal which headers correspond to definitely not-prepared messages.
                 .context = nacks.mask,
+                // DVC: Signal which headers correspond to locally available prepares.
+                .client = present.mask,
             };
 
             stdx.copy_disjoint(
@@ -3471,6 +3807,13 @@ pub fn ReplicaType(
                     @enumToInt(message.header.operation),
                 });
                 return true;
+            }
+
+            if (self.solo()) {
+                if (self.view_durable_updating()) {
+                    log.debug("{}: on_request: ignoring (still persisting view)", .{self.replica});
+                    return true;
+                }
             }
 
             if (self.ignore_request_message_backup(message)) return true;
@@ -4126,6 +4469,8 @@ pub fn ReplicaType(
             self.pipeline.queue.verify();
 
             const message = request.message;
+            defer self.message_bus.unref(message);
+
             assert(!self.ignore_request_message(message));
 
             log.debug("{}: primary_pipeline_next: request checksum={} client={}", .{
@@ -4625,7 +4970,7 @@ pub fn ReplicaType(
                 assert(prepare.header.parent == parent);
                 assert(self.journal.has(prepare.header));
 
-                pipeline_queue.push_prepare(prepare.ref());
+                pipeline_queue.push_prepare(prepare);
                 parent = prepare.header.checksum;
             }
             assert(self.commit_max + pipeline_queue.prepare_queue.count == self.op);
@@ -5123,15 +5468,10 @@ pub fn ReplicaType(
             }
 
             assert(self.status == .normal);
-            // After a view change, replicas send prepare_oks for uncommitted ops with older views:
+            // After a view change, replicas send prepare_oks for ops with older views.
             // However, we only send to the primary of the current view (see below where we send).
             assert(header.view <= self.view);
             assert(header.op <= self.op);
-
-            if (header.op <= self.commit_max) {
-                log.debug("{}: send_prepare_ok: not sending (committed)", .{self.replica});
-                return;
-            }
 
             if (self.journal.has_clean(header)) {
                 log.debug("{}: send_prepare_ok: op={} checksum={}", .{
@@ -5492,8 +5832,15 @@ pub fn ReplicaType(
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                 },
-                .request_block => unreachable,
-                .block => unreachable,
+                .request_blocks => {
+                    maybe(self.standby());
+                    assert(message.header.replica == self.replica);
+                    assert(message.header.replica != replica);
+                    assert(message.header.view == self.view);
+                },
+                .block => {
+                    assert(!self.standby());
+                },
             }
 
             if (replica != self.replica) {
@@ -5517,11 +5864,12 @@ pub fn ReplicaType(
                     return;
                 }
 
-                // For DVCs and SVCs we must wait for the log_view to be durable:
+                // For DVCs, SVCs, and prepare_oks we must wait for the log_view to be durable:
                 // - A DVC includes the log_view.
-                // - A SV implies the log_view.
+                // - A SV or a prepare_ok imply the log_view.
                 if (message.header.command == .do_view_change or
-                    message.header.command == .start_view)
+                    message.header.command == .start_view or
+                    message.header.command == .prepare_ok)
                 {
                     if (self.log_view_durable() < self.log_view) {
                         log.debug("{}: send_message_to_replica: dropped {s} " ++
@@ -5707,19 +6055,6 @@ pub fn ReplicaType(
 
             if (self.status == .view_change and self.log_view < self.view) {
                 if (!self.do_view_change_quorum) self.send_do_view_change();
-            }
-
-            if (self.solo()) {
-                assert(self.status == .recovering);
-                assert(self.view == self.log_view);
-                assert(!update_dvc);
-                assert(!update_sv);
-
-                if (self.commit_min < self.op) {
-                    self.commit_journal(self.op);
-                } else {
-                    self.transition_to_normal_from_recovering_status();
-                }
             }
         }
 
@@ -5947,7 +6282,7 @@ pub fn ReplicaType(
                 const dvc_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
                 for (dvc_headers.slice) |*header, i| {
                     log.debug(
-                        "{}: {s}: dvc: header: replica={} op={} checksum={} nack={}",
+                        "{}: {s}: dvc: header: replica={} op={} checksum={} nack={} type={s}",
                         .{
                             self.replica,
                             context,
@@ -5955,6 +6290,7 @@ pub fn ReplicaType(
                             header.op,
                             header.checksum,
                             dvc_nacks.isSet(i),
+                            @tagName(vsr.Headers.dvc_header_type(header)),
                         },
                     );
                 }
@@ -6044,7 +6380,6 @@ pub fn ReplicaType(
             assert(self.view == self.log_view);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             assert(!self.committing);
-            assert(!self.solo() or self.commit_min == self.op);
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
             assert(self.view_headers.command == .start_view);
@@ -6640,6 +6975,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(!self.grid.read_faulty_queue.empty());
             assert(!self.superblock.free_set.is_free(read.address));
+            maybe(self.state_machine_opened);
 
             log.warn("{}: on_grid_read_fault: address={} checksum={} block_type={}", .{
                 self.replica,
@@ -6647,6 +6983,77 @@ pub fn ReplicaType(
                 read.checksum,
                 read.block_type,
             });
+
+            if (self.solo()) @panic("grid is corrupt");
+
+            if (!self.grid_repair_message_timeout.ticking) {
+                assert(self.grid.read_faulty_queue.count == 1);
+
+                self.grid_repair_message_timeout.start();
+                self.grid.on_next_tick(
+                    on_grid_read_fault_next_tick,
+                    &self.grid_read_fault_next_tick,
+                );
+            }
+        }
+
+        fn on_grid_read_fault_next_tick(next_tick: *Grid.NextTick) void {
+            const self = @fieldParentPtr(Self, "grid_read_fault_next_tick", next_tick);
+            if (self.grid.read_faulty_queue.empty()) {
+                // Very unlikely, but possibly we wrote the block before next_tick fired.
+            } else {
+                self.send_request_blocks();
+            }
+        }
+
+        fn send_request_blocks(self: *Self) void {
+            assert(!self.solo());
+            assert(self.grid_repair_message_timeout.ticking);
+            assert(!self.grid.read_faulty_queue.empty());
+            maybe(self.state_machine_opened);
+
+            var message = self.message_bus.get_message();
+            defer self.message_bus.unref(message);
+
+            var requests_count: u32 = 0;
+            var requests = std.mem.bytesAsSlice(
+                vsr.BlockRequest,
+                message.buffer[@sizeOf(Header)..],
+            );
+
+            var reads = self.grid.read_faulty_queue.peek();
+            while (reads) |read| : (reads = read.next) {
+                assert(read.address > 0);
+                assert(!self.superblock.free_set.is_free(read.address));
+
+                log.debug("{}: send_request_blocks: request address={} checksum={}", .{
+                    self.replica,
+                    read.address,
+                    read.checksum,
+                });
+
+                requests[requests_count] = .{
+                    .block_checksum = read.checksum,
+                    .block_address = read.address,
+                };
+                requests_count += 1;
+
+                if (requests_count == constants.grid_repair_request_max) break;
+            }
+            assert(requests_count > 0);
+            assert(requests_count <= constants.grid_repair_request_max);
+
+            message.header.* = .{
+                .command = .request_blocks,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .size = @sizeOf(Header) + requests_count * @sizeOf(vsr.BlockRequest),
+            };
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
+
+            self.send_message_to_replica(self.choose_any_other_replica(), message);
         }
     };
 }
@@ -6809,6 +7216,11 @@ const DVCQuorum = struct {
         comptime assert(@TypeOf(nacks) == u128);
         assert(@popCount(u128, nacks) <= headers.slice.len);
         assert(@clz(u128, nacks) + headers.slice.len >= @bitSizeOf(u128));
+
+        const present = message.header.client;
+        comptime assert(@TypeOf(present) == u128);
+        assert(@popCount(u128, present) <= headers.slice.len);
+        assert(@clz(u128, present) + headers.slice.len >= @bitSizeOf(u128));
     }
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
@@ -7017,12 +7429,15 @@ const DVCQuorum = struct {
                 assert(header.op == op);
 
                 const header_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                const header_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.client };
                 if (header_nacks.isSet(header_index)) {
                     nacks += 1;
                 } else if (header_canonical) |expect| {
                     if (vsr.Headers.dvc_header_type(header) == .valid) {
                         if (expect.checksum == header.checksum) {
-                            copies += 1;
+                            if (header_present.isSet(header_index)) {
+                                copies += 1;
+                            }
                         } else {
                             // The replica's prepare is available, but for a different header.
                             nacks += 1;
@@ -7338,7 +7753,7 @@ const PipelineQueue = struct {
             assert(pipeline.request_queue.empty());
         }
 
-        pipeline.prepare_queue.push_assume_capacity(.{ .message = message });
+        pipeline.prepare_queue.push_assume_capacity(.{ .message = message.ref() });
         if (constants.verify) pipeline.verify();
     }
 };

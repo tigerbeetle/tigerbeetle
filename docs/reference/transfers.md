@@ -36,6 +36,7 @@ Fields used by each mode of transfer:
 | `flags.balancing_debit`       | optional     | optional | false        | false        |
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
 | `amount`                      | required     | required | optional     | optional     |
+| `timestamp`                   | none         | none     | none         | none         |
 
 TigerBeetle uses the same data structures internally and
 externally. This means that sometimes you need to set temporary values

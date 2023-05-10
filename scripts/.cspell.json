@@ -127,6 +127,8 @@
 	"threadpools",
 	"snapshotting",
 	"checkpointing",
-	"checkpointed"
+	"checkpointed",
+	"getenv",
+        "freeset"
     ]
 }
