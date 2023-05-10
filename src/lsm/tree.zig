@@ -849,7 +849,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 switch (tree.compaction_table_immutable.state) {
                     // The compaction wasn't started for this half bar.
                     .idle => assert(tree.table_immutable.free),
-                    .done_writing_tables => {
+                    .tables_writing_done => {
                         tree.compaction_table_immutable.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             tree.compaction_table_immutable.context.level_b,
@@ -870,7 +870,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             while (it.next()) |context| {
                 switch (context.compaction.state) {
                     .idle => {}, // The compaction wasn't started for this half bar.
-                    .done_writing_tables => {
+                    .tables_writing_done => {
                         context.compaction.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             context.compaction.context.level_b,

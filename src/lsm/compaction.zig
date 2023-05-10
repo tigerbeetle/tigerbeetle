@@ -147,15 +147,13 @@ pub fn CompactionType(
         },
         state: union(enum) {
             idle,
-            compacting,
-            iter_init_a,
-            iter_next: InputLevel,
-            writing: struct {
-                pending: usize,
-            },
             next_tick,
-            done_writing_tables,
-            done_applied_manifest,
+            compacting,
+            iterator_init_a,
+            iterator_next: InputLevel,
+            tables_writing: struct { pending: usize },
+            tables_writing_done,
+            applied_to_manifest,
         },
 
         next_tick: Grid.NextTick = undefined,
@@ -165,7 +163,7 @@ pub fn CompactionType(
         write_index_block: Grid.Write = undefined,
 
         tracer_slot: ?tracer.SpanStart,
-        iter_tracer_slot: ?tracer.SpanStart,
+        iterator_tracer_slot: ?tracer.SpanStart,
 
         pub fn init(allocator: Allocator, tree_name: []const u8) !Compaction {
             var iterator_a = try TableDataIterator.init(allocator);
@@ -207,7 +205,7 @@ pub fn CompactionType(
                 .state = .idle,
 
                 .tracer_slot = null,
-                .iter_tracer_slot = null,
+                .iterator_tracer_slot = null,
             };
         }
 
@@ -220,13 +218,13 @@ pub fn CompactionType(
         }
 
         pub fn reset(compaction: *Compaction) void {
-            assert(compaction.state == .done_applied_manifest);
+            assert(compaction.state == .applied_to_manifest);
 
             compaction.state = .idle;
             compaction.manifest_entries.len = 0;
             if (compaction.grid_reservation) |grid_reservation| {
-                compaction.grid_reservation = null;
                 compaction.context.grid.forfeit(grid_reservation);
+                compaction.grid_reservation = null;
             }
         }
 
@@ -300,7 +298,7 @@ pub fn CompactionType(
                 .state = .compacting,
 
                 .tracer_slot = compaction.tracer_slot,
-                .iter_tracer_slot = compaction.iter_tracer_slot,
+                .iterator_tracer_slot = compaction.iterator_tracer_slot,
             };
 
             if (can_move_table) {
@@ -345,9 +343,9 @@ pub fn CompactionType(
                         compaction.loop_start();
                     },
                     .disk => |table_info| {
-                        compaction.state = .iter_init_a;
+                        compaction.state = .iterator_init_a;
                         compaction.context.grid.read_block(
-                            on_iter_init_a,
+                            on_iterator_init_a,
                             &compaction.read,
                             table_info.address,
                             table_info.checksum,
@@ -358,9 +356,9 @@ pub fn CompactionType(
             }
         }
 
-        fn on_iter_init_a(read: *Grid.Read, index_block: BlockPtrConst) void {
+        fn on_iterator_init_a(read: *Grid.Read, index_block: BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "read", read);
-            assert(compaction.state == .iter_init_a);
+            assert(compaction.state == .iterator_init_a);
 
             // `index_block` is only valid for this callback, so copy its contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.
@@ -379,7 +377,7 @@ pub fn CompactionType(
             assert(compaction.state == .compacting);
 
             tracer.start(
-                &compaction.iter_tracer_slot,
+                &compaction.iterator_tracer_slot,
                 .{ .tree_compaction_iter = .{
                     .tree_name = compaction.tree_name,
                     .level_b = compaction.context.level_b,
@@ -387,26 +385,26 @@ pub fn CompactionType(
                 @src(),
             );
 
-            compaction.iter_check(.a);
+            compaction.iterator_check(.a);
         }
 
         /// If `values_in[index]` is empty and more values are available, read them.
-        fn iter_check(compaction: *Compaction, input_level: InputLevel) void {
+        fn iterator_check(compaction: *Compaction, input_level: InputLevel) void {
             assert(compaction.state == .compacting);
 
             if (compaction.values_in[@enumToInt(input_level)].len > 0) {
                 // Still have values on this input_level, no need to refill.
-                compaction.iter_check_finish(input_level);
+                compaction.iterator_check_finish(input_level);
             } else if (input_level == .a and compaction.context.table_info_a == .immutable) {
                 // No iterator to call next on.
-                compaction.iter_check_finish(input_level);
+                compaction.iterator_check_finish(input_level);
             } else {
-                compaction.state = .{ .iter_next = input_level };
+                compaction.state = .{ .iterator_next = input_level };
                 switch (input_level) {
-                    .a => compaction.iterator_a.next(iter_next_a),
+                    .a => compaction.iterator_a.next(iterator_next_a),
                     .b => compaction.iterator_b.next(.{
                         .on_index = on_index_block,
-                        .on_data = iter_next_b,
+                        .on_data = iterator_next_b,
                     }),
                 }
             }
@@ -418,7 +416,7 @@ pub fn CompactionType(
             index_block: BlockPtrConst,
         ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
-            assert(std.meta.eql(compaction.state, .{ .iter_next = .b }));
+            assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
 
             // Tables that we've compacted should become invisible at the end of this half-bar.
             compaction.manifest_entries.appendAssumeCapacity(.{
@@ -438,21 +436,21 @@ pub fn CompactionType(
             grid.release(Table.index_block_address(index_block));
         }
 
-        fn iter_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
+        fn iterator_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
-            assert(std.meta.eql(compaction.state, .{ .iter_next = .a }));
-            compaction.iter_next(data_block);
+            assert(std.meta.eql(compaction.state, .{ .iterator_next = .a }));
+            compaction.iterator_next(data_block);
         }
 
-        fn iter_next_b(iterator_b: *LevelDataIterator, data_block: ?BlockPtrConst) void {
+        fn iterator_next_b(iterator_b: *LevelDataIterator, data_block: ?BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
-            assert(std.meta.eql(compaction.state, .{ .iter_next = .b }));
-            compaction.iter_next(data_block);
+            assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
+            compaction.iterator_next(data_block);
         }
 
-        fn iter_next(compaction: *Compaction, data_block: ?BlockPtrConst) void {
-            assert(compaction.state == .iter_next);
-            const input_level = compaction.state.iter_next;
+        fn iterator_next(compaction: *Compaction, data_block: ?BlockPtrConst) void {
+            assert(compaction.state == .iterator_next);
+            const input_level = compaction.state.iterator_next;
             const index = @enumToInt(input_level);
 
             if (data_block) |block| {
@@ -480,12 +478,12 @@ pub fn CompactionType(
             }
 
             compaction.state = .compacting;
-            compaction.iter_check_finish(input_level);
+            compaction.iterator_check_finish(input_level);
         }
 
-        fn iter_check_finish(compaction: *Compaction, input_level: InputLevel) void {
+        fn iterator_check_finish(compaction: *Compaction, input_level: InputLevel) void {
             switch (input_level) {
-                .a => compaction.iter_check(.b),
+                .a => compaction.iterator_check(.b),
                 .b => compaction.compact(),
             }
         }
@@ -654,7 +652,7 @@ pub fn CompactionType(
             const input_exhausted = compaction.input_state == .exhausted;
             const table_builder = &compaction.table_builder;
 
-            compaction.state = .{ .writing = .{ .pending = 0 } };
+            compaction.state = .{ .tables_writing = .{ .pending = 0 } };
 
             // Flush the data block if needed.
             if (table_builder.data_block_full() or
@@ -705,7 +703,7 @@ pub fn CompactionType(
                 WriteBlock(.index).write_block(compaction);
             }
 
-            if (compaction.state.writing.pending == 0) {
+            if (compaction.state.tables_writing.pending == 0) {
                 compaction.write_finish();
             }
         }
@@ -714,7 +712,7 @@ pub fn CompactionType(
         fn WriteBlock(comptime write_block_field: WriteBlockField) type {
             return struct {
                 fn write_block(compaction: *Compaction) void {
-                    assert(compaction.state == .writing);
+                    assert(compaction.state == .tables_writing);
 
                     const write = switch (write_block_field) {
                         .data => &compaction.write_data_block,
@@ -726,7 +724,7 @@ pub fn CompactionType(
                         .filter => &compaction.table_builder.filter_block,
                         .index => &compaction.table_builder.index_block,
                     };
-                    compaction.state.writing.pending += 1;
+                    compaction.state.tables_writing.pending += 1;
                     compaction.context.grid.write_block(
                         on_write,
                         write,
@@ -745,9 +743,9 @@ pub fn CompactionType(
                         },
                         write,
                     );
-                    assert(compaction.state == .writing);
-                    compaction.state.writing.pending -= 1;
-                    if (compaction.state.writing.pending == 0) {
+                    assert(compaction.state == .tables_writing);
+                    compaction.state.tables_writing.pending -= 1;
+                    if (compaction.state.tables_writing.pending == 0) {
                         compaction.write_finish();
                     }
                 }
@@ -755,11 +753,11 @@ pub fn CompactionType(
         }
 
         fn write_finish(compaction: *Compaction) void {
-            assert(compaction.state == .writing);
-            assert(compaction.state.writing.pending == 0);
+            assert(compaction.state == .tables_writing);
+            assert(compaction.state.tables_writing.pending == 0);
 
             tracer.end(
-                &compaction.iter_tracer_slot,
+                &compaction.iterator_tracer_slot,
                 .{ .tree_compaction_iter = .{
                     .tree_name = compaction.tree_name,
                     .level_b = compaction.context.level_b,
@@ -802,7 +800,7 @@ pub fn CompactionType(
             const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
             assert(compaction.state == .next_tick);
 
-            compaction.state = .done_writing_tables;
+            compaction.state = .tables_writing_done;
 
             tracer.end(
                 &compaction.tracer_slot,
@@ -817,9 +815,9 @@ pub fn CompactionType(
         }
 
         pub fn apply_to_manifest(compaction: *Compaction) void {
-            assert(compaction.state == .done_writing_tables);
+            assert(compaction.state == .tables_writing_done);
 
-            compaction.state = .done_applied_manifest;
+            compaction.state = .applied_to_manifest;
 
             // Each compaction's manifest (log) updates are deferred to the end of the last
             // half-beat to ensure they are ordered deterministically relative to one

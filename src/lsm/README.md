@@ -88,7 +88,7 @@ Invariants:
 
 ### Compaction Selection Policy
 
-Compaction targets the table from level `A` which overlaps the fewest visible tables of level `B`.
+Compaction selects the table from level `A` which overlaps the fewest visible tables of level `B`.
 
 For example, in the following table (with `lsm_growth_factor=2`), each table is depicted as the range of keys it includes. The tables with uppercase letters would be chosen for compaction next.
 
@@ -111,6 +111,9 @@ input tables in level `B`, the input table can be "moved" to level `B`.
 That is, instead of sort-merging `A` and `B`, just update the input table's metadata in the manifest.
 
 This is referred to as the _move table_ optimization.
+
+Where a tree performs inserts mostly in sort order, with a minimum of updates, this _move table_
+optimization should enable the tree's performance to approach that of an append-only log.
 
 #### Compaction Table Overlap
 
