@@ -89,23 +89,33 @@ pub const DotnetDocs = Docs{
     \\  // Use client
     \\}
     \\```
+    \\
+    \\The `Client` class is thread-safe and for better performance, a
+    \\single instance should be shared between multiple concurrent
+    \\tasks. Multiple clients can be instantiated in case of connecting
+    \\to more than one TigerBeetle cluster.
     ,
 
     .create_accounts_example = 
     \\var accounts = new[] {
     \\  new Account
     \\  {
-    \\    Id = 1,
+    \\    Id = 137,
     \\    UserData = Guid.NewGuid(),
-    \\    Code = 2,
-    \\    Ledger = 720,
+    \\    Ledger = 1,
+    \\    Code = 718,
+    \\    Flags = AccountFlags.None,
     \\  },     
     \\};
     \\
     \\var createAccountsErrors = client.CreateAccounts(accounts);
     ,
 
-    .create_accounts_documentation = "",
+    .create_accounts_documentation = 
+    \\All TigerBeetle's IDs are 128-bit integers, and the .NET client
+    \\accepts a wide range of values: `int`, `uint`, `long`, `ulong`,
+    \\`Guid`, `byte[]` and `TigerBeetle.UInt128`.
+    ,
 
     .account_flags_documentation = 
     \\To toggle behavior for an account, combine enum values stored in the
@@ -122,11 +132,24 @@ pub const DotnetDocs = Docs{
     \\var account1 = new Account{ /* ... account values ... */ };
     \\account0.Flags = AccountFlags.Linked;
     \\
-    \\errors = client.CreateAccounts(new []{account0, account1});
-    \\Debug.Assert(errors.Length == 0);
+    \\createAccountsErrors = client.CreateAccounts(new []{account0, account1});
     ,
 
-    .create_accounts_errors_example = "",
+    .create_accounts_errors_example = 
+    \\var account2 = tb_types.Account{ /* ... account values ... */ };
+    \\var account3 = tb_types.Account{ /* ... account values ... */ };
+    \\var account4 = tb_types.Account{ /* ... account values ... */ };
+    \\
+    \\createAccountsErrors = client.CreateAccounts(new []{account2, account3, account4});
+    \\if err != nil {
+    \\	log.Printf("Error creating accounts: %s", err);
+    \\	return;
+    \\}
+    \\for _, err := range accountErrors {
+    \\	log.Printf("Error creating account %d: %s", err.Index, err.Result)
+    \\	return
+    \\}
+    ,
 
     .create_accounts_errors_documentation = "",
 
