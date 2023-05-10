@@ -40,19 +40,3 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: ./scripts/build.sh c_sample -Drelease-safe
 
-  # TODO(Phil): This never worked, get it working.
-  # Validation only. The linux / docs step validates and checks the diff.
-  # Also, this only validates that Docker on macOS works. It doesn't
-  # test that the commands run on macOS outside of Docker.
-  # docs:
-  #   runs-on: macos-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
-  # 
-  #     # Runs checks against generated client docs
-  #     - run: ./scripts/install_zig.sh
-  #     - run: ( cd src/clients && ../../zig/zig run docs_generate.zig -- --no-generate )
-  #   env:
-  #     # Somehow this is not the same as GITHUB_SHA.
-  #     # https://github.com/orgs/community/discussions/26325
-  #     GIT_SHA: ${{ github.event.pull_request.head.sha }}

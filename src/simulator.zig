@@ -8,7 +8,8 @@ const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
-const state_machine = @import("vsr_simulator_options").state_machine;
+const vsr_simulator_options = @import("vsr_simulator_options");
+const state_machine = vsr_simulator_options.state_machine;
 const StateMachineType = switch (state_machine) {
     .accounting => @import("state_machine.zig").StateMachineType,
     .testing => @import("testing/state_machine.zig").StateMachineType,
@@ -28,16 +29,20 @@ const Message = @import("message_pool.zig").MessagePool.Message;
 /// The `log` namespace in this root file is required to implement our custom `log` function.
 pub const output = std.log.scoped(.cluster);
 
-/// Set this to `false` if you want to see how literally everything works.
-/// This will run much slower but will trace all logic across the cluster.
-const log_state_transitions_only = builtin.mode != .Debug;
+/// The -Dsimulator-log=<full|short> build option selects two logging modes.
+/// In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
+/// "full" mode is the usual logging according to the level.
+pub const log_level: std.log.Level = if (vsr_simulator_options.log == .short) .info else .debug;
+
+// Uncomment if you need per-scope control over the log levels.
+// pub const scope_levels = [_]std.log.ScopeLevel{
+//     .{ .scope = .cluster, .level = .info },
+//     .{ .scope = .replica, .level = .debug },
+// };
 
 const log_simulator = std.log.scoped(.simulator);
 
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
-
-/// You can fine tune your log levels even further (debug/info/warn/err):
-pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
 
 const cluster_id = 0;
 
@@ -127,6 +132,9 @@ pub fn main() !void {
             .faulty_wal_headers = replica_count > 1,
             .faulty_wal_prepares = replica_count > 1,
             .faulty_client_replies = replica_count > 1,
+            // TODO State sync: Enable faults when grid repair can fall back to state sync.
+            // (Without state sync it can get stuck.)
+            .faulty_grid = false,
         },
         .state_machine = switch (state_machine) {
             .testing => .{ .lsm_forest_node_count = 4096 },
@@ -466,9 +474,10 @@ pub const Simulator = struct {
         const recoverable_count_min =
             vsr.quorums(simulator.options.cluster.replica_count).view_change;
         var recoverable_count: usize = 0;
-        for (simulator.cluster.replicas) |*replica| {
-            recoverable_count +=
-                @boolToInt(replica.status != .recovering_head and !replica.standby());
+        for (simulator.cluster.replicas) |*replica, i| {
+            recoverable_count += @boolToInt(simulator.cluster.replica_health[i] == .up and
+                replica.status != .recovering_head and
+                !replica.standby());
         }
 
         for (simulator.cluster.replicas) |*replica| {
@@ -484,11 +493,11 @@ pub const Simulator = struct {
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
                     if (!chance_f64(simulator.random, crash_probability)) continue;
 
+                    recoverable_count -=
+                        @boolToInt(replica.status != .recovering_head and !replica.standby());
+
                     log_simulator.debug("{}: crash replica", .{replica.replica});
                     simulator.cluster.crash_replica(replica.replica);
-
-                    recoverable_count -=
-                        @boolToInt(replica.status == .recovering_head and !replica.standby());
 
                     simulator.replica_stability[replica.replica] =
                         simulator.options.replica_crash_stability;
@@ -590,10 +599,10 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (log_state_transitions_only and scope != .cluster) return;
+    if (vsr_simulator_options.log == .short and scope != .cluster) return;
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
-    const prefix = if (log_state_transitions_only) "" else prefix_default;
+    const prefix = if (vsr_simulator_options.log == .short) "" else prefix_default;
 
     // Print the message to stderr using a buffer to avoid many small write() syscalls when
     // providing many format arguments. Silently ignore failure.

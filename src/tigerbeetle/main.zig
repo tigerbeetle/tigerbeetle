@@ -212,8 +212,11 @@ const Command = struct {
 
         var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
         const stdout = stdout_buffer.writer();
-        // TODO Pass an actual version number in on build, instead of just saying "experimental".
-        try stdout.writeAll("TigerBeetle version experimental\n");
+        try std.fmt.format(
+            stdout,
+            "TigerBeetle version {s}",
+            .{build_options.git_tag orelse "experimental"},
+        );
 
         if (verbose) {
             try std.fmt.format(

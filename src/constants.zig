@@ -254,6 +254,24 @@ comptime {
     assert(view_change_headers_max > view_change_headers_suffix_max);
 }
 
+/// The maximum number of block addresses/checksums requested by a single command=request_blocks.
+pub const grid_repair_request_max = config.process.grid_repair_request_max;
+
+/// The number of grid reads allocated to handle incoming command=request_blocks messages.
+pub const grid_repair_reads_max = config.process.grid_repair_reads_max;
+
+/// The number of grid writes allocated to handle incoming command=block messages.
+pub const grid_repair_writes_max = config.process.grid_repair_writes_max;
+
+comptime {
+    assert(grid_repair_request_max > 0);
+    assert(grid_repair_request_max <= @divFloor(message_body_size_max, @sizeOf(vsr.BlockRequest)));
+    assert(grid_repair_request_max <= grid_repair_reads_max);
+
+    assert(grid_repair_reads_max > 0);
+    assert(grid_repair_writes_max > 0);
+}
+
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.
 pub const connection_delay_min_ms = config.process.connection_delay_min_ms;
@@ -418,6 +436,9 @@ pub const block_size = config.cluster.block_size;
 
 comptime {
     assert(block_size % sector_size == 0);
+    assert(block_size > @sizeOf(vsr.Header));
+    // Blocks are sent over the network as messages during grid repair and state sync.
+    assert(block_size <= message_size_max);
 }
 
 /// The number of levels in an LSM tree.

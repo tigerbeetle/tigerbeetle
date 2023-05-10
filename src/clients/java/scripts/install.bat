@@ -9,4 +9,4 @@ call .\scripts\install.bat
 popd
 
 echo "Building TigerBeetle Java Client..."
-mvn -B package -Dmaven.test.skip -Djacoco.skip --quiet
+mvn -e -B package -Dmaven.test.skip -Djacoco.skip --quiet

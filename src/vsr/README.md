@@ -4,13 +4,13 @@
 - _grid_: The zone on disk where LSM trees and metadata for them reside.
 - _header_: Identifier for many kinds of messages, including each entry in the VSR log. Passed around instead of the entry when the full entry is not needed (such as view change).
 - _journal_: The in-memory data structure that manages the WAL.
-- _nack_: Short for negative acknowledgement. Used to determine (during a view change) which entries can be dropped from the log. See [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf).
+- _nack_: Short for negative acknowledgement. Used to determine (during a view change) which entries can be truncated from the log. See [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf).
 - _op_: Short for op-number. An op is assigned to each request that is submitted by the user before being stored in the log. An op is a monotonically increasing integer identifying each message to be handled by consensus. When messages with the same op in different views conflict, view change picks one version to commit. Each user batch (which may contain many batch entries) corresponds to one op. Each op is identified (once inside the VSR log) by a _header_.
-- _state sync_: The process of syncing not WAL entries but long-term storage (for us, the _grid_). If the WAL has been truncated and a lagging replica wants to catch up, syncing the WAL is not sufficient it must also sync what is in the long-term storage. What has been _checkpoint_-ed.
+- _state sync_: The process of syncing checkpointed data (the _grid_, the superblock manifest, and the superblock freeset). When a replica lags behind the cluster far enough that their WALs no longer intersect, the lagging replica must state sync to catch up.
 - _superblock_: All local state for the replica that cannot be replicated remotely. Loss is protected against by storing `config.superblock_copies` copies of the superblock.
 - _zone_: The TigerBeetle data file is made up of zones. The superblock is one zone.
 - _view_: A replica is _primary_ for one view. Views are monotonically increasing integers that are incremented each time a new primary is selected.
-- _WAL_: Write-ahead log. It is implemented as two ring buffers where entries are only ever overwritten after they have been checkpointed.
+- _WAL_: Write-ahead log. It is implemented as two on-disk ring buffers. Entries are only overwritten after they have been checkpointed.
 
 # Protocols
 
@@ -36,6 +36,8 @@
 |      `request_reply` | replica |      replica | [Repair Client Table](#protocol-repair-client-table)                             |
 |            `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
 |           `eviction` | primary |       client | [Client](#protocol-client)                                                       |
+|     `request_blocks` | replica |      replica | [Repair Grid](#protocol-repair-grid)                                             |
+|              `block` | replica |      replica | [Repair Grid](#protocol-repair-grid)                                             |
 
 ### Recovery
 
@@ -219,9 +221,18 @@ See also:
   - [Integration: Client Session Lifecycle](../../docs/design/client-sessions.md#lifecycle)
   - [Integration: Client Session Eviction](../../docs/design/client-sessions.md#eviction)
 
-## Protocol: Repair Grid (Backup)
+## Protocol: Repair Grid
 
-TODO (Unimplemented)
+Grid repair is triggered when a replica discovers a corrupt (or missing) grid block.
+
+1. The repairing replica sends a `command=request_blocks` to any other replica. The message body contains a list of block `address`/`checksum`s.
+2. Upon receiving a `command=request_blocks`, a replica reads its own grid to check for the requested blocks. For each matching block found, reply with the `command=block` message (the block itself).
+3. Upon receiving a `command=block`, a replica writes the block to its grid, and resolves the reads that were blocked on it.
+
+Note that _both sides_ of grid repair can run while the grid is being opened during replica startup.
+That is, a replica can help other replicas repair and repair itself simultaneously.
+
+TODO Describe state sync fallback.
 
 ## Protocol: Repair: State Sync
 

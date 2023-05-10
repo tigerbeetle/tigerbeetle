@@ -4,7 +4,7 @@ const { createClient } = require("tigerbeetle-node");
 
 const client = createClient({
   cluster_id: 0,
-  replica_addresses: [process.env.TB_PORT || '3000'],
+  replica_addresses: [process.env.TB_ADDRESS || '3000'],
 });
 
 async function main() {
@@ -57,6 +57,7 @@ async function main() {
   assert.equal(transferErrors.length, 0);
 
   let accounts = await client.lookupAccounts([1n, 2n]);
+  assert.equal(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
       assert.equal(account.debits_posted, 10n);

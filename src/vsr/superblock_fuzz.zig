@@ -30,6 +30,8 @@ const fuzz = @import("../testing/fuzz.zig");
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const cluster = 0;
+const replica = 0;
+const replica_count = 6;
 
 pub fn main() !void {
     const allocator = std.testing.allocator;
@@ -50,6 +52,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .faulty_wal_headers = false,
         .faulty_wal_prepares = false,
         .faulty_client_replies = false,
+        .faulty_grid = false,
     });
 
     const storage_options = .{
@@ -93,6 +96,16 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .sequence_states = sequence_states,
         .superblock = &superblock,
         .superblock_verify = &superblock_verify,
+        .latest_vsr_state = SuperBlockHeader.VSRState{
+            .commit_min_checksum = 0,
+            .commit_min = 0,
+            .commit_max = 0,
+            .log_view = 0,
+            .view = 0,
+            .replica_id = Environment.members()[replica],
+            .members = Environment.members(),
+            .replica_count = replica_count,
+        },
     };
 
     try env.format();
@@ -143,13 +156,18 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
 }
 
 const Environment = struct {
-    const replica = 0;
-    const replica_id = members[replica];
-    const members = members: {
-        @setEvalBranchQuota(100_000);
-        break :members vsr.root_members(cluster);
-    };
-    const replica_count = 6;
+    var id_once = std.once(id_init);
+    var id_members: [constants.nodes_max]u128 = undefined;
+    fn id_init() void {
+        id_members = vsr.root_members(cluster);
+    }
+
+    /// Aegis128 (used by checksum) uses hardware accelerated AES via inline asm which isn't
+    /// available at comptime. Instead of a constant, lazily initialize the root members.
+    fn members() [constants.nodes_max]u128 {
+        id_once.call();
+        return id_members;
+    }
 
     /// Track the expected value of parameters at a particular sequence.
     /// Indexed by sequence.
@@ -171,16 +189,7 @@ const Environment = struct {
     latest_sequence: u64 = 0,
     latest_checksum: u128 = 0,
     latest_parent: u128 = 0,
-    latest_vsr_state: VSRState = SuperBlockHeader.VSRState{
-        .commit_min_checksum = 0,
-        .commit_min = 0,
-        .commit_max = 0,
-        .log_view = 0,
-        .view = 0,
-        .replica_id = replica_id,
-        .members = members,
-        .replica_count = replica_count,
-    },
+    latest_vsr_state: VSRState,
 
     context_format: SuperBlock.Context = undefined,
     context_open: SuperBlock.Context = undefined,
@@ -291,8 +300,8 @@ const Environment = struct {
         try env.sequence_states.append(.{
             .vsr_state = VSRState.root(.{
                 .cluster = cluster,
-                .replica_id = replica_id,
-                .members = members,
+                .replica_id = members()[replica],
+                .members = members(),
                 .replica_count = replica_count,
             }),
             .vsr_headers = vsr_headers,
@@ -318,7 +327,7 @@ const Environment = struct {
         env.pending.remove(.open);
 
         assert(env.superblock.working.sequence == 1);
-        assert(env.superblock.working.vsr_state.replica_id == replica_id);
+        assert(env.superblock.working.vsr_state.replica_id == members()[replica]);
         assert(env.superblock.working.vsr_state.replica_count == replica_count);
         assert(env.superblock.working.cluster == cluster);
     }
@@ -333,8 +342,8 @@ const Environment = struct {
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
             .log_view = env.superblock.staging.vsr_state.log_view + 4,
             .view = env.superblock.staging.vsr_state.view + 5,
-            .replica_id = replica_id,
-            .members = members,
+            .replica_id = members()[replica],
+            .members = members(),
             .replica_count = replica_count,
         };
 
@@ -382,8 +391,8 @@ const Environment = struct {
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
             .log_view = env.superblock.staging.vsr_state.log_view,
             .view = env.superblock.staging.vsr_state.view,
-            .replica_id = replica_id,
-            .members = members,
+            .replica_id = members()[replica],
+            .members = members(),
             .replica_count = replica_count,
         };
 

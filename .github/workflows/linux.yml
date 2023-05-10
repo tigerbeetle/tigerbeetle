@@ -90,25 +90,6 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build ${{ matrix.target }}
 
-  docs:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # The Java one particularly takes a long time so split these
-        # out into different jobs.
-        language: [java, go, javascript]
-    steps:
-      - uses: actions/checkout@v3
-
-      # Runs checks against generated client docs
-      - run: ./scripts/install_zig.sh
-      - run: ( cd src/clients && ../../zig/zig run docs_generate.zig -- --language ${{ matrix.language }} )
-      - run: ./scripts/fail_on_diff.sh
-    env:
-      # Somehow this is not the same as GITHUB_SHA.
-      # https://github.com/orgs/community/discussions/26325
-      GIT_SHA: ${{ github.event.pull_request.head.sha }}
-
   # This is just a canary to make sure that the simulator compiles
   # It would be a good idea to also _run_ a single iteration,
   # but that currently has some false failures :-)
