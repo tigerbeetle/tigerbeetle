@@ -8,7 +8,7 @@ COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
 echo "Building TigerBeetle..."
-(cd ../../.. && ./zig/zig build install -Dcpu=baseline -Drelease-safe)
+(cd ../../.. && ./zig/zig build install -Drelease-safe)
 
 function onerror {
     if [ "$?" == "0" ]; then
