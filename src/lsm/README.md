@@ -88,7 +88,7 @@ Invariants:
 
 ### Compaction Selection Policy
 
-Compaction targets the table from level `A` which overlaps the fewest tables of level `B`.
+Compaction selects the table from level `A` which overlaps the fewest visible tables of level `B`.
 
 For example, in the following table (with `lsm_growth_factor=2`), each table is depicted as the range of keys it includes. The tables with uppercase letters would be chosen for compaction next.
 
@@ -103,6 +103,34 @@ Links:
 - [`Manifest.compaction_table`](manifest.zig)
 - [Constructing and Analyzing the LSM Compaction Design Space](http://vldb.org/pvldb/vol14/p2216-sarkar.pdf) describes the tradeoffs of various data movement policies. TigerBeetle implements the "least overlapping with parent" policy.
 - [Option of Compaction Priority](https://rocksdb.org/blog/2016/01/29/compaction_pri.html)
+
+#### Compaction Move Table
+
+When the [selected input table](#compaction-selection-policy) from level `A` does not overlap _any_
+input tables in level `B`, the input table can be "moved" to level `B`.
+That is, instead of sort-merging `A` and `B`, just update the input table's metadata in the manifest.
+
+This is referred to as the _move table_ optimization.
+
+Where a tree performs inserts mostly in sort order, with a minimum of updates, this _move table_
+optimization should enable the tree's performance to approach that of an append-only log.
+
+#### Compaction Table Overlap
+
+When compacting a table from level `A` to level `B`, what is the maximum number of level-`B` tables
+that may overlap the level-`A` table (i.e. the "worst case")?
+
+Perhaps surprisingly, this is `lsm_growth_factor`:
+
+- Tables within a level are disjoint.
+- Level `B` has at most `lsm_growth_factor` times as many tables as level `A`.
+- To trigger compaction, level `A`'s visible-table count exceeds
+  `table_count_max_for_level(lsm_growth_factor, level_a)`.
+- The [selection policy](#compaction-selection-policy) chooses the table from level `A`
+  which overlaps the fewest visible tables in level `B`.
+- If any table in level `A` overlaps _more than_ `lsm_growth_factor` tables in level `B`,
+  that implies the existence of a table in level `A` with _less than_ `lsm_growth_factor` overlap.
+  The latter table would be selected over the former.
 
 ## Snapshots
 
