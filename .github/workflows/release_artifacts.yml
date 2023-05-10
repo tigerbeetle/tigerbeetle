@@ -26,7 +26,10 @@ jobs:
         fetch-depth: 0
 
     - name: Build tigerbeetle
-      run: env TARGET=${{ matrix.target }} ./scripts/install.sh ${{ matrix.debug }}
+      run: ./scripts/install.sh ${{ matrix.debug }}
+      env:
+        TARGET: ${{ matrix.target }}
+        CPU: ${{ matrix.target == 'aarch64-linux' && 'baseline+aes+neon' || matrix.target == 'aarch64-macos' && 'baseline+aes+neon' || 'x86_64_v3+aes' }}
 
     # Use github.sha, not HEAD, so we can't have any race conditions where a new commit gets
     # pushed before this pipeline runs. When invoked by workflow_call, this will be set to
