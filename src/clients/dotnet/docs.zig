@@ -76,7 +76,7 @@ pub const DotnetDocs = Docs{
     \\var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
     \\var client = new Client(
     \\  clusterID: 0,
-    \\  addresses: new[] {tbAddress.Length > 0 ? tbAddress : "3000"}
+    \\  addresses: new[] {tbAddress != null ? tbAddress : "3000"}
     \\);
     ,
 
@@ -136,25 +136,21 @@ pub const DotnetDocs = Docs{
     ,
 
     .create_accounts_errors_example = 
-    \\var account2 = tb_types.Account{ /* ... account values ... */ };
-    \\var account3 = tb_types.Account{ /* ... account values ... */ };
-    \\var account4 = tb_types.Account{ /* ... account values ... */ };
+    \\var account2 = new Account{ /* ... account values ... */ };
+    \\var account3 = new Account{ /* ... account values ... */ };
+    \\var account4 = new Account{ /* ... account values ... */ };
     \\
     \\createAccountsErrors = client.CreateAccounts(new []{account2, account3, account4});
-    \\if err != nil {
-    \\	log.Printf("Error creating accounts: %s", err);
+    \\foreach (var error in createAccountsErrors) {
+    \\	Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
     \\	return;
-    \\}
-    \\for _, err := range accountErrors {
-    \\	log.Printf("Error creating account %d: %s", err.Index, err.Result)
-    \\	return
     \\}
     ,
 
     .create_accounts_errors_documentation = "",
 
     .lookup_accounts_example = 
-    \\accounts = client.LookupAccounts(new UInt128[] { 137, 138 });
+    \\accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 137, 138 });
     ,
 
     .create_transfers_example = 
@@ -204,7 +200,7 @@ pub const DotnetDocs = Docs{
     .transfer_flags_void_example = "",
 
     .lookup_transfers_example = 
-    \\transfers = client.LookupTransfers(new UInt128[] {1, 2});
+    \\transfers = client.LookupTransfers(new TigerBeetle.UInt128[] {1, 2});
     ,
 
     .linked_events_example = "",
