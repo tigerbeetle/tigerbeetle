@@ -5,6 +5,10 @@ on:
     secrets:
       NUGET_KEY:
         required: true
+    inputs:
+      version:
+        required: false
+        type: string
 
 jobs:
   build:
@@ -36,12 +40,13 @@ jobs:
       - name: Pack
         working-directory: src/clients/dotnet
         run: |
+          version=""
+          if [[ "${{ inputs.version }}" != "" ]]; then
+            version="/p:AssemblyVersion=${{ inputs.version }} /p:Version=${{ inputs.version }}"
+          fi
           dotnet pack TigerBeetle \
           --configuration Release \
-          /p:AssemblyVersion=$BASE_VERSION.$(git rev-list --count HEAD) \
-          /p:Version=$BASE_VERSION.$(git rev-list --count HEAD)
-        env:
-          BASE_VERSION: 0.0.1
+          $version
 
       - name: Save nuget package
         uses: actions/upload-artifact@v3
@@ -136,8 +141,7 @@ jobs:
           "
 
   publish:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [run_validation_tests, run_validation_tests_on_containers]
+    if: inputs.version != ''
     name: Publish NuGet package
     runs-on: ubuntu-latest
     steps:
