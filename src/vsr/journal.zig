@@ -127,11 +127,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         pub const Read = struct {
             journal: *Journal,
             completion: Storage.Read,
-            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: fn (replica: *Replica, prepare: ?*Message, destination_epoch: ?u32, destination_replica: ?u8) void,
 
             message: *Message,
             op: u64,
             checksum: u128,
+            destination_epoch: ?u32,
             destination_replica: ?u8,
         };
 
@@ -625,20 +626,20 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         // repair_header() may put a newer view to the left of an older view.
 
                         // A exists and B exists:
-                        if (range) |*r| {
-                            assert(b.op == r.op_min);
+                        if (range) |*r| { // 1
+                            assert(b.op == r.op_min); // 1
                             if (a.op == op_min) {
                                 // A is committed, because we pass `commit_min` as `op_min`:
                                 // Do not add A to range because A cannot be a break if committed.
                                 break;
                             } else if (a.checksum == b.parent) {
                                 // A is connected to B, but B is disconnected, add A to range:
-                                assert(a.view <= b.view);
+                                assert(vsr.view_order_or_eql(a, b));
                                 r.op_min = a.op;
-                            } else if (a.view < b.view) {
+                            } else if (vsr.view_order_strict(a, b)) { // FIXME: reconfig view order
                                 // A is not connected to B, and A is older than B, add A to range:
                                 r.op_min = a.op;
-                            } else if (a.view > b.view) {
+                            } else if (vsr.view_order_strict(b, a)) {
                                 // A is not connected to B, but A is newer than B, close range:
                                 break;
                             } else {
@@ -647,8 +648,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                             }
                         } else if (a.checksum == b.parent) {
                             // A is connected to B, and B is connected or B is op_max.
-                            assert(a.view <= b.view);
-                        } else if (a.view != b.view) {
+                            assert(vsr.view_order_or_eql(a, b));
+                        } else if (a.epoch != b.epoch or a.view != b.view) {
                             // A is not connected to B, open range:
                             assert(b.op <= op_max);
                             range = .{ .op_min = a.op, .op_max = a.op };
@@ -698,9 +699,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There must be a matching in-memory header.
         pub fn read_prepare(
             journal: *Journal,
-            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: fn (replica: *Replica, prepare: ?*Message, destination_epoch: ?u32, destination_replica: ?u8) void,
             op: u64,
             checksum: u128,
+            destination_epoch: ?u32,
             destination_replica: ?u8,
         ) void {
             assert(journal.status == .recovered);
@@ -709,32 +711,33 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const replica = @fieldParentPtr(Replica, "journal", journal);
             if (op > replica.op) {
                 journal.read_prepare_log(op, checksum, "beyond replica.op");
-                callback(replica, null, null);
+                callback(replica, null, null, null);
                 return;
             }
 
             const slot = journal.slot_with_op_and_checksum(op, checksum) orelse {
                 journal.read_prepare_log(op, checksum, "no entry exactly");
-                callback(replica, null, null);
+                callback(replica, null, null, null);
                 return;
             };
 
             if (journal.prepare_inhabited[slot.index] and
                 journal.prepare_checksums[slot.index] == checksum)
             {
-                journal.read_prepare_with_op_and_checksum(callback, op, checksum, destination_replica);
+                journal.read_prepare_with_op_and_checksum(callback, op, checksum, destination_epoch, destination_replica);
             } else {
                 journal.read_prepare_log(op, checksum, "no matching prepare");
-                callback(replica, null, null);
+                callback(replica, null, null, null);
             }
         }
 
         /// Read a prepare from disk. There may or may not be an in-memory header.
         pub fn read_prepare_with_op_and_checksum(
             journal: *Journal,
-            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: fn (replica: *Replica, prepare: ?*Message, destination_epoch: ?u32, destination_replica: ?u8) void,
             op: u64,
             checksum: u128,
+            destination_epoch: ?u32,
             destination_replica: ?u8,
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
@@ -755,7 +758,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // Normally the message's padding would have been zeroed by the MessageBus,
                     // but we are copying (only) a message header into a new buffer.
                     std.mem.set(u8, message.buffer[@sizeOf(Header)..constants.sector_size], 0);
-                    callback(replica, message, destination_replica);
+                    callback(replica, message, destination_epoch, destination_replica);
                     return;
                 } else {
                     // As an optimization, we can read fewer than `message_size_max` bytes because
@@ -767,7 +770,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             const read = journal.reads.acquire() orelse {
                 journal.read_prepare_log(op, checksum, "waiting for IOP");
-                callback(replica, null, null);
+                callback(replica, null, null, null);
                 return;
             };
 
@@ -778,6 +781,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .callback = callback,
                 .op = op,
                 .checksum = checksum,
+                .destination_epoch = destination_epoch,
                 .destination_replica = destination_replica,
             };
 
@@ -811,7 +815,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             if (op > replica.op) {
                 journal.read_prepare_log(op, checksum, "beyond replica.op");
-                read.callback(replica, null, null);
+                read.callback(replica, null, null, null);
                 return;
             }
 
@@ -819,7 +823,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const checksum_match = journal.prepare_checksums[journal.slot_for_op(op).index] == checksum;
             if (!checksum_inhabited or !checksum_match) {
                 journal.read_prepare_log(op, checksum, "prepare changed during read");
-                read.callback(replica, null, null);
+                read.callback(replica, null, null, null);
                 return;
             }
 
@@ -836,7 +840,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
 
                 journal.read_prepare_log(op, checksum, "corrupt header after read");
-                read.callback(replica, null, null);
+                read.callback(replica, null, null, null);
                 return;
             }
             assert(read.message.header.invalid() == null);
@@ -851,7 +855,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
 
                 journal.read_prepare_log(op, checksum, "wrong cluster");
-                read.callback(replica, null, null);
+                read.callback(replica, null, null, null);
                 return;
             }
 
@@ -870,7 +874,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(slot == null);
 
                 journal.read_prepare_log(op, checksum, "op changed during read");
-                read.callback(replica, null, null);
+                read.callback(replica, null, null, null);
                 return;
             }
 
@@ -879,7 +883,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(slot == null);
 
                 journal.read_prepare_log(op, checksum, "checksum changed during read");
-                read.callback(replica, null, null);
+                read.callback(replica, null, null, null);
                 return;
             }
 
@@ -890,11 +894,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
 
                 journal.read_prepare_log(op, checksum, "corrupt body after read");
-                read.callback(replica, null, null);
+                read.callback(replica, null, null, null);
                 return;
             }
 
-            read.callback(replica, read.message, read.destination_replica);
+            read.callback(replica, read.message, read.destination_epoch, read.destination_replica);
         }
 
         fn read_prepare_log(journal: *Journal, op: u64, checksum: ?u128, notice: []const u8) void {
@@ -950,6 +954,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .callback = undefined,
                 .op = chunk_index,
                 .checksum = undefined,
+                .destination_epoch = null,
                 .destination_replica = null,
             };
 
@@ -1077,6 +1082,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .callback = undefined,
                 .op = slot.index,
                 .checksum = undefined,
+                .destination_epoch = null,
                 .destination_replica = null,
             };
 

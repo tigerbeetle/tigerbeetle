@@ -16,6 +16,7 @@
 |  `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                 |
 |     `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                                             |
 |         `start_view` | primary |       backup | [Request/Start View](#protocol-requeststart-view)                                |
+|          `end_epoch` | replica |      replica | [Reconfiguration](#protocol-reconfiguration)                                     |
 | `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                |
 |    `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
 |    `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                               |
@@ -213,9 +214,70 @@ TODO (Unimplemented)
 
 TODO (Unimplemented)
 
-## Protocol: Reconfiguration
+## Protocol: Membership Change
+
+To remove or add machines to the cluster, two protocols are used in succession:
+
+* [Membership Change](#protocol-membership-change) manipulates the set of standbys (replicas not participating in the consensus)
+* [Reconfiguration](#protocol-reconfiguration) then promotes some standbys to active replicas
+
+This structure separates the long, cancelable process of bringing a new replica up-to-date with the cluster via [State Transfer](#protocol-repair-state-transfer), from the short, atomic decision to select consensus participants.
 
 TODO (Unimplemented)
+
+## Protocol: Reconfiguration
+
+Reconfiguration changes the subset of cluster members that participate in the consensus.
+In other words, reconfiguration turns some of standbys into active replicas and vice verse, without changing the set of cluster members.
+It is a permutation of replica indexes.
+Reconfiguration is initiated by the client sending `operation == .reconfiguration` request.
+
+Invariants:
+
+* if `.reconfiguration` request is committed in an epoch, it is the last committed request in the epoch
+* the first committed request in an epoch chains either to the root prepare, or to the `.reconfiguration`
+* the initial view of the new epoch is deterministically derived from the `.reconfiguration` request
+
+Replicas _may_ be in two epochs at the same time.
+For example, if a replica is a standby in the current epoch `E`, but was active in `E-1`, it will accept prepares in epoch `E` and repairs in epoch `E-1`.
+The replica won't send `prepare_ok` for epoch `E` because it is a standby in that epoch.
+It won't send `prepare_ok` for epoch `E - 1`, because the last request in that epoch has committed.
+
+To handle reconfiguration, replica stores:
+
+* `epoch: u32` --- the last epoch known to be active,
+* `members` --- member list for the `epoch`,
+* `members_old` --- optional member list for `epoch - 1`, if the new epoch is already active, but it is not yet safe to shutdown the old epoch, which might be needed for repairs.
+
+Additionally, primary stores `reconfiguration_pending` boolean flag.
+
+Processing of `.reconfiguration` request goes as follows:
+
+1. Primary checks that the request is valid (the new configuration is a permutation of current
+   one)
+2. Primary checks that no reconfiguration is in progress (`members_old == null`)
+3. Primary decides whether to accept a valid reconfiguration request.
+   For example, primary can reject an otherwise valid request if it knows that would-be active standbys didn't finish state sync.
+4. Primary sets `reconfiguration_pending=true` and sends a prepare.
+   Primary does not accept new requests when reconfiguration is pending.
+   If primary learns about reconfiguration during view change, it also sets `reconfiguration_pending=true`
+5. When committing a `.reconfiguration` any replica:
+   - sets `members_old` to `members`
+   - sets `members` to the new configuration
+   - updates its own `replica_index`
+   - increments `epoch` and sets `view` to `0`
+   - starts `view_change` if it is not a standby in the new epoch
+6. When a replication quorum in the new epoch has `commit_min` pointing at the reconfiguration request or greater, `members_old` is set to `null`.
+   In particular, if a replica observes `commit_max` in the next WAL wrap after reconfiguration, it can set its `members_old` to `null`.
+
+When replica's `members_old` is not `null` it continues to process some messages in the old epoch.
+
+* All replicas that were active in the old epoch broadcast `.end_epoch` message, containing the last header of the old epoch.
+* All replicas that were active in the old epoch continue responding to repair requests.
+* Replicas that are active in the new epoch may use old epoch for repairs.
+* If replica receives an `.end_epoch` message, it sets its head to the header from the message and transitions to `.normal`.
+
+Clients: TODO (Unimplemented)
 
 # Quorums
 

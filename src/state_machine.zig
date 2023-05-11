@@ -230,6 +230,7 @@ pub fn StateMachineType(
             reserved = 0,
             root = 1,
             register = 2,
+            reconfigure = 3,
 
             /// Operations exported by TigerBeetle:
             create_accounts = config.vsr_operations_reserved + 0,
@@ -330,6 +331,7 @@ pub fn StateMachineType(
                 .reserved => unreachable,
                 .root => unreachable,
                 .register => {},
+                .reconfigure => {},
                 .create_accounts => self.prepare_timestamp += mem.bytesAsSlice(Account, input).len,
                 .create_transfers => self.prepare_timestamp += mem.bytesAsSlice(Transfer, input).len,
                 .lookup_accounts => {},
@@ -372,7 +374,7 @@ pub fn StateMachineType(
             self.forest.grooves.posted.prefetch_setup(null);
 
             return switch (operation) {
-                .reserved, .root, .register => unreachable,
+                .reserved, .root, .register, .reconfigure => unreachable,
                 .create_accounts => {
                     self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
                 },
