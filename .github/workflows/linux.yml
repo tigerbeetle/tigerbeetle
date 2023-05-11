@@ -2,12 +2,17 @@ name: Linux
 
 on:
   workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   lint:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -17,12 +22,14 @@ jobs:
       SOURCE_REPO: ${{ github.event.pull_request.head.repo.clone_url }}
 
   docs_link_spellcheck:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/docs_check.sh
 
   test:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -32,12 +39,14 @@ jobs:
       - run: ./scripts/tests_on_${{ matrix.distro }}.sh
 
   benchmark:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/benchmark.sh --transfer-count 4000
 
   aof:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -45,6 +54,7 @@ jobs:
       - run: ./scripts/test_aof.sh
 
   c_sample:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -54,6 +64,7 @@ jobs:
   # I don't like this - having everything manually listed out here, but need to think of a better
   # way to parallelize it.
   fuzz:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -79,6 +90,7 @@ jobs:
   # Things like "go_client", "java_client", "dotnet_client" are excluded here
   # because they get run in their own CI
   verify:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -95,6 +107,7 @@ jobs:
   # but that currently has some false failures :-)
   # TODO: Make so we have a single zig build simulator that does both
   simulate:
+    if: inputs.version == ''
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -104,7 +117,7 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build simulator -Dsimulator-state-machine=${{ matrix.state_machine }}
 
-  build:
+  docker:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -119,7 +132,9 @@ jobs:
           images: ${{ env.IMAGE_NAME }}
           flavor: |
             latest=${{ github.ref == 'refs/heads/main' && matrix.debug == 'production' }}
+          # Each line here is a tag.
           tags: |
+            ${{ inputs.version != '' && format('{0}{1}', inputs.version, matrix.debug == 'debug' && '-debug' || '') || '' }}
             ${{ github.ref == 'refs/heads/main' && matrix.debug == 'debug' && 'debug' || '' }}
 
       - name: 'Build Docker Container'
@@ -158,8 +173,8 @@ jobs:
       - if: matrix.debug == 'debug'
         run: ./scripts/confirm_image.sh ${{ steps.docker_load.outputs.imageid }} --want-debug
 
-      # Login and publish, if we're on main.
-      - if: github.ref == 'refs/heads/main'
+      # Login and publish, if we're in a release
+      - if: inputs.version != ''
         name: 'Login to Registry'
         uses: docker/login-action@v1
         with:
@@ -167,7 +182,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - if: github.ref == 'refs/heads/main'
+      - if: inputs.version != ''
         name: 'Push Docker Container'
         uses: docker/build-push-action@v4
         with:
