@@ -7,17 +7,31 @@ on:
   workflow_dispatch:
 
 jobs:
+  version:
+    outputs:
+      version: ${{ steps.calculate_version.outputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - id: calculate_version
+      run: |
+        git fetch --tags
+        echo "version=$(./scripts/next_version.sh) >> "$GITHUB_OUTPUT"
+  
   scheduled_release:
     runs-on: ubuntu-latest
+    needs: [version]
     steps:
       - uses: actions/checkout@v3
 
       # Explicitly pass in the sha, even though it's very likely to be HEAD.
       - run: |
-          export VERSION="$(./scripts/next_version.sh)"
           hub release create \
             --prerelease \
-            --message "$(./scripts/generate_release_message.sh $VERSION)" \
+            --message "$(./scripts/generate_release_message.sh ${{ needs.version.outputs.version }})" \
             -t ${{ github.sha }} \
             "$VERSION"
 
@@ -29,5 +43,7 @@ jobs:
   # don't trigger this, so we call it here
   # https://docs.github.com/en/actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow
   release:
-    needs: scheduled_release
+    needs: [scheduled_release, version]
     uses: ./.github/workflows/release_artifacts.yml
+    with:
+      version: ${{needs.version.outputs.version}}
