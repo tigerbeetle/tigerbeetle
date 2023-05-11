@@ -13,12 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-      with:
-        submodules: recursive
-        fetch-depth: 0
     - id: calculate_version
       run: |
-        git fetch --tags
         echo "version=$(./scripts/next_version.sh) >> "$GITHUB_OUTPUT"
   
   scheduled_release:
