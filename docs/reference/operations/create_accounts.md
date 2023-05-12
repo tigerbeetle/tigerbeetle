@@ -121,9 +121,10 @@ To correctly recover from application crashes
 
 For language-specific docs see:
 
-* [Creating accounts using the Java library](/src/clients/java#creating-accounts)
-* [Creating accounts using the Go library](/src/clients/go#creating-accounts)
-* [Creating accounts using the Node.js library](/src/clients/node#creating-accounts)
+* [Creating accounts using the .NET library](/src/clients/dotnet/README.md#creating-accounts)
+* [Creating accounts using the Java library](/src/clients/java/README.md#creating-accounts)
+* [Creating accounts using the Go library](/src/clients/go/README.md#creating-accounts)
+* [Creating accounts using the Node.js library](/src/clients/node/README.md#creating-accounts)
 
 ## Internals
 
