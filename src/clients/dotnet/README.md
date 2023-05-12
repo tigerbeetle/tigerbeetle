@@ -96,7 +96,7 @@ environment variable and defaults to port `3000`.
 var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
 var client = new Client(
   clusterID: 0,
-  addresses: new[] {tbAddress.Length > 0 ? tbAddress : "3000"}
+  addresses: new[] {tbAddress != null ? tbAddress : "3000"}
 );
 ```
 
@@ -108,6 +108,11 @@ using (var client = new Client(...)) {
   // Use client
 }
 ```
+
+The `Client` class is thread-safe and for better performance, a
+single instance should be shared between multiple concurrent
+tasks. Multiple clients can be instantiated in case of connecting
+to more than one TigerBeetle cluster.
 
 The following are valid addresses:
 * `3000` (interpreted as `127.0.0.1:3000`)
@@ -123,15 +128,20 @@ reference](https://docs.tigerbeetle.com/reference/accounts).
 var accounts = new[] {
   new Account
   {
-    Id = 1,
+    Id = 137,
     UserData = Guid.NewGuid(),
-    Code = 2,
-    Ledger = 720,
+    Ledger = 1,
+    Code = 718,
+    Flags = AccountFlags.None,
   },     
 };
 
-var createAccountsErrors = client.CreateAccounts(accounts);
+var createAccountsError = client.CreateAccounts(accounts);
 ```
+
+All TigerBeetle's IDs are 128-bit integers, and the .NET client
+accepts a wide range of values: `int`, `uint`, `long`, `ulong`,
+`Guid`, `byte[]` and `TigerBeetle.UInt128`.
 
 ### Account Flags
 
@@ -155,8 +165,7 @@ var account0 = new Account{ /* ... account values ... */ };
 var account1 = new Account{ /* ... account values ... */ };
 account0.Flags = AccountFlags.Linked;
 
-errors = client.CreateAccounts(new []{account0, account1});
-Debug.Assert(errors.Length == 0);
+createAccountsError = client.CreateAccounts(new []{account0, account1});
 ```
 
 ### Response and Errors
@@ -171,6 +180,18 @@ batch.
 See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
 
+```cs
+var account2 = new Account{ /* ... account values ... */ };
+var account3 = new Account{ /* ... account values ... */ };
+var account4 = new Account{ /* ... account values ... */ };
+
+createAccountsError = client.CreateAccounts(new []{account2, account3, account4});
+foreach (var error in createAccountsError) {
+  Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
+  return;
+}
+```
+
 ## Account Lookup
 
 Account lookup is batched, like account creation. Pass
@@ -183,7 +204,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```cs
-accounts = client.LookupAccounts(new UInt128[] { 137, 138 });
+accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 137, 138 });
 ```
 
 ## Create Transfers
@@ -209,7 +230,7 @@ var transfers = new[] {
   }
 };
 
-var createTransfersErrors = client.CreateTransfers(transfers);
+var createTransfersError = client.CreateTransfers(transfers);
 ```
 
 ### Response and Errors
@@ -223,6 +244,13 @@ transfer in the request batch.
 See all error conditions in the [create_transfers
 reference](https://docs.tigerbeetle.com/reference/operations/create_transfers).
 
+```cs
+foreach (var error in createTransfersError) {
+  Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
+  return;
+}
+```
+
 ## Batching
 
 TigerBeetle performance is maximized when you batch
@@ -230,11 +258,31 @@ API requests. The client does not do this automatically for
 you. So, for example, you *can* insert 1 million transfers
 one at a time like so:
 
+```cs
+foreach(var t in transfers) {
+  createTransfersError = client.CreateTransfers(new []{t});
+  // error handling omitted
+}
+```
+
 But the insert rate will be a *fraction* of
 potential. Instead, **always batch what you can**.
 
 The maximum batch size is set in the TigerBeetle server. The default
 is 8191.
+
+```cs
+var BATCH_SIZE = 8191;
+for (int i = 0; i < transfers.Length; i += BATCH_SIZE) {
+  var batchSize = BATCH_SIZE;
+  if (i + BATCH_SIZE > transfers.Length) {
+    batchSize = transfers.Length - i;
+  }
+  var segment = new ArraySegment<Transfer>(transfers, i, batchSize);
+  createTransfersError = client.CreateTransfers(segment.Array);
+  // error handling omitted
+}
+```
 
 ### Queues and Workers
 
@@ -261,6 +309,13 @@ To toggle behavior for an account, combine enum values stored in the
 
 For example, to link `transfer0` and `transfer1`:
 
+```cs
+var transfer0 = new Transfer{ /* ... account values ... */ };
+var transfer1 = new Transfer{ /* ... account values ... */ };
+transfer0.Flags = TransferFlags.Linked;
+createTransfersError = client.CreateTransfers(new Transfer[] {transfer0, transfer1});
+```
+
 ### Two-Phase Transfers
 
 Two-phase transfers are supported natively by toggling the appropriate
@@ -277,6 +332,17 @@ back the changes to `debits_pending` and `credits_pending` of the
 appropriate accounts and apply them to the `debits_posted` and
 `credits_posted` balances.
 
+```cs
+var transfer = new Transfer
+{
+  Id = 2,
+  PendingId = 1,
+  Flags = TransferFlags.PostPendingTransfer,
+};
+createTransfersError = client.CreateTransfers(new Transfer[] {transfer});
+// error handling omitted
+```
+
 #### Void a Pending Transfer
 
 In contrast, with `flags` set to `void_pending_transfer`,
@@ -284,6 +350,17 @@ TigerBeetle will void the transfer. TigerBeetle will roll
 back the changes to `debits_pending` and `credits_pending` of the
 appropriate accounts and **not** apply them to the `debits_posted` and
 `credits_posted` balances.
+
+```cs
+transfer = new Transfer
+{
+  Id = 2,
+  PendingId = 1,
+  Flags = TransferFlags.PostPendingTransfer,
+};
+createTransfersError = client.CreateTransfers(new Transfer[] {transfer});
+// error handling omitted
+```
 
 ## Transfer Lookup
 
@@ -300,7 +377,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```cs
-transfers = client.LookupTransfers(new UInt128[] {1, 2});
+transfers = client.LookupTransfers(new TigerBeetle.UInt128[] {1, 2});
 ```
 
 ## Linked Events
@@ -320,6 +397,34 @@ next, and so that the chain is either visible or invisible as a unit
 to subsequent events after the chain. The event that was the first to
 break the chain will have a unique error result. Other events in the
 chain will have their error result set to `linked_event_failed`.
+
+```cs
+var batch = new System.Collections.Generic.List<Transfer>();
+
+// An individual transfer (successful):
+batch.Add(new Transfer{Id = 1, /* ... rest of transfer ... */ });
+
+// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
+batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
+batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
+batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Fail with exists
+batch.Add(new Transfer{Id = 4, /* ... rest of transfer ... */ }); // Fail without committing
+
+// An individual transfer (successful):
+// This should not see any effect from the failed chain above.
+batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ });
+
+// A chain of 2 transfers (the first transfer fails the chain):
+batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
+batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ });
+
+// A chain of 2 transfers (successful):
+batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
+batch.Add(new Transfer{Id = 4, /* ... rest of transfer ... */ });
+
+createTransfersError = client.CreateTransfers(batch.ToArray());
+// error handling omitted
+```
 
 ## Development Setup
 
