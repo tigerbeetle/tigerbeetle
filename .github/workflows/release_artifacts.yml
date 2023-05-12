@@ -74,6 +74,7 @@ jobs:
   # Publish all clients and Docker image.
 
   client-dotnet:
+    needs: version
     uses: ./.github/workflows/clients-dotnet.yml
     secrets:
       NUGET_KEY: ${{ secrets.NUGET_KEY }}
@@ -81,6 +82,7 @@ jobs:
       version: ${{needs.version.outputs.version}}
 
   client-go:
+    needs: version
     uses: ./.github/workflows/clients-go.yml
     secrets:
       TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
@@ -88,6 +90,7 @@ jobs:
       version: ${{needs.version.outputs.version}}
 
   client-java:
+    needs: version
     uses: ./.github/workflows/clients-java.yml
     secrets:
       MAVEN_GPG_SECRET_KEY: ${{ secrets.MAVEN_GPG_SECRET_KEY }}
@@ -98,6 +101,7 @@ jobs:
       version: ${{needs.version.outputs.version}}
 
   client-node:
+    needs: version
     uses: ./.github/workflows/clients-node.yml
     secrets:
       TIGERBEETLE_NODE_PUBLISH_KEY: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
@@ -106,6 +110,7 @@ jobs:
 
   # For the Docker image
   linux:
+    needs: version
     uses: ./.github/workflows/linux.yml
     with:
       version: ${{needs.version.outputs.version}}
