@@ -85,7 +85,7 @@ pub const Packet = extern struct {
 
         pub inline fn get_count(self: *ConcurrentStack) u32 {
             return self.count.load(.Monotonic);
-        } 
+        }
 
         pub fn push(self: *ConcurrentStack, packet: *Packet) void {
             var head = self.head.load(.Monotonic);

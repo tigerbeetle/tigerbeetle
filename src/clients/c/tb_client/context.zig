@@ -207,7 +207,7 @@ pub fn ContextType(
         }
 
         pub fn run(self: *Context) void {
-            // Keep running until shutdown and all inflight requests have finished.
+            // Keep running until shutdown and all placed packets have finished.
             while (!self.thread.signal.is_shutdown() or
                 self.packets_free.get_count() < self.packets.len)
             {
