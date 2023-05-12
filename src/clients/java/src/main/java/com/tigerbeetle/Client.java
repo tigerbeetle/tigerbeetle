@@ -99,7 +99,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CreateAccountResultBatch createAccounts(final AccountBatch batch)
-            throws RequestException {
+            throws MaxConcurrencyExceededException, RequestException {
         final var request = BlockingRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -116,8 +116,8 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<CreateAccountResultBatch> createAccountsAsync(
-            final AccountBatch batch) {
+    public CompletableFuture<CreateAccountResultBatch> createAccountsAsync(final AccountBatch batch)
+            throws MaxConcurrencyExceededException {
         final var request = AsyncRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
@@ -133,7 +133,8 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public AccountBatch lookupAccounts(final IdBatch batch) throws RequestException {
+    public AccountBatch lookupAccounts(final IdBatch batch)
+            throws MaxConcurrencyExceededException, RequestException {
         final var request = BlockingRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -149,7 +150,8 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<AccountBatch> lookupAccountsAsync(final IdBatch batch) {
+    public CompletableFuture<AccountBatch> lookupAccountsAsync(final IdBatch batch)
+            throws MaxConcurrencyExceededException {
         final var request = AsyncRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
@@ -168,7 +170,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CreateTransferResultBatch createTransfers(final TransferBatch batch)
-            throws RequestException {
+            throws MaxConcurrencyExceededException, RequestException {
         final var request = BlockingRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -185,7 +187,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<CreateTransferResultBatch> createTransfersAsync(
-            final TransferBatch batch) {
+            final TransferBatch batch) throws MaxConcurrencyExceededException {
         final var request = AsyncRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();
@@ -202,7 +204,8 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public TransferBatch lookupTransfers(final IdBatch batch) throws RequestException {
+    public TransferBatch lookupTransfers(final IdBatch batch)
+            throws MaxConcurrencyExceededException, RequestException {
         final var request = BlockingRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -218,7 +221,8 @@ public final class Client implements AutoCloseable {
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<TransferBatch> lookupTransfersAsync(final IdBatch batch) {
+    public CompletableFuture<TransferBatch> lookupTransfersAsync(final IdBatch batch)
+            throws MaxConcurrencyExceededException {
         final var request = AsyncRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.getFuture();

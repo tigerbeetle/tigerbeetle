@@ -116,7 +116,7 @@ namespace TigerBeetle
                     }
                     finally
                     {
-                        nativeClient.Return(packet);
+                        nativeClient.ReleasePacket(packet);
                     }
 
                     if (requestGCHandle.IsAllocated) requestGCHandle.Free();

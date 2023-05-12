@@ -17,6 +17,7 @@ pub const Packet = extern struct {
         invalid_data_size,
     };
 
+    /// Non thread-safe linked list.
     pub const List = extern struct {
         head: ?*Packet = null,
         tail: ?*Packet = null,
@@ -50,31 +51,64 @@ pub const Packet = extern struct {
         }
     };
 
-    pub const Stack = struct {
+    /// Thread-safe stack optimized for 1 consumer (io thread) and N producers (client threads),
+    /// `push` uses a spin lock, and `pop` is not thread-safe.
+    pub const SubmissionStack = struct {
         pushed: Atomic(?*Packet) = Atomic(?*Packet).init(null),
         popped: ?*Packet = null,
 
-        pub fn push(self: *Stack, list: List) void {
-            const head = list.head orelse return;
-            const tail = list.tail orelse unreachable;
-
+        pub fn push(self: *SubmissionStack, packet: *Packet) void {
             var pushed = self.pushed.load(.Monotonic);
             while (true) {
-                tail.next = pushed;
+                packet.next = pushed;
                 pushed = self.pushed.tryCompareAndSwap(
                     pushed,
-                    head,
+                    packet,
                     .Release,
                     .Monotonic,
                 ) orelse break;
             }
         }
 
-        pub fn pop(self: *Stack) ?*Packet {
+        pub fn pop(self: *SubmissionStack) ?*Packet {
             if (self.popped == null) self.popped = self.pushed.swap(null, .Acquire);
             const packet = self.popped orelse return null;
             self.popped = packet.next;
             return packet;
+        }
+    };
+
+    /// Thread-safe stack, `push` and `pop` can be called concurrently from the client threads.
+    pub const ConcurrentStack = struct {
+        head: Atomic(?*Packet) = Atomic(?*Packet).init(null),
+
+        pub fn push(self: *ConcurrentStack, packet: *Packet) void {
+            var head = self.head.load(.Monotonic);
+            while (true) {
+                packet.next = head;
+                head = self.head.tryCompareAndSwap(
+                    head,
+                    packet,
+                    .Release,
+                    .Monotonic,
+                ) orelse break;
+            }
+        }
+
+        pub fn pop(self: *ConcurrentStack) ?*Packet {
+            var head = self.head.load(.Monotonic);
+            while (true) {
+                var next = (head orelse return null).next;
+                head = self.head.tryCompareAndSwap(
+                    head,
+                    next,
+                    .Release,
+                    .Monotonic,
+                ) orelse {
+                    head.?.next = null;
+                    return head;
+                };
+            }
         }
     };
 };

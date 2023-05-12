@@ -176,7 +176,7 @@ namespace TigerBeetle.Tests
                 unsafe
                 {
                     this.request = isAsync ? new AsyncRequest<TResult, TBody>(nativeClient, operation) : new BlockingRequest<TResult, TBody>(nativeClient, operation);
-                    this.packet = nativeClient.Rent();
+                    this.packet = nativeClient.AcquirePacket();
                     this.receivedOperation = receivedOperation;
                     this.buffer = buffer;
                     this.status = status;

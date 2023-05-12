@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub const tb_packet_t = @import("tb_client/packet.zig").Packet;
-pub const tb_packet_list_t = tb_packet_t.List;
 pub const tb_packet_status_t = tb_packet_t.Status;
 
 pub const tb_client_t = *anyopaque;
@@ -64,7 +63,6 @@ comptime {
 
 pub fn tb_client_init(
     out_client: *tb_client_t,
-    out_packets: *tb_packet_list_t,
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
@@ -75,7 +73,6 @@ pub fn tb_client_init(
     return init(
         DefaultContext,
         out_client,
-        out_packets,
         cluster_id,
         addresses_ptr,
         addresses_len,
@@ -87,7 +84,6 @@ pub fn tb_client_init(
 
 pub fn tb_client_init_echo(
     out_client: *tb_client_t,
-    out_packets: *tb_packet_list_t,
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
@@ -98,7 +94,6 @@ pub fn tb_client_init_echo(
     return init(
         TestingContext,
         out_client,
-        out_packets,
         cluster_id,
         addresses_ptr,
         addresses_len,
@@ -111,7 +106,6 @@ pub fn tb_client_init_echo(
 fn init(
     comptime Context: type,
     out_client: *tb_client_t,
-    out_packets: *tb_packet_list_t,
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
@@ -150,21 +144,30 @@ fn init(
     };
 
     out_client.* = context_to_client(&context.implementation);
-    var list = tb_packet_list_t{};
-    for (context.packets) |*packet| {
-        list.push(tb_packet_list_t.from(packet));
-    }
-
-    out_packets.* = list;
     return .success;
+}
+
+pub export fn tb_client_acquire_packet(
+    client: tb_client_t,
+) ?*tb_packet_t {
+    const context = client_to_context(client);
+    return (context.acquire_packet_fn)(context);
+}
+
+pub export fn tb_client_release_packet(
+    client: tb_client_t,
+    packet: *tb_packet_t,
+) void {
+    const context = client_to_context(client);
+    return (context.release_packet_fn)(context, packet);
 }
 
 pub export fn tb_client_submit(
     client: tb_client_t,
-    packets: *tb_packet_list_t,
+    packet: *tb_packet_t,
 ) void {
     const context = client_to_context(client);
-    (context.submit_fn)(context, packets);
+    (context.submit_fn)(context, packet);
 }
 
 pub export fn tb_client_deinit(

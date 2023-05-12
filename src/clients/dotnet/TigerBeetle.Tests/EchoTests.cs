@@ -104,6 +104,7 @@ namespace TigerBeetle.Tests
                 {
                     var batch = GetRandom<Transfer>(rnd);
                     var threadContext = new ThreadContext(client, barrier, batch);
+                    list.Add(threadContext);
                 }
 
                 foreach (var item in list)

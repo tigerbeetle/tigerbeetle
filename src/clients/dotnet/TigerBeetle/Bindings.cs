@@ -745,17 +745,6 @@ namespace TigerBeetle
 
     }
 
-    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-    internal unsafe struct TBPacketList
-    {
-        public const int SIZE = 16;
-
-        public TBPacket* head;
-
-        public TBPacket* tail;
-
-    }
-
     internal static class TBClient
     {
         private const string LIB_NAME = "tb_client";
@@ -771,7 +760,6 @@ namespace TigerBeetle
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         public static unsafe extern InitializationStatus tb_client_init(
             IntPtr* out_client,
-            TBPacketList* out_packets,
             uint cluster_id,
             byte* address_ptr,
             uint address_len,
@@ -789,7 +777,6 @@ namespace TigerBeetle
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         public static unsafe extern InitializationStatus tb_client_init_echo(
             IntPtr* out_client,
-            TBPacketList* out_packets,
             uint cluster_id,
             byte* address_ptr,
             uint address_len,
@@ -805,9 +792,20 @@ namespace TigerBeetle
         );
 
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        public static unsafe extern TBPacket* tb_client_acquire_packet(
+            IntPtr client
+        );
+
+        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        public static unsafe extern void tb_client_release_packet(
+            IntPtr client,
+            TBPacket* packet
+        );
+
+        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         public static unsafe extern void tb_client_submit(
             IntPtr client,
-            TBPacketList* packets
+            TBPacket* packet
         );
 
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

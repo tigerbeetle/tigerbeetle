@@ -37,14 +37,10 @@ typedef struct completion_context {
 void completion_context_init(completion_context_t *ctx);
 void completion_context_destroy(completion_context_t *ctx);
 
-// Packet handling functions.
-tb_packet_t* acquire_packet(tb_packet_list_t *tb_packet_t);
-void release_packet(tb_packet_list_t *packet_list, tb_packet_t *packet);
-
 // Sends and blocks the current thread until the reply arrives.
 void send_request(
     tb_client_t client,
-    tb_packet_list_t *packets,
+    tb_packet_t *packet,
     completion_context_t *ctx
 );
 
@@ -64,12 +60,10 @@ int main(int argc, char **argv) {
     printf("TigerBeetle C Sample\n");
     printf("Connecting...\n");
     tb_client_t client;
-    tb_packet_list_t packets_pool;
     const char *address = "127.0.0.1:3000";
 
     TB_STATUS status = tb_client_init(
         &client,              // Output client.
-        &packets_pool,        // Output packet list.
         0,                    // Cluster ID.
         address,              // Cluster addresses.
         strlen(address),      //
@@ -87,7 +81,6 @@ int main(int argc, char **argv) {
     completion_context_init(&ctx);
 
     tb_packet_t *packet;
-    tb_packet_list_t packet_list;
 
     ////////////////////////////////////////////////////////////
     // Submitting a batch of accounts:                        //
@@ -109,7 +102,12 @@ int main(int argc, char **argv) {
     accounts[1].ledger = 777;
     
     // Acquiring a packet for this request:
-    packet = acquire_packet(&packets_pool);
+    packet = tb_client_acquire_packet(client);
+    if (packet == NULL) {
+        printf("Too many concurrent packets\n");
+        exit(-1);
+    }
+
     packet->operation = TB_OPERATION_CREATE_ACCOUNTS;  // The operation to be performed.
     packet->data = accounts;                           // The data to be sent.
     packet->data_size = ACCOUNTS_SIZE;                 //
@@ -118,9 +116,7 @@ int main(int argc, char **argv) {
 
     printf("Creating accounts...\n"); 
     
-    packet_list.head = packet;
-    packet_list.tail = packet;
-    send_request(client, &packet_list, &ctx);
+    send_request(client, packet, &ctx);
 
     if (packet->status != TB_PACKET_OK) {
         // Checking if the request failed:
@@ -129,7 +125,7 @@ int main(int argc, char **argv) {
     }
 
     // Releasing the packet, so it can be used in a next request.
-    release_packet(&packets_pool, packet);    
+    tb_client_release_packet(client, packet);    
 
     if (ctx.size != 0) {
         // Checking for errors creating the accounts:
@@ -170,7 +166,12 @@ int main(int argc, char **argv) {
         }
 
         // Acquiring a packet for this request:
-        packet = acquire_packet(&packets_pool);
+        packet = tb_client_acquire_packet(client);
+        if (packet == NULL) {
+            printf("Too many concurrent packets\n");
+            exit(-1);
+        }
+
         packet->operation = TB_OPERATION_CREATE_TRANSFERS;  // The operation to be performed.
         packet->data = transfers;                           // The data to be sent.
         packet->data_size = MAX_MESSAGE_SIZE;               //
@@ -179,9 +180,7 @@ int main(int argc, char **argv) {
 
         long long now = get_time_ms();
 
-        packet_list.head = packet;
-        packet_list.tail = packet;
-        send_request(client, &packet_list, &ctx);
+        send_request(client, packet, &ctx);
 
         long elapsed_ms = get_time_ms() - now;
         if (elapsed_ms > max_latency_ms) max_latency_ms = elapsed_ms;
@@ -194,7 +193,7 @@ int main(int argc, char **argv) {
         }
 
         // Releasing the packet, so it can be used in a next request.
-        release_packet(&packets_pool, packet);        
+        tb_client_release_packet(client, packet);        
 
         if (ctx.size != 0) {
             // Checking for errors creating the accounts:
@@ -224,16 +223,19 @@ int main(int argc, char **argv) {
     tb_uint128_t ids[ACCOUNTS_LEN] = { accounts[0].id, accounts[1].id };
     
     // Acquiring a packet for this request:    
-    packet = acquire_packet(&packets_pool);
+    packet = tb_client_acquire_packet(client);
+    if (packet == NULL) {
+        printf("Too many concurrent packets\n");
+        exit(-1);
+    }
+
     packet->operation = TB_OPERATION_LOOKUP_ACCOUNTS;
     packet->data = ids;
     packet->data_size = sizeof(tb_uint128_t) * ACCOUNTS_LEN;
     packet->user_data = &ctx;
     packet->status = TB_PACKET_OK;
 
-    packet_list.head = packet;
-    packet_list.tail = packet;
-    send_request(client, &packet_list, &ctx);
+    send_request(client, packet, &ctx);
     
     if (packet->status != TB_PACKET_OK) {
         // Checking if the request failed:
@@ -242,7 +244,7 @@ int main(int argc, char **argv) {
     }
 
     // Releasing the packet, so it can be used in a next request.
-    release_packet(&packets_pool, packet);    
+    tb_client_release_packet(client, packet);    
 
     if (ctx.size == 0) {
         printf("No accounts found");
@@ -265,38 +267,6 @@ int main(int argc, char **argv) {
     // Cleanup:
     completion_context_destroy(&ctx);
     tb_client_deinit(client);
-}
-
-tb_packet_t* acquire_packet(tb_packet_list_t *packet_list) {
-    // This sample is single-threaded,
-    // In real use, this function should be thread-safe.
-    tb_packet_t *packet = packet_list->head;
-
-    if (packet == NULL) {
-        printf("Too many concurrent requests\n");
-        exit(-1);
-    }
-
-    packet_list->head = packet->next;
-    packet->next = NULL;
-    
-    if (packet_list->head == NULL) {
-        packet_list->tail = NULL;
-    }
-
-    return packet;
-}
-
-void release_packet(tb_packet_list_t *packet_list, tb_packet_t *packet) {
-    // This sample is single-threaded,
-    // In real use, this function should be thread-safe.
-    if (packet_list->head == NULL) {
-        packet_list->head = packet;
-        packet_list->tail = packet;
-    } else {
-        packet_list->tail->next = packet;
-        packet_list->tail = packet;
-    }
 }
 
 #if IS_POSIX
@@ -324,7 +294,7 @@ void on_completion(
 
 void send_request(
     tb_client_t client,
-    tb_packet_list_t *packets,
+    tb_packet_t *packet,
     completion_context_t *ctx
 ) {
     // Locks the mutex:
@@ -335,7 +305,7 @@ void send_request(
 
     // Submits the request asynchronously:
     ctx->completed = false;
-    tb_client_submit(client, packets);
+    tb_client_submit(client, packet);
 
     // Uses a condvar to sync this thread with the callback:
     while (!ctx->completed) {
