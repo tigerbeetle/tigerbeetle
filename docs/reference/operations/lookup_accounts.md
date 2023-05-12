@@ -15,9 +15,10 @@ An [`id`](../accounts.md#id) belonging to a [`Account`](../accounts.md).
 
 For language-specific docs see:
 
-* [Looking up accounts using the Java library](/src/clients/java#account-lookup)
-* [Looking up accounts using the Go library](/src/clients/go#account-lookup)
-* [Looking up accounts using the Node.js library](/src/clients/node#account-lookup)
+* [Looking up accounts using the .NET library](/src/clients/dotnet/README.md#account-lookup)
+* [Looking up accounts using the Java library](/src/clients/java/README.md#account-lookup)
+* [Looking up accounts using the Go library](/src/clients/go/README.md#account-lookup)
+* [Looking up accounts using the Node.js library](/src/clients/node/README.md#account-lookup)
 
 ## Internals
 
