@@ -274,11 +274,11 @@ is 8191.
 ```cs
 var BATCH_SIZE = 8191;
 for (int i = 0; i < transfers.Length; i += BATCH_SIZE) {
-  var batch = BATCH_SIZE;
+  var batchSize = BATCH_SIZE;
   if (i + BATCH_SIZE > transfers.Length) {
-    batch = transfers.Length - i;
+    batchSize = transfers.Length - i;
   }
-  var segment = new ArraySegment<Transfer>(transfers, i, batch);
+  var segment = new ArraySegment<Transfer>(transfers, i, batchSize);
   createTransfersError = client.CreateTransfers(segment.Array);
   // error handling omitted
 }
@@ -397,6 +397,34 @@ next, and so that the chain is either visible or invisible as a unit
 to subsequent events after the chain. The event that was the first to
 break the chain will have a unique error result. Other events in the
 chain will have their error result set to `linked_event_failed`.
+
+```cs
+var batch = new System.Collections.Generic.List<Transfer>();
+
+// An individual transfer (successful):
+batch.Add(new Transfer{Id = 1, /* ... rest of transfer ... */ });
+
+// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
+batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
+batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
+batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Fail with exists
+batch.Add(new Transfer{Id = 4, /* ... rest of transfer ... */ }); // Fail without committing
+
+// An individual transfer (successful):
+// This should not see any effect from the failed chain above.
+batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ });
+
+// A chain of 2 transfers (the first transfer fails the chain):
+batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
+batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ });
+
+// A chain of 2 transfers (successful):
+batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
+batch.Add(new Transfer{Id = 4, /* ... rest of transfer ... */ });
+
+createTransfersError = client.CreateTransfers(batch.ToArray());
+// error handling omitted
+```
 
 ## Development Setup
 

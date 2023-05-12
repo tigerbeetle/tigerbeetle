@@ -338,7 +338,7 @@ pub const GoDocs = Docs{
     \\linkedFlag := tb_types.TransferFlags{Linked: true}.ToUint16()
     \\
     \\// An individual transfer (successful):
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("1"), /* ... */ })
+    \\batch = append(batch, tb_types.Transfer{ID: uint128("1"), /* ... rest of transfer ... */ })
     \\
     \\// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
     \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
@@ -348,15 +348,15 @@ pub const GoDocs = Docs{
     \\
     \\// An individual transfer (successful):
     \\// This should not see any effect from the failed chain above.
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... */ })
+    \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... rest of transfer ... */ })
     \\
     \\// A chain of 2 transfers (the first transfer fails the chain):
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... */ Flags: linkedFlag })
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ })
+    \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... rest of transfer ... */ Flags: linkedFlag })
+    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... rest of transfer ... */ })
     \\
     \\// A chain of 2 transfers (successful):
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ Flags: linkedFlag })
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... */ })
+    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... rest of transfer ... */ Flags: linkedFlag })
+    \\batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... rest of transfer ... */ })
     \\
     \\transfersRes, err = client.CreateTransfers(batch)
     ,
