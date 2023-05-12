@@ -296,7 +296,7 @@ one at a time like so:
 
 ```go
 for i := 0; i < len(transfers); i++ {
-	errors := client.CreateTransfers(transfers[i]);
+	transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfers[i]})
 	// error handling omitted
 }
 ```
@@ -312,9 +312,9 @@ BATCH_SIZE := 8191
 for i := 0; i < len(transfers); i += BATCH_SIZE {
 	batch := BATCH_SIZE
 	if i + BATCH_SIZE > len(transfers) {
-		i = BATCH_SIZE - i
+		batch = len(transfers) - i
 	}
-	transfersRes, err := client.CreateTransfers(transfers[i:i + batch])
+	transfersRes, err = client.CreateTransfers(transfers[i:i + batch])
 	// error handling omitted
 }
 ```
@@ -349,6 +349,7 @@ transfer0 := tb_types.Transfer{ /* ... account values ... */ }
 transfer1 := tb_types.Transfer{ /* ... account values ... */ }
 transfer0.Flags = tb_types.TransferFlags{Linked: true}.ToUint16()
 transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer0, transfer1})
+// error handling omitted
 ```
 
 ### Two-Phase Transfers
@@ -375,6 +376,7 @@ transfer = tb_types.Transfer{
 	Timestamp:	0,
 }
 transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
+// error handling omitted
 ```
 
 #### Void a Pending Transfer
@@ -393,7 +395,7 @@ transfer = tb_types.Transfer{
 	Timestamp:	0,
 }
 transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
-log.Println(transfersRes, err)
+// error handling omitted
 ```
 
 ## Transfer Lookup
@@ -463,7 +465,6 @@ batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ Flags: linke
 batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... */ })
 
 transfersRes, err = client.CreateTransfers(batch)
-log.Println(transfersRes, err)
 ```
 
 ## Development Setup

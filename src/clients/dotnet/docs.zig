@@ -76,7 +76,7 @@ pub const DotnetDocs = Docs{
     \\var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
     \\var client = new Client(
     \\  clusterID: 0,
-    \\  addresses: new[] {tbAddress.Length > 0 ? tbAddress : "3000"}
+    \\  addresses: new[] {tbAddress != null ? tbAddress : "3000"}
     \\);
     ,
 
@@ -108,7 +108,7 @@ pub const DotnetDocs = Docs{
     \\  },     
     \\};
     \\
-    \\var createAccountsErrors = client.CreateAccounts(accounts);
+    \\var createAccountsError = client.CreateAccounts(accounts);
     ,
 
     .create_accounts_documentation = 
@@ -132,29 +132,25 @@ pub const DotnetDocs = Docs{
     \\var account1 = new Account{ /* ... account values ... */ };
     \\account0.Flags = AccountFlags.Linked;
     \\
-    \\createAccountsErrors = client.CreateAccounts(new []{account0, account1});
+    \\createAccountsError = client.CreateAccounts(new []{account0, account1});
     ,
 
     .create_accounts_errors_example = 
-    \\var account2 = tb_types.Account{ /* ... account values ... */ };
-    \\var account3 = tb_types.Account{ /* ... account values ... */ };
-    \\var account4 = tb_types.Account{ /* ... account values ... */ };
+    \\var account2 = new Account{ /* ... account values ... */ };
+    \\var account3 = new Account{ /* ... account values ... */ };
+    \\var account4 = new Account{ /* ... account values ... */ };
     \\
-    \\createAccountsErrors = client.CreateAccounts(new []{account2, account3, account4});
-    \\if err != nil {
-    \\	log.Printf("Error creating accounts: %s", err);
-    \\	return;
-    \\}
-    \\for _, err := range accountErrors {
-    \\	log.Printf("Error creating account %d: %s", err.Index, err.Result)
-    \\	return
+    \\createAccountsError = client.CreateAccounts(new []{account2, account3, account4});
+    \\foreach (var error in createAccountsError) {
+    \\  Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
+    \\  return;
     \\}
     ,
 
     .create_accounts_errors_documentation = "",
 
     .lookup_accounts_example = 
-    \\accounts = client.LookupAccounts(new UInt128[] { 137, 138 });
+    \\accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 137, 138 });
     ,
 
     .create_transfers_example = 
@@ -173,18 +169,39 @@ pub const DotnetDocs = Docs{
     \\  }
     \\};
     \\
-    \\var createTransfersErrors = client.CreateTransfers(transfers);
+    \\var createTransfersError = client.CreateTransfers(transfers);
     ,
 
     .create_transfers_documentation = "",
 
-    .create_transfers_errors_example = "",
+    .create_transfers_errors_example = 
+    \\foreach (var error in createTransfersError) {
+    \\  Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
+    \\  return;
+    \\}
+    ,
 
     .create_transfers_errors_documentation = "",
 
-    .no_batch_example = "",
+    .no_batch_example = 
+    \\foreach(var t in transfers) {
+    \\  createTransfersError = client.CreateTransfers(new []{t});
+    \\  // error handling omitted
+    \\}
+    ,
 
-    .batch_example = "",
+    .batch_example = 
+    \\var BATCH_SIZE = 8191;
+    \\for (int i = 0; i < transfers.Length; i += BATCH_SIZE) {
+    \\  var batch = BATCH_SIZE;
+    \\  if (i + BATCH_SIZE > transfers.Length) {
+    \\    batch = transfers.Length - i;
+    \\  }
+    \\  var segment = new ArraySegment<Transfer>(transfers, i, batch);
+    \\  createTransfersError = client.CreateTransfers(segment.Array);
+    \\  // error handling omitted
+    \\}
+    ,
 
     .transfer_flags_documentation = 
     \\To toggle behavior for an account, combine enum values stored in the
@@ -197,14 +214,37 @@ pub const DotnetDocs = Docs{
     \\* `TransferFlags.VoidPendingTransfer`
     ,
 
-    .transfer_flags_link_example = "",
+    .transfer_flags_link_example = 
+    \\var transfer0 = new Transfer{ /* ... account values ... */ };
+    \\var transfer1 = new Transfer{ /* ... account values ... */ };
+    \\transfer0.Flags = TransferFlags.Linked;
+    \\createTransfersError = client.CreateTransfers(new Transfer[] {transfer0, transfer1});
+    ,
 
-    .transfer_flags_post_example = "",
+    .transfer_flags_post_example = 
+    \\var transfer = new Transfer
+    \\{
+    \\  Id = 2,
+    \\  PendingId = 1,
+    \\  Flags = TransferFlags.PostPendingTransfer,
+    \\};
+    \\createTransfersError = client.CreateTransfers(new Transfer[] {transfer});
+    \\// error handling omitted
+    ,
 
-    .transfer_flags_void_example = "",
+    .transfer_flags_void_example = 
+    \\transfer = new Transfer
+    \\{
+    \\  Id = 2,
+    \\  PendingId = 1,
+    \\  Flags = TransferFlags.PostPendingTransfer,
+    \\};
+    \\createTransfersError = client.CreateTransfers(new Transfer[] {transfer});
+    \\// error handling omitted
+    ,
 
     .lookup_transfers_example = 
-    \\transfers = client.LookupTransfers(new UInt128[] {1, 2});
+    \\transfers = client.LookupTransfers(new TigerBeetle.UInt128[] {1, 2});
     ,
 
     .linked_events_example = "",

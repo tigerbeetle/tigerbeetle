@@ -338,10 +338,12 @@ const Generator = struct {
             self.language.lookup_accounts_example,
             self.language.create_transfers_example,
             self.language.create_transfers_errors_example,
+            self.language.lookup_transfers_example,
+            self.language.no_batch_example,
+            self.language.batch_example,
             self.language.transfer_flags_link_example,
             self.language.transfer_flags_post_example,
             self.language.transfer_flags_void_example,
-            self.language.lookup_transfers_example,
             self.language.linked_events_example,
             self.language.test_main_suffix,
         };
