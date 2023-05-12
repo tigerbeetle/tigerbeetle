@@ -15,7 +15,7 @@ pub fn ThreadType(
         context: *Context,
 
         retry: Packet.List,
-        submitted: Packet.Stack,
+        submitted: Packet.SubmissionStack,
 
         signal: Signal,
         thread: std.Thread,
@@ -41,7 +41,10 @@ pub fn ThreadType(
                 return switch (err) {
                     error.Unexpected => error.Unexpected,
                     error.OutOfMemory => error.OutOfMemory,
-                    error.SystemResources, error.ThreadQuotaExceeded, error.LockedMemoryLimitExceeded => error.SystemResources,
+                    error.SystemResources,
+                    error.ThreadQuotaExceeded,
+                    error.LockedMemoryLimitExceeded,
+                    => error.SystemResources,
                 };
             };
         }
@@ -54,9 +57,8 @@ pub fn ThreadType(
             self.* = undefined;
         }
 
-        pub fn submit(self: *Self, list: Packet.List) void {
-            if (list.peek() == null) return;
-            self.submitted.push(list);
+        pub fn submit(self: *Self, packet: *Packet) void {
+            self.submitted.push(packet);
             self.signal.notify();
         }
 

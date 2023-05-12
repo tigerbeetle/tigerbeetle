@@ -713,7 +713,7 @@ namespace TigerBeetle.Tests
 
         /// <summary>
         /// This test asserts that a single Client can be shared by multiple concurrent tasks
-        /// Even if a limited "maxConcurrency" value forces new tasks to wait running tasks to complete
+        /// Even if a limited "maxConcurrency" value results in "MaxConcurrencyExceededException"
         /// </summary>
 
         [TestMethod]
@@ -721,13 +721,13 @@ namespace TigerBeetle.Tests
         public void ConcurrentTasksTest()
         {
             const int TASKS_QTY = 20;
-            int MAX_CONCURRENCY = TASKS_QTY / 2;
+            int MAX_CONCURRENCY = 2;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
 
-            var results = client.CreateAccounts(accounts);
-            Assert.IsTrue(results.Length == 0);
+            var errors = client.CreateAccounts(accounts);
+            Assert.IsTrue(errors.Length == 0);
 
             var list = new List<Task<CreateTransferResult>>();
 
@@ -743,29 +743,42 @@ namespace TigerBeetle.Tests
                     Amount = 100,
                 };
 
-                /// Starts multiple tasks using a client with a limited maxConcurrency
+                /// Starts multiple tasks using a client with a limited maxConcurrency:
                 var task = Task.Run(() => client.CreateTransfer(transfer));
                 list.Add(task);
             }
 
-            Task.WaitAll(list.ToArray());
-            Assert.IsTrue(list.All(x => x.Result == CreateTransferResult.Ok));
+            try
+            {
+                // Ignoring exceptions from the tasks.
+                Task.WhenAll(list).Wait();
+            }
+            catch { }
+
+            // It's expected for some tasks to failt with MaxConcurrencyExceededException:
+            var successCount = list.Count(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok);
+            var failedCount = list.Count(x => x.IsFaulted && x.Exception is AggregateException e && e.InnerException is MaxConcurrencyExceededException);
+            Assert.IsTrue(successCount > 0);
+            Assert.IsTrue(failedCount > 0);
+
+            // Asserting that either the task failed or succeeded.
+            Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
 
             var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
             AssertAccounts(lookupAccounts);
 
             // Assert that all tasks ran to the conclusion
 
-            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (ulong)(100 * TASKS_QTY));
+            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (ulong)(100 * successCount));
             Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0LU);
 
             Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0LU);
-            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (ulong)(100 * TASKS_QTY));
+            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (ulong)(100 * successCount));
         }
 
         /// <summary>
         /// This test asserts that Client.Dispose() will wait for any ongoing request to complete
-        /// And new requests will fail with ObjectDisposedException
+        /// And new requests will fail with ObjectDisposedException.
         /// </summary>
 
         [TestMethod]
@@ -779,7 +792,7 @@ namespace TigerBeetle.Tests
         private void ConcurrentTasksDispose(bool isAsync)
         {
             const int TASKS_QTY = 20;
-            int MAX_CONCURRENCY = 2;
+            int MAX_CONCURRENCY = 20;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
@@ -801,26 +814,27 @@ namespace TigerBeetle.Tests
                     Amount = 100,
                 };
 
-                /// Starts multiple tasks using a client with a limited maxConcurrency
+                /// Starts multiple tasks using a client with a limited maxConcurrency.
                 var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
                 list.Add(task);
             }
 
-            // Waiting for just one task
+            // Waiting for just one task.
             list.First().Wait();
 
-            // Disposes the client, forcing all tasks to finish if already submitted a message, or fail
+            // Disposes the client, forcing all tasks to finish if already submitted a message, or fail.
             client.Dispose();
 
             try
             {
-                // Ignoring exceptions from the tasks
+                // Ignoring exceptions from the tasks.
                 Task.WhenAll(list).Wait();
             }
             catch { }
 
-            // Asserting that either the task failed or succeeded
+            // Asserting that either the task failed or succeeded.
             Assert.IsTrue(list.Any(x => x.Result == CreateTransferResult.Ok));
+            Assert.IsTrue(list.Any(x => x.IsFaulted));
             Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
         }
 

@@ -90,10 +90,6 @@ const type_mappings = .{
         .name = "TBPacket",
         .visibility = .internal,
     } },
-    .{ tb_client.tb_packet_list_t, TypeMapping{
-        .name = "TBPacketList",
-        .visibility = .internal,
-    } },
 };
 
 fn dotnet_type(comptime Type: type) []const u8 {
@@ -430,7 +426,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\        public static unsafe extern InitializationStatus tb_client_init(
         \\            IntPtr* out_client,
-        \\            TBPacketList* out_packets,
         \\            uint cluster_id,
         \\            byte* address_ptr,
         \\            uint address_len,
@@ -448,7 +443,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\        public static unsafe extern InitializationStatus tb_client_init_echo(
         \\            IntPtr* out_client,
-        \\            TBPacketList* out_packets,
         \\            uint cluster_id,
         \\            byte* address_ptr,
         \\            uint address_len,
@@ -464,9 +458,20 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        );
         \\
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\        public static unsafe extern TBPacket* tb_client_acquire_packet(
+        \\            IntPtr client
+        \\        );
+        \\
+        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\        public static unsafe extern void tb_client_release_packet(
+        \\            IntPtr client,
+        \\            TBPacket* packet
+        \\        );
+        \\
+        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\        public static unsafe extern void tb_client_submit(
         \\            IntPtr client,
-        \\            TBPacketList* packets
+        \\            TBPacket* packet
         \\        );
         \\
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

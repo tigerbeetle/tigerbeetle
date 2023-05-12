@@ -2,6 +2,8 @@ const std = @import("std");
 const os = std.os;
 const assert = std.debug.assert;
 
+const Atomic = std.atomic.Atomic;
+
 const constants = @import("../../../constants.zig");
 const log = std.log.scoped(.tb_client_context);
 
@@ -23,11 +25,11 @@ const api = @import("../tb_client.zig");
 const tb_status_t = api.tb_status_t;
 const tb_client_t = api.tb_client_t;
 const tb_completion_t = api.tb_completion_t;
-const tb_packet_t = api.tb_packet_t;
-const tb_packet_list_t = api.tb_packet_list_t;
 
 pub const ContextImplementation = struct {
-    submit_fn: fn (*ContextImplementation, *tb_packet_list_t) void,
+    acquire_packet_fn: fn (*ContextImplementation) ?*Packet,
+    release_packet_fn: fn (*ContextImplementation, *Packet) void,
+    submit_fn: fn (*ContextImplementation, *Packet) void,
     deinit_fn: fn (*ContextImplementation) void,
 };
 
@@ -82,6 +84,7 @@ pub fn ContextType(
         allocator: std.mem.Allocator,
         client_id: u128,
         packets: []Packet,
+        packets_free: Packet.ConcurrentStack,
 
         addresses: []const std.net.Address,
         io: IO,
@@ -117,6 +120,11 @@ pub fn ContextType(
             log.debug("{}: init: allocating tb_packets", .{context.client_id});
             context.packets = try context.allocator.alloc(Packet, packets_count);
             errdefer context.allocator.free(context.packets);
+
+            context.packets_free = .{};
+            for (context.packets) |*packet| {
+                context.packets_free.push(packet);
+            }
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
             context.addresses = vsr.parse_addresses(
@@ -169,6 +177,8 @@ pub fn ContextType(
             context.on_completion_ctx = on_completion_ctx;
             context.on_completion_fn = on_completion_fn;
             context.implementation = .{
+                .acquire_packet_fn = Context.on_acquire_packet,
+                .release_packet_fn = Context.on_release_packet,
                 .submit_fn = Context.on_submit,
                 .deinit_fn = Context.on_deinit,
             };
@@ -291,13 +301,27 @@ pub fn ContextType(
             (self.on_completion_fn)(self.on_completion_ctx, tb_client, packet, bytes.ptr, @intCast(u32, bytes.len));
         }
 
-        fn on_submit(implementation: *ContextImplementation, packets: *tb_packet_list_t) void {
-            const context = @fieldParentPtr(Context, "implementation", implementation);
-            context.thread.submit(packets.*);
+        inline fn get_context(implementation: *ContextImplementation) *Context {
+            return @fieldParentPtr(Context, "implementation", implementation);
+        }
+
+        fn on_acquire_packet(implementation: *ContextImplementation) ?*Packet {
+            const context = get_context(implementation);
+            return context.packets_free.pop();
+        }
+
+        fn on_release_packet(implementation: *ContextImplementation, packet: *Packet) void {
+            const context = get_context(implementation);
+            return context.packets_free.push(packet);
+        }
+
+        fn on_submit(implementation: *ContextImplementation, packet: *Packet) void {
+            const context = get_context(implementation);
+            context.thread.submit(packet);
         }
 
         fn on_deinit(implementation: *ContextImplementation) void {
-            const context = @fieldParentPtr(Context, "implementation", implementation);
+            const context = get_context(implementation);
             context.deinit();
         }
     };
