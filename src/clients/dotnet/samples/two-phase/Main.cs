@@ -30,7 +30,7 @@ using (var client = new Client(
     foreach (var error in createAccountsError)
     {
         Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
-	throw new Exception("Unexpected error");
+        throw new Exception("Unexpected error");
     }
 
     // Start a pending transfer
@@ -82,7 +82,7 @@ using (var client = new Client(
     new Transfer
     {
         Id = 2,
-	PendingId = 1,
+    PendingId = 1,
         DebitAccountId = 1,
         CreditAccountId = 2,
         Ledger = 1,
