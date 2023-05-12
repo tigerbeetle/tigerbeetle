@@ -66,7 +66,7 @@ jobs:
       if: inputs.version != ''
       working-directory: src/clients/java
       run: |
-        mvn -B versions:set -DnewVersion=`${{ inputs.version }}` --file pom.xml
+        mvn -B versions:set -DnewVersion=${{ inputs.version }} --file pom.xml
         mvn -B clean deploy -Dmaven.test.skip --file pom.xml -s $GITHUB_WORKSPACE/settings.xml
       env:
         MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
