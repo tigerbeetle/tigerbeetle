@@ -142,6 +142,7 @@ jobs:
 
   publish:
     if: inputs.version != ''
+    needs: build
     name: Publish NuGet package
     runs-on: ubuntu-latest
     steps:
