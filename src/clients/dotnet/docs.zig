@@ -140,8 +140,8 @@ pub const DotnetDocs = Docs{
     \\var account3 = new Account{ /* ... account values ... */ };
     \\var account4 = new Account{ /* ... account values ... */ };
     \\
-    \\createAccountsErrors = client.CreateAccounts(new []{account2, account3, account4});
-    \\foreach (var error in createAccountsErrors) {
+    \\createAccountsError = client.CreateAccounts(new []{account2, account3, account4});
+    \\foreach (var error in createAccountsError) {
     \\	Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
     \\	return;
     \\}
