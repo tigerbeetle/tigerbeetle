@@ -193,11 +193,11 @@ pub const DotnetDocs = Docs{
     .batch_example = 
     \\var BATCH_SIZE = 8191;
     \\for (int i = 0; i < transfers.Length; i += BATCH_SIZE) {
-    \\  var batch = BATCH_SIZE;
+    \\  var batchSize = BATCH_SIZE;
     \\  if (i + BATCH_SIZE > transfers.Length) {
-    \\    batch = transfers.Length - i;
+    \\    batchSize = transfers.Length - i;
     \\  }
-    \\  var segment = new ArraySegment<Transfer>(transfers, i, batch);
+    \\  var segment = new ArraySegment<Transfer>(transfers, i, batchSize);
     \\  createTransfersError = client.CreateTransfers(segment.Array);
     \\  // error handling omitted
     \\}
@@ -247,7 +247,33 @@ pub const DotnetDocs = Docs{
     \\transfers = client.LookupTransfers(new TigerBeetle.UInt128[] {1, 2});
     ,
 
-    .linked_events_example = "",
+    .linked_events_example = 
+    \\var batch = new System.Collections.Generic.List<Transfer>();
+    \\
+    \\// An individual transfer (successful):
+    \\batch.Add(new Transfer{Id = 1, /* ... rest of transfer ... */ });
+    \\
+    \\// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
+    \\batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
+    \\batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
+    \\batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Fail with exists
+    \\batch.Add(new Transfer{Id = 4, /* ... rest of transfer ... */ }); // Fail without committing
+    \\
+    \\// An individual transfer (successful):
+    \\// This should not see any effect from the failed chain above.
+    \\batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ });
+    \\
+    \\// A chain of 2 transfers (the first transfer fails the chain):
+    \\batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
+    \\batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ });
+    \\
+    \\// A chain of 2 transfers (successful):
+    \\batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
+    \\batch.Add(new Transfer{Id = 4, /* ... rest of transfer ... */ });
+    \\
+    \\createTransfersError = client.CreateTransfers(batch.ToArray());
+    \\// error handling omitted
+    ,
 
     .developer_setup_sh_commands = 
     \\cd src/clients/dotnet
