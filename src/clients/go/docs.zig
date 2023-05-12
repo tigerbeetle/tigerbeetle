@@ -268,7 +268,7 @@ pub const GoDocs = Docs{
 
     .no_batch_example = 
     \\for i := 0; i < len(transfers); i++ {
-    \\	errors := client.CreateTransfers(transfers[i]);
+    \\	transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfers[i]})
     \\	// error handling omitted
     \\}
     ,
@@ -278,9 +278,9 @@ pub const GoDocs = Docs{
     \\for i := 0; i < len(transfers); i += BATCH_SIZE {
     \\	batch := BATCH_SIZE
     \\	if i + BATCH_SIZE > len(transfers) {
-    \\		i = BATCH_SIZE - i
+    \\		batch = len(transfers) - i
     \\	}
-    \\	transfersRes, err := client.CreateTransfers(transfers[i:i + batch])
+    \\	transfersRes, err = client.CreateTransfers(transfers[i:i + batch])
     \\	// error handling omitted
     \\}
     ,
@@ -295,11 +295,13 @@ pub const GoDocs = Docs{
     \\* `tb_types.TransferFlags{PostPendingTransfer: true}.ToUint16()`
     \\* `tb_types.TransferFlags{VoidPendingTransfer: true}.ToUint16()`
     ,
+
     .transfer_flags_link_example = 
     \\transfer0 := tb_types.Transfer{ /* ... account values ... */ }
     \\transfer1 := tb_types.Transfer{ /* ... account values ... */ }
     \\transfer0.Flags = tb_types.TransferFlags{Linked: true}.ToUint16()
     \\transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer0, transfer1})
+    \\// error handling omitted
     ,
     .transfer_flags_post_example = 
     \\transfer = tb_types.Transfer{
@@ -309,6 +311,7 @@ pub const GoDocs = Docs{
     \\	Timestamp:	0,
     \\}
     \\transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
+    \\// error handling omitted
     ,
     .transfer_flags_void_example = 
     \\transfer = tb_types.Transfer{
@@ -318,7 +321,7 @@ pub const GoDocs = Docs{
     \\	Timestamp:	0,
     \\}
     \\transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
-    \\log.Println(transfersRes, err)
+    \\// error handling omitted
     ,
 
     .lookup_transfers_example = 
@@ -356,7 +359,6 @@ pub const GoDocs = Docs{
     \\batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... */ })
     \\
     \\transfersRes, err = client.CreateTransfers(batch)
-    \\log.Println(transfersRes, err)
     ,
 
     // Extra steps to determine commit and repo so this works in
