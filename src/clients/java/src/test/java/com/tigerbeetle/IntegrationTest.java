@@ -948,9 +948,9 @@ public class IntegrationTest {
 
             // Defining a ratio between concurrent threads and client's maxConcurrency
             // The goal here is to force to have more threads than the client can process
-            // simultaneously
+            // simultaneously.
             final int tasks_qty = 20;
-            final int max_concurrency = tasks_qty / 2;
+            final int max_concurrency = 2;
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -959,19 +959,25 @@ public class IntegrationTest {
 
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
-                    // Starting multiple threads submitting transfers,
+                    // Starting multiple threads submitting transfers.
                     tasks[i] = new TransferTask(client);
                     tasks[i].start();
                 }
 
-                // Wait for all threads
+                // Wait for all threads:
+                int succeededCount = 0;
                 for (int i = 0; i < tasks_qty; i++) {
                     tasks[i].join();
-                    assertTrue(tasks[i].exception == null);
-                    assertEquals(0, tasks[i].result.getLength());
+                    if (tasks[i].exception == null) {
+                        succeededCount += 1;
+                        assertTrue(tasks[i].result.getLength() == 0);
+                    }
                 }
 
-                // Asserting if all transfers were submitted correctly
+                // At least max_concurrency tasks must succeed.
+                assertTrue(succeededCount >= max_concurrency);
+
+                // Asserting if all transfers were submitted correctly.
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertEquals(2, lookupAccounts.getLength());
 
@@ -981,14 +987,14 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals((long) (100 * tasks_qty), lookupAccounts.getCreditsPosted());
+                assertEquals((long) (100 * succeededCount), lookupAccounts.getCreditsPosted());
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals((long) (100 * tasks_qty), lookupAccounts.getDebitsPosted());
+                assertEquals((long) (100 * succeededCount), lookupAccounts.getDebitsPosted());
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
 
             } catch (Throwable any) {
@@ -1035,8 +1041,8 @@ public class IntegrationTest {
                 }
 
                 // And then close the client while several other threads are still working
-                // Some of them have already submitted the request, others are waiting due to the
-                // maxConcurrency limit
+                // Some of them have already submitted the request, while others will fail
+                // due to the maxConcurrency limit.
                 client.close();
 
                 int failedCount = 0;
@@ -1045,11 +1051,11 @@ public class IntegrationTest {
                 for (int i = 0; i < tasks_qty; i++) {
 
                     // The client.close must wait until all submitted requests have completed
-                    // Asserting that either the task succeeded or failed while waiting
+                    // Asserting that either the task succeeded or failed while waiting.
                     tasks[i].join();
 
                     final var failed = tasks[i].exception != null
-                            && tasks[i].exception.getMessage().equals("Client is closed");
+                            && tasks[i].exception instanceof MaxConcurrencyExceededException;
                     final var succeeded =
                             tasks[i].result != null && tasks[i].result.getLength() == 0;
 
