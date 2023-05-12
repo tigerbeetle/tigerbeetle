@@ -187,8 +187,8 @@ var account4 = new Account{ /* ... account values ... */ };
 
 createAccountsError = client.CreateAccounts(new []{account2, account3, account4});
 foreach (var error in createAccountsError) {
-  Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
-  return;
+	Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
+	return;
 }
 ```
 
