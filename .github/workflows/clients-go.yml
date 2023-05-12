@@ -48,8 +48,7 @@ jobs:
 
     strategy:
       matrix:
-        # TODO: Add windows-latest in here.
-        os: [ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest, windows-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
         sample: [basic, two-phase]
 
     runs-on: ${{ matrix.os }}
