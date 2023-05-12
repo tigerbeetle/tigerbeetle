@@ -865,6 +865,7 @@ fn maybe_execute(
 
         if (std.mem.eql(u8, arg, "--")) {
             build_and_run = true;
+            continue;
         }
 
         if (!build_and_run) continue;
