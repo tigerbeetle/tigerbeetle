@@ -50,11 +50,9 @@ pub const DotnetDocs = Docs{
     \\
     \\using TigerBeetle;
     \\
-    \\public class Program {
-    \\  public static void Main() {
-    \\    Console.WriteLine("SUCCESS");
-    \\  }
-    \\}
+    \\// Validate import works.
+    \\var id = new TigerBeetle.UInt128(1);
+    \\Console.WriteLine("SUCCESS");
     ,
 
     .current_commit_pre_install_hook = null,
