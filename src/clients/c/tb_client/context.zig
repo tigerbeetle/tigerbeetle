@@ -207,7 +207,10 @@ pub fn ContextType(
         }
 
         pub fn run(self: *Context) void {
-            while (!self.thread.signal.is_shutdown()) {
+            // Keep running until shutdown and all inflight requests have finished.
+            while (!self.thread.signal.is_shutdown() or
+                self.packets_free.get_count() < self.packets.len)
+            {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
@@ -307,7 +310,9 @@ pub fn ContextType(
 
         fn on_acquire_packet(implementation: *ContextImplementation) ?*Packet {
             const context = get_context(implementation);
-            return context.packets_free.pop();
+
+            // During shutdown, no packet can be acquired.
+            return if (context.thread.signal.is_shutdown()) null else context.packets_free.pop();
         }
 
         fn on_release_packet(implementation: *ContextImplementation, packet: *Packet) void {

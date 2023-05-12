@@ -117,7 +117,7 @@ namespace TigerBeetle
             {
                 // It is unexpected for the client to be disposed here
                 // Since we wait for all acquired packets to be submitted and returned before disposing.
-                AssertTrue(client != IntPtr.Zero, "Client is closed");                
+                AssertTrue(client != IntPtr.Zero, "Client is closed");
                 AssertTrue(packet.Pointer != null, "Null packet pointer");
                 tb_client_release_packet(client, packet.Pointer);
             }
@@ -137,7 +137,7 @@ namespace TigerBeetle
         public Packet AcquirePacket()
         {
             if (client == IntPtr.Zero) throw new ObjectDisposedException("Client is closed");
-            
+
             unsafe
             {
                 var packet = tb_client_acquire_packet(client);

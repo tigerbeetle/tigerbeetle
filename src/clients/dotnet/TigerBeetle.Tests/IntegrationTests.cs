@@ -791,8 +791,8 @@ namespace TigerBeetle.Tests
 
         private void ConcurrentTasksDispose(bool isAsync)
         {
-            const int TASKS_QTY = 20;
-            int MAX_CONCURRENCY = 20;
+            const int TASKS_QTY = 32;
+            int MAX_CONCURRENCY = 32;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
@@ -814,15 +814,15 @@ namespace TigerBeetle.Tests
                     Amount = 100,
                 };
 
-                /// Starts multiple tasks using a client with a limited maxConcurrency.
+                /// Starts multiple tasks.
                 var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
                 list.Add(task);
             }
 
-            // Waiting for just one task.
+            // Waiting for just one task, the others may be pending.
             list.First().Wait();
 
-            // Disposes the client, forcing all tasks to finish if already submitted a message, or fail.
+            // Disposes the client, waiting all placed requests to finish.
             client.Dispose();
 
             try
@@ -832,9 +832,9 @@ namespace TigerBeetle.Tests
             }
             catch { }
 
-            // Asserting that either the task failed or succeeded.
-            Assert.IsTrue(list.Any(x => x.Result == CreateTransferResult.Ok));
-            Assert.IsTrue(list.Any(x => x.IsFaulted));
+            // Asserting that either the task failed or succeeded,
+            // at least one must be succeeded.
+            Assert.IsTrue(list.Any(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok));
             Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
         }
 
