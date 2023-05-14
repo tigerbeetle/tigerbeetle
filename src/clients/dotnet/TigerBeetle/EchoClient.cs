@@ -8,9 +8,9 @@ namespace TigerBeetle
     {
         private readonly NativeClient nativeClient;
 
-        public EchoClient(uint clusterID, string[] addresses, int maxConcurrency)
+        public EchoClient(uint clusterID, string[] addresses, int concurrencyMax)
         {
-            this.nativeClient = NativeClient.InitEcho(clusterID, addresses, maxConcurrency);
+            this.nativeClient = NativeClient.InitEcho(clusterID, addresses, concurrencyMax);
         }
 
         public Account[] Echo(Account[] batch)

@@ -37,7 +37,7 @@ pub const Error = std.mem.Allocator.Error || error{
     Unexpected,
     AddressInvalid,
     AddressLimitExceeded,
-    PacketsCountInvalid,
+    ConcurrencyMaxInvalid,
     SystemResources,
     NetworkSubsystemFailed,
 };
@@ -96,12 +96,13 @@ pub fn ContextType(
         on_completion_fn: tb_completion_t,
         implementation: ContextImplementation,
         thread: Thread,
+        shutdown: Atomic(bool) = Atomic(bool).init(false),
 
         pub fn init(
             allocator: std.mem.Allocator,
             cluster_id: u32,
             addresses: []const u8,
-            packets_count: u32,
+            concurrency_max: u32,
             on_completion_ctx: usize,
             on_completion_fn: tb_completion_t,
         ) Error!*Context {
@@ -112,13 +113,12 @@ pub fn ContextType(
             context.client_id = std.crypto.random.int(u128);
             log.debug("{}: init: initializing", .{context.client_id});
 
-            const packets_count_max = 4096;
-            if (packets_count > packets_count_max) {
-                return error.PacketsCountInvalid;
+            if (concurrency_max == 0 or concurrency_max > 4096) {
+                return error.ConcurrencyMaxInvalid;
             }
 
             log.debug("{}: init: allocating tb_packets", .{context.client_id});
-            context.packets = try context.allocator.alloc(Packet, packets_count);
+            context.packets = try context.allocator.alloc(Packet, concurrency_max);
             errdefer context.allocator.free(context.packets);
 
             context.packets_free = .{};
@@ -191,6 +191,7 @@ pub fn ContextType(
         }
 
         pub fn deinit(self: *Context) void {
+            self.shutdown.store(true, .Monotonic);
             self.thread.deinit();
 
             self.client.deinit(self.allocator);
@@ -207,10 +208,20 @@ pub fn ContextType(
         }
 
         pub fn run(self: *Context) void {
-            // Keep running until shutdown and all placed packets have finished.
-            while (!self.thread.signal.is_shutdown() or
-                self.packets_free.get_count() < self.packets.len)
-            {
+            var drained_packets: u32 = 0;
+
+            while (true) {
+                // Keep running until shutdown:
+                const is_shutdown = self.shutdown.load(.Acquire);
+                if (is_shutdown) {
+                    // We need to drain all free packets, to ensure that all
+                    // inflight requests have finished.
+                    while (self.packets_free.pop() != null) {
+                        drained_packets += 1;
+                        if (drained_packets == self.packets.len) return;
+                    }
+                }
+
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
@@ -311,8 +322,9 @@ pub fn ContextType(
         fn on_acquire_packet(implementation: *ContextImplementation) ?*Packet {
             const context = get_context(implementation);
 
-            // During shutdown, no packet can be acquired.
-            return if (context.thread.signal.is_shutdown()) null else context.packets_free.pop();
+            // During shutdown, no packet can be acquired by the application.
+            const is_shutdown = context.shutdown.load(.Acquire);
+            return if (is_shutdown) null else context.packets_free.pop();
         }
 
         fn on_release_packet(implementation: *ContextImplementation, packet: *Packet) void {

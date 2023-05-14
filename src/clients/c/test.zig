@@ -177,7 +177,7 @@ test "c_client echo" {
 test "c_client tb_status" {
     const assert_status = struct {
         pub fn action(
-            packets_count: u32,
+            concurrency_max: u32,
             addresses: []const u8,
             expected_status: c_uint,
         ) !void {
@@ -189,7 +189,7 @@ test "c_client tb_status" {
                 cluster_id,
                 addresses.ptr,
                 @intCast(u32, addresses.len),
-                packets_count,
+                concurrency_max,
                 tb_context,
                 RequestContextType(0).on_complete,
             );
@@ -199,8 +199,7 @@ test "c_client tb_status" {
         }
     }.action;
 
-    // Valid addresses and packets count should return TB_STATUS_SUCCESS:
-    try assert_status(0, "3000", c.TB_STATUS_SUCCESS);
+    // Valid addresses and concurrency max should return TB_STATUS_SUCCESS:
     try assert_status(1, "3000", c.TB_STATUS_SUCCESS);
     try assert_status(32, "127.0.0.1", c.TB_STATUS_SUCCESS);
     try assert_status(128, "127.0.0.1:3000", c.TB_STATUS_SUCCESS);
@@ -219,9 +218,10 @@ test "c_client tb_status" {
         c.TB_STATUS_ADDRESS_LIMIT_EXCEEDED,
     );
 
-    // Packets count greater than 4096 should return "TB_STATUS_INVALID_PACKETS_COUNT":
-    try assert_status(4097, "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
-    try assert_status(std.math.maxInt(u32), "3000", c.TB_STATUS_PACKETS_COUNT_INVALID);
+    // ConcurrencyMax Zero or greater than 4096 should return "TB_STATUS_CONCURRENCY_MAX_INVALID":
+    try assert_status(0, "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
+    try assert_status(4097, "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
+    try assert_status(std.math.maxInt(u32), "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
 
     // All other status are not testable.
 }

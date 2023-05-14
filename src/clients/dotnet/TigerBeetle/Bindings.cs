@@ -694,7 +694,7 @@ namespace TigerBeetle
 
         AddressLimitExceeded = 4,
 
-        PacketsCountInvalid = 5,
+        ConcurrencyMaxInvalid = 5,
 
         SystemResources = 6,
 

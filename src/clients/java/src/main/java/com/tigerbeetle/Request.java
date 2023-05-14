@@ -70,7 +70,7 @@ abstract class Request<TResponse extends Batch> {
             throw new IllegalArgumentException("Empty batch");
     }
 
-    public void beginRequest() throws MaxConcurrencyExceededException {
+    public void beginRequest() throws ConcurrencyExceededException {
         nativeClient.submit(this);
     }
 

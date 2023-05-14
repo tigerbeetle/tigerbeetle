@@ -15,7 +15,7 @@ namespace TigerBeetle.Tests
             using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
             var request = new AsyncRequest<Account, UInt128>(nativeClient, TBOperation.LookupAccounts);
 
-            request.Submit(Array.Empty<UInt128>(), default);
+            request.Submit(Array.Empty<UInt128>());
             Assert.IsTrue(false);
         }
 
@@ -26,18 +26,7 @@ namespace TigerBeetle.Tests
             using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
             var request = new AsyncRequest<Account, UInt128>(nativeClient, TBOperation.LookupAccounts);
 
-            request.Submit((UInt128[])null!, default);
-            Assert.IsTrue(false);
-        }
-
-        [TestMethod]
-        [ExpectedException(typeof(AssertionException))]
-        public void NullPacket()
-        {
-            using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
-            var request = new AsyncRequest<Account, UInt128>(nativeClient, TBOperation.LookupAccounts);
-
-            request.Submit(new UInt128[] { 0 }, default);
+            request.Submit((UInt128[])null!);
             Assert.IsTrue(false);
         }
 

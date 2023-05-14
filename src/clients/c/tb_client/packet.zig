@@ -81,11 +81,6 @@ pub const Packet = extern struct {
     /// Thread-safe stack, `push` and `pop` can be called concurrently from the client threads.
     pub const ConcurrentStack = struct {
         head: Atomic(?*Packet) = Atomic(?*Packet).init(null),
-        count: Atomic(u32) = Atomic(u32).init(0),
-
-        pub inline fn get_count(self: *ConcurrentStack) u32 {
-            return self.count.load(.Monotonic);
-        }
 
         pub fn push(self: *ConcurrentStack, packet: *Packet) void {
             var head = self.head.load(.Monotonic);
@@ -98,8 +93,6 @@ pub const Packet = extern struct {
                     .Monotonic,
                 ) orelse break;
             }
-
-            _ = self.count.fetchAdd(1, .Monotonic);
         }
 
         pub fn pop(self: *ConcurrentStack) ?*Packet {
@@ -113,7 +106,6 @@ pub const Packet = extern struct {
                     .Monotonic,
                 ) orelse {
                     head.?.next = null;
-                    _ = self.count.fetchSub(1, .Monotonic);
                     return head;
                 };
             }
