@@ -1114,10 +1114,13 @@ public class IntegrationTest {
                     // Asserting that either the task succeeded or failed while waiting.
                     tasks[i].join();
 
-                    final var failed = tasks[i].exception != null
-                            && tasks[i].exception instanceof ConcurrencyExceededException;
                     final var succeeded =
                             tasks[i].result != null && tasks[i].result.getLength() == 0;
+
+                    // Can fail due to concurrency max or client closed.
+                    final var failed = tasks[i].exception != null
+                            && (tasks[i].exception instanceof ConcurrencyExceededException
+                                    || tasks[i].exception instanceof IllegalStateException);
 
                     assertTrue(failed || succeeded);
 

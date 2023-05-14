@@ -198,8 +198,11 @@ const JNIContext = struct {
         tb.tb_client_release_packet(self.client, packet);
     }
 
-    pub inline fn acquire_packet(self: *Self) ?*tb.tb_packet_t {
-        return tb.tb_client_acquire_packet(self.client);
+    pub inline fn acquire_packet(
+        self: *Self,
+        out_packet: *?*tb.tb_packet_t,
+    ) tb.tb_packet_acquire_status_t {
+        return tb.tb_client_acquire_packet(self.client, out_packet);
     }
 };
 
@@ -284,7 +287,7 @@ const NativeClient = struct {
         env: *jui.JNIEnv,
         context: *JNIContext,
         request_obj: jui.jobject,
-    ) bool {
+    ) tb.tb_packet_acquire_status_t {
         assert(request_obj != null);
 
         // Holds a global reference to prevent GC during the callback.
@@ -302,20 +305,24 @@ const NativeClient = struct {
             @panic("JNI: Request buffer cannot be null");
         };
 
-        var packet = context.acquire_packet() orelse {
-            // It is expected to not have any packet available here.
-            // The java side will throw the exception in this case.
-            return false;
-        };
-        packet.operation = ReflectionHelper.operation(env, request_obj);
-        packet.user_data = global_ref;
-        packet.data = buffer.ptr;
-        packet.data_size = @intCast(u32, buffer.len);
-        packet.next = null;
-        packet.status = .ok;
+        var out_packet: ?*tb.tb_packet_t = null;
+        const acquire_status = context.acquire_packet(&out_packet);
 
-        tb.tb_client_submit(context.client, packet);
-        return true;
+        if (out_packet) |packet| {
+            assert(acquire_status == .ok);
+            packet.operation = ReflectionHelper.operation(env, request_obj);
+            packet.user_data = global_ref;
+            packet.data = buffer.ptr;
+            packet.data_size = @intCast(u32, buffer.len);
+            packet.next = null;
+            packet.status = .ok;
+
+            tb.tb_client_submit(context.client, packet);
+        } else {
+            assert(acquire_status != .ok);
+        }
+
+        return acquire_status;
     }
 
     /// Completion callback.
@@ -411,16 +418,16 @@ const Exports = struct {
         class: jui.jclass,
         context_handle: jui.jlong,
         request_obj: jui.jobject,
-    ) callconv(.C) jui.jboolean {
+    ) callconv(.C) jui.jint {
         _ = class;
         assert(context_handle != 0);
-        const submitted = NativeClient.submit(
+        const packet_acquire_status = NativeClient.submit(
             env,
             @intToPtr(*JNIContext, @bitCast(usize, context_handle)),
             request_obj,
         );
 
-        return if (submitted) 1 else 0;
+        return @intCast(jui.jint, @enumToInt(packet_acquire_status));
     }
 };
 

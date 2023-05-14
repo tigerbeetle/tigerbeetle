@@ -102,14 +102,14 @@ test "c_client echo" {
     var tb_client: c.tb_client_t = undefined;
     const cluster_id = 0;
     const address = "3000";
-    const packets_count: u32 = constants.client_request_queue_max * 2;
+    const concurrency_max: u32 = constants.client_request_queue_max * 2;
     const tb_context: usize = 42;
     const result = c.tb_client_init_echo(
         &tb_client,
         cluster_id,
         address,
         @intCast(u32, address.len),
-        packets_count,
+        concurrency_max,
         tb_context,
         RequestContext.on_complete,
     );
@@ -119,7 +119,7 @@ test "c_client echo" {
 
     var prng = std.rand.DefaultPrng.init(tb_context);
 
-    var requests: []RequestContext = try testing.allocator.alloc(RequestContext, packets_count);
+    var requests: []RequestContext = try testing.allocator.alloc(RequestContext, concurrency_max);
     defer testing.allocator.free(requests);
 
     // Repeating the same test multiple times to stress the
@@ -127,7 +127,7 @@ test "c_client echo" {
     const repetitions_max = 100;
     var repetition: u32 = 0;
     while (repetition < repetitions_max) : (repetition += 1) {
-        var completion = Completion{ .pending = packets_count };
+        var completion = Completion{ .pending = concurrency_max };
 
         // Submitting some random data to be echoed back:
         for (requests) |*request| {
@@ -138,14 +138,20 @@ test "c_client echo" {
             prng.random().bytes(request.sent_data[0..request.sent_data_size]);
 
             request.packet = blk: {
-                var packet = @ptrCast(?*c.tb_packet_t, c.tb_client_acquire_packet(tb_client)) orelse unreachable;
-                packet.operation = create_accounts_operation;
-                packet.user_data = request;
-                packet.data = &request.sent_data;
-                packet.data_size = request.sent_data_size;
-                packet.next = null;
-                packet.status = c.TB_PACKET_OK;
-                break :blk packet;
+                var out_packet: ?*c.tb_packet_t = null;
+                const packet_acquire_status = c.tb_client_acquire_packet(tb_client, &out_packet);
+
+                if (out_packet) |packet| {
+                    try testing.expectEqual(@as(c_uint, c.TB_PACKET_ACQUIRE_OK), packet_acquire_status);
+
+                    packet.operation = create_accounts_operation;
+                    packet.user_data = request;
+                    packet.data = &request.sent_data;
+                    packet.data_size = request.sent_data_size;
+                    packet.next = null;
+                    packet.status = c.TB_PACKET_OK;
+                    break :blk packet;
+                } else unreachable;
             };
 
             c.tb_client_submit(tb_client, request.packet);
@@ -233,14 +239,14 @@ test "c_client tb_packet_status" {
     var tb_client: c.tb_client_t = undefined;
     const cluster_id = 0;
     const address = "3000";
-    const packets_count = 1;
+    const concurrency_max = 1;
     const tb_context: usize = 42;
     const result = c.tb_client_init_echo(
         &tb_client,
         cluster_id,
         address,
         @intCast(u32, address.len),
-        packets_count,
+        concurrency_max,
         tb_context,
         RequestContext.on_complete,
     );
@@ -264,14 +270,20 @@ test "c_client tb_packet_status" {
             };
 
             request.packet = blk: {
-                var packet = @ptrCast(?*c.tb_packet_t, c.tb_client_acquire_packet(client)) orelse unreachable;
-                packet.operation = operation;
-                packet.user_data = &request;
-                packet.data = &request.sent_data;
-                packet.data_size = request_size;
-                packet.next = null;
-                packet.status = c.TB_PACKET_OK;
-                break :blk packet;
+                var out_packet: ?*c.tb_packet_t = null;
+                const packet_acquire_status = c.tb_client_acquire_packet(client, &out_packet);
+
+                if (out_packet) |packet| {
+                    try testing.expectEqual(@as(c_uint, c.TB_PACKET_ACQUIRE_OK), packet_acquire_status);
+
+                    packet.operation = operation;
+                    packet.user_data = &request;
+                    packet.data = &request.sent_data;
+                    packet.data_size = request_size;
+                    packet.next = null;
+                    packet.status = c.TB_PACKET_OK;
+                    break :blk packet;
+                } else unreachable;
             };
             defer c.tb_client_release_packet(client, request.packet);
 

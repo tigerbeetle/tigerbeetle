@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 pub const tb_packet_t = @import("tb_client/packet.zig").Packet;
 pub const tb_packet_status_t = tb_packet_t.Status;
+pub const tb_packet_acquire_status_t = @import("tb_client/context.zig").PacketAcquireStatus;
 
 pub const tb_client_t = *anyopaque;
 pub const tb_status_t = enum(c_int) {
@@ -58,6 +59,10 @@ comptime {
     if (builtin.link_libc) {
         @export(tb_client_init, .{ .name = "tb_client_init", .linkage = .Strong });
         @export(tb_client_init_echo, .{ .name = "tb_client_init_echo", .linkage = .Strong });
+        @export(tb_client_acquire_packet, .{ .name = "tb_client_acquire_packet", .linkage = .Strong });
+        @export(tb_client_release_packet, .{ .name = "tb_client_release_packet", .linkage = .Strong });
+        @export(tb_client_submit, .{ .name = "tb_client_submit", .linkage = .Strong });
+        @export(tb_client_deinit, .{ .name = "tb_client_deinit", .linkage = .Strong });
     }
 }
 
@@ -147,32 +152,33 @@ fn init(
     return .success;
 }
 
-pub export fn tb_client_acquire_packet(
+pub fn tb_client_acquire_packet(
     client: tb_client_t,
-) ?*tb_packet_t {
+    out_packet: *?*tb_packet_t,
+) callconv(.C) tb_packet_acquire_status_t {
     const context = client_to_context(client);
-    return (context.acquire_packet_fn)(context);
+    return (context.acquire_packet_fn)(context, out_packet);
 }
 
-pub export fn tb_client_release_packet(
+pub fn tb_client_release_packet(
     client: tb_client_t,
     packet: *tb_packet_t,
-) void {
+) callconv(.C) void {
     const context = client_to_context(client);
     return (context.release_packet_fn)(context, packet);
 }
 
-pub export fn tb_client_submit(
+pub fn tb_client_submit(
     client: tb_client_t,
     packet: *tb_packet_t,
-) void {
+) callconv(.C) void {
     const context = client_to_context(client);
     (context.submit_fn)(context, packet);
 }
 
-pub export fn tb_client_deinit(
+pub fn tb_client_deinit(
     client: tb_client_t,
-) void {
+) callconv(.C) void {
     const context = client_to_context(client);
     (context.deinit_fn)(context);
 }

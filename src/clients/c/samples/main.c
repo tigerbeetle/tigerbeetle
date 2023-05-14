@@ -102,8 +102,7 @@ int main(int argc, char **argv) {
     accounts[1].ledger = 777;
     
     // Acquiring a packet for this request:
-    packet = tb_client_acquire_packet(client);
-    if (packet == NULL) {
+    if (tb_client_acquire_packet(client, &packet) != TB_PACKET_ACQUIRE_OK) {
         printf("Too many concurrent packets\n");
         exit(-1);
     }
@@ -166,8 +165,7 @@ int main(int argc, char **argv) {
         }
 
         // Acquiring a packet for this request:
-        packet = tb_client_acquire_packet(client);
-        if (packet == NULL) {
+        if (tb_client_acquire_packet(client, &packet) != TB_PACKET_ACQUIRE_OK) {
             printf("Too many concurrent packets\n");
             exit(-1);
         }
@@ -222,9 +220,8 @@ int main(int argc, char **argv) {
     printf("Looking up accounts ...\n");
     tb_uint128_t ids[ACCOUNTS_LEN] = { accounts[0].id, accounts[1].id };
     
-    // Acquiring a packet for this request:    
-    packet = tb_client_acquire_packet(client);
-    if (packet == NULL) {
+    // Acquiring a packet for this request:
+    if (tb_client_acquire_packet(client, &packet) != TB_PACKET_ACQUIRE_OK) {
         printf("Too many concurrent packets\n");
         exit(-1);
     }
