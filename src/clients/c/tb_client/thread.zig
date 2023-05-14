@@ -50,7 +50,6 @@ pub fn ThreadType(
         }
 
         pub fn deinit(self: *Self) void {
-            self.signal.shutdown();
             self.thread.join();
             self.signal.deinit();
 

@@ -1,6 +1,6 @@
 package com.tigerbeetle;
 
-public final class MaxConcurrencyExceededException extends Exception {
+public final class ConcurrencyExceededException extends Exception {
 
     @Override
     public String getMessage() {

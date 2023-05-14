@@ -142,11 +142,11 @@ public class IntegrationTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void testConstructorNegativeMaxConcurrency() throws Throwable {
+    public void testConstructorNegativeConcurrencyMax() throws Throwable {
 
         var replicaAddresses = new String[] {"3001"};
-        var maxConcurrency = -1;
-        try (var client = new Client(0, replicaAddresses, maxConcurrency)) {
+        var concurrencyMax = -1;
+        try (var client = new Client(0, replicaAddresses, concurrencyMax)) {
 
         } catch (Throwable any) {
             throw any;
@@ -939,14 +939,72 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that parallel threads will respect client's maxConcurrency.
+     * This test asserts that the client can handle parallel threads up to concurrencyMax.
      */
     @Test
     public void testConcurrentTasks() throws Throwable {
 
         try (var server = new Server()) {
 
-            // Defining a ratio between concurrent threads and client's maxConcurrency
+            final int tasks_qty = 32;
+            final int max_concurrency = 32;
+
+            try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
+
+                var errors = client.createAccounts(accounts);
+                assertTrue(errors.getLength() == 0);
+
+                var tasks = new TransferTask[tasks_qty];
+                for (int i = 0; i < tasks_qty; i++) {
+                    // Starting multiple threads submitting transfers.
+                    tasks[i] = new TransferTask(client);
+                    tasks[i].start();
+                }
+
+                // Wait for all threads:
+                for (int i = 0; i < tasks_qty; i++) {
+                    tasks[i].join();
+                    assertTrue(tasks[i].result.getLength() == 0);
+                }
+
+                // Asserting if all transfers were submitted correctly.
+                var lookupAccounts = client.lookupAccounts(accountIds);
+                assertEquals(2, lookupAccounts.getLength());
+
+                accounts.beforeFirst();
+
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals((long) (100 * tasks_qty), lookupAccounts.getCreditsPosted());
+                assertEquals(0L, lookupAccounts.getDebitsPosted());
+
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals((long) (100 * tasks_qty), lookupAccounts.getDebitsPosted());
+                assertEquals(0L, lookupAccounts.getCreditsPosted());
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+    /**
+     * This test asserts that parallel threads will respect client's concurrencyMax.
+     */
+    @Test
+    public void testConcurrencyExceeded() throws Throwable {
+
+        try (var server = new Server()) {
+
+            // Defining a ratio between concurrent threads and client's concurrencyMax
             // The goal here is to force to have more threads than the client can process
             // simultaneously.
             final int tasks_qty = 20;
@@ -969,8 +1027,10 @@ public class IntegrationTest {
                 for (int i = 0; i < tasks_qty; i++) {
                     tasks[i].join();
                     if (tasks[i].exception == null) {
-                        succeededCount += 1;
                         assertTrue(tasks[i].result.getLength() == 0);
+                        succeededCount += 1;
+                    } else {
+                        assertTrue(tasks[i].exception instanceof ConcurrencyExceededException);
                     }
                 }
 
@@ -1042,7 +1102,7 @@ public class IntegrationTest {
 
                 // And then close the client while several other threads are still working
                 // Some of them have already submitted the request, while others will fail
-                // due to the maxConcurrency limit.
+                // due to the concurrencyMax limit.
                 client.close();
 
                 int failedCount = 0;
@@ -1055,7 +1115,7 @@ public class IntegrationTest {
                     tasks[i].join();
 
                     final var failed = tasks[i].exception != null
-                            && tasks[i].exception instanceof MaxConcurrencyExceededException;
+                            && tasks[i].exception instanceof ConcurrencyExceededException;
                     final var succeeded =
                             tasks[i].result != null && tasks[i].result.getLength() == 0;
 
@@ -1082,14 +1142,14 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that async tasks will respect client's maxConcurrency.
+     * This test asserts that async tasks will respect client's concurrencyMax.
      */
     @Test
     public void testAsyncTasks() throws Throwable {
 
         try (var server = new Server()) {
 
-            // Defining the maxConcurrency greater than tasks_qty
+            // Defining the concurrencyMax greater than tasks_qty
             // The goal here is to allow to all requests being submitted at once simultaneously
             final int tasks_qty = 100;
 
@@ -1153,7 +1213,6 @@ public class IntegrationTest {
     }
 
     private static void assertAccounts(AccountBatch account1, AccountBatch account2) {
-
         assertArrayEquals(account1.getId(), account2.getId());
         assertArrayEquals(account1.getUserData(), account2.getUserData());
         assertEquals(account1.getLedger(), account2.getLedger());
@@ -1175,7 +1234,6 @@ public class IntegrationTest {
     }
 
     private static class TransferTask extends Thread {
-
         public final Client client;
         public CreateTransferResultBatch result;
         public Throwable exception;

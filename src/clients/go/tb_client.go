@@ -62,11 +62,11 @@ type c_client struct {
 func NewClient(
 	clusterID uint32,
 	addresses []string,
-	maxConcurrency uint,
+	concurrencyMax uint,
 ) (Client, error) {
 	// Cap the maximum amount of packets
-	if maxConcurrency > 4096 {
-		maxConcurrency = 4096
+	if concurrencyMax > 4096 {
+		concurrencyMax = 4096
 	}
 
 	// Allocate a cstring of the addresses joined with ","
@@ -84,7 +84,7 @@ func NewClient(
 		C.uint32_t(clusterID),
 		c_addresses,
 		C.uint32_t(len(addresses_raw)),
-		C.uint32_t(maxConcurrency),
+		C.uint32_t(concurrencyMax),
 		C.uintptr_t(0), // on_completion_ctx
 		(*[0]byte)(C.onGoPacketCompletion),
 	)
@@ -99,7 +99,7 @@ func NewClient(
 			return nil, errors.ErrInvalidAddress{}
 		case C.TB_STATUS_ADDRESS_LIMIT_EXCEEDED:
 			return nil, errors.ErrAddressLimitExceeded{}
-		case C.TB_STATUS_PACKETS_COUNT_INVALID:
+		case C.TB_STATUS_CONCURRENCY_MAX_INVALID:
 			// We limit the concurrency above so this means we're out-of-sync with tb_client.
 			panic("tb_client_init(): invalid client concurrency")
 		case C.TB_STATUS_SYSTEM_RESOURCES:
@@ -113,8 +113,8 @@ func NewClient(
 
 	c := &c_client{
 		tb_client:    tb_client,
-		max_requests: uint32(maxConcurrency),
-		requests:     make(chan *request, int(maxConcurrency)),
+		max_requests: uint32(concurrencyMax),
+		requests:     make(chan *request, int(concurrencyMax)),
 	}
 
 	// Fill the client requests with available packets we received on creation

@@ -10,34 +10,34 @@ final class NativeClient {
     private volatile long contextHandle;
 
     public static NativeClient init(final int clusterID, final String addresses,
-            final int maxConcurrency) {
-        assertArgs(clusterID, addresses, maxConcurrency);
-        final long contextHandle = clientInit(clusterID, addresses, maxConcurrency);
+            final int concurrencyMax) {
+        assertArgs(clusterID, addresses, concurrencyMax);
+        final long contextHandle = clientInit(clusterID, addresses, concurrencyMax);
         return new NativeClient(contextHandle);
     }
 
     public static NativeClient initEcho(final int clusterID, final String addresses,
-            final int maxConcurrency) {
-        assertArgs(clusterID, addresses, maxConcurrency);
-        final long contextHandle = clientInitEcho(clusterID, addresses, maxConcurrency);
+            final int concurrencyMax) {
+        assertArgs(clusterID, addresses, concurrencyMax);
+        final long contextHandle = clientInitEcho(clusterID, addresses, concurrencyMax);
         return new NativeClient(contextHandle);
     }
 
     private static void assertArgs(final int clusterID, final String addresses,
-            final int maxConcurrency) {
+            final int concurrencyMax) {
         assertTrue(clusterID >= 0, "ClusterID must be positive");
         assertTrue(addresses != null, "Replica addresses cannot be null");
-        assertTrue(maxConcurrency > 0, "Invalid maxConcurrency");
+        assertTrue(concurrencyMax > 0, "Invalid concurrencyMax");
     }
 
     private NativeClient(final long contextHandle) {
         this.contextHandle = contextHandle;
     }
 
-    public void submit(final Request<?> request) throws MaxConcurrencyExceededException {
+    public void submit(final Request<?> request) throws ConcurrencyExceededException {
         final var submitted = submit(contextHandle, request);
         if (!submitted)
-            throw new MaxConcurrencyExceededException();
+            throw new ConcurrencyExceededException();
     }
 
     public void close() throws Exception {
@@ -51,9 +51,9 @@ final class NativeClient {
 
     private static native boolean submit(long contextHandle, Request<?> request);
 
-    private static native long clientInit(int clusterID, String addresses, int maxConcurrency);
+    private static native long clientInit(int clusterID, String addresses, int concurrencyMax);
 
-    private static native long clientInitEcho(int clusterID, String addresses, int maxConcurrency);
+    private static native long clientInitEcho(int clusterID, String addresses, int concurrencyMax);
 
     private static native void clientDeinit(long contextHandle);
 }

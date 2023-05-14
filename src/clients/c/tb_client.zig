@@ -11,7 +11,7 @@ pub const tb_status_t = enum(c_int) {
     out_of_memory,
     address_invalid,
     address_limit_exceeded,
-    packets_count_invalid,
+    concurrency_max_invalid,
     system_resources,
     network_subsystem,
 };
@@ -138,7 +138,7 @@ fn init(
         error.OutOfMemory => return .out_of_memory,
         error.AddressInvalid => return .address_invalid,
         error.AddressLimitExceeded => return .address_limit_exceeded,
-        error.PacketsCountInvalid => return .packets_count_invalid,
+        error.ConcurrencyMaxInvalid => return .concurrency_max_invalid,
         error.SystemResources => return .system_resources,
         error.NetworkSubsystemFailed => return .network_subsystem,
     };

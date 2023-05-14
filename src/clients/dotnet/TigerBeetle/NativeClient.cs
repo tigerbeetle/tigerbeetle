@@ -42,25 +42,25 @@ namespace TigerBeetle
             return Encoding.UTF8.GetBytes(string.Join(',', addresses) + "\0");
         }
 
-        public static NativeClient Init(uint clusterID, string[] addresses, int maxConcurrency)
+        public static NativeClient Init(uint clusterID, string[] addresses, int concurrencyMax)
         {
             unsafe
             {
-                return CallInit(tb_client_init, clusterID, addresses, maxConcurrency);
+                return CallInit(tb_client_init, clusterID, addresses, concurrencyMax);
             }
         }
 
-        public static NativeClient InitEcho(uint clusterID, string[] addresses, int maxConcurrency)
+        public static NativeClient InitEcho(uint clusterID, string[] addresses, int concurrencyMax)
         {
             unsafe
             {
-                return CallInit(tb_client_init_echo, clusterID, addresses, maxConcurrency);
+                return CallInit(tb_client_init_echo, clusterID, addresses, concurrencyMax);
             }
         }
 
-        private static NativeClient CallInit(InitFunction initFunction, uint clusterID, string[] addresses, int maxConcurrency)
+        private static NativeClient CallInit(InitFunction initFunction, uint clusterID, string[] addresses, int concurrencyMax)
         {
-            if (maxConcurrency <= 0) throw new ArgumentException("Max concurrency must be positive", nameof(maxConcurrency));
+            if (concurrencyMax <= 0) throw new ArgumentException("Concurrency must be positive", nameof(concurrencyMax));
 
             var addresses_byte = GetBytes(addresses);
             unsafe
@@ -74,7 +74,7 @@ namespace TigerBeetle
                         clusterID,
                         addressPtr,
                         (uint)addresses_byte.Length - 1,
-                        (uint)maxConcurrency,
+                        (uint)concurrencyMax,
                         IntPtr.Zero,
 #if NETSTANDARD
                         OnCompletionHandler
@@ -93,10 +93,8 @@ namespace TigerBeetle
             where TResult : unmanaged
             where TBody : unmanaged
         {
-            var packet = AcquirePacket();
             var blockingRequest = new BlockingRequest<TResult, TBody>(this, operation);
-
-            blockingRequest.Submit(batch, packet);
+            blockingRequest.Submit(batch);
             return blockingRequest.Wait();
         }
 
@@ -104,10 +102,8 @@ namespace TigerBeetle
             where TResult : unmanaged
             where TBody : unmanaged
         {
-            var packet = AcquirePacket();
             var asyncRequest = new AsyncRequest<TResult, TBody>(this, operation);
-
-            asyncRequest.Submit(batch, packet);
+            asyncRequest.Submit(batch);
             return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
         }
 
@@ -141,7 +137,7 @@ namespace TigerBeetle
             unsafe
             {
                 var packet = tb_client_acquire_packet(client);
-                if (packet == null) throw new MaxConcurrencyExceededException();
+                if (packet == null) throw new ConcurrencyExceededException();
 
                 return new Packet(packet);
             }

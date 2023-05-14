@@ -2,9 +2,9 @@ using System;
 
 namespace TigerBeetle
 {
-    public sealed class MaxConcurrencyExceededException : Exception
+    public sealed class ConcurrencyExceededException : Exception
     {
-        internal MaxConcurrencyExceededException()
+        internal ConcurrencyExceededException()
         {
         }
 
