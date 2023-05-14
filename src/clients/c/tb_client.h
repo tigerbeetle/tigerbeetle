@@ -161,6 +161,12 @@ typedef enum TB_PACKET_STATUS {
     TB_PACKET_INVALID_DATA_SIZE = 3,
 } TB_PACKET_STATUS;
 
+typedef enum TB_PACKET_ACQUIRE_STATUS {
+    TB_PACKET_ACQUIRE_OK = 0,
+    TB_PACKET_ACQUIRE_CONCURRENCY_MAX_EXCEEDED = 1,
+    TB_PACKET_ACQUIRE_SHUTDOWN = 2,
+} TB_PACKET_ACQUIRE_STATUS;
+
 typedef struct tb_packet_t {
     struct tb_packet_t* next;
     void* user_data;
@@ -203,8 +209,9 @@ TB_STATUS tb_client_init_echo(
     void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
 );
 
-tb_packet_t* tb_client_acquire_packet(
-    tb_client_t client
+TB_PACKET_ACQUIRE_STATUS tb_client_acquire_packet(
+    tb_client_t client,
+    tb_packet_t** out_packet
 );
 
 void tb_client_release_packet(

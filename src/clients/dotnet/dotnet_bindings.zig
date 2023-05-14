@@ -81,6 +81,10 @@ const type_mappings = .{
         .name = "PacketStatus",
         .visibility = .public,
     } },
+    .{ tb_client.tb_packet_acquire_status_t, TypeMapping{
+        .name = "PacketAcquireStatus",
+        .visibility = .internal,
+    } },
     .{ tb_client.tb_operation_t, TypeMapping{
         .name = "TBOperation",
         .visibility = .internal,
@@ -458,8 +462,9 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        );
         \\
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\        public static unsafe extern TBPacket* tb_client_acquire_packet(
-        \\            IntPtr client
+        \\        public static unsafe extern PacketAcquireStatus tb_client_acquire_packet(
+        \\            IntPtr client,
+        \\            TBPacket** out_packet
         \\        );
         \\
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

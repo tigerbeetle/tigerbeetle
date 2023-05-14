@@ -35,21 +35,31 @@ final class NativeClient {
     }
 
     public void submit(final Request<?> request) throws ConcurrencyExceededException {
-        final var submitted = submit(contextHandle, request);
-        if (!submitted)
+        final var packet_acquire_status = submit(contextHandle, request);
+        if (packet_acquire_status == PacketAcquireStatus.ConcurrencyMaxExceeded.value) {
             throw new ConcurrencyExceededException();
+        } else if (packet_acquire_status == PacketAcquireStatus.Shutdown.value) {
+            throw new IllegalStateException("Client is closed");
+        } else {
+            assertTrue(packet_acquire_status == PacketAcquireStatus.Ok.value,
+                    "PacketAcquireStatus=%d is not implemented", packet_acquire_status);
+        }
     }
 
     public void close() throws Exception {
 
         if (contextHandle != 0) {
-            // Deinit and signalize that this client is closed by setting the handles to 0
-            clientDeinit(contextHandle);
-            contextHandle = 0;
+            synchronized (this) {
+                if (contextHandle != 0) {
+                    // Deinit and signalize that this client is closed by setting the handles to 0.
+                    clientDeinit(contextHandle);
+                    contextHandle = 0;
+                }
+            }
         }
     }
 
-    private static native boolean submit(long contextHandle, Request<?> request);
+    private static native int submit(long contextHandle, Request<?> request);
 
     private static native long clientInit(int clusterID, String addresses, int concurrencyMax);
 

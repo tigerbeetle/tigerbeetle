@@ -27,7 +27,7 @@ const tb_client_t = api.tb_client_t;
 const tb_completion_t = api.tb_completion_t;
 
 pub const ContextImplementation = struct {
-    acquire_packet_fn: fn (*ContextImplementation) ?*Packet,
+    acquire_packet_fn: fn (*ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus,
     release_packet_fn: fn (*ContextImplementation, *Packet) void,
     submit_fn: fn (*ContextImplementation, *Packet) void,
     deinit_fn: fn (*ContextImplementation) void,
@@ -40,6 +40,12 @@ pub const Error = std.mem.Allocator.Error || error{
     ConcurrencyMaxInvalid,
     SystemResources,
     NetworkSubsystemFailed,
+};
+
+pub const PacketAcquireStatus = enum(c_int) {
+    ok = 0,
+    concurrency_max_exceeded,
+    shutdown,
 };
 
 pub fn ContextType(
@@ -191,16 +197,18 @@ pub fn ContextType(
         }
 
         pub fn deinit(self: *Context) void {
-            self.shutdown.store(true, .Monotonic);
-            self.thread.deinit();
+            const is_shutdown = self.shutdown.swap(true, .Monotonic);
+            if (!is_shutdown) {
+                self.thread.deinit();
 
-            self.client.deinit(self.allocator);
-            self.message_pool.deinit(self.allocator);
-            self.io.deinit();
+                self.client.deinit(self.allocator);
+                self.message_pool.deinit(self.allocator);
+                self.io.deinit();
 
-            self.allocator.free(self.addresses);
-            self.allocator.free(self.packets);
-            self.allocator.destroy(self);
+                self.allocator.free(self.addresses);
+                self.allocator.free(self.packets);
+                self.allocator.destroy(self);
+            }
         }
 
         pub fn tick(self: *Context) void {
@@ -319,12 +327,19 @@ pub fn ContextType(
             return @fieldParentPtr(Context, "implementation", implementation);
         }
 
-        fn on_acquire_packet(implementation: *ContextImplementation) ?*Packet {
+        fn on_acquire_packet(implementation: *ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus {
             const context = get_context(implementation);
 
             // During shutdown, no packet can be acquired by the application.
             const is_shutdown = context.shutdown.load(.Acquire);
-            return if (is_shutdown) null else context.packets_free.pop();
+            if (is_shutdown) {
+                return .shutdown;
+            } else if (context.packets_free.pop()) |packet| {
+                out_packet.* = packet;
+                return .ok;
+            } else {
+                return .concurrency_max_exceeded;
+            }
         }
 
         fn on_release_packet(implementation: *ContextImplementation, packet: *Packet) void {

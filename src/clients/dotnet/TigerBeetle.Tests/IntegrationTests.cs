@@ -819,9 +819,11 @@ namespace TigerBeetle.Tests
             }
             catch { }
 
-            // It's expected for some tasks to failt with ConcurrencyExceededException:
+            // It's expected for some tasks to failt with ConcurrencyExceededException or ObjectDisposedException:
             var successCount = list.Count(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok);
-            var failedCount = list.Count(x => x.IsFaulted && AssertException<ConcurrencyExceededException>(x.Exception!));
+            var failedCount = list.Count(x => x.IsFaulted &&
+                (AssertException<ConcurrencyExceededException>(x.Exception!) ||
+                AssertException<ObjectDisposedException>(x.Exception!)));
             Assert.IsTrue(successCount > 0);
             Assert.IsTrue(failedCount > 0);
 

@@ -132,14 +132,22 @@ namespace TigerBeetle
 
         public Packet AcquirePacket()
         {
-            if (client == IntPtr.Zero) throw new ObjectDisposedException("Client is closed");
-
             unsafe
             {
-                var packet = tb_client_acquire_packet(client);
-                if (packet == null) throw new ConcurrencyExceededException();
-
-                return new Packet(packet);
+                TBPacket* packet;
+                var status = tb_client_acquire_packet(client, &packet);
+                switch (status)
+                {
+                    case PacketAcquireStatus.Ok:
+                        AssertTrue(packet != null);
+                        return new Packet(packet);
+                    case PacketAcquireStatus.ConcurrencyMaxExceeded:
+                        throw new ConcurrencyExceededException();
+                    case PacketAcquireStatus.Shutdown:
+                        throw new ObjectDisposedException("Client is closed");
+                    default:
+                        throw new NotImplementedException();
+                }
             }
         }
 

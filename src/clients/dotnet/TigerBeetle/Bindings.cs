@@ -714,6 +714,16 @@ namespace TigerBeetle
 
     }
 
+    internal enum PacketAcquireStatus : uint
+    {
+        Ok = 0,
+
+        ConcurrencyMaxExceeded = 1,
+
+        Shutdown = 2,
+
+    }
+
     internal enum TBOperation : byte
     {
         CreateAccounts = 128,
@@ -792,8 +802,9 @@ namespace TigerBeetle
         );
 
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        public static unsafe extern TBPacket* tb_client_acquire_packet(
-            IntPtr client
+        public static unsafe extern PacketAcquireStatus tb_client_acquire_packet(
+            IntPtr client,
+            TBPacket** out_packet
         );
 
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

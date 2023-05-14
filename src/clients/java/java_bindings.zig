@@ -12,6 +12,7 @@ const TypeMapping = struct {
     private_fields: []const []const u8 = &.{},
     readonly_fields: []const []const u8 = &.{},
     docs_link: ?[]const u8 = null,
+    visibility: enum { public, internal } = .public,
 
     pub fn is_private(comptime self: @This(), name: []const u8) bool {
         inline for (self.private_fields) |field| {
@@ -74,6 +75,10 @@ const type_mappings = .{
     } },
     .{ tb_client.tb_packet_status_t, TypeMapping{
         .name = "PacketStatus",
+    } },
+    .{ tb_client.tb_packet_acquire_status_t, TypeMapping{
+        .name = "PacketAcquireStatus",
+        .visibility = .internal,
     } },
 };
 
@@ -160,9 +165,10 @@ fn emit_enum(
         \\{[notice]s}
         \\package com.tigerbeetle;
         \\
-        \\public enum {[name]s} {{
+        \\{[visibility]s}enum {[name]s} {{
         \\
     , .{
+        .visibility = if (mapping.visibility == .internal) @as([]const u8, "") else "public ",
         .notice = auto_generated_code_notice,
         .name = mapping.name,
     });
@@ -230,10 +236,11 @@ fn emit_packed_enum(
         \\{[notice]s}
         \\package com.tigerbeetle;
         \\
-        \\public interface {[name]s} {{
+        \\{[visibility]s}interface {[name]s} {{
         \\    {[int_type]s} NONE = ({[int_type]s}) 0;
         \\
     , .{
+        .visibility = if (mapping.visibility == .internal) @as([]const u8, "") else "public ",
         .notice = auto_generated_code_notice,
         .name = mapping.name,
         .int_type = int_type,
@@ -323,13 +330,14 @@ fn emit_batch(
         \\
         \\import java.nio.ByteBuffer;
         \\
-        \\public final class {[name]s} extends Batch {{
+        \\{[visibility]s}final class {[name]s} extends Batch {{
         \\
         \\    interface Struct {{
         \\        int SIZE = {[size]d};
         \\
         \\
     , .{
+        .visibility = if (mapping.visibility == .internal) @as([]const u8, "") else "public ",
         .notice = auto_generated_code_notice,
         .name = mapping.name,
         .size = size,
