@@ -109,6 +109,8 @@ pub const Docs = struct {
 
     linked_events_example: Code,
 
+    developer_setup_documentation: Markdown,
+
     developer_setup_sh_commands: Code,
     developer_setup_pwsh_commands: Code,
 

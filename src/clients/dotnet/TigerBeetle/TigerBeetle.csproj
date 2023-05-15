@@ -13,10 +13,10 @@
     <OS Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</OS>
   </PropertyGroup>
   <Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="'$(OS)'=='Windows'">
-    <Exec Command=".\zig\zig.exe build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)\..\..\..\.." />
+    <Exec Command=".\scripts\build.bat dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)\..\..\..\.." />
   </Target>
   <Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="'$(OS)'!='Windows'">
-    <Exec Command="zig/zig build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../../.." />
+    <Exec Command="./scripts/build.sh dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../../.." />
   </Target>
   <ItemGroup>
     <Content Include="runtimes\**\*.so">
