@@ -143,6 +143,10 @@ pub fn main() !void {
         \\
         \\#ifndef TB_CLIENT_H
         \\#define TB_CLIENT_H
+        \\
+        \\#ifdef __cplusplus
+        \\extern "C" {{
+        \\#endif
         \\ 
         \\#include <stddef.h>
         \\#include <stdint.h>
@@ -217,6 +221,13 @@ pub fn main() !void {
         \\
     , .{});
 
-    try buffer.writer().print("#endif // TB_CLIENT_H\n\n", .{});
+    try buffer.writer().print(
+        \\#ifdef __cplusplus
+        \\}} // extern "C"
+        \\#endif
+        \\
+        \\#endif // TB_CLIENT_H
+        \\
+    , .{});
     try std.fs.cwd().writeFile("src/clients/c/tb_client.h", buffer.items);
 }
