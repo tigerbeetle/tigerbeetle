@@ -75,7 +75,7 @@ jobs:
 
   prepare_validation_tests:
     if: inputs.version == ''
-    needs: build
+    needs: build_and_publish
     runs-on: ubuntu-latest
     name: Prepare validation tests
 
@@ -176,7 +176,7 @@ jobs:
 
   samples_integration_test:
     if: inputs.version == ''
-    needs: build
+    needs: build_and_publish
 
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
