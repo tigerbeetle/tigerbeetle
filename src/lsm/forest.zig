@@ -164,6 +164,12 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                             forest.join_pending -= 1;
                             if (forest.join_pending > 0) return;
 
+                            if (join_op == .compacting) {
+                                inline for (std.meta.fields(Grooves)) |field| {
+                                    @field(forest.grooves, field.name).compact_end();
+                                }
+                            }
+
                             if (join_op == .checkpoint) {
                                 if (Storage == @import("../testing/storage.zig").Storage) {
                                     // We should have finished all checkpoint io by now.

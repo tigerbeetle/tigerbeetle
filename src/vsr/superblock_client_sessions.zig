@@ -257,7 +257,6 @@ pub const ClientSessions = struct {
         var entries = client_sessions.iterator();
         while (entries.next()) |entry| : (iterated += 1) {
             assert(entry.header.command == .reply);
-            assert(entry.header.context == 0);
             assert(entry.header.op == entry.header.commit);
             assert(entry.header.commit >= entry.session);
 

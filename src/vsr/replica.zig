@@ -2523,7 +2523,8 @@ pub fn ReplicaType(
                     self.do_view_change_from_all_replicas[message.header.replica] = message.ref();
                 } else if (m.header.timestamp != message.header.timestamp or
                     m.header.commit != message.header.commit or
-                    m.header.context != message.header.context)
+                    m.header.context != message.header.context or
+                    m.header.client != message.header.client)
                 {
                     log.debug("{}: on_{s}: ignoring (older message replica={})", .{
                         self.replica,
