@@ -23,6 +23,12 @@ pub const DotnetDocs = Docs{
 
     .prerequisites = 
     \\* .NET >= 6.0
+    \\And if you do not already have NuGet.org as a package
+    \\source, make sure to add it:
+    \\
+    \\```console
+    \\dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
+    \\```
     ,
 
     .project_file_name = "Test.csproj",
@@ -60,7 +66,6 @@ pub const DotnetDocs = Docs{
 
     .install_commands = "",
     .build_commands = 
-    \\dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
     \\dotnet restore
     \\dotnet clean
     \\dotnet build
@@ -278,13 +283,7 @@ pub const DotnetDocs = Docs{
     \\// error handling omitted
     ,
 
-    .developer_setup_documentation = 
-    \\If you do not already have NuGet.org as a package source, make sure to add it:
-    \\
-    \\```console
-    \\dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
-    \\```
-    ,
+    .developer_setup_documentation = "",
 
     .developer_setup_sh_commands = 
     \\cd src/clients/dotnet
