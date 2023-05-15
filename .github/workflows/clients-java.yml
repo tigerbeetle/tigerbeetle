@@ -19,7 +19,7 @@ on:
         type: string
 
 jobs:
-  build:
+  build_and_publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -143,6 +143,7 @@ jobs:
       run: |
         cd test
         java -cp "./*" Main.java
+
   run_validation_tests_on_containers:
     if: inputs.version == ''
     needs: prepare_validation_tests
@@ -225,6 +226,8 @@ jobs:
     - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language java --sample ${{ matrix.sample }}
 
   docs:
+    if: inputs.version == ''
+
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read

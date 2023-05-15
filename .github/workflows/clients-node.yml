@@ -70,7 +70,7 @@ jobs:
 
   publish:
     if: inputs.version != ''
-    needs: [test_install, samples_integration_test]
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
