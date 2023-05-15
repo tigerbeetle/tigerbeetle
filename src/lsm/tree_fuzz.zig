@@ -233,6 +233,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.fuzzing, .tree_compact);
             env.tree.compact(tree_compact_callback, op);
             env.tick_until_state_change(.tree_compact, .fuzzing);
+            env.tree.compact_end();
         }
 
         fn tree_compact_callback(tree: *Tree) void {

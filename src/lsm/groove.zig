@@ -962,7 +962,7 @@ pub fn GrooveType(
             const Join = JoinType(.compacting);
             Join.start(groove, callback);
 
-            // Compact the ObjectTree and IdTree
+            // Compact the ObjectTree and IdTree.
             if (has_id) groove.ids.compact(Join.tree_callback(.ids), op);
             groove.objects.compact(Join.tree_callback(.objects), op);
 
@@ -970,6 +970,17 @@ pub fn GrooveType(
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const compact_callback = Join.tree_callback(.{ .index = field.name });
                 @field(groove.indexes, field.name).compact(compact_callback, op);
+            }
+        }
+
+        pub fn compact_end(groove: *Groove) void {
+            assert(groove.join_callback == null);
+
+            if (has_id) groove.ids.compact_end();
+            groove.objects.compact_end();
+
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                @field(groove.indexes, field.name).compact_end();
             }
         }
 

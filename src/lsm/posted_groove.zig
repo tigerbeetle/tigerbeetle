@@ -345,6 +345,11 @@ pub fn PostedGrooveType(comptime Storage: type, value_count_max: usize) type {
             groove.tree.compact(tree_callback, op);
         }
 
+        pub fn compact_end(groove: *PostedGroove) void {
+            assert(groove.callback == null);
+            groove.tree.compact_end();
+        }
+
         pub fn checkpoint(groove: *PostedGroove, callback: fn (*PostedGroove) void) void {
             assert(groove.callback == null);
             groove.callback = callback;

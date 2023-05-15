@@ -82,20 +82,26 @@ pub fn StorageCheckerType(comptime Replica: type) type {
         }
 
         pub fn replica_compact(checker: *Self, replica: *const Replica) !void {
-            // TODO(Beat Compaction) Remove when deterministic beat compaction is fixed.
-            // Until then this is too noisy.
-            if (1 == 1) return;
-
             // If we are recovering from a crash, don't test the checksum until we are caught up.
             // Until then our grid's checksum is too far ahead.
             if (replica.superblock.working.vsr_state.op_compacted(replica.commit_min)) return;
 
-            // TODO(Beat Compaction) Remove when deterministic beat compaction is implemented.
             const half_measure_beat_count = @divExact(constants.lsm_batch_multiple, 2);
             if ((replica.commit_min + 1) % half_measure_beat_count != 0) return;
 
+            // TODO(Unified Manifest) The issue is:
+            // 1. Open manifest log blocks are acquired from the freeset but not written yet.
+            // 2. We can't defer acquiring manifest log block addresses until close-time.
+            //    This is because `append()` needs the block address in order to update the
+            //    superblock manifest table extents.
+            // 3. We can't defer the superblock manifest table extent updates because then they
+            //    would be out of order with respect to the table extent *removes* performed
+            //    during manifest compaction.
+            // Hopefully with a unified manifest another approach will open up.
+            if (1 == 1) return;
+
             const checksum = checksum_grid(replica);
-            log.debug("{}: replica_compact: op={} area=grid checksum={}", .{
+            log.debug("{}: replica_compact: op={} area=grid checksum={x:>32}", .{
                 replica.replica,
                 replica.commit_min,
                 checksum,
@@ -108,7 +114,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             } else {
                 const checksum_expect = checker.compactions.items[compactions_index];
                 if (checksum_expect != checksum) {
-                    log.err("{}: replica_compact: mismatch area=grid expect={} actual={}", .{
+                    log.err("{}: replica_compact: mismatch area=grid expect={x:>32} actual={x:>32}", .{
                         replica.replica,
                         checksum_expect,
                         checksum,
@@ -127,10 +133,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 .checksum_superblock_free_set = 0,
                 .checksum_superblock_client_sessions = 0,
                 .checksum_client_replies = checksum_client_replies(storage),
-                // TODO(Beat Compaction) Enable grid check when deterministic storage is fixed.
-                // Until then this is too noisy.
-                // checksum_grid(replica),
-                .checksum_grid = 0,
+                .checksum_grid = checksum_grid(replica),
             };
 
             inline for (.{ .manifest, .free_set, .client_sessions }) |trailer| {
@@ -144,7 +147,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             }
 
             inline for (std.meta.fields(Checkpoint)) |field| {
-                log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={}", .{
+                log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={x:>32}", .{
                     replica.replica,
                     replica.op_checkpoint(),
                     field.name,
@@ -164,7 +167,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 const field_expect = @field(checkpoint_expect, field.name);
                 if (!std.meta.eql(field_expect, field_actual)) {
                     fail = true;
-                    log.debug("{}: replica_checkpoint: mismatch area={s} expect={} actual={}", .{
+                    log.err("{}: replica_checkpoint: mismatch area={s} expect={x:>32} actual={x:>32}", .{
                         replica.replica,
                         field.name,
                         @field(checkpoint_expect, field.name),
@@ -183,7 +186,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
 
         fn checksum_grid(replica: *const Replica) u128 {
             const storage = replica.superblock.storage;
-            var acquired = replica.superblock.free_set.blocks.iterator(.{ .kind = .unset });
+            var acquired = replica.superblock.free_set.blocks.iterator(.{});
             var checksum: u128 = 0;
             while (acquired.next()) |address_index| {
                 const block = storage.grid_block(address_index + 1);
