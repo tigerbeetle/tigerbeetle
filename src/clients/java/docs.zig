@@ -502,6 +502,8 @@ pub const JavaDocs = Docs{
     \\transferErrors = client.createTransfers(transfers);
     ,
 
+    .developer_setup_documentation = "",
+
     .developer_setup_sh_commands = 
     \\cd src/clients/java
     \\./scripts/install.sh

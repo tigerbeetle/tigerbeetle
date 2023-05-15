@@ -486,6 +486,8 @@ pub const NodeDocs = Docs{
     \\ */
     ,
 
+    .developer_setup_documentation = "",
+
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_sh_commands = 
