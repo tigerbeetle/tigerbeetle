@@ -13,6 +13,10 @@ on:
         required: true
       MAVEN_GPG_SECRET_KEY_PASSWORD:
         required: true
+    inputs:
+      version:
+        required: false
+        type: string
 
 jobs:
   build:
@@ -59,18 +63,18 @@ jobs:
           !src/clients/java/target/*javadoc.jar
           !src/clients/java/target/*sources.jar
     - name: Publish to the Maven Central Repository
-      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      if: inputs.version != ''
       working-directory: src/clients/java
       run: |
-        mvn -B versions:set -DnewVersion=$BASE_VERSION-$(git rev-list --count HEAD) --file pom.xml
+        mvn -B versions:set -DnewVersion=${{ inputs.version }} --file pom.xml
         mvn -B clean deploy -Dmaven.test.skip --file pom.xml -s $GITHUB_WORKSPACE/settings.xml
       env:
-        BASE_VERSION: 0.0.1
         MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
         MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
         MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
 
   prepare_validation_tests:
+    if: inputs.version == ''
     needs: build
     runs-on: ubuntu-latest
     name: Prepare validation tests
@@ -113,6 +117,7 @@ jobs:
         path: test/*.*
 
   run_validation_tests:
+    if: inputs.version == ''
     needs: prepare_validation_tests
     name: Validate on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -139,6 +144,7 @@ jobs:
         cd test
         java -cp "./*" Main.java
   run_validation_tests_on_containers:
+    if: inputs.version == ''
     needs: prepare_validation_tests
     runs-on: ubuntu-latest
     name: Validate on ${{ matrix.image }}
@@ -168,6 +174,7 @@ jobs:
         docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java
 
   samples_integration_test:
+    if: inputs.version == ''
     needs: build
 
     # We use self hosted runners for M1 here. See macos.yml for an explaination

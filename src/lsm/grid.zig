@@ -731,8 +731,8 @@ pub fn GridType(comptime Storage: type) type {
         ///
         /// Even though this block is the block we expected to read, we can't safely
         /// cache this result:
-        /// 1. Replica A write block X₁ to address X.
-        /// 2. Replica A write block X₂ to address X (write is lost/misdirected).
+        /// 1. Replica A writes block X₁ to address X.
+        /// 2. Replica A writes block X₂ to address X (write is lost/misdirected).
         /// 3. Replica B requests block X₁ from replica A.
         /// It is safe for A to send back X₁, but A must not allow it to poison its cache.
         ///
