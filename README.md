@@ -1,9 +1,5 @@
 # tigerbeetle
 
-GitHub doesn't have a great way for you to stay in the loop. So don't
-just star the repo, [join the mailing
-list](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)!
-
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
 **Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/tigerbeetledb/viewstamped-replication-made-famous)**
@@ -21,7 +17,10 @@ TigerBeetle is not yet production-ready. The production version of
 doc](docs/DESIGN.md) provides an overview of TigerBeetle's data
 structures.
 
-Check out our [roadmap](https://github.com/tigerbeetledb/tigerbeetle/issues/259) below for where we're heading!
+Check out our
+[roadmap](https://github.com/tigerbeetledb/tigerbeetle/issues/259)
+below for where we're heading! And [join one of our communities](#Community) to stay
+in the loop about fixes and features!
 
 ## Documentation
 
@@ -261,8 +260,9 @@ For further reading:
 
 ## Community
 
-* [Join the TigerBeetle community on Slack.](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
-* [Subscribe to our monthly newsletter.](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
+* [Join the TigerBeetle chat on Slack.](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
+* [Follow us on Twitter](https://twitter.com/TigerBeetleDB), [YouTube](https://www.youtube.com/@tigerbeetledb), and [Twitch](https://www.twitch.tv/tigerbeetle).
+* [Subscribe to our monthly newsletter for the backstory on recent database changes.](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
 * [Check out past and upcoming talks.](/docs/TALKS.md)
 
 ## Benchmarks

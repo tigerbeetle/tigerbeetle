@@ -48,6 +48,7 @@ pub fn main() !void {
     defer allocator.free(events);
 
     try run_fuzz(allocator, prng.random(), events);
+    log.info("Passed!", .{});
 }
 
 fn run_fuzz(
@@ -399,6 +400,7 @@ const Environment = struct {
         env.manifest_log.compact(compact_callback);
         env.wait(&env.manifest_log);
 
+        env.manifest_log.forfeit();
         env.manifest_log_reserved = false;
     }
 
