@@ -12,6 +12,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const java_docs = @import("./java/docs.zig").JavaDocs;
+const dotnet_docs = @import("./dotnet/docs.zig").DotnetDocs;
 const go_docs = @import("./go/docs.zig").GoDocs;
 const node_docs = @import("./node/docs.zig").NodeDocs;
 const Docs = @import("./docs_types.zig").Docs;
@@ -70,6 +71,8 @@ fn error_main() !void {
                 language = node_docs;
             } else if (std.mem.eql(u8, next, "go")) {
                 language = go_docs;
+            } else if (std.mem.eql(u8, next, "dotnet")) {
+                language = dotnet_docs;
             } else {
                 std.debug.print("Unknown language: {s}.\n", .{next});
                 return error.UnknownLanguage;
