@@ -29,6 +29,10 @@ interchangeable.
 
 ## Clients
 
+**NOTE**: Because of package manager caching, it may take a few
+  minutes after the release for this version to appear in the package
+  manager.
+
 * .NET: \`dotnet add package tigerbeetle --version $VERSION\`
 * Go: \`go mod edit -require github.com/tigerbeetledb/tigerbeetle-go@$VERSION\`
 * Java: Update the version of \`com.tigerbeetle.tigerbeetle-java\` in \`pom.xml\` to \`$VERSION\`.
