@@ -5,6 +5,10 @@
 
 #ifndef TB_CLIENT_H
 #define TB_CLIENT_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
  
 #include <stddef.h>
 #include <stdint.h>
@@ -219,5 +223,8 @@ void tb_client_deinit(
     tb_client_t client
 );
 
-#endif // TB_CLIENT_H
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
+#endif // TB_CLIENT_H
