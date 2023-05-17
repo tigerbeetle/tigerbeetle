@@ -464,6 +464,18 @@ pub fn ReplicaType(
             // the vsr_headers head op may be part of the checkpoint after this one.
             maybe(vsr_headers.slice[0].op > self.op_checkpoint_trigger());
 
+            // Given on-disk state, try to recover the head op after a restart.
+            //
+            // If the replica crashed in status == .normal (view == log_view), the head is generally
+            // the last record in WAL. As a special case, during  the first open the last (and the
+            // only) record in WAL is the root prepare.
+            //
+            // Otherwise, the head is recovered from the superblock. When transitioninig to a
+            // view_change, replicas encode the current head into vsr_headers.
+            //
+            // It is a possibility that the head can't be recovered from the local data.
+            // In this case, the replica transitions to .recovering_head and waits for a .start_view
+            // message from a primary to reset its head.
             var op_head: ?u64 = null;
 
             if (self.log_view == self.view) {
@@ -2511,7 +2523,8 @@ pub fn ReplicaType(
                     self.do_view_change_from_all_replicas[message.header.replica] = message.ref();
                 } else if (m.header.timestamp != message.header.timestamp or
                     m.header.commit != message.header.commit or
-                    m.header.context != message.header.context)
+                    m.header.context != message.header.context or
+                    m.header.client != message.header.client)
                 {
                     log.debug("{}: on_{s}: ignoring (older message replica={})", .{
                         self.replica,
@@ -3398,7 +3411,14 @@ pub fn ReplicaType(
             const BitSet = std.bit_set.IntegerBitSet(128);
             comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
 
+            // Collect nack and presence bits for the headers, so that the new primary can run CTRL
+            // protocol to truncate uncomitted headers. When:
+            // - a header has quorum of nacks -- the header is truncated
+            // - a header isn't truncated and is present -- the header gets into the next view
+            // - a header is neither truncated nor present -- the primary waits for more
+            //   DVC messages to decide whether to keep or truncate the header.
             var nacks = BitSet.initEmpty();
+            var present = BitSet.initEmpty();
             if (command == .do_view_change) {
                 for (self.view_headers.array.constSlice()) |*header, i| {
                     const slot = self.journal.slot_for_op(header.op);
@@ -3421,6 +3441,13 @@ pub fn ReplicaType(
                     // Case 3: We don't have a prepare at all, and that's not due to a fault.
                     if (journal_header == null and !faulty) {
                         nacks.set(i);
+                    }
+
+                    if (journal_header != null and journal_header.?.checksum == header.checksum and
+                        !faulty)
+                    {
+                        maybe(nacks.isSet(i));
+                        present.set(i);
                     }
                 }
             }
@@ -3446,6 +3473,8 @@ pub fn ReplicaType(
                 .commit = self.commit_min,
                 // DVC: Signal which headers correspond to definitely not-prepared messages.
                 .context = nacks.mask,
+                // DVC: Signal which headers correspond to locally available prepares.
+                .client = present.mask,
             };
 
             stdx.copy_disjoint(
@@ -5836,11 +5865,12 @@ pub fn ReplicaType(
                     return;
                 }
 
-                // For DVCs and SVCs we must wait for the log_view to be durable:
+                // For DVCs, SVCs, and prepare_oks we must wait for the log_view to be durable:
                 // - A DVC includes the log_view.
-                // - A SV implies the log_view.
+                // - A SV or a prepare_ok imply the log_view.
                 if (message.header.command == .do_view_change or
-                    message.header.command == .start_view)
+                    message.header.command == .start_view or
+                    message.header.command == .prepare_ok)
                 {
                     if (self.log_view_durable() < self.log_view) {
                         log.debug("{}: send_message_to_replica: dropped {s} " ++
@@ -7187,6 +7217,11 @@ const DVCQuorum = struct {
         comptime assert(@TypeOf(nacks) == u128);
         assert(@popCount(u128, nacks) <= headers.slice.len);
         assert(@clz(u128, nacks) + headers.slice.len >= @bitSizeOf(u128));
+
+        const present = message.header.client;
+        comptime assert(@TypeOf(present) == u128);
+        assert(@popCount(u128, present) <= headers.slice.len);
+        assert(@clz(u128, present) + headers.slice.len >= @bitSizeOf(u128));
     }
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
@@ -7395,12 +7430,15 @@ const DVCQuorum = struct {
                 assert(header.op == op);
 
                 const header_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                const header_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.client };
                 if (header_nacks.isSet(header_index)) {
                     nacks += 1;
                 } else if (header_canonical) |expect| {
                     if (vsr.Headers.dvc_header_type(header) == .valid) {
                         if (expect.checksum == header.checksum) {
-                            copies += 1;
+                            if (header_present.isSet(header_index)) {
+                                copies += 1;
+                            }
                         } else {
                             // The replica's prepare is available, but for a different header.
                             nacks += 1;

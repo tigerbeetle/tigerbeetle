@@ -93,7 +93,7 @@ func main() {
 			assert(account.CreditsPosted, uint64(10), "account 2 credits")
 		} else {
 			log.Fatalf("Unexpected account")
-		}		
+		}
 	}
 
 	fmt.Println("ok")

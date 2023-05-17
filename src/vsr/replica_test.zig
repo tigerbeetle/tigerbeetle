@@ -113,7 +113,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
     try c.request(slot_count + 1, slot_count + 1);
 }
 
-test "Cluster: recovery: WAL prepare corruption (R=1, between checkpoint and head)" {
+test "Cluster: recovery: WAL prepare corruption (R=1, corrupt between checkpoint and head)" {
     // R=1 can never recover if a WAL-prepare is corrupt.
     const t = try TestContext.init(.{ .replica_count = 1 });
     defer t.deinit();

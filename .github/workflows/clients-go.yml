@@ -5,6 +5,10 @@ on:
     secrets:
       TIGERBEETLE_GO_DEPLOY_KEY:
         required: true
+    inputs:
+      version:
+        required: false
+        type: string
 
 jobs:
   binaries:
@@ -21,8 +25,8 @@ jobs:
           path: src/clients/go/pkg/native
 
   publish:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [binaries, docs, samples_integration_test]
+    if: inputs.version != ''
+    needs: binaries
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -40,6 +44,7 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
 
   samples_integration_test:
+    if: inputs.version == ''
     needs: binaries
 
     # We use self hosted runners for M1 here. See macos.yml for an explaination
@@ -104,4 +109,3 @@ jobs:
       
       - if: matrix.os == 'ubuntu-latest'
         run: ./scripts/fail_on_diff.sh
-

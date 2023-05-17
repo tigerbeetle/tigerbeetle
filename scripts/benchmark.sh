@@ -4,6 +4,11 @@ set -eEuo pipefail
 # Number of replicas to benchmark
 REPLICAS=${REPLICAS:-0}
 
+cpu="${CPU:-}"
+if [ -n "${cpu}" ]; then
+    cpu="-Dcpu=${cpu}"
+fi
+
 # Install Zig if it does not already exist:
 if [ ! -d "zig" ]; then
     scripts/install_zig.sh
@@ -19,7 +24,8 @@ else
     ZIG_TARGET="-Dtarget=native-macos"
 fi
 
-./scripts/build.sh install -Drelease-safe -Dconfig=production $ZIG_TARGET
+# shellcheck disable=SC2086
+./scripts/build.sh install -Drelease-safe -Dconfig=production $cpu $ZIG_TARGET
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -61,7 +67,8 @@ done
 
 echo ""
 echo "Benchmarking..."
-./scripts/build.sh benchmark -Drelease-safe -Dconfig=production $ZIG_TARGET -- "$@"
+# shellcheck disable=SC2086
+./scripts/build.sh benchmark -Drelease-safe -Dconfig=production $cpu $ZIG_TARGET -- "$@"
 echo ""
 
 for I in $REPLICAS

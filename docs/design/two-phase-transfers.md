@@ -155,14 +155,16 @@ The following examples show the state of two accounts in three steps:
 
 Read more about how two-phase transfers work with each client.
 
-* [Node](/src/clients/node/README.md#two-phase-transfers)
+* [.NET](/src/clients/dotnet/README.md#two-phase-transfers)
 * [Go](/src/clients/go/README.md#two-phase-transfers)
 * [Java](/src/clients/java/README.md#two-phase-transfers)
+* [Node](/src/clients/node/README.md#two-phase-transfers)
 
 ## Client samples
 
 Or take a look at how it works with real code.
 
-* [Node](/src/clients/node/samples/two-phase/main.js)
-* [Go](/src/clients/go/samples/two-phase/main.go)
-* [Java](/src/clients/java/samples/two-phase/src/main/java/Main.java)
+* [Node](/src/clients/dotnet/samples/two-phase/README.md)
+* [Go](/src/clients/go/samples/two-phase/README.md)
+* [Java](/src/clients/java/samples/two-phase/README.md)
+* [Node](/src/clients/node/samples/two-phase/README.md)
