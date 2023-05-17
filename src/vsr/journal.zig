@@ -1243,30 +1243,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
 
-            // Discard headers which we are certain do not belong in the current log_view.
-            // - This ensures that we don't accidentally set our new head op to be a message
-            //   which was truncated but not yet overwritten.
-            // - This is also necessary to ensure that generated DVC's headers are complete.
-            //
-            // It is essential that this is performed before we compute the op_max so that the
-            // recovery cases apply correctly.
-            for ([_][]align(constants.sector_size) Header{
-                journal.headers_redundant,
-                journal.headers,
-            }) |headers| {
-                for (headers) |*header_untrusted, index| {
-                    const slot = Slot{ .index = index };
-                    if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
-                        var view_range = view_change_headers.view_for_op(header.op, log_view);
-                        assert(view_range.max <= log_view);
-
-                        if (header.command == .prepare and !view_range.contains(header.view)) {
-                            header_untrusted.* = Header.reserved(replica.cluster, index);
-                        }
-                    }
-                }
-            }
-
             const prepare_op_max = std.math.max(
                 replica.op_checkpoint(),
                 op_maximum_headers_untrusted(replica.cluster, journal.headers),
@@ -1301,6 +1277,33 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     journal.replica,
                     torn_slot.index,
                 });
+            }
+
+            // Discard headers which we are certain do not belong in the current log_view.
+            // - This ensures that we don't accidentally set our new head op to be a message
+            //   which was truncated but not yet overwritten.
+            // - This is also necessary to ensure that generated DVC's headers are complete.
+            //
+            // It is essential that this is performed:
+            // - after prepare_op_max is computed,
+            // - after the case decisions are made (to avoid @H:vsr arising from an
+            //   artificially reserved prepare),
+            // - before we repair the 'fix' cases.
+            for ([_][]align(constants.sector_size) Header{
+                journal.headers_redundant,
+                journal.headers,
+            }) |headers| {
+                for (headers) |*header_untrusted, index| {
+                    const slot = Slot{ .index = index };
+                    if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
+                        var view_range = view_change_headers.view_for_op(header.op, log_view);
+                        assert(view_range.max <= log_view);
+
+                        if (header.command == .prepare and !view_range.contains(header.view)) {
+                            cases[index] = &case_cut;
+                        }
+                    }
+                }
             }
 
             for (cases) |case, index| journal.recover_slot(Slot{ .index = index }, case);
@@ -1459,9 +1462,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 },
                 .cut => {
                     assert(header != null);
-                    assert(prepare == null);
-                    assert(!journal.prepare_inhabited[slot.index]);
-                    assert(journal.prepare_checksums[slot.index] == 0);
+                    // If `prepare` is non-null, it is being truncated due to the view range.
+                    maybe(prepare == null);
                     journal.headers[slot.index] = Header.reserved(cluster, slot.index);
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
@@ -1888,9 +1890,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn write_prepare_debug(journal: *const Journal, header: *const Header, status: []const u8) void {
-            log.debug("{}: write: view={} op={} len={}: {} {s}", .{
+            assert(journal.status == .recovered);
+            assert(header.command == .prepare);
+
+            log.debug("{}: write: view={} slot={} op={} len={}: {} {s}", .{
                 journal.replica,
                 header.view,
+                journal.slot_for_header(header).index,
                 header.op,
                 header.size,
                 header.checksum,
