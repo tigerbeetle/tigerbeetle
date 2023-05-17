@@ -361,6 +361,8 @@ pub const GoDocs = Docs{
     \\transfersRes, err = client.CreateTransfers(batch)
     ,
 
+    .developer_setup_documentation = "",
+
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_sh_commands = 

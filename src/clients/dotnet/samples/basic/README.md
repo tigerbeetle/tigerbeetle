@@ -10,6 +10,12 @@ Code for this sample is in [./Main.cs](./Main.cs).
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
 * .NET >= 6.0
+And if you do not already have NuGet.org as a package
+source, make sure to add it:
+
+```console
+dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
+```
 
 ## Setup
 

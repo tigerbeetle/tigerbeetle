@@ -13,6 +13,12 @@ The TigerBeetle client for .NET.
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
 * .NET >= 6.0
+And if you do not already have NuGet.org as a package
+source, make sure to add it:
+
+```console
+dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
+```
 
 ## Setup
 
@@ -49,11 +55,9 @@ using System;
 
 using TigerBeetle;
 
-public class Program {
-  public static void Main() {
-    Console.WriteLine("SUCCESS");
-  }
-}
+// Validate import works.
+var id = new TigerBeetle.UInt128(1);
+Console.WriteLine("SUCCESS");
 ```
 
 Finally, build and run:
@@ -438,8 +442,10 @@ $ cd tigerbeetle
 $ git submodule update --init --recursive
 $ ./scripts/install_zig.sh
 $ cd src/clients/dotnet
+$ dotnet restore
+$ dotnet clean
 $ dotnet build
-$ if [ "$TEST" = "true" ]; then dotnet clean; dotnet test; else echo "Skipping client unit tests"; fi
+$ if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
 ```
 
 ### On Windows
@@ -452,7 +458,9 @@ $ cd tigerbeetle
 $ git submodule update --init --recursive
 $ .\scripts\install_zig.bat
 $ cd src/clients/dotnet
+$ dotnet restore
+$ dotnet clean
 $ dotnet build
-$ if ($env:TEST -eq 'true') { dotnet clean; dotnet test } else { echo "Skipping client unit test" }
+$ if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
 ```
 

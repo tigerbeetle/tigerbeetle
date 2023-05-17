@@ -23,6 +23,12 @@ pub const DotnetDocs = Docs{
 
     .prerequisites = 
     \\* .NET >= 6.0
+    \\And if you do not already have NuGet.org as a package
+    \\source, make sure to add it:
+    \\
+    \\```console
+    \\dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
+    \\```
     ,
 
     .project_file_name = "Test.csproj",
@@ -50,18 +56,20 @@ pub const DotnetDocs = Docs{
     \\
     \\using TigerBeetle;
     \\
-    \\public class Program {
-    \\  public static void Main() {
-    \\    Console.WriteLine("SUCCESS");
-    \\  }
-    \\}
+    \\// Validate import works.
+    \\var id = new TigerBeetle.UInt128(1);
+    \\Console.WriteLine("SUCCESS");
     ,
 
     .current_commit_pre_install_hook = null,
     .current_commit_post_install_hook = null,
 
     .install_commands = "",
-    .build_commands = "dotnet build",
+    .build_commands = 
+    \\dotnet restore
+    \\dotnet clean
+    \\dotnet build
+    ,
     .run_commands = "dotnet run",
 
     .current_commit_install_commands_hook = null,
@@ -275,16 +283,22 @@ pub const DotnetDocs = Docs{
     \\// error handling omitted
     ,
 
+    .developer_setup_documentation = "",
+
     .developer_setup_sh_commands = 
     \\cd src/clients/dotnet
+    \\dotnet restore
+    \\dotnet clean
     \\dotnet build
-    \\if [ "$TEST" = "true" ]; then dotnet clean; dotnet test; else echo "Skipping client unit tests"; fi
+    \\if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
     ,
 
     .developer_setup_pwsh_commands = 
     \\cd src/clients/dotnet
+    \\dotnet restore
+    \\dotnet clean
     \\dotnet build
-    \\if ($env:TEST -eq 'true') { dotnet clean; dotnet test } else { echo "Skipping client unit test" }
+    \\if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
     ,
 
     .test_main_prefix = 

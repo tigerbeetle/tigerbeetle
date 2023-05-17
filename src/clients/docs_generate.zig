@@ -651,6 +651,10 @@ const Generator = struct {
         mw.code(language.markdown_name, language.linked_events_example);
 
         mw.header(2, "Development Setup");
+        if (language.developer_setup_documentation.len > 0) {
+            mw.print("{s}\n\n", .{language.developer_setup_documentation});
+        }
+
         // Shell setup
         mw.header(3, "On Linux and macOS");
         mw.paragraph("In a POSIX shell run:");

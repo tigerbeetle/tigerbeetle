@@ -26,7 +26,7 @@ COPY src ./src
 COPY build.zig ./build.zig
 
 ARG TARGETPLATFORM
-RUN ./scripts/install.sh
+RUN test ${TARGETPLATFORM} = "linux/arm64" && CPU="baseline+aes+neon" || CPU="x86_64_v3+aes"; CI=true ./scripts/install.sh
 
 FROM alpine:3.17 AS release
 WORKDIR /
