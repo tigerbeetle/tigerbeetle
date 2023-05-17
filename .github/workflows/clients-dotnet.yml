@@ -173,6 +173,13 @@ jobs:
           name: nuget-artifact
           path: ./nuget
 
+      - if: matrix.os != 'windows-latest'
+        run: |
+          # Specifically for self-hosted M1 runners, OK if this fails on other envs.
+          if [[ "$(uname)" == "Darwin" ]]; then
+            brew install dotnet@7
+          fi
+
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
@@ -192,6 +199,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
+
+      - if: matrix.os != 'windows-latest'
+        run: |
+          # Specifically for self-hosted M1 runners, OK if this fails on other envs.
+          if [[ "$(uname)" == "Darwin" ]]; then
+            brew install dotnet@7
+          fi
 
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
