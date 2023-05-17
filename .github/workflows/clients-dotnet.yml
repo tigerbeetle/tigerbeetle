@@ -182,7 +182,7 @@ jobs:
         run: |
           # Specifically for self-hosted M1 runners, OK if this fails on other envs.
           if [[ "$(uname)" == "Darwin" ]]; then
-            brew install dotnet@7
+            brew install dotnet@7 || brew link --overwrite dotnet
           fi
 
       # Grab Zig
@@ -209,7 +209,7 @@ jobs:
         run: |
           # Specifically for self-hosted M1 runners, OK if this fails on other envs.
           if [[ "$(uname)" == "Darwin" ]]; then
-            brew install dotnet@7
+            brew install dotnet@7 || brew link --overwrite dotnet
           fi
 
       # Grab Zig
