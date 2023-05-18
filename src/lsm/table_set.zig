@@ -398,13 +398,16 @@ pub fn TableSetType(comptime Table: type) type {
             assert(set.count() > 0);
             assert(!set.heap.consuming);
 
+            if (set.buffer.len > 0) set.buffer_flush();
+            assert(set.buffer.len == 0);
+
             set.heap.consuming = true;
             return .{ .set = set };
         }
 
         pub const SortedIterator = struct {
             set: ?*TableSet,
-            last_slot: u32 = 0,
+            last_slot: ?u32 = null,
 
             pub fn next(it: *SortedIterator) ?*const Value {
                 const set = it.set orelse return null;
@@ -416,10 +419,8 @@ pub fn TableSetType(comptime Table: type) type {
 
                     // Assert that we're returning sorted Values.
                     if (constants.verify) {
-                        if (it.last_slot > 0) {
-                            const last_slot = it.last_slot - 1;
+                        if (it.last_slot) |last_slot| {
                             assert(last_slot < set.values);
-
                             const last_key = key_from_value(&data.values[last_slot]);
                             assert(compare_keys(last_key, key_from_value(value)) == .lt);
                         }

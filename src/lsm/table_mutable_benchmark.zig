@@ -43,7 +43,7 @@ const TransferContext = struct {
         tombstone,
         tombstone_from_key,
         config.lsm_batch_multiple * StateMachine.constants.batch_max.create_transfers,
-        .primary,
+        .general,
     );
 
     pub const tree_name = @typeName(Transfer);
@@ -73,7 +73,7 @@ const TransferIdContext = struct {
         Key.tombstone,
         Key.tombstone_from_key,
         config.lsm_batch_multiple * StateMachine.constants.batch_max.create_transfers,
-        .primary_index,
+        .secondary_index,
     );
 
     pub const TableMutable = TableMutableType(Table, tree_name);
@@ -117,8 +117,8 @@ const Order = enum {
 
 pub fn main() !void {
     try bench(TransferDebitsPendingContext);
-    // try bench(TransferIdContext);
-    // try bench(TransferContext);
+    try bench(TransferIdContext);
+    try bench(TransferContext);
 }
 
 fn bench(comptime Context: type) !void {
