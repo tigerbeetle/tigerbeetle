@@ -43,7 +43,7 @@ const TransferContext = struct {
         tombstone,
         tombstone_from_key,
         config.lsm_batch_multiple * StateMachine.constants.batch_max.create_transfers,
-        .general,
+        .primary,
     );
 
     pub const tree_name = @typeName(Transfer);
@@ -58,6 +58,33 @@ const TransferContext = struct {
 
 const TransferIdContext = struct {
     pub const tree_name = "Transfer.id";
+
+    const config = constants.state_machine_config;
+    const Storage = @import("../testing/storage.zig").Storage;
+    const StateMachine = @import("../vsr.zig").state_machine.StateMachineType(Storage, config);
+
+    const Key = @import("composite_key.zig").CompositeKey(u128);
+    pub const Table = TableType(
+        Key,
+        Key.Value,
+        Key.compare_keys,
+        Key.key_from_value,
+        Key.sentinel_key,
+        Key.tombstone,
+        Key.tombstone_from_key,
+        config.lsm_batch_multiple * StateMachine.constants.batch_max.create_transfers,
+        .primary_index,
+    );
+
+    pub const TableMutable = TableMutableType(Table, tree_name);
+
+    pub fn derive_value(id: u64) Key.Value {
+        return .{ .field = id, .timestamp = 0 };
+    }
+};
+
+const TransferDebitsPendingContext = struct {
+    pub const tree_name = "Transfer.debits_pending";
 
     const config = constants.state_machine_config;
     const Storage = @import("../testing/storage.zig").Storage;
@@ -89,8 +116,9 @@ const Order = enum {
 };
 
 pub fn main() !void {
-    try bench(TransferIdContext);
-    try bench(TransferContext);
+    try bench(TransferDebitsPendingContext);
+    // try bench(TransferIdContext);
+    // try bench(TransferContext);
 }
 
 fn bench(comptime Context: type) !void {
@@ -108,6 +136,9 @@ fn bench(comptime Context: type) !void {
 
     var table_mutable = try Context.TableMutable.init(allocator, null);
     defer table_mutable.deinit(allocator);
+
+    var empty_set = try @TypeOf(table_mutable.values).init(allocator);
+    defer empty_set.deinit(allocator);
 
     var values = try allocator.alloc(Context.Table.Value, Context.Table.value_count_max);
     defer allocator.free(values);
@@ -185,7 +216,15 @@ fn bench(comptime Context: type) !void {
         });
 
         const sort_start = timer.read();
-        const sorted = table_mutable.sort_into_values_and_clear(values);
+        const sorted = blk: {
+            var i: u32 = 0;
+            var it = table_mutable.values.consume_sorted();
+            while (it.next()) |value| : (i += 1) values[i] = value.*;
+
+            table_mutable.swap_values_and_clear(&empty_set);
+            empty_set.clear();
+            break :blk values[0..i];
+        };
         const sort_elapsed = timer.read() - sort_start;
 
         assert(sorted.ptr == values.ptr);

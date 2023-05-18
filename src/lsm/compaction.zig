@@ -46,6 +46,7 @@ const GridType = @import("grid.zig").GridType;
 const alloc_block = @import("grid.zig").alloc_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
+const TableSetType = @import("table_set.zig").TableSetType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 const LevelDataIteratorType = @import("level_data_iterator.zig").LevelDataIteratorType;
 
@@ -64,6 +65,7 @@ pub fn CompactionType(
         const TableInfo = TableInfoType(Table);
         const Manifest = ManifestType(Table, Storage);
         const CompactionRange = Manifest.CompactionRange;
+        const TableSetIterator = TableSetType(Table).SortedIterator;
         const TableDataIterator = TableDataIteratorType(Storage);
         const LevelDataIterator = LevelDataIteratorType(Table, Storage);
 
@@ -74,7 +76,7 @@ pub fn CompactionType(
         const tombstone = Table.tombstone;
 
         pub const TableInfoA = union(enum) {
-            immutable: []const Value,
+            immutable: TableSetIterator,
             disk: TableInfo,
         };
 
@@ -338,8 +340,7 @@ pub fn CompactionType(
                 });
 
                 switch (context.table_info_a) {
-                    .immutable => |values| {
-                        compaction.values_in[0] = values;
+                    .immutable => {
                         compaction.loop_start();
                     },
                     .disk => |table_info| {
@@ -395,13 +396,13 @@ pub fn CompactionType(
             if (compaction.values_in[@enumToInt(input_level)].len > 0) {
                 // Still have values on this input_level, no need to refill.
                 compaction.iterator_check_finish(input_level);
-            } else if (input_level == .a and compaction.context.table_info_a == .immutable) {
-                // No iterator to call next on.
-                compaction.iterator_check_finish(input_level);
             } else {
                 compaction.state = .{ .iterator_next = input_level };
                 switch (input_level) {
-                    .a => compaction.iterator_a.next(iterator_next_a),
+                    .a => switch (compaction.context.table_info_a) {
+                        .immutable => |*it| compaction.iterator_next_set(it),
+                        .disk => compaction.iterator_a.next(iterator_next_a),
+                    },
                     .b => compaction.iterator_b.next(.{
                         .on_index = on_index_block,
                         .on_data = iterator_next_b,
@@ -436,19 +437,43 @@ pub fn CompactionType(
             grid.release(Table.index_block_address(index_block));
         }
 
+        fn iterator_next_set(compaction: *Compaction, it: *TableSetIterator) void {
+            assert(std.meta.eql(compaction.state, .{ .iterator_next = .a }));
+            assert(compaction.context.table_info_a == .immutable);
+
+            // Read values from the TableSetIterator into the data block for compaction.
+            var values_out: u32 = 0;
+            const values = Table.data_block_values(compaction.data_blocks[0]);
+            while (values_out < values.len) {
+                const value = it.next() orelse break;
+
+                // Assert that the TableSetIterator is returning sorted values.
+                if (constants.verify and values_out > 0) {
+                    const prev_key = key_from_value(&values[values_out - 1]);
+                    assert(compare_keys(prev_key, key_from_value(value)) == .lt);
+                }
+
+                values[values_out] = value.*;
+                values_out += 1;
+            }
+
+            compaction.values_in[0] = values[0..values_out];
+            compaction.iterator_next();
+        }
+
         fn iterator_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .a }));
-            compaction.iterator_next(data_block);
+            compaction.iterator_next_data(data_block);
         }
 
         fn iterator_next_b(iterator_b: *LevelDataIterator, data_block: ?BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
-            compaction.iterator_next(data_block);
+            compaction.iterator_next_data(data_block);
         }
 
-        fn iterator_next(compaction: *Compaction, data_block: ?BlockPtrConst) void {
+        fn iterator_next_data(compaction: *Compaction, data_block: ?BlockPtrConst) void {
             assert(compaction.state == .iterator_next);
             const input_level = compaction.state.iterator_next;
             const index = @enumToInt(input_level);
@@ -459,22 +484,30 @@ pub fn CompactionType(
                 stdx.copy_disjoint(.exact, u8, compaction.data_blocks[index], block);
                 compaction.values_in[index] =
                     Table.data_block_values_used(compaction.data_blocks[index]);
-
-                // Assert that we're reading data blocks in key order.
-                const values_in = compaction.values_in[index];
-                if (values_in.len > 0) {
-                    const first_key = key_from_value(&values_in[0]);
-                    const last_key = key_from_value(&values_in[values_in.len - 1]);
-                    if (compaction.last_keys_in[index]) |last_key_prev| {
-                        assert(compare_keys(last_key_prev, first_key) == .lt);
-                    }
-                    if (values_in.len > 1) {
-                        assert(compare_keys(first_key, last_key) == .lt);
-                    }
-                    compaction.last_keys_in[index] = last_key;
-                }
             } else {
                 // If no more data blocks available, just leave `values_in[index]` empty.
+            }
+
+            compaction.iterator_next();
+        }
+
+        fn iterator_next(compaction: *Compaction) void {
+            assert(compaction.state == .iterator_next);
+            const input_level = compaction.state.iterator_next;
+            const index = @enumToInt(input_level);
+
+            // Assert that we're reading data blocks in key order.
+            const values_in = compaction.values_in[index];
+            if (values_in.len > 0) {
+                const first_key = key_from_value(&values_in[0]);
+                const last_key = key_from_value(&values_in[values_in.len - 1]);
+                if (compaction.last_keys_in[index]) |last_key_prev| {
+                    assert(compare_keys(last_key_prev, first_key) == .lt);
+                }
+                if (values_in.len > 1) {
+                    assert(compare_keys(first_key, last_key) == .lt);
+                }
+                compaction.last_keys_in[index] = last_key;
             }
 
             compaction.state = .compacting;
