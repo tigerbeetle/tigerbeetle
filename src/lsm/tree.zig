@@ -673,25 +673,26 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             assert(tree.table_immutable.snapshot_min % half_bar_beat_count == 0);
 
-            const values_count = tree.table_immutable.values.len;
+            const values_range = tree.table_immutable.key_range();
+            const values_count = tree.table_immutable.count();
             assert(values_count > 0);
 
             const level_b: u8 = 0;
             const range = tree.manifest.compaction_range(
                 level_b,
-                tree.table_immutable.key_min(),
-                tree.table_immutable.key_max(),
+                values_range.key_min,
+                values_range.key_max,
             );
 
             assert(range.table_count >= 1);
             assert(range.table_count <= compaction_tables_input_max);
-            assert(compare_keys(range.key_min, tree.table_immutable.key_min()) != .gt);
-            assert(compare_keys(range.key_max, tree.table_immutable.key_max()) != .lt);
+            assert(compare_keys(range.key_min, values_range.key_min) != .gt);
+            assert(compare_keys(range.key_max, values_range.key_max) != .lt);
 
             log.debug(tree_name ++
                 ": compacting immutable table to level 0 " ++
                 "(values.len={d} snapshot_min={d} compaction.op_min={d} table_count={d})", .{
-                tree.table_immutable.values.len,
+                values_count,
                 tree.table_immutable.snapshot_min,
                 op_min,
                 range.table_count,
@@ -702,7 +703,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .grid = tree.grid,
                 .tree = tree,
                 .op_min = op_min,
-                .table_info_a = .{ .immutable = tree.table_immutable.values },
+                .table_info_a = .{ .immutable = tree.table_immutable.values.consume_sorted() },
                 .level_b = level_b,
                 .range_b = range,
                 .callback = compact_table_finish,
@@ -916,10 +917,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             if (tree.table_mutable.count() == 0) return;
 
-            // Sort the mutable table values directly into the immutable table's array.
-            const values_max = tree.table_immutable.values_max();
-            const values = tree.table_mutable.sort_into_values_and_clear(values_max);
-            assert(values.ptr == values_max.ptr);
+            // Swap the mutable table values directly with the immutable table's.
+            tree.table_mutable.swap_values_and_clear(&tree.table_immutable.values);
 
             // The immutable table must be visible to the next bar — setting its snapshot_min to
             // lookup_snapshot_max guarantees.
@@ -927,7 +926,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // In addition, the immutable table is conceptually an output table of this compaction
             // bar, and now its snapshot_min matches the snapshot_min of the Compactions' output
             // tables.
-            tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max, values);
+            tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max);
 
             assert(tree.table_mutable.count() == 0);
             assert(!tree.table_immutable.free);
