@@ -515,7 +515,8 @@ pub const JavaDocs = Docs{
     \\
     \\import com.tigerbeetle.*;
     \\public final class Main {
-    \\  public static void main(String[] args) throws com.tigerbeetle.RequestException {
+    \\  public static void main(String[] args)
+    \\      throws RequestException, ConcurrencyExceededException {
     ,
 
     .test_main_suffix = "} }",

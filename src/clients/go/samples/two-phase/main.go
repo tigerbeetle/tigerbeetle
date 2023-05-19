@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"reflect"
 	"log"
 	"os"
+	"reflect"
 
 	tb "github.com/tigerbeetledb/tigerbeetle-go"
 	tb_types "github.com/tigerbeetledb/tigerbeetle-go/pkg/types"
@@ -32,7 +32,7 @@ func main() {
 		port = "3000"
 	}
 
-	client, err := tb.NewClient(0, []string{port}, 1)
+	client, err := tb.NewClient(0, []string{port}, 32)
 	if err != nil {
 		log.Fatalf("Error creating client: %s", err)
 	}
@@ -68,7 +68,7 @@ func main() {
 			Ledger:          1,
 			Code:            1,
 			Amount:          500,
-			Flags: tb_types.TransferFlags{Pending: true}.ToUint16(),
+			Flags:           tb_types.TransferFlags{Pending: true}.ToUint16(),
 		},
 	})
 	if err != nil {
@@ -99,20 +99,20 @@ func main() {
 			assert(account.CreditsPending, uint64(500), "account 2 credits pending, before posted")
 		} else {
 			log.Fatalf("Unexpected account: %s", account.ID)
-		}		
+		}
 	}
 
 	// Create a second transfer simply posting the first transfer
 	transferRes, err = client.CreateTransfers([]tb_types.Transfer{
 		{
 			ID:              uint128("2"),
-			PendingID:              uint128("1"),
+			PendingID:       uint128("1"),
 			DebitAccountID:  uint128("1"),
 			CreditAccountID: uint128("2"),
 			Ledger:          1,
 			Code:            1,
 			Amount:          500,
-			Flags: tb_types.TransferFlags{PostPendingTransfer: true}.ToUint16(),
+			Flags:           tb_types.TransferFlags{PostPendingTransfer: true}.ToUint16(),
 		},
 	})
 	if err != nil {
@@ -142,7 +142,6 @@ func main() {
 		}
 	}
 
-	
 	// Validate accounts pending and posted debits/credits after finishing the two-phase transfer
 	accounts, err = client.LookupAccounts([]tb_types.Uint128{uint128("1"), uint128("2")})
 	if err != nil {
@@ -163,7 +162,7 @@ func main() {
 			assert(account.CreditsPending, uint64(0), "account 2 credits pending")
 		} else {
 			log.Fatalf("Unexpected account: %s", account.ID)
-		}		
+		}
 	}
 
 	fmt.Println("ok")

@@ -369,7 +369,7 @@ void on_completion(
 
 void send_request(
     tb_client_t client,
-    tb_packet_list_t *packets,
+    tb_packet_t *packet,
     completion_context_t *ctx
 ) {
     // Locks the mutex:
@@ -377,7 +377,7 @@ void send_request(
 
     // Submits the request asynchronously:
     ctx->completed = false;
-    tb_client_submit(client, packets);
+    tb_client_submit(client, packet);
 
     // Uses a condvar to sync this thread with the callback:
     while (!ctx->completed) {
