@@ -78,37 +78,27 @@ pub const Packet = extern struct {
         }
     };
 
-    /// Thread-safe stack, `push` and `pop` can be called concurrently from the client threads.
+    /// Thread-safe stack, guarded by a Mutex,
+    /// `push` and `pop` can be called concurrently from the client threads.
     pub const ConcurrentStack = struct {
-        head: Atomic(?*Packet) = Atomic(?*Packet).init(null),
+        mutex: std.Thread.Mutex = .{},
+        head: ?*Packet = null,
 
         pub fn push(self: *ConcurrentStack, packet: *Packet) void {
-            var head = self.head.load(.Monotonic);
-            while (true) {
-                packet.next = head;
-                head = self.head.tryCompareAndSwap(
-                    head,
-                    packet,
-                    .Release,
-                    .Monotonic,
-                ) orelse break;
-            }
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            packet.next = self.head;
+            self.head = packet;
         }
 
         pub fn pop(self: *ConcurrentStack) ?*Packet {
-            var head = self.head.load(.Monotonic);
-            while (true) {
-                var next = (head orelse return null).next;
-                head = self.head.tryCompareAndSwap(
-                    head,
-                    next,
-                    .Release,
-                    .Monotonic,
-                ) orelse {
-                    head.?.next = null;
-                    return head;
-                };
-            }
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            var head = self.head orelse return null;
+            self.head = head.next;
+
+            head.next = null;
+            return head;
         }
     };
 };
