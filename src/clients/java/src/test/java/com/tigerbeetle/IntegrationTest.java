@@ -1007,7 +1007,7 @@ public class IntegrationTest {
             // Defining a ratio between concurrent threads and client's concurrencyMax
             // The goal here is to force to have more threads than the client can process
             // simultaneously.
-            final int tasks_qty = 20;
+            final int tasks_qty = 32;
             final int max_concurrency = 2;
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
@@ -1024,18 +1024,22 @@ public class IntegrationTest {
 
                 // Wait for all threads:
                 int succeededCount = 0;
+                int failedCount = 0;
                 for (int i = 0; i < tasks_qty; i++) {
                     tasks[i].join();
                     if (tasks[i].exception == null) {
                         assertTrue(tasks[i].result.getLength() == 0);
                         succeededCount += 1;
                     } else {
-                        assertTrue(tasks[i].exception instanceof ConcurrencyExceededException);
+                        assertEquals(ConcurrencyExceededException.class,
+                                tasks[i].exception.getClass());
+                        failedCount += 1;
                     }
                 }
 
                 // At least max_concurrency tasks must succeed.
                 assertTrue(succeededCount >= max_concurrency);
+                assertTrue(succeededCount + failedCount == tasks_qty);
 
                 // Asserting if all transfers were submitted correctly.
                 var lookupAccounts = client.lookupAccounts(accountIds);
