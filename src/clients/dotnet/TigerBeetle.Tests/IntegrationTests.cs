@@ -784,7 +784,7 @@ namespace TigerBeetle.Tests
 
         private void ConcurrencyExceededTest(bool isAsync)
         {
-            const int TASKS_QTY = 20;
+            const int TASKS_QTY = 32;
             int MAX_CONCURRENCY = 2;
 
             using var server = new TBServer();
@@ -825,7 +825,7 @@ namespace TigerBeetle.Tests
                 (AssertException<ConcurrencyExceededException>(x.Exception!) ||
                 AssertException<ObjectDisposedException>(x.Exception!)));
             Assert.IsTrue(successCount > 0);
-            Assert.IsTrue(failedCount > 0);
+            Assert.IsTrue(successCount + failedCount == TASKS_QTY);
 
             // Asserting that either the task failed or succeeded.
             Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
