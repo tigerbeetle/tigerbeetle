@@ -79,6 +79,7 @@ jobs:
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language go --sample ${{ matrix.sample }}
 
   docs:
+    if: inputs.version == ''
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read
