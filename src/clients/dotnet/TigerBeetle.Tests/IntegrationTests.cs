@@ -904,6 +904,34 @@ namespace TigerBeetle.Tests
             Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
         }
 
+        [TestMethod]
+        [ExpectedException(typeof(ObjectDisposedException))]
+        [DoNotParallelize]
+        public void DisposedClient()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            var accountResults = client.CreateAccounts(accounts);
+            Assert.IsTrue(accountResults.Length == 0);
+
+            client.Dispose();
+
+            var transfer = new Transfer
+            {
+                Id = 1,
+                CreditAccountId = accounts[0].Id,
+                DebitAccountId = accounts[1].Id,
+                Ledger = 1,
+                Code = 1,
+                Amount = 100,
+            };
+
+            _ = client.CreateTransfers(new Transfer[] { transfer });
+            Assert.IsTrue(false);
+        }
+
+
         private static void AssertAccounts(Account[] lookupAccounts)
         {
             Assert.IsTrue(lookupAccounts.Length == accounts.Length);

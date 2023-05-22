@@ -134,6 +134,8 @@ namespace TigerBeetle
         {
             unsafe
             {
+                if (client == IntPtr.Zero) throw new ObjectDisposedException("Client is closed");
+
                 TBPacket* packet;
                 var status = tb_client_acquire_packet(client, &packet);
                 switch (status)
@@ -144,7 +146,7 @@ namespace TigerBeetle
                     case PacketAcquireStatus.ConcurrencyMaxExceeded:
                         throw new ConcurrencyExceededException();
                     case PacketAcquireStatus.Shutdown:
-                        throw new ObjectDisposedException("Client is closed");
+                        throw new ObjectDisposedException("Client is closing");
                     default:
                         throw new NotImplementedException();
                 }
@@ -160,7 +162,7 @@ namespace TigerBeetle
                     if (client != IntPtr.Zero)
                     {
                         tb_client_deinit(client);
-                        client = IntPtr.Zero;
+                        this.client = IntPtr.Zero;
                     }
                 }
             }

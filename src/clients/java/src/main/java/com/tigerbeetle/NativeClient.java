@@ -35,11 +35,14 @@ final class NativeClient {
     }
 
     public void submit(final Request<?> request) throws ConcurrencyExceededException {
+        if (contextHandle == 0L)
+            throw new IllegalStateException("Client is closed");
+
         final var packet_acquire_status = submit(contextHandle, request);
         if (packet_acquire_status == PacketAcquireStatus.ConcurrencyMaxExceeded.value) {
             throw new ConcurrencyExceededException();
         } else if (packet_acquire_status == PacketAcquireStatus.Shutdown.value) {
-            throw new IllegalStateException("Client is closed");
+            throw new IllegalStateException("Client is closing");
         } else {
             assertTrue(packet_acquire_status == PacketAcquireStatus.Ok.value,
                     "PacketAcquireStatus=%d is not implemented", packet_acquire_status);
@@ -48,12 +51,12 @@ final class NativeClient {
 
     public void close() throws Exception {
 
-        if (contextHandle != 0) {
+        if (contextHandle != 0L) {
             synchronized (this) {
-                if (contextHandle != 0) {
+                if (contextHandle != 0L) {
                     // Deinit and signalize that this client is closed by setting the handles to 0.
                     clientDeinit(contextHandle);
-                    contextHandle = 0;
+                    this.contextHandle = 0L;
                 }
             }
         }
