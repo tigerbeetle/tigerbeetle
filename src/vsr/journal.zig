@@ -1271,7 +1271,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
             if (journal.recover_torn_prepare(&cases)) |torn_slot| {
                 assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
-                cases[torn_slot.index] = &case_cut;
+                cases[torn_slot.index] = &case_cut_torn;
 
                 log.warn("{}: recover_slots: torn prepare in slot={}", .{
                     journal.replica,
@@ -1303,7 +1303,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         assert(view_range.max <= log_view);
 
                         if (header.command == .prepare and !view_range.contains(header.view)) {
-                            cases[index] = &case_cut;
+                            cases[index] = &case_cut_view_range;
                         }
                     }
                 }
@@ -1463,9 +1463,17 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(journal.dirty.bit(slot));
                     assert(journal.faulty.bit(slot));
                 },
-                .cut => {
+                .cut_torn => {
                     assert(header != null);
-                    // If `prepare` is non-null, it is being truncated due to the view range.
+                    assert(prepare == null);
+                    assert(!journal.prepare_inhabited[slot.index]);
+                    assert(journal.prepare_checksums[slot.index] == 0);
+                    journal.headers[slot.index] = Header.reserved(cluster, slot.index);
+                    journal.dirty.clear(slot);
+                    journal.faulty.clear(slot);
+                },
+                .cut_view_range => {
+                    assert(header != null);
                     maybe(prepare == null);
                     journal.headers[slot.index] = Header.reserved(cluster, slot.index);
                     journal.dirty.clear(slot);
@@ -1485,7 +1493,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         journal.headers[slot.index].op,
                     });
                 },
-                .fix, .vsr, .cut => {
+                .fix, .vsr, .cut_torn, .cut_view_range => {
                     log.warn("{}: recover_slot: recovered " ++
                         "slot={:0>4} label={s} decision={s} command={} op={}", .{
                         journal.replica,
@@ -2202,10 +2210,17 @@ const recovery_cases = table: {
     };
 };
 
-const case_cut = Case{
-    .label = "@Truncate",
-    .decision_multiple = .cut,
-    .decision_single = .cut,
+const case_cut_torn = Case{
+    .label = "@TruncateTorn",
+    .decision_multiple = .cut_torn,
+    .decision_single = .cut_torn,
+    .pattern = undefined,
+};
+
+const case_cut_view_range = Case{
+    .label = "@TruncateViewRange",
+    .decision_multiple = .cut_view_range,
+    .decision_single = .cut_view_range,
     .pattern = undefined,
 };
 
@@ -2220,7 +2235,8 @@ const RecoveryDecision = enum {
     /// If replica_count=1 and !standby: Fail; cannot recover safely.
     vsr,
     /// Truncate the op, setting it to reserved. Dirty/faulty are clear.
-    cut,
+    cut_torn,
+    cut_view_range,
 };
 
 const Matcher = enum { any, is_false, is_true, assert_is_false, assert_is_true };
