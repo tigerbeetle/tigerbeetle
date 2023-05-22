@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -948,6 +949,7 @@ public class IntegrationTest {
 
             final int tasks_qty = 32;
             final int max_concurrency = 32;
+            final var barrier = new CountDownLatch(tasks_qty);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -957,7 +959,7 @@ public class IntegrationTest {
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
                     // Starting multiple threads submitting transfers.
-                    tasks[i] = new TransferTask(client);
+                    tasks[i] = new TransferTask(client, barrier, null);
                     tasks[i].start();
                 }
 
@@ -1009,6 +1011,7 @@ public class IntegrationTest {
             // simultaneously.
             final int tasks_qty = 32;
             final int max_concurrency = 2;
+            final var barrier = new CountDownLatch(tasks_qty);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -1018,7 +1021,7 @@ public class IntegrationTest {
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
                     // Starting multiple threads submitting transfers.
-                    tasks[i] = new TransferTask(client);
+                    tasks[i] = new TransferTask(client, barrier, null);
                     tasks[i].start();
                 }
 
@@ -1082,8 +1085,10 @@ public class IntegrationTest {
 
             // The goal here is to force to have way more threads than the client can
             // process simultaneously
-            final int tasks_qty = 20;
+            final int tasks_qty = 32;
             final int max_concurrency = 2;
+            final var enterBarrier = new CountDownLatch(tasks_qty);
+            final var exitBarrier = new CountDownLatch(1);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -1091,18 +1096,15 @@ public class IntegrationTest {
                 assertTrue(errors.getLength() == 0);
 
                 var tasks = new TransferTask[tasks_qty];
-                synchronized (client) {
+                for (int i = 0; i < tasks_qty; i++) {
 
-                    for (int i = 0; i < tasks_qty; i++) {
-
-                        // Starting multiple threads submitting transfers,
-                        tasks[i] = new TransferTask(client);
-                        tasks[i].start();
-                    }
-
-                    // Waiting for any thread to complete
-                    client.wait();
+                    // Starting multiple threads submitting transfers,
+                    tasks[i] = new TransferTask(client, enterBarrier, exitBarrier);
+                    tasks[i].start();
                 }
+
+                // Waits until the first thread finishes.
+                exitBarrier.await();
 
                 // And then close the client while several other threads are still working
                 // Some of them have already submitted the request, while others will fail
@@ -1147,6 +1149,46 @@ public class IntegrationTest {
             throw any;
         }
     }
+
+
+    /**
+     * This test asserts that submit a request after the client was closed will fail with
+     * IllegalStateException.
+     */
+    @Test(expected = IllegalStateException.class)
+    public void testClose() throws Throwable {
+
+        try (var server = new Server()) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+
+                // Creating the accounts
+                var createAccountErrors = client.createAccounts(accounts);
+                assertTrue(createAccountErrors.getLength() == 0);
+
+                client.close();
+
+                // Creating a transfer
+                var transfers = new TransferBatch(2);
+
+                transfers.add();
+                transfers.setId(transfer1Id);
+                transfers.setCreditAccountId(account1Id);
+                transfers.setDebitAccountId(account2Id);
+                transfers.setLedger(720);
+                transfers.setCode((short) 1);
+                transfers.setFlags(TransferFlags.NONE);
+                transfers.setAmount(100);
+
+                client.createTransfers(transfers);
+                assert false;
+            } catch (Throwable any) {
+                throw any;
+            }
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
 
     /**
      * This test asserts that async tasks will respect client's concurrencyMax.
@@ -1244,11 +1286,16 @@ public class IntegrationTest {
         public final Client client;
         public CreateTransferResultBatch result;
         public Throwable exception;
+        private CountDownLatch enterBarrier;
+        private CountDownLatch exitBarrier;
 
-        public TransferTask(Client client) {
+        public TransferTask(Client client, CountDownLatch enterBarrier,
+                CountDownLatch exitBarrier) {
             this.client = client;
             this.result = null;
             this.exception = null;
+            this.enterBarrier = enterBarrier;
+            this.exitBarrier = exitBarrier;
         }
 
         @Override
@@ -1265,16 +1312,14 @@ public class IntegrationTest {
             transfers.setAmount(100);
 
             try {
+                enterBarrier.countDown();
+                enterBarrier.await();
                 result = client.createTransfers(transfers);
             } catch (Throwable e) {
                 exception = e;
             } finally {
-
-                // Signal the caller
-                synchronized (client) {
-                    client.notify();
-                }
-
+                if (exitBarrier != null)
+                    exitBarrier.countDown();
             }
         }
     }
