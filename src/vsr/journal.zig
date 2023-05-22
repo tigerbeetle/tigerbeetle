@@ -1289,6 +1289,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // - after the case decisions are made (to avoid @H:vsr arising from an
             //   artificially reserved prepare),
             // - before we repair the 'fix' cases.
+            //
+            // (These headers can originate if we join a view, write some prepares from the new
+            // view, and then crash before the view_durable_update() finished.)
             for ([_][]align(constants.sector_size) Header{
                 journal.headers_redundant,
                 journal.headers,
