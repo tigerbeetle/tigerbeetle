@@ -1288,6 +1288,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // - after prepare_op_max is computed,
             // - after the case decisions are made (to avoid @H:vsr arising from an
             //   artificially reserved prepare),
+            // - after recover_torn_prepare(), which computes its own max ops.
             // - before we repair the 'fix' cases.
             //
             // (These headers can originate if we join a view, write some prepares from the new
