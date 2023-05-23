@@ -9,8 +9,9 @@ const os = std.os;
 const log = std.log.scoped(.tree);
 const tracer = @import("../tracer.zig");
 
+const stdx = @import("../stdx.zig");
+const div_ceil = stdx.div_ceil;
 const constants = @import("../constants.zig");
-const div_ceil = @import("../stdx.zig").div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
 const bloom_filter = @import("bloom_filter.zig");
@@ -323,7 +324,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
 
             // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
-            const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
+            const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
 
             context.* = .{
                 .tree = tree,
