@@ -2355,14 +2355,15 @@ fn header_ok(cluster: u32, slot: Slot, header: *const Header) ?*const Header {
 }
 
 test "recovery_cases" {
+    const parameters_count = 9;
     // Verify that every pattern matches exactly one case.
     //
     // Every possible combination of parameters must either:
     // * have a matching case
     // * have a case that fails (which would result in a panic).
     var i: usize = 0;
-    while (i <= std.math.maxInt(u8)) : (i += 1) {
-        var parameters: [9]bool = undefined;
+    while (i < (1 << parameters_count)) : (i += 1) {
+        var parameters: [parameters_count]bool = undefined;
         comptime var j: usize = 0;
         inline while (j < parameters.len) : (j += 1) {
             parameters[j] = i & (1 << j) != 0;
