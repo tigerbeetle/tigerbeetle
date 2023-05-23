@@ -84,8 +84,8 @@ pub const Storage = struct {
             if (!list.completion_scheduled) {
                 list.completion_scheduled = true;
                 io.timeout(
-                    *void,
-                    undefined,
+                    *DeferredTickList,
+                    list,
                     on_timeout,
                     &list.completion,
                     delay,
@@ -93,9 +93,12 @@ pub const Storage = struct {
             }
         }
 
-        fn on_timeout(ctx: *void, completion: *IO.Completion, result: IO.TimeoutError!void) void {
-            const list = @fieldParentPtr(DeferredTickList, "completion", completion);
-            _ = ctx;
+        fn on_timeout(
+            list: *DeferredTickList,
+            completion: *IO.Completion,
+            result: IO.TimeoutError!void,
+        ) void {
+            assert(&list.completion == completion);
             _ = result catch |e| switch (e) {
                 error.Canceled => unreachable,
                 error.Unexpected => unreachable,
@@ -129,7 +132,7 @@ pub const Storage = struct {
     pub fn deinit(storage: *Storage) void {
         assert(storage.deferred_next_tick.queue.empty());
         assert(storage.deferred_after_io.queue.empty());
-        
+
         assert(storage.fd != IO.INVALID_FILE);
         storage.fd = IO.INVALID_FILE;
     }
@@ -147,8 +150,9 @@ pub const Storage = struct {
         next_tick: *Storage.NextTick,
     ) void {
         // Schedule with 0ns timeout to resolve as soon as possible.
+        const timeout_ns = 0;
         next_tick.* = .{ .callback = callback };
-        storage.deferred_next_tick.schedule(next_tick, &storage.io, 0);
+        storage.deferred_next_tick.schedule(next_tick, storage.io, timeout_ns);
     }
 
     pub fn after_io(
@@ -157,8 +161,9 @@ pub const Storage = struct {
         next_tick: *Storage.NextTick,
     ) void {
         // Schedule with 1ns timeout to allow any existing IO to be submitted first.
+        const timeout_ns = 1;
         next_tick.* = .{ .callback = callback };
-        storage.deferred_after_io.schedule(next_tick, &storage.io, 1);
+        storage.deferred_after_io.schedule(next_tick, storage.io, timeout_ns);
     }
 
     pub fn read_sectors(

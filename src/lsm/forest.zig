@@ -63,7 +63,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         const Callback = fn (*Forest) void;
         const JoinOp = enum {
             compacting,
-            compacting_end,
+            compact_end,
             checkpoint,
             open,
         };
@@ -167,12 +167,13 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
                             // Start the compact_end()s.
                             if (join_op == .compacting) {
+                                const Join = JoinType(.compact_end);
                                 forest.join_op = .compact_end;
                                 forest.join_pending = std.meta.fields(Grooves).len;
 
                                 inline for (std.meta.fields(Grooves)) |field| {
-                                    const cb = JoinType(.compact_end).groove_callback(field.name);
-                                    @field(forest.grooves, field.name).compact_end(cb);
+                                    const callback = Join.groove_callback(field.name);
+                                    @field(forest.grooves, field.name).compact_end(callback);
                                 }
                                 return;
                             }

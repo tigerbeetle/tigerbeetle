@@ -402,6 +402,7 @@ pub fn GrooveType(
         const Callback = fn (*Groove) void;
         const JoinOp = enum {
             compacting,
+            compact_end,
             checkpoint,
             open,
         };
@@ -973,14 +974,16 @@ pub fn GrooveType(
             }
         }
 
-        pub fn compact_end(groove: *Groove) void {
-            assert(groove.join_callback == null);
+        pub fn compact_end(groove: *Groove, callback: Callback) void {
+            const Join = JoinType(.compact_end);
+            Join.start(groove, callback);
 
-            if (has_id) groove.ids.compact_end();
-            groove.objects.compact_end();
+            if (has_id) groove.ids.compact_end(Join.tree_callback(.ids));
+            groove.objects.compact_end(Join.tree_callback(.objects));
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(groove.indexes, field.name).compact_end();
+                const compact_end_callback = Join.tree_callback(.{ .index = field.name });
+                @field(groove.indexes, field.name).compact_end(compact_end_callback);
             }
         }
 
