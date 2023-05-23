@@ -558,11 +558,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 tree.compaction_phase = .skipped;
 
                 tree.lookup_snapshot_max = op + 1;
+                tree.compaction_callback = .{ .next_tick = callback };
+
                 if (op + 1 == constants.lsm_batch_multiple) {
-                    tree.compact_mutable_table_into_immutable();
+                    tree.compact_mutable_table_into_immutable(compact_finish_next_tick);
+                    return;
                 }
 
-                tree.compaction_callback = .{ .next_tick = callback };
                 tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 return;
             }
@@ -575,14 +577,16 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 // See also: lookup_snapshot_max_for_checkpoint().
                 tree.compaction_phase = .skipped;
 
+                tree.compaction_callback = .{ .next_tick = callback };
+
                 if (op + 1 == tree.lookup_snapshot_max) {
                     // This is the last op of the skipped compaction bar.
                     // Prepare the immutable table for the next bar — since this state is
                     // in-memory, it cannot be skipped.
-                    tree.compact_mutable_table_into_immutable();
+                    tree.compact_mutable_table_into_immutable(compact_finish_next_tick);
+                    return;
                 }
 
-                tree.compaction_callback = .{ .next_tick = callback };
                 tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 return;
             }
@@ -820,13 +824,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             callback(tree);
         }
 
-        pub fn compact_end(tree: *Tree) void {
+        pub fn compact_end(tree: *Tree, callback: fn (*Tree) void) void {
             const state_old = tree.compaction_phase;
             tree.compaction_phase = .idle;
 
+            assert(tree.compaction_callback == .none);
+            tree.compaction_callback = .{ .next_tick = callback };
+
             switch (state_old) {
                 .running_done => {}, // Fall through.
-                .skipped_done => return,
+                .skipped_done => {
+                    tree.grid.on_next_tick(compact_end_next_tick, &tree.compaction_next_tick);
+                    return;
+                },
                 else => unreachable,
             }
 
@@ -834,7 +844,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
             const compacted_levels_odd = compaction_beat == constants.lsm_batch_multiple - 1;
             const compacted_levels_even = compaction_beat == half_bar_beat_count - 1;
-            if (!compacted_levels_odd and !compacted_levels_even) return;
+            if (!compacted_levels_odd and !compacted_levels_even) {
+                tree.grid.on_next_tick(compact_end_next_tick, &tree.compaction_next_tick);
+                return;
+            }
 
             tree.lookup_snapshot_max = tree.compaction_op + 1;
 
@@ -904,18 +917,50 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 tree.manifest.assert_level_table_counts();
 
                 // Convert mutable table to immutable table for next bar.
-                tree.compact_mutable_table_into_immutable();
+                tree.compact_mutable_table_into_immutable(compact_end_next_tick);
+                return;
             }
+
+            tree.grid.on_next_tick(compact_end_next_tick, &tree.compaction_next_tick);
+        }
+
+        fn compact_end_next_tick(next_tick: *Grid.NextTick) void {
+            const tree = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
+            assert(tree.compaction_callback == .next_tick);
+            assert(tree.compaction_phase == .idle);
+
+            const callback = tree.compaction_callback.next_tick;
+            tree.compaction_callback = .none;
+            callback(tree);
         }
 
         /// Called after the last beat of a full compaction bar.
-        fn compact_mutable_table_into_immutable(tree: *Tree) void {
+        fn compact_mutable_table_into_immutable(
+            tree: *Tree,
+            comptime next_tick_callback: fn (*Grid.NextTick) void,
+        ) void {
             assert(tree.table_immutable.free);
             assert((tree.compaction_op + 1) % constants.lsm_batch_multiple == 0);
             assert(tree.compaction_op + 1 == tree.lookup_snapshot_max);
+            assert(tree.compaction_callback == .next_tick);
 
-            if (tree.table_mutable.count() == 0) return;
+            if (tree.table_mutable.count() == 0) {
+                tree.grid.on_next_tick(next_tick_callback, &tree.compaction_next_tick);
+                return;
+            }
 
+            const AfterIO = struct {
+                fn callback(next_tick: *Grid.NextTick) void {
+                    const tree_ = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
+                    tree_.compact_mutable_table_into_immutable_after_io();
+                    next_tick_callback(next_tick);
+                }
+            };
+
+            tree.grid.after_io(AfterIO.callback, &tree.compaction_next_tick);
+        }
+
+        fn compact_mutable_table_into_immutable_after_io(tree: *Tree) void {
             // Sort the mutable table values directly into the immutable table's array.
             const values_max = tree.table_immutable.values_max();
             const values = tree.table_mutable.sort_into_values_and_clear(values_max);

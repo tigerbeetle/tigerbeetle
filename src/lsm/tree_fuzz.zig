@@ -123,6 +123,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             tree_open,
             fuzzing,
             tree_compact,
+            tree_compact_end,
             tree_checkpoint,
             superblock_checkpoint,
             tree_lookup,
@@ -232,13 +233,19 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         pub fn compact(env: *Environment, op: u64) void {
             env.change_state(.fuzzing, .tree_compact);
             env.tree.compact(tree_compact_callback, op);
-            env.tick_until_state_change(.tree_compact, .fuzzing);
-            env.tree.compact_end();
+            env.tick_until_state_change(.tree_compact, .tree_compact_end);
+            env.tree.compact_end(tree_compact_end_callback);
+            env.tick_until_state_change(.tree_compact_end, .fuzzing);
         }
 
         fn tree_compact_callback(tree: *Tree) void {
             const env = @fieldParentPtr(@This(), "tree", tree);
-            env.change_state(.tree_compact, .fuzzing);
+            env.change_state(.tree_compact, .tree_compact_end);
+        }
+
+        fn tree_compact_end_callback(tree: *Tree) void {
+            const env = @fieldParentPtr(@This(), "tree", tree);
+            env.change_state(.tree_compact_end, .fuzzing);
         }
 
         pub fn checkpoint(env: *Environment, op: u64) void {
