@@ -20,7 +20,7 @@ public final class Client implements AutoCloseable {
      *
      * @param clusterID
      * @param replicaAddresses
-     * @param concurrencyMax
+     * @param concurrencyMax maximum number of requests this instance can handle concurrently.
      *
      * @throws InitializationException if an error occurred initializing this client. See
      *         {@link InitializationStatus} for more details.
@@ -96,6 +96,8 @@ public final class Client implements AutoCloseable {
      * @throws RequestException refer to {@link PacketStatus} for more details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(int, String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public CreateAccountResultBatch createAccounts(final AccountBatch batch)
@@ -114,6 +116,8 @@ public final class Client implements AutoCloseable {
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(int, String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<CreateAccountResultBatch> createAccountsAsync(final AccountBatch batch)
@@ -131,6 +135,8 @@ public final class Client implements AutoCloseable {
      * @throws RequestException refer to {@link PacketStatus} for more details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(int, String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public AccountBatch lookupAccounts(final IdBatch batch)
@@ -148,6 +154,8 @@ public final class Client implements AutoCloseable {
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(int, String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<AccountBatch> lookupAccountsAsync(final IdBatch batch)
@@ -167,6 +175,8 @@ public final class Client implements AutoCloseable {
      * @throws RequestException refer to {@link PacketStatus} for more details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(int, String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public CreateTransferResultBatch createTransfers(final TransferBatch batch)
@@ -184,6 +194,8 @@ public final class Client implements AutoCloseable {
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(int, String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<CreateTransferResultBatch> createTransfersAsync(
@@ -202,6 +214,8 @@ public final class Client implements AutoCloseable {
      * @throws RequestException refer to {@link PacketStatus} for more details.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(int, String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public TransferBatch lookupTransfers(final IdBatch batch)
@@ -219,6 +233,8 @@ public final class Client implements AutoCloseable {
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
+     * @throws ConcurrencyExceededException if there are more concurrent requests than defined at
+     *         {@link #Client(int, String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
     public CompletableFuture<TransferBatch> lookupTransfersAsync(final IdBatch batch)
