@@ -233,6 +233,14 @@ pub fn GridType(comptime Storage: type) type {
             grid.superblock.storage.on_next_tick(callback, next_tick);
         }
 
+        pub fn after_io(
+            grid: *Grid,
+            callback: fn (*Grid.NextTick) void,
+            next_tick: *Grid.NextTick,
+        ) void {
+            grid.superblock.storage.after_io(callback, next_tick);
+        }
+
         /// Returning null indicates that there are not enough free blocks to fill the reservation.
         pub fn reserve(grid: *Grid, blocks_count: usize) ?Reservation {
             return grid.superblock.free_set.reserve(blocks_count);

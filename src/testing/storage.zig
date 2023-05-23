@@ -147,6 +147,7 @@ pub const Storage = struct {
     writes: PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
+    after_io_queue: FIFO(NextTick) = .{ .name = "storage_after_io" },
     next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
@@ -270,6 +271,10 @@ pub const Storage = struct {
             storage.write_sectors_finish(write);
         }
 
+        while (storage.after_io_queue.pop()) |next_tick| {
+            next_tick.callback(next_tick);
+        }
+
         while (storage.next_tick_queue.pop()) |next_tick| {
             next_tick.callback(next_tick);
         }
@@ -282,6 +287,15 @@ pub const Storage = struct {
     ) void {
         next_tick.* = .{ .callback = callback };
         storage.next_tick_queue.push(next_tick);
+    }
+
+    pub fn after_io(
+        storage: *Storage,
+        callback: fn (next_tick: *Storage.NextTick) void,
+        next_tick: *Storage.NextTick,
+    ) void {
+        next_tick.* = .{ .callback = callback };
+        storage.after_io_queue.push(next_tick);
     }
 
     /// * Verifies that the read fits within the target sector.

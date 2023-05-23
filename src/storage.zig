@@ -73,12 +73,51 @@ pub const Storage = struct {
         callback: fn (next_tick: *NextTick) void,
     };
 
+    const DeferredTickList = struct {
+        queue: FIFO(NextTick),
+        completion_scheduled: bool = false,
+        completion: IO.Completion = undefined,
+
+        fn schedule(list: *DeferredTickList, next_tick: *NextTick, io: *IO, delay: u63) void {
+            list.queue.push(next_tick);
+
+            if (!list.completion_scheduled) {
+                list.completion_scheduled = true;
+                io.timeout(
+                    *void,
+                    undefined,
+                    on_timeout,
+                    &list.completion,
+                    delay,
+                );
+            }
+        }
+
+        fn on_timeout(ctx: *void, completion: *IO.Completion, result: IO.TimeoutError!void) void {
+            const list = @fieldParentPtr(DeferredTickList, "completion", completion);
+            _ = ctx;
+            _ = result catch |e| switch (e) {
+                error.Canceled => unreachable,
+                error.Unexpected => unreachable,
+            };
+
+            // Reset the scheduled flag after processing all tick entries
+            assert(list.completion_scheduled);
+            defer {
+                assert(list.completion_scheduled);
+                list.completion_scheduled = false;
+            }
+
+            while (list.queue.pop()) |next_tick| {
+                next_tick.callback(next_tick);
+            }
+        }
+    };
+
     io: *IO,
     fd: os.fd_t,
-
-    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
-    next_tick_completion_scheduled: bool = false,
-    next_tick_completion: IO.Completion = undefined,
+    deferred_after_io: DeferredTickList = .{ .queue = .{ .name = "storage_after_io" } },
+    deferred_next_tick: DeferredTickList = .{ .queue = .{ .name = "storage_next_tick" } },
 
     pub fn init(io: *IO, fd: os.fd_t) !Storage {
         return Storage{
@@ -88,7 +127,9 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage) void {
-        assert(storage.next_tick_queue.empty());
+        assert(storage.deferred_next_tick.queue.empty());
+        assert(storage.deferred_after_io.queue.empty());
+        
         assert(storage.fd != IO.INVALID_FILE);
         storage.fd = IO.INVALID_FILE;
     }
@@ -105,42 +146,19 @@ pub const Storage = struct {
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
+        // Schedule with 0ns timeout to resolve as soon as possible.
         next_tick.* = .{ .callback = callback };
-        storage.next_tick_queue.push(next_tick);
-
-        if (!storage.next_tick_completion_scheduled) {
-            storage.next_tick_completion_scheduled = true;
-            storage.io.timeout(
-                *Storage,
-                storage,
-                timeout_callback,
-                &storage.next_tick_completion,
-                0, // 0ns timeout means to resolve as soon as possible - like a yield
-            );
-        }
+        storage.deferred_next_tick.schedule(next_tick, &storage.io, 0);
     }
 
-    fn timeout_callback(
+    pub fn after_io(
         storage: *Storage,
-        completion: *IO.Completion,
-        result: IO.TimeoutError!void,
+        callback: fn (next_tick: *Storage.NextTick) void,
+        next_tick: *Storage.NextTick,
     ) void {
-        assert(completion == &storage.next_tick_completion);
-        _ = result catch |e| switch (e) {
-            error.Canceled => unreachable,
-            error.Unexpected => unreachable,
-        };
-
-        // Reset the scheduled flag after processing all tick entries
-        assert(storage.next_tick_completion_scheduled);
-        defer {
-            assert(storage.next_tick_completion_scheduled);
-            storage.next_tick_completion_scheduled = false;
-        }
-
-        while (storage.next_tick_queue.pop()) |next_tick| {
-            next_tick.callback(next_tick);
-        }
+        // Schedule with 1ns timeout to allow any existing IO to be submitted first.
+        next_tick.* = .{ .callback = callback };
+        storage.deferred_after_io.schedule(next_tick, &storage.io, 1);
     }
 
     pub fn read_sectors(
