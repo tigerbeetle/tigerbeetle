@@ -1224,7 +1224,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///    >  header.op > prepare.op
         ///  eql  The header and prepare are identical; no repair necessary.
         ///  nil  Reserved; dirty/faulty are clear, no repair necessary.
-        ///  fix  When replicas=1, use intact prepare. When replicas>1, use VSR `request_prepare`.
+        ///  fix  Repair header using local intact prepare.
         ///  vsr  Repair with VSR `request_prepare`.
         ///
         /// A "valid" header/prepare:
@@ -2096,7 +2096,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 }
 
 /// @B and @C:
-/// This prepare header is corrupt.
+/// This prepare is corrupt.
 /// We may have a valid redundant header, but need to recover the full message.
 ///
 /// Case @B may be caused by crashing while writing the prepare (torn write).
@@ -2165,7 +2165,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///
 /// @L:
 /// The message was rewritten due to a view change.
-/// A single-replica cluster doesn't ever change views.
 ///
 ///
 /// @M:
