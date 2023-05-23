@@ -1206,7 +1206,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///   header reserved          _   1   0   _   _   _   1   0   1   0   0   0   0
         ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1   1
         ///   prepare reserved         _   _   _   1   0   0   0   1   1   0   0   0   0
-        ///   prepare.op is maximum    _   _   _   _   0   1   1   _   _   _   _   _   _
+        ///   prepare.op is maximum    _   _   _   _   0   1   _   _   _   _   _   _   _
         ///   match checksum           _   _   _   _   _   _   _   _  !1   0   0   0   1
         ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1  !1
         ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !1
