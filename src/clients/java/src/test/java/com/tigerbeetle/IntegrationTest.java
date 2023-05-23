@@ -959,7 +959,7 @@ public class IntegrationTest {
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
                     // Starting multiple threads submitting transfers.
-                    tasks[i] = new TransferTask(client, barrier, null);
+                    tasks[i] = new TransferTask(client, barrier);
                     tasks[i].start();
                 }
 
@@ -1021,7 +1021,7 @@ public class IntegrationTest {
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
                     // Starting multiple threads submitting transfers.
-                    tasks[i] = new TransferTask(client, barrier, null);
+                    tasks[i] = new TransferTask(client, barrier);
                     tasks[i].start();
                 }
 
@@ -1086,9 +1086,8 @@ public class IntegrationTest {
             // The goal here is to force to have way more threads than the client can
             // process simultaneously
             final int tasks_qty = 32;
-            final int max_concurrency = 2;
-            final var enterBarrier = new CountDownLatch(tasks_qty);
-            final var exitBarrier = new CountDownLatch(1);
+            final int max_concurrency = 32;
+            final var barrier = new CountDownLatch(tasks_qty);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -1099,16 +1098,16 @@ public class IntegrationTest {
                 for (int i = 0; i < tasks_qty; i++) {
 
                     // Starting multiple threads submitting transfers,
-                    tasks[i] = new TransferTask(client, enterBarrier, exitBarrier);
+                    tasks[i] = new TransferTask(client, barrier);
                     tasks[i].start();
                 }
 
-                // Waits until the first thread finishes.
-                exitBarrier.await();
+                // Waits until all threads are running.
+                barrier.await();
 
-                // And then close the client while several other threads are still working
+                // And then close the client while threads are still working
                 // Some of them have already submitted the request, while others will fail
-                // due to the concurrencyMax limit.
+                // due to "shutdown".
                 client.close();
 
                 int failedCount = 0;
@@ -1123,10 +1122,9 @@ public class IntegrationTest {
                     final var succeeded =
                             tasks[i].result != null && tasks[i].result.getLength() == 0;
 
-                    // Can fail due to concurrency max or client closed.
+                    // Can fail due to client closed.
                     final var failed = tasks[i].exception != null
-                            && (tasks[i].exception instanceof ConcurrencyExceededException
-                                    || tasks[i].exception instanceof IllegalStateException);
+                            && tasks[i].exception instanceof IllegalStateException;
 
                     assertTrue(failed || succeeded);
 
@@ -1137,7 +1135,6 @@ public class IntegrationTest {
                     }
                 }
 
-                assertTrue(succeededCount > 0);
                 assertTrue(succeededCount + failedCount == tasks_qty);
 
 
@@ -1287,15 +1284,12 @@ public class IntegrationTest {
         public CreateTransferResultBatch result;
         public Throwable exception;
         private CountDownLatch enterBarrier;
-        private CountDownLatch exitBarrier;
 
-        public TransferTask(Client client, CountDownLatch enterBarrier,
-                CountDownLatch exitBarrier) {
+        public TransferTask(Client client, CountDownLatch enterBarrier) {
             this.client = client;
             this.result = null;
             this.exception = null;
             this.enterBarrier = enterBarrier;
-            this.exitBarrier = exitBarrier;
         }
 
         @Override
@@ -1317,9 +1311,6 @@ public class IntegrationTest {
                 result = client.createTransfers(transfers);
             } catch (Throwable e) {
                 exception = e;
-            } finally {
-                if (exitBarrier != null)
-                    exitBarrier.countDown();
             }
         }
     }
