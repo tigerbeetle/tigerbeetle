@@ -127,7 +127,7 @@ pub fn GridType(comptime Storage: type) type {
 
             inline fn hash_address(address: u64) u64 {
                 assert(address > 0);
-                return std.hash.Wyhash.hash(0, mem.asBytes(&address));
+                return stdx.hash_inline(address);
             }
 
             inline fn equal_addresses(a: u64, b: u64) bool {
