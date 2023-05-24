@@ -1206,7 +1206,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///   header reserved          _   1   0   _   _   _   1   0   1   0   0   0   0
         ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1   1
         ///   prepare reserved         _   _   _   1   0   0   0   1   1   0   0   0   0
-        ///   prepare.op is maximum    _   _   _   _   0   1   1   _   _   _   _   _   _
+        ///   prepare.op is maximum    _   _   _   _   0   1   _   _   _   _   _   _   _
         ///   match checksum           _   _   _   _   _   _   _   _  !1   0   0   0   1
         ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1  !1
         ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !1
@@ -1224,7 +1224,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///    >  header.op > prepare.op
         ///  eql  The header and prepare are identical; no repair necessary.
         ///  nil  Reserved; dirty/faulty are clear, no repair necessary.
-        ///  fix  When replicas=1, use intact prepare. When replicas>1, use VSR `request_prepare`.
+        ///  fix  Repair header using local intact prepare.
         ///  vsr  Repair with VSR `request_prepare`.
         ///
         /// A "valid" header/prepare:
@@ -1242,30 +1242,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.writes.executing() == 0);
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
-
-            // Discard headers which we are certain do not belong in the current log_view.
-            // - This ensures that we don't accidentally set our new head op to be a message
-            //   which was truncated but not yet overwritten.
-            // - This is also necessary to ensure that generated DVC's headers are complete.
-            //
-            // It is essential that this is performed before we compute the op_max so that the
-            // recovery cases apply correctly.
-            for ([_][]align(constants.sector_size) Header{
-                journal.headers_redundant,
-                journal.headers,
-            }) |headers| {
-                for (headers) |*header_untrusted, index| {
-                    const slot = Slot{ .index = index };
-                    if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
-                        var view_range = view_change_headers.view_for_op(header.op, log_view);
-                        assert(view_range.max <= log_view);
-
-                        if (header.command == .prepare and !view_range.contains(header.view)) {
-                            header_untrusted.* = Header.reserved(replica.cluster, index);
-                        }
-                    }
-                }
-            }
 
             const prepare_op_max = std.math.max(
                 replica.op_checkpoint(),
@@ -1295,12 +1271,43 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // Refine cases @B and @C: Repair (truncate) a prepare if it was torn during a crash.
             if (journal.recover_torn_prepare(&cases)) |torn_slot| {
                 assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
-                cases[torn_slot.index] = &case_cut;
+                cases[torn_slot.index] = &case_cut_torn;
 
                 log.warn("{}: recover_slots: torn prepare in slot={}", .{
                     journal.replica,
                     torn_slot.index,
                 });
+            }
+
+            // Discard headers which we are certain do not belong in the current log_view.
+            // - This ensures that we don't accidentally set our new head op to be a message
+            //   which was truncated but not yet overwritten.
+            // - This is also necessary to ensure that generated DVC's headers are complete.
+            //
+            // It is essential that this is performed:
+            // - after prepare_op_max is computed,
+            // - after the case decisions are made (to avoid @H:vsr arising from an
+            //   artificially reserved prepare),
+            // - after recover_torn_prepare(), which computes its own max ops.
+            // - before we repair the 'fix' cases.
+            //
+            // (These headers can originate if we join a view, write some prepares from the new
+            // view, and then crash before the view_durable_update() finished.)
+            for ([_][]align(constants.sector_size) Header{
+                journal.headers_redundant,
+                journal.headers,
+            }) |headers| {
+                for (headers) |*header_untrusted, index| {
+                    const slot = Slot{ .index = index };
+                    if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
+                        var view_range = view_change_headers.view_for_op(header.op, log_view);
+                        assert(view_range.max <= log_view);
+
+                        if (header.command == .prepare and !view_range.contains(header.view)) {
+                            cases[index] = &case_cut_view_range;
+                        }
+                    }
+                }
             }
 
             for (cases) |case, index| journal.recover_slot(Slot{ .index = index }, case);
@@ -1457,11 +1464,18 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(journal.dirty.bit(slot));
                     assert(journal.faulty.bit(slot));
                 },
-                .cut => {
+                .cut_torn => {
                     assert(header != null);
                     assert(prepare == null);
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
+                    journal.headers[slot.index] = Header.reserved(cluster, slot.index);
+                    journal.dirty.clear(slot);
+                    journal.faulty.clear(slot);
+                },
+                .cut_view_range => {
+                    assert(header != null);
+                    maybe(prepare == null);
                     journal.headers[slot.index] = Header.reserved(cluster, slot.index);
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
@@ -1480,7 +1494,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         journal.headers[slot.index].op,
                     });
                 },
-                .fix, .vsr, .cut => {
+                .fix, .vsr, .cut_torn, .cut_view_range => {
                     log.warn("{}: recover_slot: recovered " ++
                         "slot={:0>4} label={s} decision={s} command={} op={}", .{
                         journal.replica,
@@ -1888,9 +1902,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn write_prepare_debug(journal: *const Journal, header: *const Header, status: []const u8) void {
-            log.debug("{}: write: view={} op={} len={}: {} {s}", .{
+            assert(journal.status == .recovered);
+            assert(header.command == .prepare);
+
+            log.debug("{}: write: view={} slot={} op={} len={}: {} {s}", .{
                 journal.replica,
                 header.view,
+                journal.slot_for_header(header).index,
                 header.op,
                 header.size,
                 header.checksum,
@@ -2079,7 +2097,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 }
 
 /// @B and @C:
-/// This prepare header is corrupt.
+/// This prepare is corrupt.
 /// We may have a valid redundant header, but need to recover the full message.
 ///
 /// Case @B may be caused by crashing while writing the prepare (torn write).
@@ -2148,7 +2166,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///
 /// @L:
 /// The message was rewritten due to a view change.
-/// A single-replica cluster doesn't ever change views.
 ///
 ///
 /// @M:
@@ -2193,10 +2210,17 @@ const recovery_cases = table: {
     };
 };
 
-const case_cut = Case{
-    .label = "@Truncate",
-    .decision_multiple = .cut,
-    .decision_single = .cut,
+const case_cut_torn = Case{
+    .label = "@TruncateTorn",
+    .decision_multiple = .cut_torn,
+    .decision_single = .cut_torn,
+    .pattern = undefined,
+};
+
+const case_cut_view_range = Case{
+    .label = "@TruncateViewRange",
+    .decision_multiple = .cut_view_range,
+    .decision_single = .cut_view_range,
     .pattern = undefined,
 };
 
@@ -2211,7 +2235,8 @@ const RecoveryDecision = enum {
     /// If replica_count=1 and !standby: Fail; cannot recover safely.
     vsr,
     /// Truncate the op, setting it to reserved. Dirty/faulty are clear.
-    cut,
+    cut_torn,
+    cut_view_range,
 };
 
 const Matcher = enum { any, is_false, is_true, assert_is_false, assert_is_true };
@@ -2331,14 +2356,15 @@ fn header_ok(cluster: u32, slot: Slot, header: *const Header) ?*const Header {
 }
 
 test "recovery_cases" {
+    const parameters_count = 9;
     // Verify that every pattern matches exactly one case.
     //
     // Every possible combination of parameters must either:
     // * have a matching case
     // * have a case that fails (which would result in a panic).
     var i: usize = 0;
-    while (i <= std.math.maxInt(u8)) : (i += 1) {
-        var parameters: [9]bool = undefined;
+    while (i < (1 << parameters_count)) : (i += 1) {
+        var parameters: [parameters_count]bool = undefined;
         comptime var j: usize = 0;
         inline while (j < parameters.len) : (j += 1) {
             parameters[j] = i & (1 << j) != 0;
