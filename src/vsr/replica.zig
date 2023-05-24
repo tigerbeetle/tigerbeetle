@@ -2844,11 +2844,7 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
 
             if (self.status == .normal and self.primary()) {
-                if (self.pipeline.queue.prepare_queue.empty()) {
-                    self.commit_ops_done();
-                } else {
-                    self.commit_pipeline_next();
-                }
+                self.commit_pipeline_next();
             } else {
                 self.commit_journal_next();
             }
@@ -2856,11 +2852,11 @@ pub fn ReplicaType(
 
         /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
         ///
-        /// 1. prefetch
-        /// 2. commit_op: Update the state machine and the replica's commit_min/commit_max.
-        /// 3. compact
-        /// 4. checkpoint: (Only called when `commit_min == op_checkpoint_trigger`).
-        /// 5. done: Call the `callback` that was passed to `commit_op_prefetch`.
+        /// 1. Prefetch.
+        /// 2. Commit_op: Update the state machine and the replica's commit_min/commit_max.
+        /// 3. Compact.
+        /// 4. Checkpoint: (Only called when `commit_min == op_checkpoint_trigger`).
+        /// 5. Done: Call the `callback` that was passed to `commit_op_prefetch`.
         fn commit_op_prefetch(
             self: *Self,
             prepare: *Message,
