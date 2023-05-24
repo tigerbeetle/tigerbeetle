@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -142,11 +143,11 @@ public class IntegrationTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void testConstructorNegativeMaxConcurrency() throws Throwable {
+    public void testConstructorNegativeConcurrencyMax() throws Throwable {
 
         var replicaAddresses = new String[] {"3001"};
-        var maxConcurrency = -1;
-        try (var client = new Client(0, replicaAddresses, maxConcurrency)) {
+        var concurrencyMax = -1;
+        try (var client = new Client(0, replicaAddresses, concurrencyMax)) {
 
         } catch (Throwable any) {
             throw any;
@@ -939,18 +940,16 @@ public class IntegrationTest {
     }
 
     /**
-     * This test asserts that parallel threads will respect client's maxConcurrency.
+     * This test asserts that the client can handle parallel threads up to concurrencyMax.
      */
     @Test
     public void testConcurrentTasks() throws Throwable {
 
         try (var server = new Server()) {
 
-            // Defining a ratio between concurrent threads and client's maxConcurrency
-            // The goal here is to force to have more threads than the client can process
-            // simultaneously
-            final int tasks_qty = 20;
-            final int max_concurrency = tasks_qty / 2;
+            final int tasks_qty = 32;
+            final int max_concurrency = 32;
+            final var barrier = new CountDownLatch(tasks_qty);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -959,19 +958,18 @@ public class IntegrationTest {
 
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
-                    // Starting multiple threads submitting transfers,
-                    tasks[i] = new TransferTask(client);
+                    // Starting multiple threads submitting transfers.
+                    tasks[i] = new TransferTask(client, barrier);
                     tasks[i].start();
                 }
 
-                // Wait for all threads
+                // Wait for all threads:
                 for (int i = 0; i < tasks_qty; i++) {
                     tasks[i].join();
-                    assertTrue(tasks[i].exception == null);
-                    assertEquals(0, tasks[i].result.getLength());
+                    assertTrue(tasks[i].result.getLength() == 0);
                 }
 
-                // Asserting if all transfers were submitted correctly
+                // Asserting if all transfers were submitted correctly.
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertEquals(2, lookupAccounts.getLength());
 
@@ -1001,6 +999,81 @@ public class IntegrationTest {
     }
 
     /**
+     * This test asserts that parallel threads will respect client's concurrencyMax.
+     */
+    @Test
+    public void testConcurrencyExceeded() throws Throwable {
+
+        try (var server = new Server()) {
+
+            // Defining a ratio between concurrent threads and client's concurrencyMax
+            // The goal here is to force to have more threads than the client can process
+            // simultaneously.
+            final int tasks_qty = 32;
+            final int max_concurrency = 2;
+            final var barrier = new CountDownLatch(tasks_qty);
+
+            try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
+
+                var errors = client.createAccounts(accounts);
+                assertTrue(errors.getLength() == 0);
+
+                var tasks = new TransferTask[tasks_qty];
+                for (int i = 0; i < tasks_qty; i++) {
+                    // Starting multiple threads submitting transfers.
+                    tasks[i] = new TransferTask(client, barrier);
+                    tasks[i].start();
+                }
+
+                // Wait for all threads:
+                int succeededCount = 0;
+                int failedCount = 0;
+                for (int i = 0; i < tasks_qty; i++) {
+                    tasks[i].join();
+                    if (tasks[i].exception == null) {
+                        assertTrue(tasks[i].result.getLength() == 0);
+                        succeededCount += 1;
+                    } else {
+                        assertEquals(ConcurrencyExceededException.class,
+                                tasks[i].exception.getClass());
+                        failedCount += 1;
+                    }
+                }
+
+                // At least max_concurrency tasks must succeed.
+                assertTrue(succeededCount >= max_concurrency);
+                assertTrue(succeededCount + failedCount == tasks_qty);
+
+                // Asserting if all transfers were submitted correctly.
+                var lookupAccounts = client.lookupAccounts(accountIds);
+                assertEquals(2, lookupAccounts.getLength());
+
+                accounts.beforeFirst();
+
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals((long) (100 * succeededCount), lookupAccounts.getCreditsPosted());
+                assertEquals(0L, lookupAccounts.getDebitsPosted());
+
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals((long) (100 * succeededCount), lookupAccounts.getDebitsPosted());
+                assertEquals(0L, lookupAccounts.getCreditsPosted());
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+    /**
      * This test asserts that client.close() will wait for all ongoing request to complete And new
      * threads trying to submit a request after the client was closed will fail with
      * IllegalStateException.
@@ -1012,8 +1085,9 @@ public class IntegrationTest {
 
             // The goal here is to force to have way more threads than the client can
             // process simultaneously
-            final int tasks_qty = 20;
-            final int max_concurrency = 2;
+            final int tasks_qty = 32;
+            final int max_concurrency = 32;
+            final var barrier = new CountDownLatch(tasks_qty);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -1021,22 +1095,19 @@ public class IntegrationTest {
                 assertTrue(errors.getLength() == 0);
 
                 var tasks = new TransferTask[tasks_qty];
-                synchronized (client) {
+                for (int i = 0; i < tasks_qty; i++) {
 
-                    for (int i = 0; i < tasks_qty; i++) {
-
-                        // Starting multiple threads submitting transfers,
-                        tasks[i] = new TransferTask(client);
-                        tasks[i].start();
-                    }
-
-                    // Waiting for any thread to complete
-                    client.wait();
+                    // Starting multiple threads submitting transfers,
+                    tasks[i] = new TransferTask(client, barrier);
+                    tasks[i].start();
                 }
 
-                // And then close the client while several other threads are still working
-                // Some of them have already submitted the request, others are waiting due to the
-                // maxConcurrency limit
+                // Waits until all threads are running.
+                barrier.await();
+
+                // And then close the client while threads are still working
+                // Some of them have already submitted the request, while others will fail
+                // due to "shutdown".
                 client.close();
 
                 int failedCount = 0;
@@ -1045,13 +1116,15 @@ public class IntegrationTest {
                 for (int i = 0; i < tasks_qty; i++) {
 
                     // The client.close must wait until all submitted requests have completed
-                    // Asserting that either the task succeeded or failed while waiting
+                    // Asserting that either the task succeeded or failed while waiting.
                     tasks[i].join();
 
-                    final var failed = tasks[i].exception != null
-                            && tasks[i].exception.getMessage().equals("Client is closed");
                     final var succeeded =
                             tasks[i].result != null && tasks[i].result.getLength() == 0;
+
+                    // Can fail due to client closed.
+                    final var failed = tasks[i].exception != null
+                            && tasks[i].exception instanceof IllegalStateException;
 
                     assertTrue(failed || succeeded);
 
@@ -1062,7 +1135,6 @@ public class IntegrationTest {
                     }
                 }
 
-                assertTrue(succeededCount > 0);
                 assertTrue(succeededCount + failedCount == tasks_qty);
 
 
@@ -1075,15 +1147,55 @@ public class IntegrationTest {
         }
     }
 
+
     /**
-     * This test asserts that async tasks will respect client's maxConcurrency.
+     * This test asserts that submit a request after the client was closed will fail with
+     * IllegalStateException.
+     */
+    @Test(expected = IllegalStateException.class)
+    public void testClose() throws Throwable {
+
+        try (var server = new Server()) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+
+                // Creating the accounts
+                var createAccountErrors = client.createAccounts(accounts);
+                assertTrue(createAccountErrors.getLength() == 0);
+
+                client.close();
+
+                // Creating a transfer
+                var transfers = new TransferBatch(2);
+
+                transfers.add();
+                transfers.setId(transfer1Id);
+                transfers.setCreditAccountId(account1Id);
+                transfers.setDebitAccountId(account2Id);
+                transfers.setLedger(720);
+                transfers.setCode((short) 1);
+                transfers.setFlags(TransferFlags.NONE);
+                transfers.setAmount(100);
+
+                client.createTransfers(transfers);
+                assert false;
+            } catch (Throwable any) {
+                throw any;
+            }
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+
+    /**
+     * This test asserts that async tasks will respect client's concurrencyMax.
      */
     @Test
     public void testAsyncTasks() throws Throwable {
 
         try (var server = new Server()) {
 
-            // Defining the maxConcurrency greater than tasks_qty
+            // Defining the concurrencyMax greater than tasks_qty
             // The goal here is to allow to all requests being submitted at once simultaneously
             final int tasks_qty = 100;
 
@@ -1147,7 +1259,6 @@ public class IntegrationTest {
     }
 
     private static void assertAccounts(AccountBatch account1, AccountBatch account2) {
-
         assertArrayEquals(account1.getId(), account2.getId());
         assertArrayEquals(account1.getUserData(), account2.getUserData());
         assertEquals(account1.getLedger(), account2.getLedger());
@@ -1169,15 +1280,16 @@ public class IntegrationTest {
     }
 
     private static class TransferTask extends Thread {
-
         public final Client client;
         public CreateTransferResultBatch result;
         public Throwable exception;
+        private CountDownLatch enterBarrier;
 
-        public TransferTask(Client client) {
+        public TransferTask(Client client, CountDownLatch enterBarrier) {
             this.client = client;
             this.result = null;
             this.exception = null;
+            this.enterBarrier = enterBarrier;
         }
 
         @Override
@@ -1194,16 +1306,11 @@ public class IntegrationTest {
             transfers.setAmount(100);
 
             try {
+                enterBarrier.countDown();
+                enterBarrier.await();
                 result = client.createTransfers(transfers);
             } catch (Throwable e) {
                 exception = e;
-            } finally {
-
-                // Signal the caller
-                synchronized (client) {
-                    client.notify();
-                }
-
             }
         }
     }

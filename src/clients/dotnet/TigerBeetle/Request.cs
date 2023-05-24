@@ -57,7 +57,7 @@ namespace TigerBeetle
             return bodyGCHandle.AddrOfPinnedObject();
         }
 
-        public void Submit(TBody[] batch, Packet packet)
+        public void Submit(TBody[] batch)
         {
             if (batch == null) throw new ArgumentNullException(nameof(batch));
             if (batch.Length == 0) throw new ArgumentException("Batch cannot be empty", nameof(batch));
@@ -66,7 +66,7 @@ namespace TigerBeetle
 
             unsafe
             {
-                AssertTrue(packet.Pointer != null, "Null packet pointer");
+                var packet = this.nativeClient.AcquirePacket();
 
                 var ptr = packet.Pointer;
                 ptr->next = null;
@@ -116,7 +116,7 @@ namespace TigerBeetle
                     }
                     finally
                     {
-                        nativeClient.Return(packet);
+                        nativeClient.ReleasePacket(packet);
                     }
 
                     if (requestGCHandle.IsAllocated) requestGCHandle.Free();
@@ -191,7 +191,7 @@ namespace TigerBeetle
                 {
                     if (!Completed)
                     {
-                        Monitor.Wait(this);
+                        _ = Monitor.Wait(this);
                     }
                 }
             }

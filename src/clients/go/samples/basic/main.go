@@ -32,7 +32,7 @@ func main() {
 		port = "3000"
 	}
 
-	client, err := tb.NewClient(0, []string{port}, 1)
+	client, err := tb.NewClient(0, []string{port}, 32)
 	if err != nil {
 		log.Fatalf("Error creating client: %s", err)
 	}
@@ -93,7 +93,7 @@ func main() {
 			assert(account.CreditsPosted, uint64(10), "account 2 credits")
 		} else {
 			log.Fatalf("Unexpected account")
-		}		
+		}
 	}
 
 	fmt.Println("ok")

@@ -27,7 +27,6 @@ pub const Signal = struct {
         running,
         waiting,
         notified,
-        shutdown,
     }),
 
     pub fn init(self: *Signal, io: *IO, on_signal_fn: fn (*Signal) void) !void {
@@ -185,20 +184,6 @@ pub const Signal = struct {
         }
     }
 
-    /// Stops the signal from firing on_signal callbacks on the IO thread.
-    /// Safe to call from multiple threads.
-    pub fn shutdown(self: *Signal) void {
-        if (self.state.swap(.shutdown, .Release) == .waiting) {
-            self.wake();
-        }
-    }
-
-    /// Return true if the Signal was marked disabled and should no longer fire on_signal callbacks.
-    /// Safe to call from multiple threads.
-    pub fn is_shutdown(self: *const Signal) bool {
-        return self.state.load(.Acquire) == .shutdown;
-    }
-
     fn wake(self: *Signal) void {
         assert(self.accept_socket != IO.INVALID_SOCKET);
         self.send_buffer[0] = 0;
@@ -233,7 +218,6 @@ pub const Signal = struct {
             .running => unreachable, // Not possible due to CAS semantics.
             .waiting => unreachable, // We should be the only ones who could've started waiting.
             .notified => {}, // A thread woke us up before we started waiting so reschedule below.
-            .shutdown => return, // A thread shut down the signal before we started waiting.
         }
 
         self.io.timeout(
@@ -280,7 +264,6 @@ pub const Signal = struct {
             .running => unreachable, // Multiple racing calls to on_signal().
             .waiting => unreachable, // on_signal() called without transitioning to a waking state.
             .notified => unreachable, // Not possible due to CAS semantics.
-            .shutdown => return, // A thread shut down the signal before we started running.
         }
     }
 };

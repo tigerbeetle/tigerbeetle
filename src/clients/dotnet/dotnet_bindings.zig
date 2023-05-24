@@ -81,6 +81,10 @@ const type_mappings = .{
         .name = "PacketStatus",
         .visibility = .public,
     } },
+    .{ tb_client.tb_packet_acquire_status_t, TypeMapping{
+        .name = "PacketAcquireStatus",
+        .visibility = .internal,
+    } },
     .{ tb_client.tb_operation_t, TypeMapping{
         .name = "TBOperation",
         .visibility = .internal,
@@ -88,10 +92,6 @@ const type_mappings = .{
     } },
     .{ tb_client.tb_packet_t, TypeMapping{
         .name = "TBPacket",
-        .visibility = .internal,
-    } },
-    .{ tb_client.tb_packet_list_t, TypeMapping{
-        .name = "TBPacketList",
         .visibility = .internal,
     } },
 };
@@ -430,7 +430,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\        public static unsafe extern InitializationStatus tb_client_init(
         \\            IntPtr* out_client,
-        \\            TBPacketList* out_packets,
         \\            uint cluster_id,
         \\            byte* address_ptr,
         \\            uint address_len,
@@ -448,7 +447,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\        public static unsafe extern InitializationStatus tb_client_init_echo(
         \\            IntPtr* out_client,
-        \\            TBPacketList* out_packets,
         \\            uint cluster_id,
         \\            byte* address_ptr,
         \\            uint address_len,
@@ -464,9 +462,21 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        );
         \\
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\        public static unsafe extern PacketAcquireStatus tb_client_acquire_packet(
+        \\            IntPtr client,
+        \\            TBPacket** out_packet
+        \\        );
+        \\
+        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\        public static unsafe extern void tb_client_release_packet(
+        \\            IntPtr client,
+        \\            TBPacket* packet
+        \\        );
+        \\
+        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\        public static unsafe extern void tb_client_submit(
         \\            IntPtr client,
-        \\            TBPacketList* packets
+        \\            TBPacket* packet
         \\        );
         \\
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]

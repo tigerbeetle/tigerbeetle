@@ -139,7 +139,7 @@ pub const GoDocs = Docs{
     \\if len(tbAddress) == 0 {
     \\  tbAddress = "3000"
     \\} 
-    \\client, err := tb.NewClient(0, []string{tbAddress}, 1)
+    \\client, err := tb.NewClient(0, []string{tbAddress}, 32)
     \\if err != nil {
     \\	log.Printf("Error creating client: %s", err)
     \\	return
@@ -149,7 +149,7 @@ pub const GoDocs = Docs{
 
     .client_object_documentation = 
     \\The third argument to `NewClient` is a `uint` max concurrency
-    \\setting. `1` is a good default and can increase to `4096`
+    \\setting. `32` is a good default and can increase to `4096`
     \\as you need increased throughput.
     ,
 

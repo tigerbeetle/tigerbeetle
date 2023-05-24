@@ -2,8 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub const tb_packet_t = @import("tb_client/packet.zig").Packet;
-pub const tb_packet_list_t = tb_packet_t.List;
 pub const tb_packet_status_t = tb_packet_t.Status;
+pub const tb_packet_acquire_status_t = @import("tb_client/context.zig").PacketAcquireStatus;
 
 pub const tb_client_t = *anyopaque;
 pub const tb_status_t = enum(c_int) {
@@ -12,7 +12,7 @@ pub const tb_status_t = enum(c_int) {
     out_of_memory,
     address_invalid,
     address_limit_exceeded,
-    packets_count_invalid,
+    concurrency_max_invalid,
     system_resources,
     network_subsystem,
 };
@@ -59,12 +59,15 @@ comptime {
     if (builtin.link_libc) {
         @export(tb_client_init, .{ .name = "tb_client_init", .linkage = .Strong });
         @export(tb_client_init_echo, .{ .name = "tb_client_init_echo", .linkage = .Strong });
+        @export(tb_client_acquire_packet, .{ .name = "tb_client_acquire_packet", .linkage = .Strong });
+        @export(tb_client_release_packet, .{ .name = "tb_client_release_packet", .linkage = .Strong });
+        @export(tb_client_submit, .{ .name = "tb_client_submit", .linkage = .Strong });
+        @export(tb_client_deinit, .{ .name = "tb_client_deinit", .linkage = .Strong });
     }
 }
 
 pub fn tb_client_init(
     out_client: *tb_client_t,
-    out_packets: *tb_packet_list_t,
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
@@ -75,7 +78,6 @@ pub fn tb_client_init(
     return init(
         DefaultContext,
         out_client,
-        out_packets,
         cluster_id,
         addresses_ptr,
         addresses_len,
@@ -87,7 +89,6 @@ pub fn tb_client_init(
 
 pub fn tb_client_init_echo(
     out_client: *tb_client_t,
-    out_packets: *tb_packet_list_t,
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
@@ -98,7 +99,6 @@ pub fn tb_client_init_echo(
     return init(
         TestingContext,
         out_client,
-        out_packets,
         cluster_id,
         addresses_ptr,
         addresses_len,
@@ -111,7 +111,6 @@ pub fn tb_client_init_echo(
 fn init(
     comptime Context: type,
     out_client: *tb_client_t,
-    out_packets: *tb_packet_list_t,
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
@@ -144,32 +143,42 @@ fn init(
         error.OutOfMemory => return .out_of_memory,
         error.AddressInvalid => return .address_invalid,
         error.AddressLimitExceeded => return .address_limit_exceeded,
-        error.PacketsCountInvalid => return .packets_count_invalid,
+        error.ConcurrencyMaxInvalid => return .concurrency_max_invalid,
         error.SystemResources => return .system_resources,
         error.NetworkSubsystemFailed => return .network_subsystem,
     };
 
     out_client.* = context_to_client(&context.implementation);
-    var list = tb_packet_list_t{};
-    for (context.packets) |*packet| {
-        list.push(tb_packet_list_t.from(packet));
-    }
-
-    out_packets.* = list;
     return .success;
 }
 
-pub export fn tb_client_submit(
+pub fn tb_client_acquire_packet(
     client: tb_client_t,
-    packets: *tb_packet_list_t,
-) void {
+    out_packet: *?*tb_packet_t,
+) callconv(.C) tb_packet_acquire_status_t {
     const context = client_to_context(client);
-    (context.submit_fn)(context, packets);
+    return (context.acquire_packet_fn)(context, out_packet);
 }
 
-pub export fn tb_client_deinit(
+pub fn tb_client_release_packet(
     client: tb_client_t,
-) void {
+    packet: *tb_packet_t,
+) callconv(.C) void {
+    const context = client_to_context(client);
+    return (context.release_packet_fn)(context, packet);
+}
+
+pub fn tb_client_submit(
+    client: tb_client_t,
+    packet: *tb_packet_t,
+) callconv(.C) void {
+    const context = client_to_context(client);
+    (context.submit_fn)(context, packet);
+}
+
+pub fn tb_client_deinit(
+    client: tb_client_t,
+) callconv(.C) void {
     const context = client_to_context(client);
     (context.deinit_fn)(context);
 }

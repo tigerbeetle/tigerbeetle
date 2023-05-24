@@ -20,7 +20,7 @@ namespace TigerBeetle.Benchmarks
         {
             Console.WriteLine($"Benchmarking dotnet");
 
-            using var client = new Client(0, new string[] { "3001" });
+            using var client = new Client(0, new string[] { "3000" });
 
             var accounts = new[] {
                 new Account
@@ -41,7 +41,7 @@ namespace TigerBeetle.Benchmarks
             for (int i = 0; i < BATCHES_COUNT; i++)
             {
                 transfers[i] = new Transfer[TRANSFERS_PER_BATCH];
-                for (int j=0; j<TRANSFERS_PER_BATCH; j++)
+                for (int j = 0; j < TRANSFERS_PER_BATCH; j++)
                 {
                     transfers[i][j] = new Transfer
                     {

@@ -1,7 +1,5 @@
 package com.tigerbeetle;
 
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 final class NativeClient {
@@ -9,95 +7,66 @@ final class NativeClient {
         JNILoader.loadFromJar();
     }
 
-    private final int maxConcurrency;
-    private final Semaphore maxConcurrencySemaphore;
     private volatile long contextHandle;
 
     public static NativeClient init(final int clusterID, final String addresses,
-            final int maxConcurrency) {
-        assertArgs(clusterID, addresses, maxConcurrency);
-        final long contextHandle = clientInit(clusterID, addresses, maxConcurrency);
-        return new NativeClient(maxConcurrency, contextHandle);
+            final int concurrencyMax) {
+        assertArgs(clusterID, addresses, concurrencyMax);
+        final long contextHandle = clientInit(clusterID, addresses, concurrencyMax);
+        return new NativeClient(contextHandle);
     }
 
     public static NativeClient initEcho(final int clusterID, final String addresses,
-            final int maxConcurrency) {
-        assertArgs(clusterID, addresses, maxConcurrency);
-        final long contextHandle = clientInitEcho(clusterID, addresses, maxConcurrency);
-        return new NativeClient(maxConcurrency, contextHandle);
+            final int concurrencyMax) {
+        assertArgs(clusterID, addresses, concurrencyMax);
+        final long contextHandle = clientInitEcho(clusterID, addresses, concurrencyMax);
+        return new NativeClient(contextHandle);
     }
 
     private static void assertArgs(final int clusterID, final String addresses,
-            final int maxConcurrency) {
+            final int concurrencyMax) {
         assertTrue(clusterID >= 0, "ClusterID must be positive");
         assertTrue(addresses != null, "Replica addresses cannot be null");
-        assertTrue(maxConcurrency > 0, "Invalid maxConcurrency");
+        assertTrue(concurrencyMax > 0, "Invalid concurrencyMax");
     }
 
-    private NativeClient(final int maxConcurrency, final long contextHandle) {
+    private NativeClient(final long contextHandle) {
         this.contextHandle = contextHandle;
-        this.maxConcurrency = maxConcurrency;
-        this.maxConcurrencySemaphore = new Semaphore(maxConcurrency, false);
     }
 
-    public void submit(final Request<?> request) {
-        acquirePermit();
-        submit(contextHandle, request);
-    }
+    public void submit(final Request<?> request) throws ConcurrencyExceededException {
+        if (contextHandle == 0L)
+            throw new IllegalStateException("Client is closed");
 
-    private void acquirePermit() {
-
-        // Assure that only the max number of concurrent requests can acquire a packet
-        // It forces other threads to wait until a packet became available
-        // We also assure that the clientHandle will be zeroed only after all permits
-        // have been released
-        final int TIMEOUT = 5;
-        boolean acquired = false;
-        do {
-
-            if (contextHandle == 0)
-                throw new IllegalStateException("Client is closed");
-
-            try {
-                acquired = maxConcurrencySemaphore.tryAcquire(TIMEOUT, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException interruptedException) {
-
-                // This exception should never exposed by the API to be handled by the user
-                throw new AssertionError(interruptedException,
-                        "Unexpected thread interruption on acquiring a packet.");
-            }
-
-        } while (!acquired);
-    }
-
-    public void releasePermit() {
-        // Releasing the packet to be used by another thread
-        maxConcurrencySemaphore.release();
+        final var packet_acquire_status = submit(contextHandle, request);
+        if (packet_acquire_status == PacketAcquireStatus.ConcurrencyMaxExceeded.value) {
+            throw new ConcurrencyExceededException();
+        } else if (packet_acquire_status == PacketAcquireStatus.Shutdown.value) {
+            throw new IllegalStateException("Client is closing");
+        } else {
+            assertTrue(packet_acquire_status == PacketAcquireStatus.Ok.value,
+                    "PacketAcquireStatus=%d is not implemented", packet_acquire_status);
+        }
     }
 
     public void close() throws Exception {
 
-        if (contextHandle != 0) {
-
-            // Acquire all permits, forcing to wait for any processing thread to release
-            // Note that "acquireUninterruptibly(maxConcurrency)" atomically acquires the
-            // permits
-            // all at once, causing this operation to take longer.
-            for (int i = 0; i < maxConcurrency; i++) {
-                this.maxConcurrencySemaphore.acquireUninterruptibly();
+        if (contextHandle != 0L) {
+            synchronized (this) {
+                if (contextHandle != 0L) {
+                    // Deinit and signalize that this client is closed by setting the handles to 0.
+                    clientDeinit(contextHandle);
+                    this.contextHandle = 0L;
+                }
             }
-
-            // Deinit and signalize that this client is closed by setting the handles to 0
-            clientDeinit(contextHandle);
-            contextHandle = 0;
         }
     }
 
-    private static native void submit(long contextHandle, Request<?> request);
+    private static native int submit(long contextHandle, Request<?> request);
 
-    private static native long clientInit(int clusterID, String addresses, int maxConcurrency);
+    private static native long clientInit(int clusterID, String addresses, int concurrencyMax);
 
-    private static native long clientInitEcho(int clusterID, String addresses, int maxConcurrency);
+    private static native long clientInitEcho(int clusterID, String addresses, int concurrencyMax);
 
     private static native void clientDeinit(long contextHandle);
 }
