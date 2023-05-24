@@ -208,15 +208,15 @@ else
 pub inline fn hash_inline(value: anytype) u64 {
     const salt = [_]u64{ 0xa0761d6478bd642f, 0xe7037ed1a0b428db };
     var in: []const u8 = std.mem.asBytes(&value);
-    var chunk: [2]u64 = undefined;
     var state = salt[0];
 
     while (in.len >= 16) : (in = in[16..]) {
-        chunk = @bitCast([2]u64, in[0..16].*);
+        const chunk = @bitCast([2]u64, in[0..16].*);
         const mixed = @as(u128, chunk[0] ^ salt[1]) *% (chunk[1] ^ state);
         state = @truncate(u64, mixed ^ (mixed >> 64));
     }
 
+    var chunk = std.mem.zeroes([2]u64);
     if (in.len > 8) {
         chunk[0] = @bitCast(u64, in[0..8].*);
         chunk[1] = @bitCast(u64, in[in.len - 8 ..][0..8].*);
@@ -225,12 +225,10 @@ pub inline fn hash_inline(value: anytype) u64 {
         chunk[1] = @bitCast(u32, in[in.len - 4 ..][0..4].*);
     } else if (in.len > 0) {
         chunk[0] = (@as(u64, in[0]) << 16) | (@as(u64, in[in.len / 2]) << 8) | in[in.len - 1];
-        chunk[1] = 0;
-    } else {
-        return state;
     }
 
     var mixed = @as(u128, chunk[0] ^ salt[1]) *% (chunk[1] ^ state);
-    mixed = (mixed ^ (mixed >> 64)) *% (salt[1] ^ @sizeOf(@TypeOf(value)));
+    mixed = @truncate(u64, mixed ^ (mixed >> 64));
+    mixed *%= (@sizeOf(@TypeOf(value)) ^ salt[1]);
     return @truncate(u64, mixed ^ (mixed >> 64));
 }
