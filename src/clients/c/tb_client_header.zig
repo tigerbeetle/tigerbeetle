@@ -13,8 +13,8 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, "tb_create_transfers_result_t" },
     .{ tb_client.tb_operation_t, "TB_OPERATION" },
     .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
+    .{ tb_client.tb_packet_acquire_status_t, "TB_PACKET_ACQUIRE_STATUS" },
     .{ tb_client.tb_packet_t, "tb_packet_t" },
-    .{ tb_client.tb_packet_list_t, "tb_packet_list_t" },
     .{ tb_client.tb_client_t, "tb_client_t" },
     .{ tb_client.tb_status_t, "TB_STATUS" },
 };
@@ -189,7 +189,6 @@ pub fn main() !void {
     try buffer.writer().print(
         \\TB_STATUS tb_client_init(
         \\    tb_client_t* out_client,
-        \\    struct tb_packet_list_t* out_packets,
         \\    uint32_t cluster_id,
         \\    const char* address_ptr,
         \\    uint32_t address_len,
@@ -200,7 +199,6 @@ pub fn main() !void {
         \\
         \\TB_STATUS tb_client_init_echo(
         \\    tb_client_t* out_client,
-        \\    struct tb_packet_list_t* out_packets,
         \\    uint32_t cluster_id,
         \\    const char* address_ptr,
         \\    uint32_t address_len,
@@ -209,9 +207,19 @@ pub fn main() !void {
         \\    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
         \\);
         \\
+        \\TB_PACKET_ACQUIRE_STATUS tb_client_acquire_packet(
+        \\    tb_client_t client,
+        \\    tb_packet_t** out_packet
+        \\);
+        \\
+        \\void tb_client_release_packet(
+        \\    tb_client_t client,
+        \\    tb_packet_t* packet
+        \\);
+        \\
         \\void tb_client_submit(
         \\    tb_client_t client,
-        \\    struct tb_packet_list_t* packets
+        \\    tb_packet_t* packet
         \\);
         \\
         \\void tb_client_deinit(

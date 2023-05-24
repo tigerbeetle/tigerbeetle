@@ -149,6 +149,7 @@
               <!-- Excluding exceptions classes -->
               <exclude>com/tigerbeetle/InitializationException.class</exclude>
               <exclude>com/tigerbeetle/RequestException.class</exclude>
+              <exclude>com/tigerbeetle/ConcurrencyExceededException.class</exclude>
               <exclude>com/tigerbeetle/AssertionError.class</exclude>
 
               <!-- Excluding JNILoader platform specifics -->
@@ -158,6 +159,7 @@
 
               <!-- Excluding enums -->
               <exclude>com/tigerbeetle/PacketStatus.class</exclude>
+              <exclude>com/tigerbeetle/PacketAcquireStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
 

@@ -6,7 +6,8 @@ import java.math.BigInteger;
 import com.tigerbeetle.*;
 
 public final class Main {
-    public static void main(String[] args) throws com.tigerbeetle.RequestException {
+    public static void main(String[] args)
+		throws RequestException, ConcurrencyExceededException {
 	var port = System.getenv("TB_ADDRESS");
 	if (port == null || port == "") {
 	    port = "3000";
