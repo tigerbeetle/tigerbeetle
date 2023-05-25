@@ -1474,8 +1474,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     journal.faulty.clear(slot);
                 },
                 .cut_view_range => {
-                    assert(header != null);
+                    maybe(header == null);
                     maybe(prepare == null);
+                    assert(header != null or prepare != null);
                     journal.headers[slot.index] = Header.reserved(cluster, slot.index);
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
