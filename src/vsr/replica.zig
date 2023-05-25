@@ -2680,7 +2680,7 @@ pub fn ReplicaType(
             unreachable;
         }
 
-        fn commit_step(self: *Self, status_new: CommitStatus) void {
+        fn commit_dispatch(self: *Self, status_new: CommitStatus) void {
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
@@ -2697,7 +2697,7 @@ pub fn ReplicaType(
                 else => status_new,
             };
 
-            log.debug("{}: commit_step: {s}..{s} (commit_min={})", .{
+            log.debug("{}: commit_dispatch: {s}..{s} (commit_min={})", .{
                 self.replica,
                 @tagName(status_old),
                 @tagName(self.commit_status),
@@ -2780,7 +2780,7 @@ pub fn ReplicaType(
             // op.
 
             assert(self.commit_status == .idle);
-            self.commit_step(.next_journal);
+            self.commit_dispatch(.next_journal);
         }
 
         fn commit_journal_next(self: *Self) void {
@@ -2796,7 +2796,7 @@ pub fn ReplicaType(
 
             if (!self.valid_hash_chain("commit_journal_next")) {
                 assert(!self.solo());
-                self.commit_step(.idle);
+                self.commit_dispatch(.idle);
                 return;
             }
 
@@ -2822,7 +2822,7 @@ pub fn ReplicaType(
                     );
                 }
             } else {
-                self.commit_step(.idle);
+                self.commit_dispatch(.idle);
                 // This is an optimization to expedite the view change before the `repair_timeout`:
                 if (self.status == .view_change and self.repairs_allowed()) self.repair();
 
@@ -2844,7 +2844,7 @@ pub fn ReplicaType(
             assert(destination_replica == null);
 
             if (prepare == null) {
-                self.commit_step(.idle);
+                self.commit_dispatch(.idle);
                 log.debug("{}: commit_journal_next_callback: prepare == null", .{self.replica});
                 if (self.solo()) @panic("cannot recover corrupt prepare");
                 return;
@@ -2854,7 +2854,7 @@ pub fn ReplicaType(
                 .normal => {},
                 .view_change => {
                     if (self.primary_index(self.view) != self.replica) {
-                        self.commit_step(.idle);
+                        self.commit_dispatch(.idle);
                         log.debug("{}: commit_journal_next_callback: no longer primary view={}", .{
                             self.replica,
                             self.view,
@@ -2876,7 +2876,7 @@ pub fn ReplicaType(
             assert(prepare.?.header.op == op);
 
             self.commit_prepare = prepare.?.ref();
-            self.commit_step(.prefetch_state_machine);
+            self.commit_dispatch(.prefetch_state_machine);
         }
 
         /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
@@ -2919,7 +2919,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
 
             maybe(self.client_replies.writes.available() == 0);
-            self.commit_step(.setup_client_replies);
+            self.commit_dispatch(.setup_client_replies);
         }
 
         fn commit_op_client_replies_ready_callback(client_replies: *ClientReplies) void {
@@ -2968,7 +2968,7 @@ pub fn ReplicaType(
                 }
             }
 
-            self.commit_step(.compact_state_machine);
+            self.commit_dispatch(.compact_state_machine);
         }
 
         fn commit_op_compact_callback(state_machine: *StateMachine) void {
@@ -3004,9 +3004,9 @@ pub fn ReplicaType(
                 assert(self.grid.write_queue.empty());
                 assert(self.grid.write_iops.executing() == 0);
 
-                self.commit_step(.checkpoint_state_machine);
+                self.commit_dispatch(.checkpoint_state_machine);
             } else {
-                self.commit_step(.cleanup);
+                self.commit_dispatch(.cleanup);
             }
         }
 
@@ -3020,14 +3020,14 @@ pub fn ReplicaType(
             assert(self.grid.write_queue.empty());
             assert(self.grid.write_iops.executing() == 0);
 
-            self.commit_step(.checkpoint_client_replies);
+            self.commit_dispatch(.checkpoint_client_replies);
         }
 
         fn commit_op_checkpoint_client_replies_callback(client_replies: *ClientReplies) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
             assert(self.commit_status == .checkpoint_client_replies);
 
-            self.commit_step(.checkpoint_superblock);
+            self.commit_dispatch(.checkpoint_superblock);
         }
 
         fn commit_op_checkpoint_superblock(self: *Self) void {
@@ -3085,7 +3085,7 @@ pub fn ReplicaType(
             );
 
             if (self.on_checkpoint_done) |on_checkpoint| on_checkpoint(self);
-            self.commit_step(.cleanup);
+            self.commit_dispatch(.cleanup);
         }
 
         fn commit_op_cleanup(self: *Self) void {
@@ -3103,7 +3103,7 @@ pub fn ReplicaType(
                 .{ .commit = .{ .op = op } },
             );
 
-            self.commit_step(.next);
+            self.commit_dispatch(.next);
         }
 
         fn commit_op(self: *Self, prepare: *const Message) void {
@@ -3267,7 +3267,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            self.commit_step(.next_pipeline);
+            self.commit_dispatch(.next_pipeline);
         }
 
         fn commit_pipeline_next(self: *Self) void {
@@ -3284,7 +3284,7 @@ pub fn ReplicaType(
                 if (!prepare.ok_quorum_received) {
                     // Eventually handled by on_prepare_timeout().
                     log.debug("{}: commit_pipeline_next: waiting for quorum", .{self.replica});
-                    self.commit_step(.idle);
+                    self.commit_dispatch(.idle);
                     return;
                 }
 
@@ -3293,9 +3293,9 @@ pub fn ReplicaType(
                 assert(count <= self.replica_count);
 
                 self.commit_prepare = prepare.message.ref();
-                self.commit_step(.prefetch_state_machine);
+                self.commit_dispatch(.prefetch_state_machine);
             } else {
-                self.commit_step(.idle);
+                self.commit_dispatch(.idle);
             }
         }
 
