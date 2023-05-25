@@ -115,9 +115,11 @@ func (output *vopr_output) extract_stack_trace(message *vopr_message) {
 	if output.seed_passed || message.bug == bug_type_liveness {
 		return
 	}
-	// The stack trace begins on the first line that starts with neither a square bracket nor
-	// white space.
-	address_regexpr := regexp.MustCompile(`(\n([^\[\s]))`)
+	// The stack trace begins on the first line that:
+	// - doesn't begin with a bracket (e.g. "[debug] ...",
+	// - doesn't begin with a number (e.g. "10   \ .       533V ...")
+	// - doesn't begin with whitespace (e.g. " SEED=3262606282417516824")
+	address_regexpr := regexp.MustCompile(`(\n([^\[\s\d]))`)
 	index := address_regexpr.FindIndex(output.logs)
 	// If an instance is found then the index returns an int array containing the start and end
 	// index for the match.
