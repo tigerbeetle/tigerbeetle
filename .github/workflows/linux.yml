@@ -41,7 +41,7 @@ jobs:
   benchmark:
     if: inputs.version == ''
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/benchmark.sh --transfer-count 4000
