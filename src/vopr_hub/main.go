@@ -134,7 +134,7 @@ func (output *vopr_output) extract_stack_trace(message *vopr_message) {
 
 // The VOPR's parameters are moved from output.logs into output.parameters.
 func (output *vopr_output) extract_parameters(message *vopr_message) {
-	state_regexpr := regexp.MustCompile(`\[info\] \(state_checker\):[^\[]+`)
+	state_regexpr := regexp.MustCompile(`\[info\] \(cluster\):[^\[]+`)
 	index := state_regexpr.FindIndex(output.logs)
 	// If an instance is found then the index returns an int array containing the start and end
 	// index for the match.
