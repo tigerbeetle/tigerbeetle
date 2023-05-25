@@ -22,7 +22,7 @@ jobs:
       - run: ./scripts/install.sh
 
   benchmark:
-    timeout-minutes: 5
+    timeout-minutes: 10
     strategy:
       matrix:
         target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
