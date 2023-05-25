@@ -2694,8 +2694,6 @@ pub fn ReplicaType(
                     CommitStatus.next_pipeline
                 else
                     CommitStatus.next_journal,
-                .next_journal => unreachable,
-                .next_pipeline => unreachable,
                 else => status_new,
             };
 
@@ -2782,7 +2780,7 @@ pub fn ReplicaType(
             // op.
 
             assert(self.commit_status == .idle);
-            self.commit_step(.next);
+            self.commit_step(.next_journal);
         }
 
         fn commit_journal_next(self: *Self) void {
@@ -3269,7 +3267,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            self.commit_step(.next);
+            self.commit_step(.next_pipeline);
         }
 
         fn commit_pipeline_next(self: *Self) void {
