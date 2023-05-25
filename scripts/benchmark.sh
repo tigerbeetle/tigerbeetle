@@ -14,6 +14,11 @@ if [ ! -d "zig" ]; then
     scripts/install_zig.sh
 fi
 
+PORT=3001
+if command -v python &> /dev/null; then
+    PORT=$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')
+fi
+
 COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
@@ -62,13 +67,13 @@ for I in $REPLICAS
 do
     echo "Starting replica $I..."
     FILE="./0_${I}.tigerbeetle.benchmark"
-    ./tigerbeetle start --addresses=3001 "$FILE" >> benchmark.log 2>&1 &
+    ./tigerbeetle start "--addresses=${PORT}" "$FILE" >> benchmark.log 2>&1 &
 done
 
 echo ""
 echo "Benchmarking..."
 # shellcheck disable=SC2086
-./scripts/build.sh benchmark -Drelease-safe -Dconfig=production $cpu $ZIG_TARGET -- "$@"
+./scripts/build.sh benchmark -Drelease-safe -Dconfig=production $cpu $ZIG_TARGET -- --addresses "${PORT}" "$@"
 echo ""
 
 for I in $REPLICAS
