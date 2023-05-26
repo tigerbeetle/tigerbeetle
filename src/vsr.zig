@@ -32,6 +32,7 @@ pub const testing = .{
 };
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
+pub const ReplicaEvent = @import("vsr/replica.zig").ReplicaEvent;
 pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const Client = @import("vsr/client.zig").Client;
