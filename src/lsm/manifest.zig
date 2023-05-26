@@ -178,6 +178,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.manifest_log.deinit(allocator);
         }
 
+        pub fn reset(manifest: *Manifest) void {
+            for (manifest.levels) |*level| level.reset();
+            manifest.manifest_log.reset();
+            manifest.* = .{
+                .node_pool = manifest.node_pool,
+                .levels = manifest.levels,
+                .manifest_log = manifest.manifest_log,
+            };
+        }
+
         pub fn open(manifest: *Manifest, callback: Callback) void {
             assert(manifest.open_callback == null);
             manifest.open_callback = callback;

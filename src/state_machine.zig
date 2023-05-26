@@ -278,7 +278,7 @@ pub fn StateMachineType(
         compact_callback: ?fn (*StateMachine) void = null,
         checkpoint_callback: ?fn (*StateMachine) void = null,
 
-        tracer_slot: ?tracer.SpanStart,
+        tracer_slot: ?tracer.SpanStart = null,
 
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
             var forest = try Forest.init(
@@ -293,7 +293,6 @@ pub fn StateMachineType(
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
                 .forest = forest,
-                .tracer_slot = null,
             };
         }
 
@@ -301,6 +300,16 @@ pub fn StateMachineType(
             assert(self.tracer_slot == null);
 
             self.forest.deinit(allocator);
+        }
+
+        // TODO Reset here and in LSM should clean up (i.e. end) tracer spans.
+        pub fn reset(self: *StateMachine) void {
+            self.forest.reset();
+            self.* = .{
+                .prepare_timestamp = 0,
+                .commit_timestamp = 0,
+                .forest = self.forest,
+            };
         }
 
         pub fn Event(comptime operation: Operation) type {

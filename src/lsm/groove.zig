@@ -543,6 +543,26 @@ pub fn GrooveType(
             groove.* = undefined;
         }
 
+        pub fn reset(groove: *Groove) void {
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                @field(groove.indexes, field.name).reset();
+            }
+            groove.objects.reset();
+            if (has_id) groove.ids.reset();
+
+            groove.prefetch_ids.clearRetainingCapacity();
+            groove.prefetch_objects.clearRetainingCapacity();
+
+            groove.* = .{
+                .objects = groove.objects,
+                .ids = groove.ids,
+                .indexes = groove.indexes,
+                .prefetch_ids = groove.prefetch_ids,
+                .prefetch_objects = groove.prefetch_objects,
+                .prefetch_snapshot = null,
+            };
+        }
+
         pub fn get(groove: *const Groove, key: PrimaryKey) ?*const Object {
             return groove.prefetch_objects.getKeyPtrAdapted(key, PrefetchObjectsAdapter{});
         }

@@ -157,6 +157,16 @@ fn SegmentedArrayType(
             allocator.free(array.indexes);
         }
 
+        pub fn reset(array: *Self) void {
+            mem.set(?*[node_capacity]T, array.nodes, null);
+            array.indexes[0] = 0;
+
+            array.* = .{
+                .nodes = array.nodes,
+                .indexes = array.indexes,
+            };
+        }
+
         pub fn verify(array: Self) void {
             assert(array.node_count <= node_count_max);
             for (array.nodes) |node, node_index| {

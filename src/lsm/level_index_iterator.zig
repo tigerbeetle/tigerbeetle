@@ -68,6 +68,14 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
             it.* = undefined;
         }
 
+        pub fn reset(it: *LevelIndexIterator) void {
+            it.* = .{
+                .context = undefined,
+                .key_exclusive = null,
+                .callback = .none,
+            };
+        }
+
         pub fn start(it: *LevelIndexIterator, context: Context) void {
             assert(it.callback == .none);
             if (context.direction == .descending) {

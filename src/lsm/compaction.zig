@@ -226,6 +226,41 @@ pub fn CompactionType(
         }
 
         pub fn reset(compaction: *Compaction) void {
+            // Zero the blocks because alloc_block() returns a zeroed block.
+            std.mem.set(u8, compaction.index_block_a, 0);
+            std.mem.set(u8, compaction.index_block_b, 0);
+            std.mem.set(u8, compaction.data_blocks[0], 0);
+            std.mem.set(u8, compaction.data_blocks[1], 0);
+
+            compaction.iterator_a.reset();
+            compaction.iterator_b.reset();
+            compaction.table_builder.reset();
+            compaction.* = .{
+                .tree_name = compaction.tree_name,
+
+                .iterator_a = compaction.iterator_a,
+                .iterator_b = compaction.iterator_b,
+                .index_block_a = compaction.index_block_a,
+                .index_block_b = compaction.index_block_b,
+                .data_blocks = compaction.data_blocks,
+                .table_builder = compaction.table_builder,
+
+                .context = undefined,
+                .move_table = undefined,
+                .grid_reservation = null,
+                .drop_tombstones = undefined,
+
+                .values_in = .{ &.{}, &.{} },
+
+                .input_state = .remaining,
+                .state = .idle,
+
+                .tracer_slot = null,
+                .iterator_tracer_slot = null,
+            };
+        }
+
+        pub fn close(compaction: *Compaction) void {
             assert(compaction.state == .applied_to_manifest);
 
             compaction.state = .idle;
