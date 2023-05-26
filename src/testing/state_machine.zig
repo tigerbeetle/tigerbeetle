@@ -84,6 +84,14 @@ pub fn StateMachineType(
             state_machine.forest.deinit(allocator);
         }
 
+        pub fn reset(state_machine: *StateMachine) void {
+            state_machine.forest.reset();
+            state_machine.* = .{
+                .options = state_machine.options,
+                .forest = state_machine.forest,
+            };
+        }
+
         pub fn open(state_machine: *StateMachine, callback: fn (*StateMachine) void) void {
             assert(state_machine.callback == null);
 

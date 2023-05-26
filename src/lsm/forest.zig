@@ -133,6 +133,19 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             allocator.destroy(forest.node_pool);
         }
 
+        pub fn reset(forest: *Forest) void {
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).reset();
+            }
+            forest.node_pool.reset();
+
+            forest.* = .{
+                .grid = forest.grid,
+                .grooves = forest.grooves,
+                .node_pool = forest.node_pool,
+            };
+        }
+
         fn JoinType(comptime join_op: JoinOp) type {
             return struct {
                 pub fn start(forest: *Forest, callback: Callback) void {

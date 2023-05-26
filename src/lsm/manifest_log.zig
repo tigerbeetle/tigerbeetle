@@ -170,6 +170,17 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             for (manifest_log.blocks.buffer) |block| allocator.free(block);
         }
 
+        pub fn reset(manifest_log: *ManifestLog) void {
+            for (manifest_log.blocks.buffer) |block| std.mem.set(u8, block, 0);
+            manifest_log.blocks.clear();
+            manifest_log.* = .{
+                .superblock = manifest_log.superblock,
+                .grid = manifest_log.grid,
+                .tree_hash = manifest_log.tree_hash,
+                .blocks = manifest_log.blocks,
+            };
+        }
+
         /// Opens the manifest log.
         /// Reads the manifest blocks in reverse order and passes extent table inserts to event().
         /// Therefore, only the latest version of a table will be emitted by event() for insertion

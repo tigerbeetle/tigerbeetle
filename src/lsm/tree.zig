@@ -148,7 +148,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         ///    when `op_checkpoint ≠ 0`.
         lookup_snapshot_max: ?u64 = null,
 
-        compaction_io_pending: usize,
+        compaction_io_pending: usize = 0,
         compaction_callback: union(enum) {
             none,
             /// We're at the end of a half-bar.
@@ -157,11 +157,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             /// We're at the end of some other beat.
             /// Call this on the next tick.
             next_tick: fn (*Tree) void,
-        },
+        } = .none,
         compaction_next_tick: Grid.NextTick = undefined,
 
-        checkpoint_callback: ?fn (*Tree) void,
-        open_callback: ?fn (*Tree) void,
+        checkpoint_callback: ?fn (*Tree) void = null,
+        open_callback: ?fn (*Tree) void = null,
 
         tracer_slot: ?tracer.SpanStart = null,
         filter_block_hits: u64 = 0,
@@ -227,10 +227,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .manifest = manifest,
                 .compaction_table_immutable = compaction_table_immutable,
                 .compaction_table = compaction_table,
-                .compaction_io_pending = 0,
-                .compaction_callback = .none,
-                .checkpoint_callback = null,
-                .open_callback = null,
             };
         }
 
@@ -249,6 +245,26 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 cache.deinit(allocator);
                 allocator.destroy(cache);
             }
+        }
+
+        pub fn reset(tree: *Tree) void {
+            tree.table_mutable.reset();
+            tree.table_immutable.clear();
+            if (tree.values_cache) |cache| cache.reset();
+            tree.manifest.reset();
+            tree.compaction_table_immutable.reset();
+            for (tree.compaction_table) |*compaction| compaction.reset();
+
+            tree.* = .{
+                .grid = tree.grid,
+                .options = tree.options,
+                .table_mutable = tree.table_mutable,
+                .table_immutable = tree.table_immutable,
+                .values_cache = tree.values_cache,
+                .manifest = tree.manifest,
+                .compaction_table_immutable = tree.compaction_table_immutable,
+                .compaction_table = tree.compaction_table,
+            };
         }
 
         pub fn put(tree: *Tree, value: *const Value) void {
@@ -840,7 +856,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // We couldn't remove the (invisible) input tables until now because prefetch()
             // needs a complete set of tables for lookups to avoid missing data.
 
-            // Reset the immutable table Compaction.
+            // Close the immutable table Compaction.
             // Also clear any tables made invisible by the compaction.
             const even_levels = compaction_beat < half_bar_beat_count;
             if (!even_levels) {
@@ -856,13 +872,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                             tree.compaction_table_immutable.context.range_b.key_max,
                         );
                         tree.table_immutable.clear();
-                        tree.compaction_table_immutable.reset();
+                        tree.compaction_table_immutable.close();
                     },
                     else => unreachable,
                 }
             }
 
-            // Reset all the other Compactions.
+            // Close all the other Compactions.
             // Also clear any tables made invisible by the compactions.
             var it = CompactionTableIterator{ .tree = tree };
             while (it.next()) |context| {
@@ -884,7 +900,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                                 context.compaction.context.range_b.key_max,
                             );
                         }
-                        context.compaction.reset();
+                        context.compaction.close();
                     },
                     else => unreachable,
                 }

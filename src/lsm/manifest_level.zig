@@ -88,6 +88,15 @@ pub fn ManifestLevelType(
             level.tables.deinit(allocator, node_pool);
         }
 
+        pub fn reset(level: *Self) void {
+            level.keys.reset();
+            level.tables.reset();
+            level.* = .{
+                .keys = level.keys,
+                .tables = level.tables,
+            };
+        }
+
         /// Inserts the given table into the ManifestLevel.
         pub fn insert_table(
             level: *Self,

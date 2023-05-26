@@ -483,6 +483,18 @@ pub fn TableType(
                 builder.* = undefined;
             }
 
+            pub fn reset(builder: *Builder) void {
+                std.mem.set(u8, builder.index_block, 0);
+                std.mem.set(u8, builder.filter_block, 0);
+                std.mem.set(u8, builder.data_block, 0);
+
+                builder.* = .{
+                    .index_block = builder.index_block,
+                    .filter_block = builder.filter_block,
+                    .data_block = builder.data_block,
+                };
+            }
+
             pub fn data_block_values(builder: *Builder) []Value {
                 return Table.data_block_values(builder.data_block);
             }

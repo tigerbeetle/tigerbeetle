@@ -146,6 +146,19 @@ pub fn PostedGrooveType(comptime Storage: type, value_count_max: usize) type {
             groove.* = undefined;
         }
 
+        pub fn reset(groove: *PostedGroove) void {
+            groove.tree.reset();
+            groove.prefetch_ids.clearRetainingCapacity();
+            groove.prefetch_objects.clearRetainingCapacity();
+
+            groove.* = .{
+                .tree = groove.tree,
+                .prefetch_ids = groove.prefetch_ids,
+                .prefetch_objects = groove.prefetch_objects,
+                .prefetch_snapshot = null,
+            };
+        }
+
         pub fn get(groove: *const PostedGroove, id: u128) ?bool {
             return groove.prefetch_objects.get(id);
         }
