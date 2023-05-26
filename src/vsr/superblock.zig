@@ -734,8 +734,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
         };
 
-        /// The vsr_state must update the commit_min and commit_min_checksum.
-        /// The vsr_state must not update view/log_view.
+        /// Must update the commit_min and commit_min_checksum.
         pub fn checkpoint(
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
@@ -766,7 +765,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .caller = .checkpoint,
                 .vsr_state = vsr_state,
             };
-
+            superblock.log_context(context);
             superblock.acquire(context);
         }
 
@@ -798,33 +797,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
             update.headers.verify();
             assert(update.view >= update.log_view);
 
-            const vsr_state = SuperBlockHeader.VSRState{
-                .commit_min_checksum = superblock.staging.vsr_state.commit_min_checksum,
-                .commit_min = superblock.staging.vsr_state.commit_min,
-                .commit_max = update.commit_max,
-                .log_view = update.log_view,
-                .view = update.view,
-                .replica_id = superblock.staging.vsr_state.replica_id,
-                .members = superblock.staging.vsr_state.members,
-                .replica_count = superblock.staging.vsr_state.replica_count,
-            };
-            vsr_state.assert_internally_consistent();
+            var vsr_state = superblock.staging.vsr_state;
+            vsr_state.commit_max = update.commit_max;
+            vsr_state.log_view = update.log_view;
+            vsr_state.view = update.view;
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
-            assert(superblock.staging.vsr_state.monotonic(vsr_state));
-
-            log.debug("view_change: commit_max={}..{} log_view={}..{} view={}..{} head={}..{}", .{
-                superblock.staging.vsr_state.commit_max,
-                update.commit_max,
-
-                superblock.staging.vsr_state.log_view,
-                update.log_view,
-
-                superblock.staging.vsr_state.view,
-                update.view,
-
-                superblock.staging.vsr_headers().slice[0].checksum,
-                update.headers.array.get(0).checksum,
-            });
 
             context.* = .{
                 .superblock = superblock,
@@ -833,7 +810,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .vsr_state = vsr_state,
                 .vsr_headers = update.headers.*,
             };
-
+            superblock.log_context(context);
             superblock.acquire(context);
         }
 
@@ -964,7 +941,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.manifest_buffer[0..superblock.staging.manifest_size],
             ));
 
-            log.debug("{s}: write_manifest: checksum={x} size={} offset={}", .{
+            log.debug("{s}: write_manifest: checksum={x:0>32} size={} offset={}", .{
                 @tagName(context.caller),
                 superblock.staging.manifest_checksum,
                 superblock.staging.manifest_size,
@@ -1007,7 +984,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.free_set_buffer[0..superblock.staging.free_set_size],
             ));
 
-            log.debug("{s}: write_free_set: checksum={x} size={} offset={}", .{
+            log.debug("{s}: write_free_set: checksum={x:0>32} size={} offset={}", .{
                 @tagName(context.caller),
                 superblock.staging.free_set_checksum,
                 superblock.staging.free_set_size,
@@ -1050,7 +1027,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.client_sessions_buffer[0..superblock.staging.client_sessions_size],
             ));
 
-            log.debug("{s}: write_client_sessions: checksum={x} size={} offset={}", .{
+            log.debug("{s}: write_client_sessions: checksum={x:0>32} size={} offset={}", .{
                 @tagName(context.caller),
                 superblock.staging.client_sessions_checksum,
                 superblock.staging.client_sessions_size,
@@ -1106,7 +1083,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const buffer = mem.asBytes(superblock.staging);
             const offset = areas.header.offset(context.copy.?);
 
-            log.debug("{}: {s}: write_header: checksum={x} sequence={} copy={} size={} offset={}", .{
+            log.debug("{}: {s}: write_header: checksum={x:0>32} sequence={} copy={} size={} offset={}", .{
                 superblock.staging.vsr_state.replica_id,
                 @tagName(context.caller),
                 superblock.staging.checksum,
@@ -1259,8 +1236,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.working.* = working.*;
                 superblock.staging.* = working.*;
                 log.debug(
-                    "{s}: installed working superblock: checksum={x} sequence={} cluster={} " ++
+                    "{s}: installed working superblock: checksum={x:0>32} sequence={} cluster={} " ++
                         "replica_id={} size={} " ++
+                        "manifest_checksum={x:0>32} " ++
+                        "free_set_checksum={x:0>32} " ++
+                        "client_sessions_checksum={x:0>32} " ++
                         "commit_min_checksum={} commit_min={} commit_max={} " ++
                         "log_view={} view={}",
                     .{
@@ -1270,6 +1250,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.cluster,
                         superblock.working.vsr_state.replica_id,
                         superblock.working.storage_size,
+                        superblock.working.manifest_checksum,
+                        superblock.working.free_set_checksum,
+                        superblock.working.client_sessions_checksum,
                         superblock.working.vsr_state.commit_min_checksum,
                         superblock.working.vsr_state.commit_min,
                         superblock.working.vsr_state.commit_max,
@@ -1644,6 +1627,41 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     else => unreachable,
                 },
             };
+        }
+
+        fn log_context(superblock: *const SuperBlock, context: *const Context) void {
+            // TODO(Zig): Use named format specifiers when we upgrade past 0.9.
+            // In 0.9 the test runner's log implementation does not support the named arguments.
+            log.debug("{s}: " ++
+                "commit_min={}..{} " ++
+                "commit_max={}..{} " ++
+                "commit_min_checksum={}..{} " ++
+                "log_view={}..{} " ++
+                "view={}..{} " ++
+                "head={}..{}", .{
+                @tagName(context.caller),
+
+                superblock.staging.vsr_state.commit_min,
+                context.vsr_state.?.commit_min,
+
+                superblock.staging.vsr_state.commit_max,
+                context.vsr_state.?.commit_max,
+
+                superblock.staging.vsr_state.commit_min_checksum,
+                context.vsr_state.?.commit_min_checksum,
+
+                superblock.staging.vsr_state.log_view,
+                context.vsr_state.?.log_view,
+
+                superblock.staging.vsr_state.view,
+                context.vsr_state.?.view,
+
+                superblock.staging.vsr_headers().slice[0].checksum,
+                if (context.vsr_headers) |headers|
+                    @as(?u128, headers.array.get(0).checksum)
+                else
+                    null,
+            });
         }
     };
 }
