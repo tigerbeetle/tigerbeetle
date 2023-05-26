@@ -6082,7 +6082,7 @@ pub fn ReplicaType(
         }
 
         fn view_durable_updating(self: *const Self) bool {
-            return self.superblock.view_change_in_progress();
+            return self.superblock.updating(.view_change);
         }
 
         /// Persist the current view and log_view to the superblock.
