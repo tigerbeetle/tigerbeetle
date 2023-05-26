@@ -131,7 +131,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         /// While a compaction is running, this is the op of the last compact().
         /// While no compaction is running, this is the op of the last compact() to complete.
         /// (When recovering from a checkpoint, compaction_op starts at op_checkpoint).
-        compaction_op: u64,
+        compaction_op: ?u64 = null,
 
         /// The maximum snapshot which is safe to prefetch from.
         /// The minimum snapshot which can see the mutable table.
@@ -146,7 +146,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         /// * `lookup_snapshot_max = compaction_op + 1` after a compaction beat finishes.
         /// * `lookup_snapshot_max ≥ op_checkpoint + 1 + lsm_batch_multiple`
         ///    when `op_checkpoint ≠ 0`.
-        lookup_snapshot_max: u64,
+        lookup_snapshot_max: ?u64 = null,
 
         compaction_io_pending: usize,
         compaction_callback: union(enum) {
@@ -218,11 +218,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
             errdefer for (compaction_table) |*c| c.deinit(allocator);
 
-            // Compaction is one bar ahead of superblock's commit_min.
-            const op_checkpoint = grid.superblock.working.vsr_state.commit_min;
-            const lookup_snapshot_max = lookup_snapshot_max_for_checkpoint(op_checkpoint);
-            const compaction_op = op_checkpoint;
-
             return Tree{
                 .grid = grid,
                 .options = options,
@@ -232,8 +227,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .manifest = manifest,
                 .compaction_table_immutable = compaction_table_immutable,
                 .compaction_table = compaction_table,
-                .compaction_op = compaction_op,
-                .lookup_snapshot_max = lookup_snapshot_max,
                 .compaction_io_pending = 0,
                 .compaction_callback = .none,
                 .checkpoint_callback = null,
@@ -269,9 +262,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         /// Returns the value from the mutable or immutable table (possibly a tombstone),
         /// if one is available for the specified snapshot.
         pub fn lookup_from_memory(tree: *Tree, snapshot: u64, key: Key) ?*const Value {
-            assert(tree.lookup_snapshot_max >= snapshot);
+            assert(tree.lookup_snapshot_max.? >= snapshot);
 
-            if (tree.lookup_snapshot_max == snapshot) {
+            if (tree.lookup_snapshot_max.? == snapshot) {
                 if (tree.table_mutable.get(key)) |value| return value;
             } else {
                 // The mutable table is converted to an immutable table when a snapshot is created.
@@ -283,7 +276,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 if (tree.table_immutable.get(key)) |value| return value;
             } else {
                 // If the immutable table is invisible, then the mutable table is also invisible.
-                assert(tree.table_immutable.free or snapshot != tree.lookup_snapshot_max);
+                assert(tree.table_immutable.free or snapshot != tree.lookup_snapshot_max.?);
             }
 
             return null;
@@ -297,7 +290,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             snapshot: u64,
             key: Key,
         ) void {
-            assert(tree.lookup_snapshot_max >= snapshot);
+            assert(tree.lookup_snapshot_max.? >= snapshot);
             if (constants.verify) {
                 // The caller is responsible for checking the mutable table.
                 assert(tree.lookup_from_memory(snapshot, key) == null);
@@ -482,6 +475,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(tree.open_callback == null);
             tree.open_callback = callback;
 
+            // Compaction is one bar ahead of superblock's commit_min.
+            const op_checkpoint = tree.grid.superblock.working.vsr_state.commit_min;
+            tree.lookup_snapshot_max = lookup_snapshot_max_for_checkpoint(op_checkpoint);
+            tree.compaction_op = op_checkpoint;
+
             tree.manifest.open(manifest_open_callback);
         }
 
@@ -506,7 +504,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             index: u8 = 0,
 
             fn next(it: *CompactionTableIterator) ?CompactionTableContext {
-                const compaction_beat = it.tree.compaction_op % constants.lsm_batch_multiple;
+                const compaction_beat = it.tree.compaction_op.? % constants.lsm_batch_multiple;
                 const even_levels = compaction_beat < half_bar_beat_count;
                 const level_a = (it.index * 2) + @boolToInt(!even_levels);
                 const level_b = level_a + 1;
@@ -541,7 +539,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(tree.compaction_phase == .idle);
             assert(tree.compaction_callback == .none);
             assert(op != 0);
-            assert(op == tree.compaction_op + 1);
+            assert(op == tree.compaction_op.? + 1);
             assert(op > tree.grid.superblock.working.vsr_state.commit_min);
 
             tracer.start(
@@ -576,7 +574,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 // See also: lookup_snapshot_max_for_checkpoint().
                 tree.compaction_phase = .skipped;
 
-                if (op + 1 == tree.lookup_snapshot_max) {
+                if (op + 1 == tree.lookup_snapshot_max.?) {
                     // This is the last op of the skipped compaction bar.
                     // Prepare the immutable table for the next bar — since this state is
                     // in-memory, it cannot be skipped.
@@ -587,17 +585,17 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 return;
             }
-            assert(op == tree.lookup_snapshot_max);
+            assert(op == tree.lookup_snapshot_max.?);
 
             tree.compaction_phase = .running;
 
-            const op_min = compaction_op_min(tree.compaction_op);
+            const op_min = compaction_op_min(tree.compaction_op.?);
             assert(op_min < snapshot_latest);
             assert(op_min % half_bar_beat_count == 0);
 
-            const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
+            const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
             log.debug(tree_name ++ ": compact: op={d} op_min={d} beat={d}/{d}", .{
-                tree.compaction_op,
+                tree.compaction_op.?,
                 op_min,
                 compaction_beat + 1,
                 constants.lsm_batch_multiple,
@@ -616,7 +614,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             switch (beat_kind) {
                 .half_bar_start => {
                     if (constants.verify) {
-                        tree.manifest.verify(tree.compaction_op);
+                        tree.manifest.verify(tree.compaction_op.?);
                     }
 
                     tree.manifest.reserve();
@@ -639,13 +637,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         tree.compact_start_table(op_min, context);
                     }
 
-                    tree.lookup_snapshot_max = tree.compaction_op + 1;
+                    tree.lookup_snapshot_max = tree.compaction_op.? + 1;
 
                     tree.compaction_callback = .{ .next_tick = callback };
                     tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 },
                 .half_bar_middle => {
-                    tree.lookup_snapshot_max = tree.compaction_op + 1;
+                    tree.lookup_snapshot_max = tree.compaction_op.? + 1;
 
                     tree.compaction_callback = .{ .next_tick = callback };
                     tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
@@ -666,7 +664,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         }
 
         fn compact_start_table_immutable(tree: *Tree, op_min: u64) void {
-            const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
+            const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
             assert(compaction_beat == half_bar_beat_count);
 
             // Do not start compaction if the immutable table does not require compaction.
@@ -710,7 +708,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         }
 
         fn compact_start_table(tree: *Tree, op_min: u64, context: CompactionTableContext) void {
-            const compaction_beat = tree.compaction_op % half_bar_beat_count;
+            const compaction_beat = tree.compaction_op.? % half_bar_beat_count;
             assert(compaction_beat == 0);
 
             assert(context.level_a < constants.lsm_levels);
@@ -807,7 +805,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             tree.compaction_phase = .running_done;
 
             if (constants.verify) {
-                tree.manifest.verify(tree.lookup_snapshot_max);
+                tree.manifest.verify(tree.lookup_snapshot_max.?);
             }
 
             tracer.end(
@@ -831,12 +829,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             }
 
             // Only run at the end of each half-bar.
-            const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
+            const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
             const compacted_levels_odd = compaction_beat == constants.lsm_batch_multiple - 1;
             const compacted_levels_even = compaction_beat == half_bar_beat_count - 1;
             if (!compacted_levels_odd and !compacted_levels_even) return;
 
-            tree.lookup_snapshot_max = tree.compaction_op + 1;
+            tree.lookup_snapshot_max = tree.compaction_op.? + 1;
 
             // All compactions have finished for the current half-bar.
             // We couldn't remove the (invisible) input tables until now because prefetch()
@@ -853,7 +851,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         tree.compaction_table_immutable.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             tree.compaction_table_immutable.context.level_b,
-                            tree.lookup_snapshot_max,
+                            tree.lookup_snapshot_max.?,
                             tree.compaction_table_immutable.context.range_b.key_min,
                             tree.compaction_table_immutable.context.range_b.key_max,
                         );
@@ -874,14 +872,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                         context.compaction.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             context.compaction.context.level_b,
-                            tree.lookup_snapshot_max,
+                            tree.lookup_snapshot_max.?,
                             context.compaction.context.range_b.key_min,
                             context.compaction.context.range_b.key_max,
                         );
                         if (context.compaction.context.level_b > 0) {
                             tree.manifest.remove_invisible_tables(
                                 context.compaction.context.level_b - 1,
-                                tree.lookup_snapshot_max,
+                                tree.lookup_snapshot_max.?,
                                 context.compaction.context.range_b.key_min,
                                 context.compaction.context.range_b.key_max,
                             );
@@ -911,8 +909,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         /// Called after the last beat of a full compaction bar.
         fn compact_mutable_table_into_immutable(tree: *Tree) void {
             assert(tree.table_immutable.free);
-            assert((tree.compaction_op + 1) % constants.lsm_batch_multiple == 0);
-            assert(tree.compaction_op + 1 == tree.lookup_snapshot_max);
+            assert((tree.compaction_op.? + 1) % constants.lsm_batch_multiple == 0);
+            assert(tree.compaction_op.? + 1 == tree.lookup_snapshot_max.?);
 
             if (tree.table_mutable.count() == 0) return;
 
@@ -927,7 +925,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // In addition, the immutable table is conceptually an output table of this compaction
             // bar, and now its snapshot_min matches the snapshot_min of the Compactions' output
             // tables.
-            tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max, values);
+            tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max.?, values);
 
             assert(tree.table_mutable.count() == 0);
             assert(!tree.table_immutable.free);
@@ -937,13 +935,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             // Assert no outstanding compact_tick() work.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == .none);
-            assert(tree.compaction_op > 0);
-            assert(tree.compaction_op + 1 == tree.lookup_snapshot_max);
+            assert(tree.compaction_op.? > 0);
+            assert(tree.compaction_op.? + 1 == tree.lookup_snapshot_max.?);
             // Don't re-run the checkpoint we recovered from.
-            assert(!tree.grid.superblock.working.vsr_state.op_compacted(tree.compaction_op));
+            assert(!tree.grid.superblock.working.vsr_state.op_compacted(tree.compaction_op.?));
 
             // Assert that this is the last beat in the compaction bar.
-            const compaction_beat = tree.compaction_op % constants.lsm_batch_multiple;
+            const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
             const last_beat_in_bar = constants.lsm_batch_multiple - 1;
             assert(last_beat_in_bar == compaction_beat);
 
@@ -958,7 +956,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             // Assert that we're checkpointing only after invisible tables have been removed.
             if (constants.verify) {
-                tree.manifest.assert_no_invisible_tables(compaction_op_min(tree.compaction_op));
+                tree.manifest.assert_no_invisible_tables(compaction_op_min(tree.compaction_op.?));
             }
 
             // Start an asynchronous checkpoint on the manifest.
