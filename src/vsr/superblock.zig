@@ -1557,11 +1557,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 log.debug("{s}: started", .{@tagName(context.caller)});
 
                 if (Storage == @import("../testing/storage.zig").Storage) {
-                    // We should have finished all pending io before starting any more.
-                    // TODO This may change when grid repair lands.
-                    superblock.storage.assert_no_pending_io(.superblock);
-                    if (context.caller == .checkpoint) {
-                        superblock.storage.assert_no_pending_io(.grid);
+                    // We should have finished all pending superblock io before starting any more.
+                    superblock.storage.assert_no_pending_reads(.superblock);
+                    superblock.storage.assert_no_pending_writes(.superblock);
+                    if (context.caller != .view_change) {
+                        superblock.storage.assert_no_pending_writes(.grid);
+                        // (Pending repair-reads are possible.)
                     }
                 }
 
@@ -1580,8 +1581,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io by now.
-                // TODO This may change when grid repair lands.
-                superblock.storage.assert_no_pending_io(.superblock);
+                superblock.storage.assert_no_pending_reads(.superblock);
+                superblock.storage.assert_no_pending_writes(.superblock);
             }
 
             switch (context.caller) {

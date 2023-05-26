@@ -7065,7 +7065,8 @@ pub fn ReplicaType(
                 assert(self.grid.read_faulty_queue.count == 1);
 
                 self.grid_repair_message_timeout.start();
-                self.grid.on_next_tick(
+                self.superblock.storage.on_next_tick(
+                    .vsr,
                     on_grid_read_fault_next_tick,
                     &self.grid_read_fault_next_tick,
                 );

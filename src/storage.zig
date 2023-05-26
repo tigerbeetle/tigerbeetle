@@ -76,7 +76,8 @@ pub const Storage = struct {
     io: *IO,
     fd: os.fd_t,
 
-    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
+    next_tick_queue_lsm: FIFO(NextTick) = .{ .name = "storage_next_tick_lsm" },
+    next_tick_queue_vsr: FIFO(NextTick) = .{ .name = "storage_next_tick_vsr" },
     next_tick_completion_scheduled: bool = false,
     next_tick_completion: IO.Completion = undefined,
 
@@ -88,7 +89,8 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage) void {
-        assert(storage.next_tick_queue.empty());
+        assert(storage.next_tick_queue_lsm.empty());
+        assert(storage.next_tick_queue_vsr.empty());
         assert(storage.fd != IO.INVALID_FILE);
         storage.fd = IO.INVALID_FILE;
     }
@@ -102,11 +104,15 @@ pub const Storage = struct {
 
     pub fn on_next_tick(
         storage: *Storage,
+        source: enum { lsm, vsr },
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
         next_tick.* = .{ .callback = callback };
-        storage.next_tick_queue.push(next_tick);
+        switch (source) {
+            .lsm => storage.next_tick_queue_lsm.push(next_tick),
+            .vsr => storage.next_tick_queue_vsr.push(next_tick),
+        }
 
         if (!storage.next_tick_completion_scheduled) {
             storage.next_tick_completion_scheduled = true;
@@ -118,6 +124,10 @@ pub const Storage = struct {
                 0, // 0ns timeout means to resolve as soon as possible - like a yield
             );
         }
+    }
+
+    pub fn reset_next_tick_lsm(storage: *Storage) void {
+        storage.next_tick_queue_lsm.reset();
     }
 
     fn timeout_callback(
@@ -138,8 +148,17 @@ pub const Storage = struct {
             storage.next_tick_completion_scheduled = false;
         }
 
-        while (storage.next_tick_queue.pop()) |next_tick| {
-            next_tick.callback(next_tick);
+        // Process the queues in a single loop, since their callbacks may append to each other.
+        while (storage.next_tick_queue_lsm.count > 0 or
+            storage.next_tick_queue_vsr.count > 0)
+        {
+            if (storage.next_tick_queue_lsm.pop()) |next_tick| {
+                next_tick.callback(next_tick);
+            }
+
+            if (storage.next_tick_queue_vsr.pop()) |next_tick| {
+                next_tick.callback(next_tick);
+            }
         }
     }
 
