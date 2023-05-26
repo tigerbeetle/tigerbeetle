@@ -7110,6 +7110,7 @@ pub fn ReplicaType(
             while (reads) |read| : (reads = read.next) {
                 assert(read.address > 0);
                 assert(!self.superblock.free_set.is_free(read.address));
+                if (self.grid.writing(read.address, null) != .none) continue;
 
                 log.debug("{}: send_request_blocks: request address={} checksum={}", .{
                     self.replica,
@@ -7125,8 +7126,8 @@ pub fn ReplicaType(
 
                 if (requests_count == constants.grid_repair_request_max) break;
             }
-            assert(requests_count > 0);
             assert(requests_count <= constants.grid_repair_request_max);
+            if (requests_count == 0) return;
 
             message.header.* = .{
                 .command = .request_blocks,
