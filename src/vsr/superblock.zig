@@ -836,7 +836,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.staging.vsr_state = context.vsr_state.?;
 
             if (context.vsr_headers) |*headers| {
-                assert(context.caller == .format or context.caller == .view_change);
+                assert(context.caller.updates_vsr_headers());
 
                 superblock.staging.vsr_headers_count = @intCast(u32, headers.array.len);
                 stdx.copy_disjoint(
@@ -851,10 +851,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     std.mem.zeroes(vsr.Header),
                 );
             } else {
-                assert(context.caller == .checkpoint);
+                assert(!context.caller.updates_vsr_headers());
             }
 
-            if (context.caller != .view_change) {
+            if (context.caller.updates_trailers()) {
                 superblock.write_staging_encode_manifest();
                 superblock.write_staging_encode_free_set();
                 superblock.write_staging_encode_client_sessions();
@@ -862,10 +862,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.staging.set_checksum();
 
             context.copy = 0;
-            if (context.caller == .view_change) {
-                superblock.write_header(context);
-            } else {
+            if (context.caller.updates_trailers()) {
                 superblock.write_manifest(context);
+            } else {
+                superblock.write_header(context);
             }
         }
 
@@ -1117,10 +1117,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             } else {
                 context.copy = copy + 1;
 
-                switch (context.caller) {
-                    .open => unreachable,
-                    .format, .checkpoint => superblock.write_manifest(context),
-                    .view_change => superblock.write_header(context),
+                if (context.caller.updates_trailers()) {
+                    superblock.write_manifest(context);
+                } else {
+                    superblock.write_header(context);
                 }
             }
         }
@@ -1510,12 +1510,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn acquire(superblock: *SuperBlock, context: *Context) void {
             if (superblock.queue_head) |head| {
-                // There should be nothing else happening when we format() or open():
-                assert(context.caller != .format and context.caller != .open);
-                assert(head.caller != .format and head.caller != .open);
-
-                // There may only be one checkpoint() and one view_change() submitted at a time:
+                // All operations are mutually exclusive with themselves.
                 assert(head.caller != context.caller);
+                assert(Caller.transitions.get(head.caller).?.contains(context.caller));
                 assert(superblock.queue_tail == null);
 
                 log.debug("{s}: enqueued after {s}", .{
@@ -1662,6 +1659,40 @@ pub const Caller = enum {
     open,
     checkpoint,
     view_change,
+
+    /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
+    /// other operations, only the following queue combinations are allowed:
+    ///
+    /// from state → to states
+    const transitions = sets: {
+        const Set = std.enums.EnumSet(Caller);
+        break :sets std.enums.EnumMap(Caller, Set).init(.{
+            .format = Set.init(.{}),
+            .open = Set.init(.{}),
+            .checkpoint = Set.init(.{ .view_change = true }),
+            .view_change = Set.init(.{
+                .checkpoint = true,
+            }),
+        });
+    };
+
+    fn updates_vsr_headers(caller: Caller) bool {
+        return switch (caller) {
+            .format => true,
+            .open => unreachable,
+            .checkpoint => false,
+            .view_change => true,
+        };
+    }
+
+    fn updates_trailers(caller: Caller) bool {
+        return switch (caller) {
+            .format => true,
+            .open => unreachable,
+            .checkpoint => true,
+            .view_change => false,
+        };
+    }
 };
 
 pub const Area = enum {
