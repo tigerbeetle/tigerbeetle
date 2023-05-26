@@ -589,6 +589,9 @@ pub fn ReplicaType(
                 }
             }
 
+            maybe(self.status == .normal);
+            maybe(self.status == .view_change);
+            maybe(self.status == .recovering_head);
             if (self.status == .recovering) assert(self.solo());
 
             // Asynchronously open the (Forest inside) StateMachine so that we can repair grid
