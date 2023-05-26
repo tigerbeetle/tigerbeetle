@@ -195,14 +195,14 @@ const JNIContext = struct {
     client: tb.tb_client_t,
 
     pub inline fn release_packet(self: *Self, packet: *tb.tb_packet_t) void {
-        tb.tb_client_release_packet(self.client, packet);
+        tb.release_packet(self.client, packet);
     }
 
     pub inline fn acquire_packet(
         self: *Self,
         out_packet: *?*tb.tb_packet_t,
     ) tb.tb_packet_acquire_status_t {
-        return tb.tb_client_acquire_packet(self.client, out_packet);
+        return tb.acquire_packet(self.client, out_packet);
     }
 };
 
@@ -232,14 +232,12 @@ const NativeClient = struct {
     ) *JNIContext {
         assert(addresses_obj != null);
 
-        var out_client: tb.tb_client_t = undefined;
-
         var addresses_return = jui.JNIEnv.getStringUTFChars(env, addresses_obj) catch {
             ReflectionHelper.throwInitializationException(env, tb.tb_status_t.address_invalid);
             return undefined;
         };
         const addresses_len = @intCast(usize, env.getStringUTFLength(addresses_obj));
-        var addresses_chars = std.meta.assumeSentinel(addresses_return.chars[0..addresses_len], 0);
+        const addresses = addresses_return.chars[0..addresses_len];
         defer env.releaseStringUTFChars(addresses_obj, addresses_return.chars);
 
         var context = global_allocator.create(JNIContext) catch {
@@ -248,38 +246,36 @@ const NativeClient = struct {
         };
         errdefer global_allocator.destroy(context);
 
-        const init_fn = if (echo_client) tb.tb_client_init_echo else tb.tb_client_init;
-        var status = init_fn(
-            &out_client,
+        const init_fn = if (echo_client) tb.init_echo else tb.init;
+        const client = init_fn(
+            global_allocator,
             cluster_id,
-            addresses_chars,
-            @intCast(u32, addresses_len),
+            addresses,
             max_concurrency,
             @ptrToInt(context),
             on_completion,
-        );
-
-        if (status == .success) {
-            var jvm = env.getJavaVM() catch |err| {
-                log.err("Unexpected JNI failure retrieving the JVM {}", .{err});
-                @panic("JNI: Unexpected JNI failure retrieving the JVM");
-            };
-
-            context.* = .{
-                .jvm = jvm,
-                .client = out_client,
-            };
-            return context;
-        } else {
+        ) catch |err| {
+            const status = tb.init_error_to_status(err);
             ReflectionHelper.throwInitializationException(env, status);
             return undefined;
-        }
+        };
+
+        var jvm = env.getJavaVM() catch |err| {
+            log.err("Unexpected JNI failure retrieving the JVM {}", .{err});
+            @panic("JNI: Unexpected JNI failure retrieving the JVM");
+        };
+
+        context.* = .{
+            .jvm = jvm,
+            .client = client,
+        };
+        return context;
     }
 
     /// JNI clientDeinit implementation.
     fn client_deinit(context: *JNIContext) void {
         defer global_allocator.destroy(context);
-        tb.tb_client_deinit(context.client);
+        tb.deinit(context.client);
     }
 
     /// JNI submit implementation.
@@ -317,7 +313,7 @@ const NativeClient = struct {
             packet.next = null;
             packet.status = .ok;
 
-            tb.tb_client_submit(context.client, packet);
+            tb.submit(context.client, packet);
         } else {
             assert(acquire_status != .ok);
         }
