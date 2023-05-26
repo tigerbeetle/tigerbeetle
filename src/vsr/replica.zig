@@ -1502,15 +1502,17 @@ pub fn ReplicaType(
             assert(count <= threshold);
 
             if (count < threshold) {
-                log.debug("{}: on_start_view_change: view={} waiting for quorum ({}/{})", .{
+                log.debug("{}: on_start_view_change: view={} waiting for quorum " ++
+                    "({}/{}; replicas={b})", .{
                     self.replica,
                     self.view,
                     count,
                     threshold,
+                    self.start_view_change_from_all_replicas.mask,
                 });
                 return;
             }
-            log.debug("{}: on_start_view_change: view={} quorum received replicas={b}", .{
+            log.debug("{}: on_start_view_change: view={} quorum received (replicas={b})", .{
                 self.replica,
                 self.view,
                 self.start_view_change_from_all_replicas.mask,
@@ -2102,7 +2104,7 @@ pub fn ReplicaType(
                         read.destination == message.header.replica)
                     {
                         log.debug("{}: on_request_blocks: ignoring block request;" ++
-                            " already reading (replica={} address={} checksum={})", .{
+                            " already reading (destination={} address={} checksum={})", .{
                             self.replica,
                             message.header.replica,
                             request.block_address,
@@ -2163,21 +2165,21 @@ pub fn ReplicaType(
 
             result catch {
                 log.debug("{}: on_request_blocks: block not found " ++
-                    "(address={} checksum={} destination={})", .{
+                    "(destination={} address={} checksum={})", .{
                     self.replica,
+                    read.destination,
                     grid_read.address,
                     grid_read.checksum,
-                    read.destination,
                 });
                 return;
             };
 
             log.debug("{}: on_request_blocks: block found " ++
-                "(address={} checksum={} destination={})", .{
+                "(destination={} address={} checksum={})", .{
                 self.replica,
+                read.destination,
                 grid_read.address,
                 grid_read.checksum,
-                read.destination,
             });
 
             assert(read.message.header.command == .block);
@@ -2204,6 +2206,7 @@ pub fn ReplicaType(
                 });
                 return;
             }
+            assert(self.grid_repair_message_timeout.ticking);
 
             switch (self.grid.writing(message.header.op, null)) {
                 .init => unreachable,
@@ -3768,7 +3771,7 @@ pub fn ReplicaType(
                 message.header.command == .request_prepare or
                 message.header.command == .request_reply)
             {
-                // A recovering_head replica can still assist others with WAL/Reply-repair,
+                // A recovering_head/syncing replica can still assist others with WAL/Reply-repair,
                 // but does not itself install headers, since its head is unknown.
             } else {
                 if (self.status != .normal and self.status != .view_change) {
@@ -3784,6 +3787,8 @@ pub fn ReplicaType(
             {
                 // A replica in a different view can assist WAL repair.
             } else {
+                assert(message.header.command == .request_start_view);
+
                 if (message.header.view < self.view) {
                     log.debug("{}: on_{s}: ignoring (older view)", .{ self.replica, command });
                     return true;
@@ -3908,9 +3913,9 @@ pub fn ReplicaType(
             // (The request's op hasn't been assigned yet, but it will be `self.op + 1`
             // when primary_pipeline_next() converts the request to a prepare.)
             if (self.op + self.pipeline.queue.request_queue.count == self.op_checkpoint_trigger()) {
-                log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint_trigger={})", .{
+                log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
-                    self.op + 1,
+                    self.op + self.pipeline.queue.request_queue.count,
                     self.op_checkpoint(),
                 });
                 return true;
@@ -6483,10 +6488,14 @@ pub fn ReplicaType(
 
             self.status = .recovering_head;
 
-            log.warn("{}: transition_to_recovering_head: op_checkpoint={} op_head={}", .{
+            log.warn("{}: transition_to_recovering_head: " ++
+                "op_checkpoint={} commit_min={} op_head={} log_view={} view={}", .{
                 self.replica,
                 self.op_checkpoint(),
+                self.commit_min,
                 self.op,
+                self.log_view,
+                self.view,
             });
         }
 
