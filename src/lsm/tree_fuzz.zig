@@ -272,13 +272,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         pub fn get(env: *Environment, key: Key) ?*const Key.Value {
             env.change_state(.fuzzing, .tree_lookup);
 
-            if (env.tree.lookup_from_memory(env.tree.lookup_snapshot_max, key)) |value| {
+            if (env.tree.lookup_from_memory(env.tree.lookup_snapshot_max.?, key)) |value| {
                 env.change_state(.tree_lookup, .fuzzing);
                 return Tree.unwrap_tombstone(value);
             }
 
             env.lookup_value = null;
-            env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max, key);
+            env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max.?, key);
             env.tick_until_state_change(.tree_lookup, .fuzzing);
             return env.lookup_value;
         }

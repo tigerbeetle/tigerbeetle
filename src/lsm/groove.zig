@@ -553,8 +553,8 @@ pub fn GrooveType(
             // We may query the input tables of an ongoing compaction, but must not query the
             // output tables until the compaction is complete. (Until then, the output tables may
             // be in the manifest but not yet on disk).
-            const snapshot_max = groove.objects.lookup_snapshot_max;
-            assert(!has_id or snapshot_max == groove.ids.lookup_snapshot_max);
+            const snapshot_max = groove.objects.lookup_snapshot_max.?;
+            assert(!has_id or snapshot_max == groove.ids.lookup_snapshot_max.?);
 
             const snapshot_target = snapshot orelse snapshot_max;
             assert(snapshot_target <= snapshot_max);
