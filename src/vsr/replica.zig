@@ -59,6 +59,22 @@ const CommitStage = enum {
     cleanup,
 };
 
+pub const ReplicaEvent = union(enum) {
+    message_sent: *const Message,
+    commit,
+    /// Called immediately after a compaction.
+    compact,
+    /// Called immediately before a checkpoint.
+    checkpoint_start,
+    /// Called immediately after a checkpoint.
+    /// Note: The replica may checkpoint without calling this function:
+    /// 1. Begin checkpoint.
+    /// 2. Write 2/4 SuperBlock copies.
+    /// 3. Crash.
+    /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
+    checkpoint_done,
+};
+
 const Nonce = u128;
 
 const Prepare = struct {
@@ -367,21 +383,9 @@ pub fn ReplicaType(
         prng: std.rand.DefaultPrng,
 
         /// Used by `Cluster` in the simulator.
-        context: ?*anyopaque = null,
+        test_context: ?*anyopaque = null,
         /// Simulator hooks.
-        on_change_state: ?fn (replica: *const Self) void = null,
-        /// Called immediately after a compaction.
-        on_compact: ?fn (replica: *const Self) void = null,
-        /// Called immediately before a checkpoint.
-        on_checkpoint_start: ?fn (replica: *const Self) void = null,
-        /// Called immediately after a checkpoint.
-        /// Note: The replica may checkpoint without calling this function:
-        /// 1. Begin checkpoint.
-        /// 2. Write 2/4 SuperBlock copies.
-        /// 3. Crash.
-        /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
-        on_checkpoint_done: ?fn (replica: *const Self) void = null,
-        on_message_sent: ?fn (replica: *const Self, message: *Message) void = null,
+        test_event_callback: ?fn (replica: *const Self, event: ReplicaEvent) void = null,
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
@@ -3080,7 +3084,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
 
-            if (self.on_compact) |on_compact| on_compact(self);
+            if (self.test_event_callback) |hook| hook(self, .compact);
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
@@ -3101,7 +3105,7 @@ pub fn ReplicaType(
                     .checkpoint,
                     @src(),
                 );
-                if (self.on_checkpoint_start) |on_checkpoint| on_checkpoint(self);
+                if (self.test_event_callback) |hook| hook(self, .checkpoint_start);
 
                 assert(self.grid.read_faulty_queue.empty());
                 assert(self.grid.write_queue.empty());
@@ -3187,7 +3191,7 @@ pub fn ReplicaType(
                 .checkpoint,
             );
 
-            if (self.on_checkpoint_done) |on_checkpoint| on_checkpoint(self);
+            if (self.test_event_callback) |hook| hook(self, .checkpoint_done);
             self.commit_dispatch(.cleanup);
         }
 
@@ -3297,7 +3301,7 @@ pub fn ReplicaType(
             assert(self.commit_min == prepare.header.op);
             if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
 
-            if (self.on_change_state) |hook| hook(self);
+            if (self.test_event_callback) |hook| hook(self, .commit);
 
             reply.header.* = .{
                 .command = .reply,
@@ -6007,8 +6011,8 @@ pub fn ReplicaType(
                 assert(self.loopback_queue == null);
                 self.loopback_queue = message.ref();
             } else {
-                if (self.on_message_sent) |on_message_sent| {
-                    on_message_sent(self, message);
+                if (self.test_event_callback) |hook| {
+                    hook(self, .{ .message_sent = message });
                 }
                 self.message_bus.send_message_to_replica(replica, message);
             }

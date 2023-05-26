@@ -388,12 +388,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             assert(replica.replica_count == cluster.replica_count);
             assert(replica.standby_count == cluster.standby_count);
 
-            replica.context = cluster;
-            replica.on_change_state = on_replica_commit;
-            replica.on_compact = on_replica_compact;
-            replica.on_checkpoint_start = on_replica_checkpoint_start;
-            replica.on_checkpoint_done = on_replica_checkpoint_done;
-            replica.on_message_sent = on_replica_message_sent;
+            replica.test_context = cluster;
+            replica.test_event_callback = on_replica_event;
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
         }
 
@@ -448,46 +444,35 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             cluster.on_client_reply(cluster, client_index, request_message, reply_message);
         }
 
-        fn on_replica_commit(replica: *const Replica) void {
-            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
+        fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
+            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.test_context.?));
             assert(cluster.replica_health[replica.replica] == .up);
 
-            cluster.log_replica(.commit, replica.replica);
-            cluster.state_checker.check_state(replica.replica) catch |err| {
-                fatal(.correctness, "state checker error: {}", .{err});
-            };
-        }
-
-        fn on_replica_compact(replica: *const Replica) void {
-            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
-            assert(cluster.replica_health[replica.replica] == .up);
-            cluster.storage_checker.replica_compact(replica) catch |err| {
-                fatal(.correctness, "storage checker error: {}", .{err});
-            };
-        }
-
-        fn on_replica_checkpoint_start(replica: *const Replica) void {
-            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
-            assert(cluster.replica_health[replica.replica] == .up);
-
-            cluster.log_replica(.checkpoint_start, replica.replica);
-        }
-
-        fn on_replica_checkpoint_done(replica: *const Replica) void {
-            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
-            assert(cluster.replica_health[replica.replica] == .up);
-
-            cluster.log_replica(.checkpoint_done, replica.replica);
-            cluster.storage_checker.replica_checkpoint(replica) catch |err| {
-                fatal(.correctness, "storage checker error: {}", .{err});
-            };
-        }
-
-        fn on_replica_message_sent(replica: *const Replica, message: *Message) void {
-            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
-            assert(cluster.replica_health[replica.replica] == .up);
-
-            cluster.state_checker.on_message(message);
+            switch (event) {
+                .message_sent => |message| {
+                    cluster.state_checker.on_message(message);
+                },
+                .commit => {
+                    cluster.log_replica(.commit, replica.replica);
+                    cluster.state_checker.check_state(replica.replica) catch |err| {
+                        fatal(.correctness, "state checker error: {}", .{err});
+                    };
+                },
+                .compact => {
+                    cluster.storage_checker.replica_compact(replica) catch |err| {
+                        fatal(.correctness, "storage checker error: {}", .{err});
+                    };
+                },
+                .checkpoint_start => {
+                    cluster.log_replica(.checkpoint_start, replica.replica);
+                },
+                .checkpoint_done => {
+                    cluster.log_replica(.checkpoint_done, replica.replica);
+                    cluster.storage_checker.replica_checkpoint(replica) catch |err| {
+                        fatal(.correctness, "storage checker error: {}", .{err});
+                    };
+                },
+            }
         }
 
         /// Print an error message and then exit with an exit code.
