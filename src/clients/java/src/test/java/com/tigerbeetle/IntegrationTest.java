@@ -959,7 +959,7 @@ public class IntegrationTest {
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
                     // Starting multiple threads submitting transfers.
-                    tasks[i] = new TransferTask(client, barrier);
+                    tasks[i] = new TransferTask(client, barrier, new CountDownLatch(0));
                     tasks[i].start();
                 }
 
@@ -1021,7 +1021,7 @@ public class IntegrationTest {
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
                     // Starting multiple threads submitting transfers.
-                    tasks[i] = new TransferTask(client, barrier);
+                    tasks[i] = new TransferTask(client, barrier, new CountDownLatch(0));
                     tasks[i].start();
                 }
 
@@ -1083,11 +1083,18 @@ public class IntegrationTest {
 
         try (var server = new Server()) {
 
-            // The goal here is to force to have way more threads than the client can
-            // process simultaneously
-            final int tasks_qty = 32;
-            final int max_concurrency = 32;
-            final var barrier = new CountDownLatch(tasks_qty);
+            // The goal here is to queue many concurrent requests,
+            // so we have a good chance of testing "client.close()" not only before/after
+            // calling "submit()", but also during the native call.
+            //
+            // Unfortunately this is a hacky test, but a reasonable one:
+            // Since our JNI module does not expose the acquire_packet function,
+            // we cannot insert a lock/wait in between "acquire_packet" and "submit"
+            // in order to cause and assert each variant.
+            final int tasks_qty = 256;
+            final int max_concurrency = tasks_qty;
+            final var enterBarrier = new CountDownLatch(tasks_qty);
+            final var exitBarrier = new CountDownLatch(1);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
@@ -1097,13 +1104,13 @@ public class IntegrationTest {
                 var tasks = new TransferTask[tasks_qty];
                 for (int i = 0; i < tasks_qty; i++) {
 
-                    // Starting multiple threads submitting transfers,
-                    tasks[i] = new TransferTask(client, barrier);
+                    // Starting multiple threads submitting transfers.
+                    tasks[i] = new TransferTask(client, enterBarrier, exitBarrier);
                     tasks[i].start();
                 }
 
-                // Waits until all threads are running.
-                barrier.await();
+                // Waits until one thread finish.
+                exitBarrier.await();
 
                 // And then close the client while threads are still working
                 // Some of them have already submitted the request, while others will fail
@@ -1284,12 +1291,15 @@ public class IntegrationTest {
         public CreateTransferResultBatch result;
         public Throwable exception;
         private CountDownLatch enterBarrier;
+        private CountDownLatch exitBarrier;
 
-        public TransferTask(Client client, CountDownLatch enterBarrier) {
+        public TransferTask(Client client, CountDownLatch enterBarrier,
+                CountDownLatch exitBarrier) {
             this.client = client;
             this.result = null;
             this.exception = null;
             this.enterBarrier = enterBarrier;
+            this.exitBarrier = exitBarrier;
         }
 
         @Override
@@ -1311,6 +1321,8 @@ public class IntegrationTest {
                 result = client.createTransfers(transfers);
             } catch (Throwable e) {
                 exception = e;
+            } finally {
+                exitBarrier.countDown();
             }
         }
     }
