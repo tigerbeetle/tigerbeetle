@@ -66,6 +66,12 @@ pub const Storage = struct {
         callback: fn (write: *Storage.Write) void,
         buffer: []const u8,
         offset: u64,
+        write_sync: IO.WriteSync,
+    };
+
+    pub const Sync = struct {
+        completion: IO.Completion,
+        callback: fn (sync: *Storage.Sync) void,
     };
 
     pub const NextTick = struct {
@@ -314,6 +320,10 @@ pub const Storage = struct {
             .callback = callback,
             .buffer = buffer,
             .offset = offset_in_storage,
+            .write_sync = switch (zone) {
+                .wal_headers, .wal_prepares => .data_sync,
+                .superblock, .client_replies, .grid => .none,
+            },
         };
 
         self.start_write(write);
@@ -331,6 +341,7 @@ pub const Storage = struct {
             self.fd,
             write.buffer,
             write.offset,
+            write.write_sync,
         );
     }
 
@@ -371,6 +382,33 @@ pub const Storage = struct {
         }
 
         self.start_write(write);
+    }
+
+    pub fn sync_sectors(
+        storage: *Storage,
+        callback: fn (sync: *Storage.Sync) void,
+        sync: *Storage.Sync,
+    ) void {
+        sync.* = .{
+            .completion = undefined,
+            .callback = callback,
+        };
+
+        storage.io.fsync(
+            *Storage,
+            storage,
+            on_fsync,
+            &sync.completion,
+            storage.fd,
+        );
+    }
+
+    fn on_fsync(storage: *Storage, completion: *IO.Completion, result: IO.FsyncError!void) void {
+        _ = storage;
+        _ = result catch @panic("failed to fsync storage");
+
+        const sync = @fieldParentPtr(Sync, "completion", completion);
+        sync.callback(sync);
     }
 
     /// Ensures that the read or write is aligned correctly for Direct I/O.

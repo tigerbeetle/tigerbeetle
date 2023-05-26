@@ -288,13 +288,23 @@ pub const IO = struct {
                 .timeout => |*op| {
                     linux.io_uring_prep_timeout(sqe, &op.timespec, 0, 0);
                 },
-                .write => |op| {
-                    linux.io_uring_prep_write(
+                .write => |*op| {
+                    linux.io_uring_prep_writev(
                         sqe,
                         op.fd,
-                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        @as(*const [1]os.iovec_const, &op.iovec),
                         op.offset,
                     );
+
+                    //const RWF_HIPRI = 0x1;
+                    const RWF_DSYNC = 0x2;
+                    sqe.rw_flags = switch (op.sync) {
+                        .none => 0,
+                        .data_sync => RWF_DSYNC,
+                    };
+                },
+                .fsync => |op| {
+                    linux.io_uring_prep_fsync(sqe, op.fd, 0);
                 },
             }
             sqe.user_data = @ptrToInt(completion);
@@ -521,6 +531,29 @@ pub const IO = struct {
                     };
                     call_callback(completion, &result, callback_tracer_slot);
                 },
+                .fsync => {
+                    const result = blk: {
+                        if (completion.result < 0) {
+                            const err = switch (@intToEnum(os.E, -completion.result)) {
+                                .INTR => {
+                                    completion.io.enqueue(completion);
+                                    return;
+                                },
+                                .BADF => error.FileDescriptorInvalid,
+                                .DQUOT => error.DiskQuota,
+                                .INVAL => error.ArgumentsInvalid,
+                                .IO => error.InputOutput,
+                                .NOSPC => error.NoSpaceLeft,
+                                .ROFS => error.ReadOnlyFileSystem,
+                                else => |errno| os.unexpectedErrno(errno),
+                            };
+                            break :blk err;
+                        } else {
+                            break :blk {};
+                        }
+                    };
+                    call_callback(completion, &result, callback_tracer_slot);
+                },
             }
         }
     };
@@ -574,8 +607,12 @@ pub const IO = struct {
         },
         write: struct {
             fd: os.fd_t,
-            buffer: []const u8,
             offset: u64,
+            sync: WriteSync,
+            iovec: os.iovec_const,
+        },
+        fsync: struct {
+            fd: os.fd_t,
         },
     };
 
@@ -923,6 +960,11 @@ pub const IO = struct {
         BrokenPipe,
     } || os.UnexpectedError;
 
+    pub const WriteSync = enum {
+        none,
+        data_sync,
+    };
+
     pub fn write(
         self: *IO,
         comptime Context: type,
@@ -936,6 +978,7 @@ pub const IO = struct {
         fd: os.fd_t,
         buffer: []const u8,
         offset: u64,
+        sync: WriteSync,
     ) void {
         completion.* = .{
             .io = self,
@@ -952,8 +995,54 @@ pub const IO = struct {
             .operation = .{
                 .write = .{
                     .fd = fd,
-                    .buffer = buffer,
                     .offset = offset,
+                    .sync = sync,
+                    .iovec = .{
+                        .iov_base = buffer.ptr,
+                        .iov_len = @intCast(u32, buffer.len),
+                    },
+                },
+            },
+        };
+        self.enqueue(completion);
+    }
+
+    pub const FsyncError = error{
+        FileDescriptorInvalid,
+        DiskQuota,
+        ArgumentsInvalid,
+        InputOutput,
+        NoSpaceLeft,
+        ReadOnlyFileSystem,
+    } || os.UnexpectedError;
+
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
+        completion: *Completion,
+        fd: os.fd_t,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = struct {
+                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    callback(
+                        @intToPtr(Context, @ptrToInt(ctx)),
+                        comp,
+                        @intToPtr(*const FsyncError!void, @ptrToInt(res)).*,
+                    );
+                }
+            }.wrapper,
+            .operation = .{
+                .fsync = .{
+                    .fd = fd,
                 },
             },
         };
@@ -995,7 +1084,7 @@ pub const IO = struct {
         // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
 
-        var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
+        var flags: u32 = os.O.CLOEXEC | os.O.RDWR;
         var mode: os.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
@@ -1031,9 +1120,6 @@ pub const IO = struct {
                 log.info("opening \"{s}\"...", .{relative_path});
             },
         }
-
-        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert((flags & os.O.DSYNC) > 0);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));

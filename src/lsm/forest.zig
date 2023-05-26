@@ -73,6 +73,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         join_op: ?JoinOp = null,
         join_pending: usize = 0,
         join_callback: ?Callback = null,
+        sync_completion: Storage.Sync = undefined,
 
         grid: *Grid,
         grooves: Grooves,
@@ -171,21 +172,34 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                             }
 
                             if (join_op == .checkpoint) {
+                                const storage = forest.grid.superblock.storage;
                                 if (Storage == @import("../testing/storage.zig").Storage) {
                                     // We should have finished all checkpoint io by now.
                                     // TODO This may change when grid repair lands.
-                                    forest.grid.superblock.storage.assert_no_pending_io(.grid);
+                                    storage.assert_no_pending_io(.grid);
                                 }
+
+                                storage.sync_sectors(on_storage_sync, &forest.sync_completion);
+                                return;
                             }
 
-                            const callback = forest.join_callback.?;
-                            forest.join_op = null;
-                            forest.join_callback = null;
-                            callback(forest);
+                            forest.join_complete();
                         }
                     }.groove_cb;
                 }
             };
+        }
+
+        fn on_storage_sync(sync_completion: *Storage.Sync) void {
+            const forest = @fieldParentPtr(Forest, "sync_completion", sync_completion);
+            forest.join_complete();
+        }
+
+        fn join_complete(forest: *Forest) void {
+            const callback = forest.join_callback.?;
+            forest.join_op = null;
+            forest.join_callback = null;
+            callback(forest);
         }
 
         pub fn open(forest: *Forest, callback: Callback) void {

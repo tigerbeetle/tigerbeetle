@@ -122,6 +122,8 @@ pub const Storage = struct {
         }
     };
 
+    pub const Sync = NextTick;
+
     pub const NextTick = struct {
         next: ?*NextTick = null,
         callback: fn (next_tick: *NextTick) void,
@@ -404,6 +406,8 @@ pub const Storage = struct {
 
         write.callback(write);
     }
+
+    pub const sync_sectors = on_next_tick;
 
     fn read_latency(storage: *Storage) u64 {
         return storage.latency(storage.options.read_latency_min, storage.options.read_latency_mean);
