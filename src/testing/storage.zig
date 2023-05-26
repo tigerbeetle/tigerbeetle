@@ -147,7 +147,8 @@ pub const Storage = struct {
     writes: PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
-    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
+    next_tick_queue_lsm: FIFO(NextTick) = .{ .name = "storage_next_tick_lsm" },
+    next_tick_queue_vsr: FIFO(NextTick) = .{ .name = "storage_next_tick_vsr" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(options.write_latency_mean >= options.write_latency_min);
@@ -197,10 +198,12 @@ pub const Storage = struct {
     /// Cancel any currently in-progress reads/writes.
     /// Corrupt the target sectors of any in-progress writes.
     pub fn reset(storage: *Storage) void {
-        log.debug(
-            "Reset: {} pending reads, {} pending writes, {} pending next_ticks",
-            .{ storage.reads.len, storage.writes.len, storage.next_tick_queue.count },
-        );
+        log.debug("Reset: {} pending reads, {} pending writes, {};{} pending next_ticks", .{
+            storage.reads.len,
+            storage.writes.len,
+            storage.next_tick_queue_lsm.count,
+            storage.next_tick_queue_vsr.count,
+        });
         while (storage.writes.peek()) |_| {
             const write = storage.writes.remove();
             if (!storage.x_in_100(storage.options.crash_fault_probability)) continue;
@@ -213,7 +216,8 @@ pub const Storage = struct {
         assert(storage.writes.len == 0);
 
         storage.reads.len = 0;
-        storage.next_tick_queue.reset();
+        storage.next_tick_queue_lsm.reset();
+        storage.next_tick_queue_vsr.reset();
     }
 
     /// Returns the number of bytes that have been written to, assuming that (the simulated)
@@ -268,18 +272,36 @@ pub const Storage = struct {
             storage.write_sectors_finish(write);
         }
 
-        while (storage.next_tick_queue.pop()) |next_tick| {
-            next_tick.callback(next_tick);
+        // Process the queues in a single loop, since their callbacks may append to each other.
+        while (storage.next_tick_queue_lsm.count > 0 or
+            storage.next_tick_queue_vsr.count > 0)
+        {
+            if (storage.next_tick_queue_lsm.pop()) |next_tick| {
+                next_tick.callback(next_tick);
+            }
+
+            if (storage.next_tick_queue_vsr.pop()) |next_tick| {
+                next_tick.callback(next_tick);
+            }
         }
     }
 
     pub fn on_next_tick(
         storage: *Storage,
+        source: enum { lsm, vsr },
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
         next_tick.* = .{ .callback = callback };
-        storage.next_tick_queue.push(next_tick);
+
+        switch (source) {
+            .lsm => storage.next_tick_queue_lsm.push(next_tick),
+            .vsr => storage.next_tick_queue_vsr.push(next_tick),
+        }
+    }
+
+    pub fn reset_next_tick_lsm(storage: *Storage) void {
+        storage.next_tick_queue_lsm.reset();
     }
 
     /// * Verifies that the read fits within the target sector.
@@ -538,7 +560,7 @@ pub const Storage = struct {
         }
     }
 
-    pub fn assert_no_pending_io(storage: *const Storage, zone: vsr.Zone) void {
+    pub fn assert_no_pending_reads(storage: *const Storage, zone: vsr.Zone) void {
         var assert_failed = false;
 
         const reads = storage.reads;
@@ -548,6 +570,14 @@ pub const Storage = struct {
                 assert_failed = true;
             }
         }
+
+        if (assert_failed) {
+            panic("Pending io in zone: {}", .{zone});
+        }
+    }
+
+    pub fn assert_no_pending_writes(storage: *const Storage, zone: vsr.Zone) void {
+        var assert_failed = false;
 
         const writes = storage.writes;
         for (writes.items[0..writes.len]) |write| {
