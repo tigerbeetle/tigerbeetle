@@ -451,13 +451,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
         pub const ClientSessions = SuperBlockClientSessions;
 
         pub const Context = struct {
-            pub const Caller = enum {
-                format,
-                open,
-                checkpoint,
-                view_change,
-            };
-
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             caller: Caller,
@@ -814,17 +807,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
-        pub fn view_change_in_progress(superblock: *const SuperBlock) bool {
+        pub fn updating(superblock: *const SuperBlock, caller: Caller) bool {
             assert(superblock.opened);
 
             if (superblock.queue_head) |head| {
-                if (head.caller == .view_change) return true;
-                assert(head.caller == .checkpoint);
+                if (head.caller == caller) return true;
             }
 
             if (superblock.queue_tail) |tail| {
-                assert(tail.caller == .view_change);
-                return true;
+                if (tail.caller == caller) return true;
             }
 
             return false;
@@ -1607,7 +1598,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         ///
         /// This ensures that our read and write quorums will intersect.
         /// Using flexible quorums in this way increases resiliency of the superblock.
-        fn threshold_for_caller(caller: Context.Caller) u8 {
+        fn threshold_for_caller(caller: Caller) u8 {
             // Working these threshold out by formula is easy to get wrong, so enumerate them:
             // The rule is that the write quorum plus the read quorum must be exactly copies + 1.
 
@@ -1665,6 +1656,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
     };
 }
+
+pub const Caller = enum {
+    format,
+    open,
+    checkpoint,
+    view_change,
+};
 
 pub const Area = enum {
     header,

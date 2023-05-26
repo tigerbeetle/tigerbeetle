@@ -8,7 +8,7 @@
 //! - Calling checkpoint() and view_change() concurrently is safe.
 //!   - VSRState will not leak before the corresponding checkpoint()/view_change().
 //!   - Trailers will not leak before the corresponding checkpoint().
-//! - view_change_in_progress() reports the correct state.
+//! - updating() reports the correct state.
 //!
 const std = @import("std");
 const assert = std.debug.assert;
@@ -24,6 +24,7 @@ const data_file_size_min = @import("superblock.zig").data_file_size_min;
 const VSRState = @import("superblock.zig").SuperBlockHeader.VSRState;
 const SuperBlockHeader = @import("superblock.zig").SuperBlockHeader;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
+const Caller = @import("superblock.zig").Caller;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../testing/fuzz.zig");
 
@@ -189,7 +190,7 @@ const Environment = struct {
     context_verify: SuperBlock.Context = undefined,
 
     // Set bits indicate pending operations.
-    pending: std.enums.EnumSet(SuperBlock.Context.Caller) = .{},
+    pending: std.enums.EnumSet(Caller) = .{},
     pending_verify: bool = false,
 
     /// After every write to `superblock`'s storage, verify that the superblock can be opened,
@@ -200,7 +201,7 @@ const Environment = struct {
         assert(!env.pending.contains(.format));
         assert(!env.pending.contains(.open));
         assert(!env.pending_verify);
-        assert(env.pending.contains(.view_change) == env.superblock.view_change_in_progress());
+        assert(env.pending.contains(.view_change) == env.superblock.updating(.view_change));
 
         const write = env.superblock.storage.writes.peek();
         env.superblock.storage.tick();
