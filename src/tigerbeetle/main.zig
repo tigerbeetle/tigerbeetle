@@ -155,6 +155,7 @@ const Command = struct {
             .storage = &command.storage,
             .aof = &aof,
             .message_pool = &command.message_pool,
+            .nonce = std.crypto.random.int(u128),
             .time = .{},
             .state_machine_options = .{
                 // TODO Tune lsm_forest_node_count better.
