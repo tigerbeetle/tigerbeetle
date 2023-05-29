@@ -258,7 +258,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             for (cluster.replicas) |_, replica_index| {
                 errdefer for (replicas[0..replica_index]) |*r| r.deinit(allocator);
-                try cluster.open_replica(@intCast(u8, replica_index), .{
+                const nonce = random.int(u128);
+                try cluster.open_replica(@intCast(u8, replica_index), nonce, .{
                     .resolution = constants.tick_ms * std.time.ns_per_ms,
                     .offset_type = .linear,
                     .offset_coefficient_A = 0,
@@ -329,10 +330,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         pub fn restart_replica(cluster: *Self, replica_index: u8) !void {
             assert(cluster.replica_health[replica_index] == .down);
 
+            var nonce = cluster.replicas[replica_index].nonce + 1;
             // Pass the old replica's Time through to the new replica. It will continue to tick while
             // the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
             var time = cluster.replicas[replica_index].time;
-            try cluster.open_replica(replica_index, time);
+            try cluster.open_replica(replica_index, nonce, time);
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
             cluster.log_replica(.recover, replica_index);
@@ -362,7 +364,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             assert(messages_in_pool == message_pool.messages_max_replica);
         }
 
-        fn open_replica(cluster: *Self, replica_index: u8, time: Time) !void {
+        fn open_replica(cluster: *Self, replica_index: u8, nonce: u128, time: Time) !void {
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
@@ -373,6 +375,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,
                     .message_pool = &cluster.replica_pools[replica_index],
+                    .nonce = nonce,
                     .time = time,
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },

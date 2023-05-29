@@ -146,6 +146,8 @@ pub fn ReplicaType(
         /// header/message.
         quorum_nack_prepare: u8,
 
+        nonce: Nonce = 0,
+
         time: Time,
 
         /// A distributed fault-tolerant clock for lower and upper bounds on the primary's wall clock:
@@ -395,6 +397,7 @@ pub fn ReplicaType(
             storage_size_limit: u64,
             storage: *Storage,
             message_pool: *MessagePool,
+            nonce: Nonce,
             time: Time,
             aof: *AOF,
             state_machine_options: StateMachine.Options,
@@ -449,6 +452,7 @@ pub fn ReplicaType(
                 .standby_count = options.node_count - replica_count,
                 .storage = options.storage,
                 .aof = options.aof,
+                .nonce = options.nonce,
                 .time = options.time,
                 .message_pool = options.message_pool,
                 .state_machine_options = options.state_machine_options,
@@ -647,6 +651,7 @@ pub fn ReplicaType(
             replica_count: u8,
             standby_count: u8,
             replica_index: u8,
+            nonce: Nonce,
             time: Time,
             storage: *Storage,
             aof: *AOF,
@@ -763,6 +768,7 @@ pub fn ReplicaType(
                 .quorum_replication = quorum_replication,
                 .quorum_view_change = quorum_view_change,
                 .quorum_nack_prepare = quorum_nack_prepare,
+                .nonce = options.nonce,
                 // Copy the (already-initialized) time back, to avoid regressing the monotonic
                 // clock guard.
                 .time = self.time,
@@ -1791,7 +1797,7 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
             assert(self.primary());
 
-            const start_view = self.create_view_change_message(.start_view);
+            const start_view = self.create_view_change_message(.start_view, message.header.context);
             defer self.message_bus.unref(start_view);
 
             assert(start_view.references == 1);
@@ -2466,6 +2472,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
+                .context = self.nonce,
             });
         }
 
@@ -3399,10 +3406,11 @@ pub fn ReplicaType(
         /// Construct a SV/DVC message, including attached headers from the current log_view.
         ///
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_view_change_message(self: *Self, command: Command) *Message {
+        fn create_view_change_message(self: *Self, command: Command, nonce: ?u128) *Message {
             assert(self.status == .normal or self.status == .view_change);
             assert((self.status == .normal) == (command == .start_view));
             assert((self.status == .view_change) == (command == .do_view_change));
+            assert((command == .do_view_change) == (nonce == null));
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
             assert((self.log_view < self.view) == (command == .do_view_change));
@@ -3493,7 +3501,7 @@ pub fn ReplicaType(
                 // from non-canonical DVCs.
                 .commit = self.commit_min,
                 // DVC: Signal which headers correspond to definitely not-prepared messages.
-                .context = nacks.mask,
+                .context = if (command == .do_view_change) nacks.mask else nonce.?,
                 // DVC: Signal which headers correspond to locally available prepares.
                 .client = present.mask,
             };
@@ -4151,6 +4159,22 @@ pub fn ReplicaType(
                         log.warn("{}: on_{s}: misdirected message (self)", .{ self.replica, command });
                         return true;
                     }
+
+                    if (self.status == .recovering_head) {
+                        if (message.header.view > self.view or
+                            message.header.op >= self.op_checkpoint_trigger() or
+                            message.header.context == self.nonce)
+                        {
+                            // This SV is guaranteed to have originated after the replica crash,
+                            // it is safe to use to determine the head op.
+                        } else {
+                            log.debug("{}: on_{s}: ignoring (recovering_head, nonce mismatch)", .{
+                                self.replica,
+                                command,
+                            });
+                            return true;
+                        }
+                    }
                 },
                 .do_view_change => {
                     assert(message.header.view > 0); // The initial view is already zero.
@@ -4671,6 +4695,7 @@ pub fn ReplicaType(
                     .cluster = self.cluster,
                     .replica = self.replica,
                     .view = self.view,
+                    .context = self.nonce,
                 });
                 return;
             }
@@ -5578,7 +5603,7 @@ pub fn ReplicaType(
             assert(self.view > self.log_view);
             assert(!self.do_view_change_quorum);
 
-            const message = self.create_view_change_message(.do_view_change);
+            const message = self.create_view_change_message(.do_view_change, null);
             defer self.message_bus.unref(message);
 
             assert(message.references == 1);
@@ -6066,7 +6091,8 @@ pub fn ReplicaType(
                 assert(self.log_view == self.view);
 
                 if (self.primary_index(self.view) == self.replica) {
-                    const start_view = self.create_view_change_message(.start_view);
+                    const nonce = 0;
+                    const start_view = self.create_view_change_message(.start_view, nonce);
                     defer self.message_bus.unref(start_view);
 
                     self.send_message_to_other_replicas(start_view);
@@ -6911,6 +6937,7 @@ pub fn ReplicaType(
                         .cluster = self.cluster,
                         .replica = self.replica,
                         .view = header.view,
+                        .context = self.nonce,
                     });
                 },
                 .view_change => {
