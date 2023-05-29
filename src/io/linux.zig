@@ -304,7 +304,8 @@ pub const IO = struct {
                     };
                 },
                 .fsync => |op| {
-                    linux.io_uring_prep_fsync(sqe, op.fd, 0);
+                    // We only need to fdatasync.
+                    linux.io_uring_prep_fsync(sqe, op.fd, linux.IORING_FSYNC_DATASYNC);
                 },
             }
             sqe.user_data = @ptrToInt(completion);
