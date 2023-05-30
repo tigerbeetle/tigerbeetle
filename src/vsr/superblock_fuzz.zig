@@ -108,6 +108,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
             .replica_id = members[replica],
             .members = members,
             .replica_count = replica_count,
+            .status = .healthy,
         },
     };
 
@@ -337,6 +338,7 @@ const Environment = struct {
             .replica_id = env.members[replica],
             .members = env.members,
             .replica_count = replica_count,
+            .status = .healthy,
         };
 
         var vsr_headers = vsr.Headers.Array{ .buffer = undefined };
@@ -386,6 +388,7 @@ const Environment = struct {
             .replica_id = env.members[replica],
             .members = env.members,
             .replica_count = replica_count,
+            .status = .healthy,
         };
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
