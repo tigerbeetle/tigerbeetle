@@ -1007,7 +1007,16 @@ const TestReplicas = struct {
             const replica = &t.cluster.replicas[r];
             const value = @field(replica, @tagName(field));
             if (value_all) |all| {
-                assert(all == value);
+                if (all != value) {
+                    for (t.replicas.constSlice()) |replica_index| {
+                        log.err("replica={} field={s} value={}", .{
+                            replica_index,
+                            @tagName(field),
+                            @field(&t.cluster.replicas[replica_index], @tagName(field)),
+                        });
+                    }
+                    @panic("test failed: value mismatch");
+                }
             } else {
                 value_all = value;
             }
