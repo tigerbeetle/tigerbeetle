@@ -607,13 +607,23 @@ pub fn GridType(comptime Storage: type) type {
 
                 const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
                 assert(header.op == read.address);
-                assert(header.checksum == read.checksum);
-                if (constants.verify) grid.verify_read(read.address, cache_block);
 
-                // Remove the "root" read so that the address is no longer actively reading / locked.
-                grid.read_queue.remove(read);
-                grid.read_block_resolve(read, cache_block);
-                return;
+                if (grid.superblock.working.vsr_state.status == .syncing) {
+                    // During sync, allow an inconsistent cache.
+                    // We will clean the cache when sync concludes.
+                    // (This allows us to not completely reset the cache completely every time the
+                    // sync target changes).
+                } else {
+                    assert(header.checksum == read.checksum);
+                    if (constants.verify) grid.verify_read(read.address, cache_block);
+                }
+
+                if (header.checksum == read.checksum) {
+                    // Remove the "root" read so that the address is no longer actively reading / locked.
+                    grid.read_queue.remove(read);
+                    grid.read_block_resolve(read, cache_block);
+                    return;
+                }
             }
 
             // Grab an IOP to resolve the block from storage.
