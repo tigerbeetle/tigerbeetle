@@ -5954,7 +5954,6 @@ pub fn ReplicaType(
                     maybe(self.standby());
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
-                    assert(message.header.view == self.view);
                 },
                 .block => {
                     assert(!self.standby());
@@ -7141,7 +7140,6 @@ pub fn ReplicaType(
                 .command = .request_blocks,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .view = self.view,
                 .size = @sizeOf(Header) + requests_count * @sizeOf(vsr.BlockRequest),
             };
             message.header.set_checksum_body(message.body());
