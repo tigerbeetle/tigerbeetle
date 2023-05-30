@@ -23,6 +23,7 @@ const Version = vsr.Version;
 const VSRState = vsr.VSRState;
 const SyncTargetCanonical = vsr.SyncTargetCanonical;
 const SyncTargetCandidate = vsr.SyncTargetCandidate;
+const SyncTargetQuorum = vsr.SyncTargetQuorum;
 
 const log = stdx.log.scoped(.replica);
 const tracer = @import("../tracer.zig");
@@ -209,6 +210,7 @@ pub fn ReplicaType(
         /// The latest discovered *canonical* checkpoint.
         /// Kept up-to-date during every status, while syncing or healthy.
         sync_target_max: ?SyncTargetCanonical = null,
+        sync_target_quorum: SyncTargetQuorum = .{},
 
         /// The current view.
         /// Initialized from the superblock's VSRState.
@@ -1078,7 +1080,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
-                .op = message.header.op,
+                .commit = message.header.commit,
                 .timestamp = @bitCast(u64, self.clock.realtime()),
             });
         }
@@ -1093,7 +1095,7 @@ pub fn ReplicaType(
             // Ignore clocks of standbys.
             if (message.header.replica >= self.replica_count) return;
 
-            const m0 = message.header.op;
+            const m0 = message.header.commit;
             const t1 = @bitCast(i64, message.header.timestamp);
             const m2 = self.clock.monotonic();
 
@@ -2291,7 +2293,11 @@ pub fn ReplicaType(
                 .command = .ping,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .op = self.clock.monotonic(),
+                .commit = self.clock.monotonic(),
+                // Checkpoint information:
+                .parent = self.superblock.working.checkpoint_id(),
+                .op = self.op_checkpoint(),
+                .client = self.superblock.working.vsr_state.commit_min_checksum,
             };
 
             self.send_header_to_other_replicas_and_standbys(ping);
@@ -7009,6 +7015,10 @@ pub fn ReplicaType(
         }
 
         fn jump_sync_target(self: *Self, header: *const Header) void {
+            if (!self.standby()) {
+                assert(self.sync_target_quorum.candidates[self.replica] == null);
+            }
+
             if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
             if (header.replica == self.replica) return; // Ignore messages from self. (Misdirect).
 
@@ -7017,6 +7027,7 @@ pub fn ReplicaType(
             // partitioned from command=commit and command=ping messages.
             switch (header.command) {
                 .commit => assert(header.commit >= header.op),
+                .ping => {},
                 else => return,
             }
 
@@ -7028,6 +7039,8 @@ pub fn ReplicaType(
 
             if (candidate.checkpoint_op == 0) return;
             if (candidate.checkpoint_op < self.op_checkpoint()) return;
+            if (!self.sync_target_quorum.replace(header.replica, &candidate)) return;
+
             if (self.sync_target_max != null and
                 self.sync_target_max.?.checkpoint_op >= candidate.checkpoint_op)
             {
@@ -7043,6 +7056,20 @@ pub fn ReplicaType(
                     break :canonical true;
                 }
 
+                const candidates_matching = self.sync_target_quorum.count(&candidate);
+                assert(candidates_matching >= 1);
+                assert(candidates_matching <= self.replica_count);
+                if (candidates_matching >= self.quorum_view_change) {
+                    // Fallback case:
+                    // In an idle cluster, where the last commit landed on a checkpoint boundary,
+                    // we still want to be able to sync a lagging replica.
+                    log.debug("{}: on_{s}: jump_sync_target: " ++
+                        "candidate checkpoint is canonical (quorum)", .{
+                        self.replica,
+                        @tagName(header.command),
+                    });
+                    break :canonical true;
+                }
                 break :canonical false;
             };
 
