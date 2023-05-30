@@ -21,6 +21,8 @@ const Timeout = vsr.Timeout;
 const Command = vsr.Command;
 const Version = vsr.Version;
 const VSRState = vsr.VSRState;
+const SyncTargetCanonical = vsr.SyncTargetCanonical;
+const SyncTargetCandidate = vsr.SyncTargetCandidate;
 
 const log = stdx.log.scoped(.replica);
 const tracer = @import("../tracer.zig");
@@ -203,6 +205,10 @@ pub fn ReplicaType(
         grid_read_fault_next_tick: Grid.NextTick = undefined,
 
         opened: bool,
+
+        /// The latest discovered *canonical* checkpoint.
+        /// Kept up-to-date during every status, while syncing or healthy.
+        sync_target_max: ?SyncTargetCanonical = null,
 
         /// The current view.
         /// Initialized from the superblock's VSRState.
@@ -1008,6 +1014,7 @@ pub fn ReplicaType(
             }
 
             self.jump_view(message.header);
+            self.jump_sync_target(message.header);
 
             assert(message.header.replica < self.node_count);
             switch (message.header.command) {
@@ -2428,6 +2435,9 @@ pub fn ReplicaType(
                 .view = self.view,
                 .commit = self.commit_max,
                 .timestamp = self.clock.monotonic(),
+                .op = self.superblock.working.vsr_state.commit_min,
+                .parent = self.superblock.working.checkpoint_id(),
+                .client = self.superblock.working.vsr_state.commit_min_checksum,
             });
         }
 
@@ -6996,6 +7006,56 @@ pub fn ReplicaType(
                 },
                 else => unreachable,
             }
+        }
+
+        fn jump_sync_target(self: *Self, header: *const Header) void {
+            if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
+            if (header.replica == self.replica) return; // Ignore messages from self. (Misdirect).
+
+            // TODO(256-byte headers) Prepares also need to include a checkpoint id,
+            // so that backups cannot diverge by >1 checkpoint when they are (somehow)
+            // partitioned from command=commit and command=ping messages.
+            switch (header.command) {
+                .commit => assert(header.commit >= header.op),
+                else => return,
+            }
+
+            const candidate = SyncTargetCandidate{
+                .checkpoint_id = header.parent,
+                .checkpoint_op = header.op,
+                .checkpoint_op_checksum = header.client,
+            };
+
+            if (candidate.checkpoint_op == 0) return;
+            if (candidate.checkpoint_op < self.op_checkpoint()) return;
+            if (self.sync_target_max != null and
+                self.sync_target_max.?.checkpoint_op >= candidate.checkpoint_op)
+            {
+                return;
+            }
+
+            const candidate_canonical = canonical: {
+                const candidate_trigger = candidate.checkpoint_op + constants.lsm_batch_multiple;
+                if (header.command == .commit and
+                    header.commit > candidate_trigger)
+                {
+                    // Normal case: The primary has committed atop the checkpoint.
+                    break :canonical true;
+                }
+
+                break :canonical false;
+            };
+
+            if (!candidate_canonical) return;
+
+            log.debug("{}: on_{s}: jump_sync_target: op={} id={x:0>32}", .{
+                self.replica,
+                @tagName(header.command),
+                candidate.checkpoint_op,
+                candidate.checkpoint_id,
+            });
+
+            self.sync_target_max = candidate.canonical();
         }
 
         fn write_prepare(self: *Self, message: *Message, trigger: Journal.Write.Trigger) void {
