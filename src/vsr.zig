@@ -37,6 +37,7 @@ pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const SyncTargetCandidate = @import("vsr/sync.zig").SyncTargetCandidate;
 pub const SyncTargetCanonical = @import("vsr/sync.zig").SyncTargetCanonical;
+pub const SyncTargetQuorum = @import("vsr/sync.zig").SyncTargetQuorum;
 pub const Client = @import("vsr/client.zig").Client;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
@@ -240,6 +241,7 @@ pub const Header = extern struct {
     /// reordered through a view change never repeat the same IV for the same encryption key.
     ///
     /// * A `commit` sets this to its checkpoint id. (Possibly uncanonical.)
+    /// * A `ping` sets this to its checkpoint id. (Possibly uncanonical.)
     parent: u128 = 0,
 
     /// Each client process generates a unique, random and ephemeral client ID at initialization.
@@ -260,6 +262,7 @@ pub const Header = extern struct {
     ///   the corresponding header is not "blank", the replica has the prepare, and the prepare
     ///   is not known to be faulty.
     /// * A `commit` sets this to the checksum of its op_checkpoint header.
+    /// * A `ping` sets this to the checksum of its op_checkpoint header.
     client: u128 = 0,
 
     /// The checksum of the message to which this message refers.
@@ -310,6 +313,7 @@ pub const Header = extern struct {
     /// may be replaced by different ops if they do not survive through a view change.
     ///
     /// * A `commit` sets this to its checkpoint op.
+    /// * A `ping` sets this to its checkpoint op.
     /// * A `request_headers` sets this to the maximum op requested (inclusive).
     /// * A `request_prepare` sets this to the requested op.
     /// * A `request_reply` sets this to the requested op.
@@ -321,6 +325,8 @@ pub const Header = extern struct {
     ///   The sending replica may continue to commit after sending the DVC.
     /// * A `start_view` sets this to `commit_min`/`commit_max` (they are the same).
     /// * A `request_headers` sets this to the minimum op requested (inclusive).
+    /// * A `ping` sets this to its monotonic timestamp.
+    /// * A `pong` echoes the ping's monotonic timestamp.
     commit: u64 = 0,
 
     /// This field is used in various ways:
@@ -431,12 +437,9 @@ pub const Header = extern struct {
 
     fn invalid_ping(self: *const Header) ?[]const u8 {
         assert(self.command == .ping);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -451,7 +454,7 @@ pub const Header = extern struct {
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
+        if (self.op != 0) return "op != 0";
         if (self.timestamp == 0) return "timestamp == 0";
         if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
