@@ -123,7 +123,7 @@ pub fn CompactionType(
             table: TableInfo,
         }, manifest_entries_max: {
             // Worst-case manifest updates:
-            // See lsm/README.md "Compaction Table Overlap" for more detail.
+            // See docs/internals/lsm.md "Compaction Table Overlap" for more detail.
             var count = 0;
             count += 1; // Update the input table from level A.
             count += constants.lsm_growth_factor; // Update the input tables from level B.
