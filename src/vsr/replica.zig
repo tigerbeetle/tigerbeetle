@@ -1007,7 +1007,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            self.view_jump(message.header);
+            self.jump_view(message.header);
 
             assert(message.header.replica < self.node_count);
             switch (message.header.command) {
@@ -2776,7 +2776,7 @@ pub fn ReplicaType(
 
         /// Commit ops up to commit number `commit` (inclusive).
         /// A function which calls `commit_journal()` to set `commit_max` must first call
-        /// `view_jump()`. Otherwise, we may fork the log.
+        /// `jump_view()`. Otherwise, we may fork the log.
         fn commit_journal(self: *Self, commit: u64) void {
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
@@ -6914,7 +6914,7 @@ pub fn ReplicaType(
             return true;
         }
 
-        fn view_jump(self: *Self, header: *const Header) void {
+        fn jump_view(self: *Self, header: *const Header) void {
             if (header.view < self.view) return;
             if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
 
@@ -6959,18 +6959,22 @@ pub fn ReplicaType(
                     if (header.view == self.view) {
                         assert(self.status == .view_change or self.status == .recovering_head);
 
-                        log.debug("{}: view_jump: waiting to exit view change", .{self.replica});
+                        log.debug("{}: jump_view: waiting to exit view change", .{self.replica});
                     } else {
                         assert(header.view > self.view);
                         assert(self.status == .view_change or self.status == .recovering_head or
                             self.status == .normal);
 
-                        log.debug("{}: view_jump: waiting to jump to newer view", .{self.replica});
+                        log.debug("{}: jump_view: waiting to jump to newer view ({}..{})", .{
+                            self.replica,
+                            self.view,
+                            header.view,
+                        });
                     }
 
                     // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
                     // (Using request_start_view_message_timeout).
-                    log.debug("{}: view_jump: requesting start_view message", .{self.replica});
+                    log.debug("{}: jump_view: requesting start_view message", .{self.replica});
                     self.send_header_to_replica(self.primary_index(header.view), .{
                         .command = .request_start_view,
                         .cluster = self.cluster,
@@ -6984,9 +6988,9 @@ pub fn ReplicaType(
                     assert(self.view < header.view);
 
                     if (header.view == self.view + 1) {
-                        log.debug("{}: view_jump: jumping to view change", .{self.replica});
+                        log.debug("{}: jump_view: jumping to view change", .{self.replica});
                     } else {
-                        log.debug("{}: view_jump: jumping to next view change", .{self.replica});
+                        log.debug("{}: jump_view: jumping to next view change", .{self.replica});
                     }
                     self.transition_to_view_change_status(header.view);
                 },
