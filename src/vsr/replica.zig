@@ -5586,6 +5586,7 @@ pub fn ReplicaType(
             }
 
             assert(self.status == .normal);
+            assert(self.superblock.working.vsr_state.status == .healthy);
             // After a view change, replicas send prepare_oks for ops with older views.
             // However, we only send to the primary of the current view (see below where we send).
             assert(header.view <= self.view);

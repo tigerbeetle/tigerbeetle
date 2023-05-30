@@ -492,7 +492,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             read: Storage.Read = undefined,
             read_threshold: ?Quorums.Threshold = null,
             copy: ?u8 = null,
-            /// Used by format(), checkpoint(), and view_change().
+            /// Used by format(), checkpoint(), view_change(), sync_start(), and sync_done().
             vsr_state: ?SuperBlockHeader.VSRState = null,
             /// Used by format() and view_change().
             vsr_headers: ?vsr.Headers.ViewChangeArray = null,
@@ -547,11 +547,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
         block_count_limit: usize,
         storage_size_limit: u64,
 
-        /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
-        /// other operations, only the following queue combinations are allowed:
-        /// 1. A view change may queue on a checkpoint.
-        /// 2. A checkpoint may queue on a view change.
-        ///
         /// There may only be a single caller queued at a time, to ensure that the VSR protocol is
         /// careful to submit at most one view change at a time.
         queue_head: ?*Context = null,
@@ -809,12 +804,17 @@ pub fn SuperBlockType(comptime Storage: type) type {
             update: UpdateViewChange,
         ) void {
             assert(superblock.opened);
-            assert(superblock.staging.vsr_state.commit_min <= update.headers.array.get(0).op);
             assert(superblock.staging.vsr_state.commit_max <= update.commit_max);
             assert(superblock.staging.vsr_state.view <= update.view);
             assert(superblock.staging.vsr_state.log_view <= update.log_view);
             assert(superblock.staging.vsr_state.log_view < update.log_view or
                 superblock.staging.vsr_state.view < update.view);
+
+            if (superblock.staging.vsr_state.status == .healthy) {
+                // While syncing, our commit_min may jump ahead of our available headers.
+                // We don't participate in a view-change while syncing anyway, so it's fine.
+                assert(superblock.staging.vsr_state.commit_min <= update.headers.array.get(0).op);
+            }
 
             update.headers.verify();
             assert(update.view >= update.log_view);
@@ -831,6 +831,63 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .caller = .view_change,
                 .vsr_state = vsr_state,
                 .vsr_headers = update.headers.*,
+            };
+            superblock.log_context(context);
+            superblock.acquire(context);
+        }
+
+        const UpdateSyncStart = struct {
+            commit_min_checksum: u128,
+            commit_min: u64,
+            commit_max: u64,
+        };
+
+        pub fn sync_start(
+            superblock: *SuperBlock,
+            callback: fn (context: *Context) void,
+            context: *Context,
+            update: UpdateSyncStart,
+        ) void {
+            assert(superblock.opened);
+            assert(update.commit_min >= superblock.staging.vsr_state.commit_min);
+            assert(update.commit_min <= update.commit_max);
+            assert((update.commit_min == superblock.staging.vsr_state.commit_min) ==
+                (update.commit_min_checksum == superblock.staging.vsr_state.commit_min_checksum));
+
+            var vsr_state = superblock.staging.vsr_state;
+            vsr_state.commit_min_checksum = update.commit_min_checksum;
+            vsr_state.commit_min = update.commit_min;
+            vsr_state.commit_max = update.commit_max;
+            vsr_state.status = .syncing;
+            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
+
+            context.* = .{
+                .superblock = superblock,
+                .callback = callback,
+                .caller = .sync_start,
+                .vsr_state = vsr_state,
+            };
+            superblock.log_context(context);
+            superblock.acquire(context);
+        }
+
+        pub fn sync_done(
+            superblock: *SuperBlock,
+            callback: fn (context: *Context) void,
+            context: *Context,
+        ) void {
+            assert(superblock.opened);
+            assert(superblock.staging.vsr_state.status == .syncing);
+
+            var vsr_state = superblock.staging.vsr_state;
+            vsr_state.status = .healthy;
+            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
+
+            context.* = .{
+                .superblock = superblock,
+                .callback = callback,
+                .caller = .sync_done,
+                .vsr_state = vsr_state,
             };
             superblock.log_context(context);
             superblock.acquire(context);
@@ -1604,7 +1661,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         assert(superblock.free_set.count_acquired() > 0);
                     }
                 },
-                .checkpoint, .view_change => {
+                .checkpoint,
+                .view_change,
+                .sync_start,
+                .sync_done,
+                => {
                     assert(meta.eql(superblock.staging.vsr_state, context.vsr_state.?));
                     assert(meta.eql(superblock.working.vsr_state, context.vsr_state.?));
                 },
@@ -1634,7 +1695,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // The rule is that the write quorum plus the read quorum must be exactly copies + 1.
 
             return switch (caller) {
-                .format, .checkpoint, .view_change => switch (constants.superblock_copies) {
+                .format,
+                .checkpoint,
+                .view_change,
+                .sync_start,
+                .sync_done,
+                => switch (constants.superblock_copies) {
                     4 => 3,
                     6 => 4,
                     8 => 5,
@@ -1697,6 +1763,8 @@ pub const Caller = enum {
     open,
     checkpoint,
     view_change,
+    sync_start,
+    sync_done,
 
     /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
     /// other operations, only the following queue combinations are allowed:
@@ -1710,7 +1778,11 @@ pub const Caller = enum {
             .checkpoint = Set.init(.{ .view_change = true }),
             .view_change = Set.init(.{
                 .checkpoint = true,
+                .sync_start = true,
+                .sync_done = true,
             }),
+            .sync_start = Set.init(.{ .view_change = true }),
+            .sync_done = Set.init(.{ .view_change = true }),
         });
     };
 
@@ -1720,6 +1792,8 @@ pub const Caller = enum {
             .open => unreachable,
             .checkpoint => false,
             .view_change => true,
+            .sync_start => false,
+            .sync_done => false,
         };
     }
 
@@ -1729,6 +1803,8 @@ pub const Caller = enum {
             .open => unreachable,
             .checkpoint => true,
             .view_change => false,
+            .sync_start => false,
+            .sync_done => true,
         };
     }
 };
