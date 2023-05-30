@@ -193,9 +193,18 @@ pub const SuperBlockHeader = extern struct {
         pub fn monotonic(old: VSRState, new: VSRState) bool {
             old.assert_internally_consistent();
             new.assert_internally_consistent();
-            assert(old.commit_min != new.commit_min or
-                old.commit_min_checksum == new.commit_min_checksum or
-                (old.commit_min_checksum == 0 and old.commit_min == 0));
+            if (old.commit_min == new.commit_min) {
+                if (old.commit_min_checksum == 0 and old.commit_min == 0) {
+                    // "old" is the root VSRState.
+                    assert(old.commit_max == 0);
+                    assert(old.log_view == 0);
+                    assert(old.view == 0);
+                } else {
+                    assert(old.commit_min_checksum == new.commit_min_checksum);
+                }
+            } else {
+                assert(old.commit_min_checksum != new.commit_min_checksum);
+            }
             assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
             assert(meta.eql(old.members, new.members));
