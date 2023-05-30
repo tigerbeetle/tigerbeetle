@@ -1065,6 +1065,17 @@ const TestReplicas = struct {
         return role_all.?;
     }
 
+    pub fn op_checkpoint_id(t: *const TestReplicas) u128 {
+        var checkpoint_id_all: ?u128 = null;
+        for (t.replicas.constSlice()) |r| {
+            const replica = &t.cluster.replicas[r];
+            const replica_checkpoint_id = replica.superblock.working.checkpoint_id();
+            assert(checkpoint_id_all == null or checkpoint_id_all.? == replica_checkpoint_id);
+            checkpoint_id_all = replica_checkpoint_id;
+        }
+        return checkpoint_id_all.?;
+    }
+
     pub fn op_checkpoint(t: *const TestReplicas) u64 {
         var checkpoint_all: ?u64 = null;
         for (t.replicas.constSlice()) |r| {
