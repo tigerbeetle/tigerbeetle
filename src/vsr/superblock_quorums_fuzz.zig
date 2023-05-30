@@ -136,6 +136,7 @@ fn test_quorums_working(
                 .replica_id = members[1],
                 .members = members,
                 .replica_count = 6,
+                .commit_min_checksum = 123,
             }),
         });
 
@@ -277,6 +278,7 @@ pub fn fuzz_quorum_repairs(
                     .replica_id = members[1],
                     .members = members,
                     .replica_count = 6,
+                    .commit_min_checksum = 123,
                 }),
             });
 
