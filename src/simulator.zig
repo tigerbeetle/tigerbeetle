@@ -670,7 +670,7 @@ pub const Simulator = struct {
                         continue;
                     }
 
-                    const fault = recoverable_count > recoverable_count_min or replica.standby();
+                    const fault = recoverable_count >= recoverable_count_min or replica.standby();
                     simulator.restart_replica(replica.replica, fault);
                 },
             }
