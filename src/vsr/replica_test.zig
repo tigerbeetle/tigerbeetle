@@ -960,6 +960,57 @@ test "Cluster: sync: R=2" {
     try expectEqual(c.replies(), checkpoint_1_trigger + 2);
 }
 
+test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
+    // Buggify a divergent replica (i.e. a storage determinism bug).
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    a0.drop(.R_, .bidirectional, .request_sync_manifest); // (Block sync for now.)
+    a0.diverge();
+
+    // Prior to the checkpoint, the cluster has not realized that A0 diverged.
+    try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
+    try expectEqual(a0.role(), .primary);
+
+    // After the checkpoint, A0 must discard all acks from B1/B2, since they are from
+    // a different (i.e. correct) checkpoint.
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    // A0 was forced to ignore B1/B2's acks since the checkpoint id didn't match its own.
+    // Unable to commit, it stepped down as primary.
+    try expectEqual(a0.role(), .backup);
+    // A0 may have committed trigger+1, but its commit_min would have backtracked when
+    // it started sync.
+    try expectEqual(a0.commit(), checkpoint_1);
+    try expectEqual(b1.commit(), checkpoint_1_trigger);
+    try expectEqual(b2.commit(), checkpoint_1_trigger);
+
+    // A0 has learned about B1/B2's canonical checkpoint — a checkpoint with the same op,
+    // but a different identifier.
+    try expectEqual(a0.sync_status(), .request_trailers);
+    try expectEqual(a0.sync_target_checkpoint_op(), t.replica(.R_).op_checkpoint());
+    try expectEqual(a0.sync_target_checkpoint_id(), b1.op_checkpoint_id());
+    try expectEqual(a0.sync_target_checkpoint_id(), b2.op_checkpoint_id());
+
+    a0.pass(.R_, .bidirectional, .request_sync_manifest); // Allow sync again.
+    t.run();
+
+    // After syncing, A0 is back to the correct checkpoint.
+    try expectEqual(t.replica(.R_).sync_status(), .none);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    try expectEqual(t.replica(.R_).op_checkpoint_id(), a0.op_checkpoint_id());
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
@@ -1322,6 +1373,14 @@ const TestReplicas = struct {
     pub fn view_headers(t: *const TestReplicas) []const vsr.Header {
         assert(t.replicas.len == 1);
         return t.cluster.replicas[t.replicas.get(0)].view_headers.array.constSlice();
+    }
+
+    /// Simulate a storage determinism bug.
+    /// (Replicas must be running and between compaction beats for this to run.)
+    pub fn diverge(t: *TestReplicas) void {
+        for (t.replicas.slice()) |r| {
+            t.cluster.diverge(r);
+        }
     }
 
     pub fn corrupt(

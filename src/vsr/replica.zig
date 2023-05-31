@@ -413,6 +413,10 @@ pub fn ReplicaType(
         test_context: ?*anyopaque = null,
         /// Simulator hooks.
         test_event_callback: ?fn (replica: *const Self, event: ReplicaEvent) void = null,
+        /// Whether or not to panic if the primary sees an ack from a diverged replica.
+        /// Uses a runtime flag so that this assertion can be disabled when a checkpoint fork
+        /// is deliberately buggified.
+        test_checkpoint_divergence: bool = constants.verify,
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
@@ -1337,6 +1341,25 @@ pub fn ReplicaType(
             assert(prepare.message.header.op <= self.commit_max +
                 self.pipeline.queue.prepare_queue.count);
             assert(prepare.message.header.op <= self.op);
+
+            const checkpoint_id = message.header.parent;
+            if (checkpoint_id != self.checkpoint_id_for_op(prepare.message.header.op).?) {
+                // If this is hit, there is a storage determinism problem.
+                // One of these replicas will need to state sync.
+                log.warn("{}: on_prepare_ok: checkpoint_id mismatch " ++
+                    "(expect={x:0>32} received={x:0>32} from={} op={})", .{
+                    self.replica,
+                    self.superblock.working.checkpoint_id(),
+                    checkpoint_id,
+                    message.header.replica,
+                    message.header.op,
+                });
+
+                if (self.test_checkpoint_divergence) {
+                    @panic("checkpoint_id fork");
+                }
+                return;
+            }
 
             // Wait until we have a quorum of prepare_ok messages (including ourself):
             const threshold = self.quorum_replication;
@@ -5007,6 +5030,19 @@ pub fn ReplicaType(
             return self.op_checkpoint_next() + constants.lsm_batch_multiple;
         }
 
+        fn checkpoint_id_for_op(self: *const Self, op: u64) ?u128 {
+            if (self.op_checkpoint() > 0) {
+                if (op < self.op_repair_min()) return null;
+
+                const op_checkpoint_trigger_previous =
+                    self.op_checkpoint() + constants.lsm_batch_multiple;
+                if (op <= op_checkpoint_trigger_previous) {
+                    return self.superblock.working.parent_checkpoint_id;
+                }
+            }
+            return self.superblock.working.checkpoint_id();
+        }
+
         /// Returns the oldest op that the replica must/(is permitted to) repair.
         /// The goal is to repair as much as possible without triggering unnecessary state sync.
         ///
@@ -6106,6 +6142,11 @@ pub fn ReplicaType(
 
                 if (self.standby()) return;
 
+                const checkpoint_id = self.checkpoint_id_for_op(header.op) orelse {
+                    log.debug("{}: send_prepare_ok: not sending (old)", .{self.replica});
+                    return;
+                };
+
                 // It is crucial that replicas stop accepting prepare messages from earlier views
                 // once they start the view change protocol. Without this constraint, the system
                 // could get into a state in which there are two active primaries: the old one,
@@ -6118,7 +6159,8 @@ pub fn ReplicaType(
                 // primary of the prepare header's view:
                 self.send_header_to_replica(self.primary_index(self.view), .{
                     .command = .prepare_ok,
-                    .parent = header.parent,
+                    // TODO 256-byte headers: Send `header.parent` as the parent.
+                    .parent = checkpoint_id,
                     .client = header.client,
                     .context = header.checksum,
                     .request = header.request,
@@ -8025,6 +8067,24 @@ pub fn ReplicaType(
             self.sync_target_max = candidate.canonical();
 
             if (self.sync_stage == .none) {
+                if (candidate.checkpoint_op == self.op_checkpoint() and
+                    candidate.checkpoint_id != self.superblock.working.checkpoint_id())
+                {
+                    // Normally we wait for the repair_sync_timeout before starting sync.
+                    // However, if our checkpoint diverged, transition immediately —
+                    // there is no chance of recovering via repair.
+                    log.err("{}: on_{s}: jump_sync_target: diverged; starting sync " ++
+                        "(op={} id_local={x:0>32} id_canonical={x:0>32})", .{
+                        self.replica,
+                        @tagName(header.command),
+                        candidate.checkpoint_op,
+                        self.superblock.working.checkpoint_id(),
+                        candidate.checkpoint_id,
+                    });
+
+                    assert(!self.test_checkpoint_divergence);
+                    self.sync_start_from_committing();
+                }
             } else {
                 self.sync_start_from_sync();
             }
@@ -8835,7 +8895,6 @@ const PipelineQueue = struct {
             ok.header.context,
         ) orelse return null;
         assert(prepare.message.header.command == .prepare);
-        assert(prepare.message.header.parent == ok.header.parent);
         assert(prepare.message.header.client == ok.header.client);
         assert(prepare.message.header.request == ok.header.request);
         assert(prepare.message.header.cluster == ok.header.cluster);
@@ -8846,6 +8905,7 @@ const PipelineQueue = struct {
         assert(prepare.message.header.commit == ok.header.commit);
         assert(prepare.message.header.timestamp == ok.header.timestamp);
         assert(prepare.message.header.operation == ok.header.operation);
+        // "ok.parent" stores the checkpoint id, so don't compare it.
 
         return prepare;
     }
