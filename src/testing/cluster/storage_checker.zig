@@ -132,8 +132,12 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 .checksum_superblock_manifest = 0,
                 .checksum_superblock_free_set = 0,
                 .checksum_superblock_client_sessions = 0,
-                .checksum_client_replies = checksum_client_replies(storage),
-                .checksum_grid = checksum_grid(replica),
+                // TODO State sync: Enable this when proactive client replies sync is implemented.
+                // .checksum_client_replies = checksum_client_replies(storage),
+                .checksum_client_replies = 0,
+                // TODO: State sync: Enable this (again) when proactive table sync is implemented.
+                // .checksum_grid = checksum_grid(replica),
+                .checksum_grid = 0,
             };
 
             inline for (.{ .manifest, .free_set, .client_sessions }) |trailer| {
