@@ -919,6 +919,47 @@ test "Cluster: sync: sync, bump target, sync" {
     try expectEqual(t.replica(.R_).sync_status(), .none);
 }
 
+test "Cluster: sync: R=2" {
+    // TODO explicit code coverage marks: "candidate is canonical (R=2)"
+    const t = try TestContext.init(.{ .replica_count = 2 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+
+    // A0 prepares the trigger op, commits it, and checkpoints.
+    // B1 prepares the trigger op, but does not commit/checkpoint.
+    b1.drop(.R_, .incoming, .commit); // Prevent last commit.
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+    try expectEqual(a0.commit(), checkpoint_1_trigger);
+    try expectEqual(b1.commit(), checkpoint_1_trigger - 1);
+    try expectEqual(a0.op_head(), checkpoint_1_trigger);
+    try expectEqual(b1.op_head(), checkpoint_1_trigger);
+    try expectEqual(a0.op_checkpoint(), checkpoint_1);
+    try expectEqual(b1.op_checkpoint(), 0);
+
+    // On B1, corrupt the same slot that A0 is about to overwrite with a new prepare.
+    b1.stop();
+    b1.pass(.R_, .incoming, .commit);
+    b1.corrupt(.{ .wal_prepare = (checkpoint_1_trigger + 2) % slot_count });
+
+    // Prepare 2 more ops, to overwrite A0's slots 0,1 in the WAL.
+    try c.request(checkpoint_1_trigger + 2, checkpoint_1_trigger);
+
+    try b1.open();
+    t.run();
+
+    // B1 needs a prepare that no longer exists anywhere in the cluster.
+    // So it state syncs. This is a special case, since normally A0's latest checkpoint
+    // would not be recognized as canonical until it was committed.
+
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 2);
+    try expectEqual(c.replies(), checkpoint_1_trigger + 2);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
