@@ -19,6 +19,7 @@ const Network = @import("cluster/network.zig").Network;
 const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
 const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
 const StorageCheckerType = @import("cluster/storage_checker.zig").StorageCheckerType;
+const SyncCheckerType = @import("cluster/sync_checker.zig").SyncCheckerType;
 
 const vsr = @import("../vsr.zig");
 pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
@@ -50,6 +51,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const StorageChecker = StorageCheckerType(Replica);
+        pub const SyncChecker = SyncCheckerType(Replica);
 
         pub const Options = struct {
             cluster_id: u32,
@@ -93,6 +95,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
         state_checker: StateChecker,
         storage_checker: StorageChecker,
+        sync_checker: SyncChecker,
 
         context: ?*anyopaque = null,
 
@@ -216,6 +219,9 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             var storage_checker = StorageChecker.init(allocator);
             errdefer storage_checker.deinit();
 
+            var sync_checker = SyncChecker.init(allocator);
+            errdefer sync_checker.deinit();
+
             // Format each replica's storage (equivalent to "tigerbeetle format ...").
             for (storages) |*storage, replica_index| {
                 var superblock = try SuperBlock.init(allocator, .{
@@ -260,6 +266,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .client_id_permutation = client_id_permutation,
                 .state_checker = state_checker,
                 .storage_checker = storage_checker,
+                .sync_checker = sync_checker,
             };
 
             for (cluster.replicas) |_, replica_index| {
@@ -286,6 +293,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         }
 
         pub fn deinit(cluster: *Self) void {
+            cluster.sync_checker.deinit();
             cluster.storage_checker.deinit();
             cluster.state_checker.deinit();
             cluster.network.deinit();
@@ -322,6 +330,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 switch (cluster.replica_health[i]) {
                     .up => {
                         replica.tick();
+                        cluster.sync_checker.check_sync_stage(replica);
                         cluster.state_checker.check_state(replica.replica) catch |err| {
                             fatal(.correctness, "state checker error: {}", .{err});
                         };
@@ -517,9 +526,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .sync => switch (replica.sync_stage) {
                     .request_trailers => {
                         cluster.log_replica(.sync_start, replica.replica);
+                        cluster.sync_checker.replica_sync_start(replica.replica, replica);
                     },
                     .done => {
                         cluster.log_replica(.sync_done, replica.replica);
+                        cluster.sync_checker.replica_sync_done(replica.replica, replica);
                         if (cluster.replica_diverged.isSet(replica.replica)) {
                             cluster.replica_diverged.unset(replica.replica);
                             log.debug("{}: on_sync_done: clearing deviation", .{replica.replica});
