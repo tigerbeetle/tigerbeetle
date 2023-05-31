@@ -2871,7 +2871,7 @@ pub fn ReplicaType(
                 const backup_repair_next = self.commit_min + 1;
                 if (backup_repair_next >= primary_repair_min) return;
             } else {
-                // The above logic is only valid when we are waiting for a WAL prepare — it could
+                // The above branch is only valid when we are waiting for a WAL prepare — it could
                 // get stuck waiting for a grid block. The cluster may be on the next checkpoint,
                 // and has overwritten the block that we are trying to retrieve.
             }
