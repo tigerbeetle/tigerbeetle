@@ -8,44 +8,55 @@ Documentation for (roughly) code in the `src/vsr` directory.
 
 # Glossary
 
+Consensus:
+
 - _checkpoint_: Ensure that all updates from the past wrap of the WAL are durable in the _grid_, then advance the replica's recovery point by updating the superblock. After a checkpoint, the checkpointed WAL entries are safe to be overwritten by the next wrap. (Sidenote: in consensus literature this is sometimes called snapshotting. But we use that term to mean something else.)
-- _grid_: The zone on disk where LSM trees and metadata for them reside.
 - _header_: Identifier for many kinds of messages, including each entry in the VSR log. Passed around instead of the entry when the full entry is not needed (such as view change).
 - _journal_: The in-memory data structure that manages the WAL.
 - _nack_: Short for negative acknowledgement. Used to determine (during a view change) which entries can be truncated from the log. See [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf).
 - _op_: Short for op-number. An op is assigned to each request that is submitted by the user before being stored in the log. An op is a monotonically increasing integer identifying each message to be handled by consensus. When messages with the same op in different views conflict, view change picks one version to commit. Each user batch (which may contain many batch entries) corresponds to one op. Each op is identified (once inside the VSR log) by a _header_.
-- _state sync_: The process of syncing checkpointed data (the _grid_, the superblock manifest, and the superblock freeset). When a replica lags behind the cluster far enough that their WALs no longer intersect, the lagging replica must state sync to catch up.
 - _superblock_: All local state for the replica that cannot be replicated remotely. Loss is protected against by storing `config.superblock_copies` copies of the superblock.
-- _zone_: The TigerBeetle data file is made up of zones. The superblock is one zone.
 - _view_: A replica is _primary_ for one view. Views are monotonically increasing integers that are incremented each time a new primary is selected.
+
+Storage:
+
+- _zone_: The TigerBeetle data file is made up of zones. The superblock is one zone.
+- _grid_: The zone on disk where LSM trees and metadata for them reside.
 - _WAL_: Write-ahead log. It is implemented as two on-disk ring buffers. Entries are only overwritten after they have been checkpointed.
+- _state sync_: The process of syncing checkpointed data (the _grid_, the superblock manifest, and the superblock freeset). When a replica lags behind the cluster far enough that their WALs no longer intersect, the lagging replica must state sync to catch up.
 
 # Protocols
 
 ### Commands
 
-| `vsr.Header.Command` |  Source |       Target | Protocols                                                                        |
-| -------------------: | ------: | -----------: | -------------------------------------------------------------------------------- |
-|               `ping` | replica |      replica | [Ping (Replica-Replica)](#protocol-ping-replica-replica)                         |
-|               `pong` | replica |      replica | [Ping (Replica-Replica)](#protocol-ping-replica-replica)                         |
-|        `ping_client` |  client |      replica | [Ping (Replica-Client)](#protocol-ping-replica-client)                           |
-|        `pong_client` | replica |       client | [Ping (Replica-Client)](#protocol-ping-replica-client)                           |
-|            `request` |  client |      primary | [Normal](#protocol-normal)                                                       |
-|            `prepare` | replica |       backup | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
-|         `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
-|              `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Table](#protocol-repair-client-table) |
-|             `commit` | primary |       backup | [Normal](#protocol-normal)                                                       |
-|  `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                 |
-|     `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                                             |
-|         `start_view` | primary |       backup | [Request/Start View](#protocol-requeststart-view)                                |
-| `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                |
-|    `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
-|    `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                               |
-|      `request_reply` | replica |      replica | [Repair Client Table](#protocol-repair-client-table)                             |
-|            `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
-|           `eviction` | primary |       client | [Client](#protocol-client)                                                       |
-|     `request_blocks` | replica |      replica | [Repair Grid](#protocol-repair-grid)                                             |
-|              `block` | replica |      replica | [Repair Grid](#protocol-repair-grid)                                             |
+|           `vsr.Header.Command` |  Source |       Target | Protocols                                                                        |
+| -----------------------------: | ------: | -----------: | -------------------------------------------------------------------------------- |
+|                         `ping` | replica |      replica | [Ping (Replica-Replica)](#protocol-ping-replica-replica)                         |
+|                         `pong` | replica |      replica | [Ping (Replica-Replica)](#protocol-ping-replica-replica)                         |
+|                  `ping_client` |  client |      replica | [Ping (Replica-Client)](#protocol-ping-replica-client)                           |
+|                  `pong_client` | replica |       client | [Ping (Replica-Client)](#protocol-ping-replica-client)                           |
+|                      `request` |  client |      primary | [Normal](#protocol-normal)                                                       |
+|                      `prepare` | replica |       backup | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
+|                   `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
+|                        `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Table](#protocol-repair-client-table) |
+|                       `commit` | primary |       backup | [Normal](#protocol-normal)                                                       |
+|            `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                 |
+|               `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                                             |
+|                   `start_view` | primary |       backup | [Request/Start View](#protocol-requeststart-view)                                |
+|           `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                |
+|              `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
+|              `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                               |
+|                `request_reply` | replica |      replica | [Repair Client Table](#protocol-repair-client-table)                             |
+|                      `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
+|                     `eviction` | primary |       client | [Client](#protocol-client)                                                       |
+|               `request_blocks` | replica |      replica | [State Sync](#protocol-state-sync), [Repair Grid](#protocol-repair-grid)         |
+|                        `block` | replica |      replica | [State Sync](#protocol-state-sync), [Repair Grid](#protocol-repair-grid)         |
+|        `request_sync_manifest` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
+|        `request_sync_free_set` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
+| `request_sync_client_sessions` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
+|                `sync_manifest` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
+|                `sync_free_set` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
+|         `sync_client_sessions` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
 
 ### Recovery
 
@@ -242,9 +253,15 @@ That is, a replica can help other replicas repair and repair itself simultaneous
 
 TODO Describe state sync fallback.
 
-## Protocol: Repair: State Sync
+## Protocol: State Sync
 
-TODO (Unimplemented)
+State sync synchronizes the state of a lagging/divergent replica with the healthy cluster.
+
+State sync is used when when a lagging replica's log no longer intersects with the cluster's current log —
+[WAL repair](#protocol-repair-wal) cannot catch the replica up.
+
+
+See [State Sync](./sync.md) for details.
 
 ## Protocol: Reconfiguration
 
