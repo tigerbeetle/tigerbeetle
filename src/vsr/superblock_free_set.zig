@@ -114,6 +114,21 @@ pub const FreeSet = struct {
         set.staging.deinit(allocator);
     }
 
+    pub fn clear(set: *FreeSet) void {
+        for ([_]*DynamicBitSetUnmanaged{ &set.index, &set.blocks, &set.staging }) |bitset| {
+            var it = bitset.iterator(.{});
+            while (it.next()) |bit| bitset.unset(bit);
+        }
+        set.reservation_blocks = 0;
+        set.reservation_count = 0;
+        set.reservation_state = .reserving;
+        set.reservation_session +%= 1;
+
+        assert(set.index.count() == 0);
+        assert(set.blocks.count() == 0);
+        assert(set.staging.count() == 0);
+    }
+
     /// Returns the number of active reservations.
     pub fn count_reservations(set: FreeSet) usize {
         return set.reservation_count;

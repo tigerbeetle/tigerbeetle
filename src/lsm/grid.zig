@@ -155,6 +155,12 @@ pub fn GridType(comptime Storage: type) type {
         // Each entry in cache has a corresponding block.
         cache_blocks: []BlockPtr,
         cache: Cache,
+        /// Each bit corresponds to a cached block.
+        /// Tracks valid cache entries during state sync. At the conclusion of state sync,
+        /// unmarked entries are removed from the cache. This ensures that blocks which were
+        /// removed from the LSM during the synced-over period do not pollute the cache.
+        cache_valid: std.DynamicBitSetUnmanaged,
+        cache_marking: bool = false,
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_iop_tracer_slots: [write_iops_max]?tracer.SpanStart = .{null} ** write_iops_max,
@@ -186,6 +192,10 @@ pub fn GridType(comptime Storage: type) type {
             const cache_blocks = try allocator.alloc(BlockPtr, options.cache_blocks_count);
             errdefer allocator.free(cache_blocks);
 
+            var cache_valid =
+                try std.DynamicBitSetUnmanaged.initEmpty(allocator, options.cache_blocks_count);
+            errdefer cache_valid.deinit(allocator);
+
             for (cache_blocks) |*cache_block, i| {
                 errdefer for (cache_blocks[0..i]) |block| allocator.free(block);
                 cache_block.* = try allocate_block(allocator);
@@ -207,6 +217,7 @@ pub fn GridType(comptime Storage: type) type {
                 .superblock = options.superblock,
                 .cache_blocks = cache_blocks,
                 .cache = cache,
+                .cache_valid = cache_valid,
                 .read_iop_blocks = read_iop_blocks,
                 .on_read_fault = options.on_read_fault,
             };
@@ -218,6 +229,7 @@ pub fn GridType(comptime Storage: type) type {
             for (grid.read_iop_tracer_slots) |slot| assert(slot == null);
             for (grid.write_iop_tracer_slots) |slot| assert(slot == null);
 
+            grid.cache_valid.deinit(allocator);
             grid.cache.deinit(allocator);
 
             for (grid.cache_blocks) |block| allocator.free(block);
@@ -266,6 +278,32 @@ pub fn GridType(comptime Storage: type) type {
                 grid.read_faulty_queue.reset();
 
                 callback(grid);
+            }
+        }
+
+        pub fn cache_mark(grid: *Grid) void {
+            // Due to changing sync targets, the replica may call cache_mark() multiple times
+            // before calling cache_sweep().
+            maybe(grid.cache_marking);
+            grid.cache_marking = true;
+
+            var cache_indexes = grid.cache_valid.iterator(.{});
+            while (cache_indexes.next()) |index| grid.cache_valid.unset(index);
+        }
+
+        pub fn cache_sweep(grid: *Grid) void {
+            assert(grid.cache_marking);
+            grid.cache_marking = false;
+
+            var cache_invalid = grid.cache_valid.iterator(.{ .kind = .unset });
+            while (cache_invalid.next()) |cache_index| {
+                grid.cache.remove_index(cache_index);
+            }
+
+            var cache_valid = grid.cache_valid.iterator(.{ .kind = .set });
+            while (cache_valid.next()) |cache_index| {
+                const cache_block = grid.cache_blocks[cache_index];
+                grid.verify_read(grid.cache.values[cache_index], cache_block);
             }
         }
 
@@ -497,6 +535,7 @@ pub fn GridType(comptime Storage: type) type {
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
             std.mem.set(u8, completed_write.block.*, 0);
+            grid.cache_valid.set(cache_index);
 
             const write_iop_index = grid.write_iops.index(iop);
             tracer.end(
@@ -622,6 +661,7 @@ pub fn GridType(comptime Storage: type) type {
                     // Remove the "root" read so that the address is no longer actively reading / locked.
                     grid.read_queue.remove(read);
                     grid.read_block_resolve(read, cache_block);
+                    grid.cache_valid.set(cache_index);
                     return;
                 }
             }
@@ -676,6 +716,7 @@ pub fn GridType(comptime Storage: type) type {
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, iop_block, cache_block);
             std.mem.set(u8, iop_block.*, 0);
+            grid.cache_valid.set(cache_index);
 
             const read_iop_index = grid.read_iops.index(iop);
             tracer.end(
@@ -706,6 +747,7 @@ pub fn GridType(comptime Storage: type) type {
 
             // Don't cache a corrupt or incorrect block.
             grid.cache.remove(read.address);
+            grid.cache_valid.unset(cache_index);
 
             if (grid.cancelling) {
                 grid.cancel_join_callback();

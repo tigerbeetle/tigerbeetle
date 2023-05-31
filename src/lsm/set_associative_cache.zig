@@ -228,6 +228,13 @@ pub fn SetAssociativeCache(
             set.values[way] = undefined;
         }
 
+        pub fn remove_index(self: *Self, index: usize) void {
+            const count = self.counts.get(index);
+            if (count == 0) return;
+
+            self.remove(key_from_value(&self.values[index]));
+        }
+
         /// Hint that the key is less likely to be accessed in the future, without actually removing
         /// it from the cache.
         pub fn demote(self: *Self, key: Key) void {
