@@ -250,6 +250,7 @@ pub const Header = extern struct {
     /// that the primary ratchets the encryption key every view change to ensure that prepares
     /// reordered through a view change never repeat the same IV for the same encryption key.
     ///
+    /// * A `prepare_ok` sets this to the checkpoint id. (TODO(Big headers): Use a separate field.)
     /// * A `commit` sets this to its checkpoint id. (Possibly uncanonical.)
     /// * A `ping` sets this to its checkpoint id. (Possibly uncanonical.)
     /// * A `request_sync_manifest` sets this to the requested checkpoint id.
@@ -608,7 +609,6 @@ pub const Header = extern struct {
             .reserved => return "operation == .reserved",
             .root => {
                 const root_checksum = Header.root_prepare(self.cluster).checksum;
-                if (self.parent != 0) return "root: parent != 0";
                 if (self.client != 0) return "root: client != 0";
                 if (self.context != root_checksum) return "root: context != expected";
                 if (self.request != 0) return "root: request != 0";
