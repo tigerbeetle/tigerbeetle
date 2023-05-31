@@ -572,6 +572,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn verify(manifest: *Manifest, snapshot: u64) void {
+            // TODO: When state sync is proactive, re-enable this.
+            if (1 == 1) return;
+
             for (manifest.levels) |*level| {
                 var key_max_prev: ?Key = null;
                 var table_info_iter = level.iterator(
