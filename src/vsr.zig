@@ -35,9 +35,11 @@ pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const ReplicaEvent = @import("vsr/replica.zig").ReplicaEvent;
 pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
+pub const SyncStage = @import("vsr/sync.zig").SyncStage;
 pub const SyncTargetCandidate = @import("vsr/sync.zig").SyncTargetCandidate;
 pub const SyncTargetCanonical = @import("vsr/sync.zig").SyncTargetCanonical;
 pub const SyncTargetQuorum = @import("vsr/sync.zig").SyncTargetQuorum;
+pub const SyncTrailer = @import("vsr/sync.zig").SyncTrailer;
 pub const Client = @import("vsr/client.zig").Client;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
@@ -134,6 +136,14 @@ pub const Command = enum(u8) {
 
     request_blocks,
     block,
+
+    request_sync_manifest,
+    request_sync_free_set,
+    request_sync_client_sessions,
+
+    sync_manifest,
+    sync_free_set,
+    sync_client_sessions,
 };
 
 /// This type exists to avoid making the Header type dependant on the state
@@ -242,6 +252,12 @@ pub const Header = extern struct {
     ///
     /// * A `commit` sets this to its checkpoint id. (Possibly uncanonical.)
     /// * A `ping` sets this to its checkpoint id. (Possibly uncanonical.)
+    /// * A `request_sync_manifest` sets this to the requested checkpoint id.
+    /// * A `request_sync_free_set` sets this to the requested checkpoint id.
+    /// * A `request_sync_client_sessions` sets this to the requested checkpoint id.
+    /// * A `sync_manifest` sets this to the checkpoint id.
+    /// * A `sync_free_set` sets this to the checkpoint id.
+    /// * A `sync_client_sessions` sets this to the checkpoint id.
     parent: u128 = 0,
 
     /// Each client process generates a unique, random and ephemeral client ID at initialization.
@@ -284,6 +300,9 @@ pub const Header = extern struct {
     ///   responding to the RSV.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `request_reply` sets this to the checksum of the reply being requested.
+    /// * A `sync_manifest` sets this to the complete Manifest's checksum.
+    /// * A `sync_free_set` sets this to the complete FreeSet's checksum.
+    /// * A `sync_manifest` sets this to the complete ClientSessions's checksum.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -295,6 +314,12 @@ pub const Header = extern struct {
     /// A client is allowed to have at most one request inflight at a time.
     ///
     /// * A `do_view_change` sets this to its latest log_view number.
+    /// * A `request_sync_manifest` sets this to the requested offset within the encoded Manifest.
+    /// * A `request_sync_free_set` sets this to the requested offset within the encoded FreeSet.
+    /// * A `request_sync_client_sessions` sets this to the requested offset within the encoded ClientSessions.
+    /// * A `sync_manifest` sets this to the offset within the encoded Manifest.
+    /// * A `sync_free_set` sets this to the offset within the encoded FreeSet.
+    /// * A `sync_client_sessions` sets this to the offset within the encoded ClientSessions.
     request: u32 = 0,
 
     /// The cluster number binds intention into the header, so that a client or replica can indicate
@@ -317,6 +342,12 @@ pub const Header = extern struct {
     /// * A `request_headers` sets this to the maximum op requested (inclusive).
     /// * A `request_prepare` sets this to the requested op.
     /// * A `request_reply` sets this to the requested op.
+    /// * A `request_sync_manifest` sets this to the requested checkpoint op.
+    /// * A `request_sync_free_set` sets this to the requested checkpoint op.
+    /// * A `request_sync_client_sessions` sets this to the requested checkpoint op.
+    /// * A `sync_manifest` sets this to the checkpoint op.
+    /// * A `sync_free_set` sets this to the checkpoint op.
+    /// * A `sync_client_sessions` sets this to the checkpoint op.
     op: u64 = 0,
 
     /// The commit number of the latest committed prepare. Committed ops are immutable.
@@ -325,6 +356,9 @@ pub const Header = extern struct {
     ///   The sending replica may continue to commit after sending the DVC.
     /// * A `start_view` sets this to `commit_min`/`commit_max` (they are the same).
     /// * A `request_headers` sets this to the minimum op requested (inclusive).
+    /// * A `sync_manifest` sets this to the complete Manifest's size.
+    /// * A `sync_free_set` sets this to the complete FreeSet's size.
+    /// * A `sync_client_sessions` sets this to the complete ClientSessions's size.
     /// * A `ping` sets this to its monotonic timestamp.
     /// * A `pong` echoes the ping's monotonic timestamp.
     commit: u64 = 0,
@@ -418,6 +452,12 @@ pub const Header = extern struct {
             .headers => self.invalid_headers(),
             .eviction => self.invalid_eviction(),
             .block => self.invalid_block(),
+            .request_sync_manifest => self.invalid_request_sync_manifest(),
+            .request_sync_free_set => self.invalid_request_sync_free_set(),
+            .request_sync_client_sessions => self.invalid_request_sync_client_sessions(),
+            .sync_manifest => self.invalid_sync_manifest(),
+            .sync_free_set => self.invalid_sync_free_set(),
+            .sync_client_sessions => self.invalid_sync_client_sessions(),
         };
     }
 
@@ -757,6 +797,69 @@ pub const Header = extern struct {
         if (self.op == 0) return "op == 0"; // address ≠ 0
         if (self.replica != 0) return "replica != 0";
         if (self.operation == .reserved) return "operation == .reserved";
+        return null;
+    }
+
+    fn invalid_request_sync_manifest(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_sync_manifest);
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_sync_free_set(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_sync_free_set);
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_sync_client_sessions(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_sync_client_sessions);
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_sync_manifest(self: *const Header) ?[]const u8 {
+        assert(self.command == .sync_manifest);
+        if (self.client != 0) return "client != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_sync_free_set(self: *const Header) ?[]const u8 {
+        assert(self.command == .sync_free_set);
+        if (self.client != 0) return "client != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_sync_client_sessions(self: *const Header) ?[]const u8 {
+        assert(self.command == .sync_client_sessions);
+        if (self.client != 0) return "client != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
 

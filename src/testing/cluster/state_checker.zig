@@ -27,6 +27,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
     return struct {
         const Self = @This();
 
+        node_count: u8,
         replica_count: u8,
 
         commits: Commits,
@@ -40,34 +41,34 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
         /// Tracks the latest op acked by a replica across restarts.
         replica_head_max: []ReplicaHead,
-
-        pub fn init(
-            allocator: mem.Allocator,
-            cluster: u32,
+        pub fn init(allocator: mem.Allocator, options: struct {
+            cluster_id: u32,
+            replica_count: u8,
             replicas: []const Replica,
             clients: []const Client,
-        ) !Self {
-            const root_prepare = vsr.Header.root_prepare(cluster);
+        }) !Self {
+            const root_prepare = vsr.Header.root_prepare(options.cluster_id);
 
             var commits = Commits.init(allocator);
             errdefer commits.deinit();
 
             var commit_replicas = ReplicaSet.initEmpty();
-            for (replicas) |_, i| commit_replicas.set(i);
+            for (options.replicas) |_, i| commit_replicas.set(i);
             try commits.append(.{
                 .header = root_prepare,
                 .replicas = commit_replicas,
             });
 
-            var replica_head_max = try allocator.alloc(ReplicaHead, replicas.len);
+            var replica_head_max = try allocator.alloc(ReplicaHead, options.replicas.len);
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
 
             return Self{
-                .replica_count = @intCast(u8, replicas.len),
+                .node_count = @intCast(u8, options.replicas.len),
+                .replica_count = options.replica_count,
                 .commits = commits,
-                .replicas = replicas,
-                .clients = clients,
+                .replicas = options.replicas,
+                .clients = options.clients,
                 .replica_head_max = replica_head_max,
             };
         }
@@ -93,6 +94,20 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         /// Returns whether the replica's state changed since the last check_state().
         pub fn check_state(state_checker: *Self, replica_index: u8) !void {
             const replica = &state_checker.replicas[replica_index];
+            if (replica.sync_stage != .none) {
+                // Allow a syncing replica to fast-forward its commit.
+                //
+                // But "fast-forwarding" may actually move commit_min slightly backwards:
+                // 1. Suppose op X is a checkpoint trigger.
+                // 2. We are committing op X-1 but are stuck due to a block that does not exist in
+                //    the cluster anymore.
+                // 3. When we sync, `commit_min` "backtracks", to `X - lsm_batch_multiple`.
+                const commit_min_source = state_checker.commit_mins[replica_index];
+                const commit_min_target = replica.commit_min;
+                assert(commit_min_source <= commit_min_target + constants.lsm_batch_multiple);
+                state_checker.commit_mins[replica_index] = replica.commit_min;
+                return;
+            }
 
             if (replica.status != .recovering_head) {
                 const head_max = &state_checker.replica_head_max[replica_index];

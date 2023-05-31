@@ -632,11 +632,13 @@ pub const Simulator = struct {
     fn tick_crash(simulator: *Simulator) void {
         const recoverable_count_min =
             vsr.quorums(simulator.options.cluster.replica_count).view_change;
+
         var recoverable_count: usize = 0;
         for (simulator.cluster.replicas) |*replica, i| {
             recoverable_count += @boolToInt(simulator.cluster.replica_health[i] == .up and
+                !replica.standby() and
                 replica.status != .recovering_head and
-                !replica.standby());
+                replica.sync_stage == .none);
         }
 
         for (simulator.cluster.replicas) |*replica| {
@@ -652,8 +654,9 @@ pub const Simulator = struct {
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
                     if (!chance_f64(simulator.random, crash_probability)) continue;
 
-                    recoverable_count -=
-                        @boolToInt(replica.status != .recovering_head and !replica.standby());
+                    recoverable_count -= @boolToInt(!replica.standby() and
+                        replica.status != .recovering_head and
+                        replica.sync_stage == .none);
 
                     log_simulator.debug("{}: crash replica", .{replica.replica});
                     simulator.cluster.crash_replica(replica.replica);

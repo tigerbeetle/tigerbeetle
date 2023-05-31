@@ -534,10 +534,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// This also gives us confidence that our working superblock has sufficient redundancy.
         quorums: Quorums = Quorums{},
 
+        /// Staging trailers. These are modified between checkpoints, and are persisted on
+        /// checkpoint (or sync_done).
         manifest: Manifest,
         free_set: FreeSet,
         client_sessions: ClientSessions,
 
+        /// Updated when:
+        /// - the trailer is serialized immediately before checkpoint or sync_done, and
+        /// - used to construct the trailer during state sync.
         manifest_buffer: []align(constants.sector_size) u8,
         free_set_buffer: []align(constants.sector_size) u8,
         client_sessions_buffer: []align(constants.sector_size) u8,

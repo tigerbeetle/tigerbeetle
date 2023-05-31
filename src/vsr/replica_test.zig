@@ -420,7 +420,6 @@ test "Cluster: network: partititon client-primary (asymmetric, drop replies)" {
 
 test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     // A backup that has fallen behind by two checkpoints can catch up, without using state sync.
-    // TODO(State Sync): How to assert that state sync is not used?
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
@@ -441,7 +440,9 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(r_lag.status(), .normal);
     try expectEqual(r_lag.op_checkpoint(), 0);
 
+    // Allow repair, but ensure that state sync doesn't run.
     r_lag.pass_all(.__, .bidirectional);
+    r_lag.drop(.__, .bidirectional, .sync_manifest);
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
@@ -770,6 +771,154 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     try expectEqual(t.replica(.R_).status(), .view_change);
 }
 
+test "Cluster: sync: partition, lag, sync (transition from idle)" {
+    for ([_]u64{
+        // Normal case: the cluster has committed atop the checkpoint trigger.
+        // The lagging replica can learn the canonical checkpoint from a commit message.
+        checkpoint_2_trigger + 1,
+        // Idle case: the idle cluster has not committed atop the checkpoint trigger.
+        // The lagging replica uses the sync target candidate quorum (populated by ping messages)
+        // to identify the canonical checkpoint.
+        // TODO Explicit code coverage: "candidate checkpoint is canonical (quorum)"
+        checkpoint_2_trigger,
+    }) |cluster_commit_max| {
+        log.info("test cluster_commit_max={}", .{cluster_commit_max});
+
+        const t = try TestContext.init(.{ .replica_count = 3 });
+        defer t.deinit();
+
+        var c = t.clients(0, t.cluster.clients.len);
+        try c.request(20, 20);
+        try expectEqual(t.replica(.R_).commit(), 20);
+
+        t.replica(.R2).drop_all(.R_, .bidirectional);
+        try c.request(cluster_commit_max, cluster_commit_max);
+
+        t.replica(.R2).pass_all(.R_, .bidirectional);
+        t.run();
+
+        // R2 catches up via state sync.
+        try expectEqual(t.replica(.R_).status(), .normal);
+        try expectEqual(t.replica(.R_).commit(), cluster_commit_max);
+        try expectEqual(t.replica(.R_).sync_status(), .none);
+
+        // The entire cluster is healthy and able to commit more.
+        try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
+        try expectEqual(t.replica(.R_).status(), .normal);
+        try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
+    }
+}
+
+test "Cluster: sync: partition, lag, sync (transition from manifest log repair)" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    // Commit enough ops to force R2 to actually use its manifest when it recovers.
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+
+    t.replica(.R2).drop_all(.R_, .bidirectional);
+    try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
+
+    // Crash R2, corrupt its entire grid, then restart it.
+    t.replica(.R2).stop();
+    var address: u64 = 1;
+    while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
+        t.replica(.R2).corrupt(.{ .grid_block = address });
+    }
+    try t.replica(.R2).open();
+
+    // R2 is stuck repairing manifest log blocks (during StateMachine.open()).
+    // But R2 makes no progress — it is partitioned.
+    t.run();
+    try expectEqual(t.replica(.R2).state_machine_opened(), false);
+
+    // Allow R2 to discover that it has lagged too far behind and must sync.
+    // But don't allow it to sync blocks yet — we want to ensure that those reads
+    // are still pending during the transition to state sync so that they must be
+    // cancelled by the grid.
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.replica(.R2).drop(.R_, .outgoing, .request_blocks);
+    t.run();
+
+    try expectEqual(t.replica(.R2).sync_status(), .request_manifest_logs);
+    // Now allow state sync to finish.
+    t.replica(.R2).pass(.R_, .outgoing, .request_blocks);
+    t.run();
+
+    try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
+    try expectEqual(t.replica(.R_).sync_status(), .none);
+}
+
+test "Cluster: sync: sync, crash, restart (vsr_state.status=sync_start)" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    t.replica(.R2).drop_all(.R_, .bidirectional);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    // Allow R2 to complete SyncStage.request_trailers, but get stuck
+    // during SyncStage.request_manifest_logs.
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.replica(.R2).drop(.R_, .outgoing, .request_sync_manifest);
+    t.run();
+    try expectEqual(t.replica(.R2).sync_status(), .request_trailers);
+    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_2);
+
+    // Crash/restart R2 — when it recovers, it is already syncing.
+    t.replica(.R2).stop();
+    try t.replica(.R2).open();
+    try expectEqual(t.replica(.R2).status(), .normal);
+    try expectEqual(t.replica(.R2).sync_status(), .request_target);
+    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), null);
+
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.run();
+
+    try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).sync_status(), .none);
+}
+
+test "Cluster: sync: sync, bump target, sync" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    t.replica(.R2).drop_all(.R_, .bidirectional);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    // Allow R2 to complete SyncStage.request_trailers, but get stuck
+    // during SyncStage.request_manifest_logs.
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.replica(.R2).drop(.R_, .outgoing, .request_blocks);
+    t.run();
+    try expectEqual(t.replica(.R2).sync_status(), .request_manifest_logs);
+    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_2);
+
+    // R2 discovers the newer sync target and restarts sync.
+    t.replica(.R2).drop(.R_, .outgoing, .request_sync_manifest);
+    try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
+    try expectEqual(t.replica(.R2).sync_status(), .request_trailers);
+    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_3);
+
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.run();
+
+    try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
+    try expectEqual(t.replica(.R_).sync_status(), .none);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
@@ -1042,6 +1191,49 @@ const TestReplicas = struct {
 
     pub fn commit(t: *const TestReplicas) u64 {
         return t.get(.commit_min);
+    }
+
+    pub fn state_machine_opened(t: *const TestReplicas) bool {
+        return t.get(.state_machine_opened);
+    }
+
+    fn sync_stage(t: *const TestReplicas) vsr.SyncStage {
+        assert(t.replicas.len > 0);
+
+        var sync_stage_all: ?vsr.SyncStage = null;
+        for (t.replicas.constSlice()) |r| {
+            const replica = &t.cluster.replicas[r];
+            if (sync_stage_all) |all| {
+                assert(std.meta.eql(all, replica.sync_stage));
+            } else {
+                sync_stage_all = replica.sync_stage;
+            }
+        }
+        return sync_stage_all.?;
+    }
+
+    pub fn sync_status(t: *const TestReplicas) std.meta.Tag(vsr.SyncStage) {
+        return @as(std.meta.Tag(vsr.SyncStage), t.sync_stage());
+    }
+
+    fn sync_target(t: *const TestReplicas) ?vsr.SyncTargetCanonical {
+        return t.sync_stage().target();
+    }
+
+    pub fn sync_target_checkpoint_op(t: *const TestReplicas) ?u64 {
+        if (t.sync_target()) |target| {
+            return target.checkpoint_op;
+        } else {
+            return null;
+        }
+    }
+
+    pub fn sync_target_checkpoint_id(t: *const TestReplicas) ?u128 {
+        if (t.sync_target()) |target| {
+            return target.checkpoint_id;
+        } else {
+            return null;
+        }
     }
 
     const Role = enum { primary, backup, standby };

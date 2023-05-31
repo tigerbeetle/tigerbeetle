@@ -40,11 +40,12 @@ pub const ClientSessions = struct {
     /// Values are indexes into `entries`.
     const EntriesByClient = stdx.AutoHashMapUnmanaged(u128, usize);
 
+    const EntriesFree = std.StaticBitSet(constants.clients_max);
+
     /// Free entries are zeroed, both in `entries` and on-disk.
     entries: []Entry,
     entries_by_client: EntriesByClient,
-    entries_free: std.StaticBitSet(constants.clients_max) =
-        std.StaticBitSet(constants.clients_max).initFull(),
+    entries_free: EntriesFree = EntriesFree.initFull(),
 
     pub fn init(allocator: mem.Allocator) !ClientSessions {
         var entries_by_client: EntriesByClient = .{};
@@ -66,6 +67,12 @@ pub const ClientSessions = struct {
     pub fn deinit(client_sessions: *ClientSessions, allocator: mem.Allocator) void {
         client_sessions.entries_by_client.deinit(allocator);
         allocator.free(client_sessions.entries);
+    }
+
+    pub fn clear(client_sessions: *ClientSessions) void {
+        std.mem.set(Entry, client_sessions.entries, std.mem.zeroes(Entry));
+        client_sessions.entries_by_client.clearRetainingCapacity();
+        client_sessions.entries_free = EntriesFree.initFull();
     }
 
     /// Maximum size of the buffer needed to encode the client sessions on disk.

@@ -203,8 +203,12 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
             errdefer for (clients) |*c| c.deinit(allocator);
 
-            var state_checker =
-                try StateChecker.init(allocator, options.cluster_id, replicas, clients);
+            var state_checker = try StateChecker.init(allocator, .{
+                .cluster_id = options.cluster_id,
+                .replicas = replicas,
+                .replica_count = options.replica_count,
+                .clients = clients,
+            });
             errdefer state_checker.deinit();
 
             var storage_checker = StorageChecker.init(allocator);
@@ -472,6 +476,15 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                         fatal(.correctness, "storage checker error: {}", .{err});
                     };
                 },
+                .sync => switch (replica.sync_stage) {
+                    .request_trailers => {
+                        cluster.log_replica(.sync_start, replica.replica);
+                    },
+                    .done => {
+                        cluster.log_replica(.sync_done, replica.replica);
+                    },
+                    else => {},
+                },
             }
         }
 
@@ -497,6 +510,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 commit = ' ',
                 checkpoint_start = '[',
                 checkpoint_done = ']',
+                sync_start = '<',
+                sync_done = '>',
             },
             replica_index: u8,
         ) void {
@@ -516,6 +531,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             const role: u8 = role: {
                 if (cluster.replica_health[replica_index] == .down) break :role '#';
+                if (replica.sync_stage != .none) break :role '~';
                 if (replica.standby()) break :role '|';
                 if (replica.primary_index(replica.view) == replica.replica) break :role '/';
                 break :role '\\';
