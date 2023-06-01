@@ -230,6 +230,9 @@ pub fn ReplicaType(
         ///   for recovery.
         op: u64,
 
+        ok_op_max: u64 = 0,
+        ok_op_view_max: u64 = 0,
+
         /// The op number of the latest committed and executed operation (according to the replica).
         /// The replica may have to wait for repairs to complete before commit_min reaches commit_max.
         ///
@@ -1760,6 +1763,7 @@ pub fn ReplicaType(
                 // TODO State transfer.
                 stdx.unimplemented("state transfer");
             }
+            assert(self.view > self.ok_op_view_max or self.view == self.ok_op_view_max and self.op >= self.ok_op_max);
 
             for (view_headers.slice) |*header| {
                 if (header.op <= self.op_checkpoint_trigger()) {
@@ -5573,6 +5577,12 @@ pub fn ReplicaType(
                 // the new one. If a replica sent a prepare_ok message to the old primary after
                 // sending its log to the new one, the old primary might commit an operation that
                 // the new primary doesn't learn about in the do_view_change messages.
+
+                if (header.view > self.ok_op_view_max or header.view == self.ok_op_view_max
+                and header.op == self.ok_op_max) {
+                    self.ok_op_max = header.op;
+                    self.ok_op_view_max = header.view;
+                }
 
                 // We therefore only ever send to the primary of the current view, never to the
                 // primary of the prepare header's view:

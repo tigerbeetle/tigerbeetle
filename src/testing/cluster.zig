@@ -333,10 +333,14 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             assert(cluster.replica_health[replica_index] == .down);
 
             var nonce = cluster.replicas[replica_index].nonce + 1;
+            var ok_op_max = cluster.replicas[replica_index].ok_op_max;
+            var ok_op_view_max = cluster.replicas[replica_index].ok_op_view_max;
             // Pass the old replica's Time through to the new replica. It will continue to tick while
             // the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
             var time = cluster.replicas[replica_index].time;
             try cluster.open_replica(replica_index, nonce, time);
+            cluster.replicas[replica_index].ok_op_max = ok_op_max;
+            cluster.replicas[replica_index].ok_op_view_max = ok_op_view_max;
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
             cluster.log_replica(.recover, replica_index);
