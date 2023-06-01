@@ -2700,6 +2700,7 @@ pub fn ReplicaType(
             // 6. Backup needs a `commit` message to learn its sync target.
             // (Both replication and view-change quorums are also 2, so abdication isn't needed.)
             // See "Cluster: sync: R=2" test.
+            // TODO: If we sync to uncanonical checkpoints, then this can be removed.
             if (self.replica_count == 2) return;
 
             log.debug("{}: on_primary_abdicate_timeout: abdicating (view={})", .{
@@ -4354,6 +4355,34 @@ pub fn ReplicaType(
                     self.op_checkpoint(),
                 });
                 return true;
+            }
+
+            // TODO(Async checkpoints): Remove this check.
+            // It is a hack to prevent an availability issue, but it comes at a huge
+            // performance cost.
+            // For an explanation, see: "Cluster: repair: primary checkpoint, backup crash before
+            // checkpoint, primary prepare".
+            if (self.op_checkpoint() != 0 and
+                self.op_checkpoint() + constants.lsm_batch_multiple + 1 == self.op)
+            {
+                var count: usize = 0;
+                for (self.sync_target_quorum.candidates) |target, replica_index| {
+                    if (replica_index == self.replica) {
+                        count += 1; // Count ourselves.
+                    } else {
+                        count += @boolToInt(
+                            target != null and
+                                target.?.checkpoint_op == self.op_checkpoint(),
+                        );
+                    }
+                }
+
+                if (count < self.quorum_replication) {
+                    log.warn("{}: on_request: ignoring (waiting for backups to checkpoint)", .{
+                        self.replica,
+                    });
+                    return true;
+                }
             }
 
             return false;
@@ -8025,6 +8054,7 @@ pub fn ReplicaType(
                     // The cluster must commit atop the checkpoint for it to be canonical.
                     // But we may need to sync in order for the cluster to commit.
                     // See the "Cluster: sync: R=2" test for more detail on this special case.
+                    // TODO: If we sync to uncanonical checkpoints, then this can be removed.
                     log.warn("{}: on_{s}: jump_sync_target: candidate is canonical (R=2)", .{
                         self.replica,
                         @tagName(header.command),
