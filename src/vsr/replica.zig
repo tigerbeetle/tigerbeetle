@@ -339,7 +339,7 @@ pub fn ReplicaType(
         /// The number of ticks before a primary or backup broadcasts a ping to other replicas.
         /// TODO Explain why we need this (MessageBus handshaking, leapfrogging faulty replicas,
         /// deciding whether starting a view change would be detrimental under some network partitions).
-        /// (status=normal replicas)
+        /// (always running)
         ping_timeout: Timeout,
 
         /// The number of ticks without enough prepare_ok's before the primary resends a prepare.
@@ -2581,10 +2581,6 @@ pub fn ReplicaType(
 
         fn on_ping_timeout(self: *Self) void {
             self.ping_timeout.reset();
-
-            // TODO We may want to ping for connectivity during a view change.
-            assert(self.status == .normal);
-            assert(self.primary() or self.backup());
 
             var ping = Header{
                 .command = .ping,
@@ -6453,7 +6449,6 @@ pub fn ReplicaType(
                 },
                 .ping => {
                     maybe(self.standby());
-                    assert(self.status == .normal);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
@@ -7079,7 +7074,7 @@ pub fn ReplicaType(
 
             self.status = .recovering_head;
 
-            self.ping_timeout.stop();
+            self.ping_timeout.start();
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
             self.commit_message_timeout.stop();
@@ -7430,7 +7425,7 @@ pub fn ReplicaType(
                 queue.deinit(self.message_bus.pool);
             }
 
-            self.ping_timeout.stop();
+            self.ping_timeout.start();
             self.commit_message_timeout.stop();
             self.normal_heartbeat_timeout.stop();
             self.start_view_change_window_timeout.stop();
