@@ -148,6 +148,13 @@ const Command = struct {
             aof = try AOF.from_absolute_path(aof_path);
         }
 
+        const nonce = while (true) {
+            // `random.uintLessThan` does not work for u128 as of Zig 0.9.1.x.
+            const nonce_or_zero = std.crypto.random.int(u128);
+            if (nonce_or_zero != 0) break nonce_or_zero;
+        } else unreachable;
+        assert(nonce != 0);
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(u8, args.addresses.len),
@@ -155,7 +162,7 @@ const Command = struct {
             .storage = &command.storage,
             .aof = &aof,
             .message_pool = &command.message_pool,
-            .nonce = std.crypto.random.int(u128),
+            .nonce = nonce,
             .time = .{},
             .state_machine_options = .{
                 // TODO Tune lsm_forest_node_count better.
