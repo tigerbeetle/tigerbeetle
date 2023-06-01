@@ -258,7 +258,9 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             for (cluster.replicas) |_, replica_index| {
                 errdefer for (replicas[0..replica_index]) |*r| r.deinit(allocator);
-                const nonce = random.int(u128);
+                // Nonces are incremented on restart, so spread them out across 128 bit space
+                // to avoid collisions.
+                const nonce = 1 + @as(u128, replica_index) << 64;
                 try cluster.open_replica(@intCast(u8, replica_index), nonce, .{
                     .resolution = constants.tick_ms * std.time.ns_per_ms,
                     .offset_type = .linear,
