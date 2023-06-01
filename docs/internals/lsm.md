@@ -119,7 +119,7 @@ optimization should enable the tree's performance to approach that of an append-
 
 Applying [this](#compaction-selection-policy) selection policy while compacting a table
 from level A to level B, what is the maximum number of level-B tables that may overlap with the
-selected level-A table (i.e. the “worst case”)?”
+selected level-A table (i.e. the "worst case")?
 
 Perhaps surprisingly, this is `lsm_growth_factor`:
 
