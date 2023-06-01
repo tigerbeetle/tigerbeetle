@@ -341,6 +341,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             try cluster.open_replica(replica_index, nonce, time);
             cluster.replicas[replica_index].ok_op_max = ok_op_max;
             cluster.replicas[replica_index].ok_op_view_max = ok_op_view_max;
+
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
             cluster.log_replica(.recover, replica_index);

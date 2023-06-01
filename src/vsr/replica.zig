@@ -4192,15 +4192,16 @@ pub fn ReplicaType(
                     }
 
                     if (self.status == .recovering_head) {
-                        if (message.header.context != 0 and message.header.context != self.nonce) {
-                            log.err("{}: on_{s}: recovering head view={}..{} same-wrap={} same-nonce={}", .{
-                                self.replica,
-                                command,
-                                message.header.view, self.view,
-                                message.header.op < self.op_checkpoint_trigger(),
-                                message.header.context == self.nonce,
-                            });
-                        }
+                        // if (message.header.context != 0 and message.header.context != self.nonce) {
+                        //     log.err("{}: on_{s}: recovering head view={}..{} same-wrap={} same-nonce={}", .{
+                        //         self.replica,
+                        //         command,
+                        //         message.header.view,
+                        //         self.view,
+                        //         message.header.op < self.op_checkpoint_trigger(),
+                        //         message.header.context == self.nonce,
+                        //     });
+                        // }
                         if (message.header.view > self.view or
                             message.header.op >= self.op_checkpoint_trigger() or
                             message.header.context == self.nonce)
@@ -4208,9 +4209,12 @@ pub fn ReplicaType(
                             // This SV is guaranteed to have originated after the replica crash,
                             // it is safe to use to determine the head op.
                         } else {
-                            log.err("{}: on_{s}: ignoring (recovering_head, nonce mismatch)", .{
+                            log.err("{}: on_{s}: nonce mismatch op_ok_max={} op={} mesasge.op={}", .{
                                 self.replica,
                                 command,
+                                self.ok_op_max,
+                                self.op,
+                                message.header.op,
                             });
 
                             // return true;
@@ -5578,12 +5582,6 @@ pub fn ReplicaType(
                 // sending its log to the new one, the old primary might commit an operation that
                 // the new primary doesn't learn about in the do_view_change messages.
 
-                if (header.view > self.ok_op_view_max or header.view == self.ok_op_view_max
-                and header.op == self.ok_op_max) {
-                    self.ok_op_max = header.op;
-                    self.ok_op_view_max = header.view;
-                }
-
                 // We therefore only ever send to the primary of the current view, never to the
                 // primary of the prepare header's view:
                 self.send_header_to_replica(self.primary_index(self.view), .{
@@ -5980,6 +5978,15 @@ pub fn ReplicaType(
                         message.body(),
                         std.mem.sliceAsBytes(self.superblock.working.vsr_headers().slice),
                     ));
+                }
+            }
+
+            if (message.header.command == .prepare_ok) {
+                if (message.header.view > self.ok_op_view_max or
+                    message.header.view == self.ok_op_view_max and message.header.op > self.ok_op_max)
+                {
+                    self.ok_op_max = message.header.op;
+                    self.ok_op_view_max = message.header.view;
                 }
             }
 
