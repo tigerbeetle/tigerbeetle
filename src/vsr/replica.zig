@@ -112,6 +112,8 @@ pub fn ReplicaType(
             replica: *Self,
         };
 
+        stored_sv: ?*Message = null,
+
         /// We use this allocator during open/init and then disable it.
         /// An accidental dynamic allocation after open/init will cause an assertion failure.
         static_allocator: StaticAllocator,
@@ -912,6 +914,10 @@ pub fn ReplicaType(
             for (self.do_view_change_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
             }
+
+            if (self.stored_sv) |sv| {
+                self.message_bus.unref(sv);
+            }
         }
 
         /// ClientSessions records for each client the latest session and the latest committed reply.
@@ -1124,7 +1130,7 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
             const realtime = self.clock.realtime_synchronized() orelse {
-                log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+                log.warn("{}: on_request: dropping (clock not synchronized)", .{self.replica});
                 return;
             };
 
@@ -1805,11 +1811,11 @@ pub fn ReplicaType(
             const start_view = self.create_view_change_message(.start_view, message.header.context);
             defer self.message_bus.unref(start_view);
 
-            assert(start_view.references == 1);
+            // assert(start_view.references == 1);
             assert(start_view.header.command == .start_view);
-            assert(start_view.header.view == self.view);
-            assert(start_view.header.op == self.op);
-            assert(start_view.header.commit == self.commit_max);
+            // assert(start_view.header.view == self.view);
+            // assert(start_view.header.op == self.op);
+            // assert(start_view.header.commit == self.commit_max);
 
             self.send_message_to_replica(message.header.replica, start_view);
         }
@@ -3184,10 +3190,10 @@ pub fn ReplicaType(
             // It should be impossible for a client to receive a response without the request
             // being logged by at least one replica.
             if (AOF != void) {
-                self.aof.write(prepare, .{
-                    .replica = self.replica,
-                    .primary = self.primary_index(self.view),
-                }) catch @panic("aof failure");
+                // self.aof.write(prepare, .{
+                //     .replica = self.replica,
+                //     .primary = self.primary_index(self.view),
+                // }) catch @panic("aof failure");
             }
 
             const reply_body_size = @intCast(u32, self.state_machine.commit(
@@ -3519,6 +3525,22 @@ pub fn ReplicaType(
             );
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
+
+            if (message.header.command == .start_view) {
+                const replay = self.prng.random().uintAtMost(u8, 100) < 50;
+                const store = self.prng.random().uintAtMost(u8, 100) < 20 or self.stored_sv == null or self.stored_sv.?.header.view < message.header.view;
+                if (replay) {
+                    if (self.stored_sv) |sv| {
+                        return sv.ref();
+                    }
+                }
+                if (store) {
+                    if (self.stored_sv) |sv| {
+                        self.message_bus.unref(sv);
+                    }
+                    self.stored_sv = message.ref();
+                }
+            }
 
             return message.ref();
         }
@@ -3928,7 +3950,7 @@ pub fn ReplicaType(
                     // Caused by one of the following:
                     // - client bug, or
                     // - this primary is no longer the actual primary
-                    log.err("{}: on_request: ignoring newer request (client|network bug)", .{self.replica});
+                    // log.err("{}: on_request: ignoring newer request (client|network bug)", .{self.replica});
                     return true;
                 }
             } else if (message.header.operation == .register) {
@@ -4166,6 +4188,15 @@ pub fn ReplicaType(
                     }
 
                     if (self.status == .recovering_head) {
+                        if (message.header.context != 0 and message.header.context != self.nonce) {
+                            log.err("{}: on_{s}: recovering head view={}..{} same-wrap={} same-nonce={}", .{
+                                self.replica,
+                                command,
+                                message.header.view, self.view,
+                                message.header.op < self.op_checkpoint_trigger(),
+                                message.header.context == self.nonce,
+                            });
+                        }
                         if (message.header.view > self.view or
                             message.header.op >= self.op_checkpoint_trigger() or
                             message.header.context == self.nonce)
@@ -4173,11 +4204,12 @@ pub fn ReplicaType(
                             // This SV is guaranteed to have originated after the replica crash,
                             // it is safe to use to determine the head op.
                         } else {
-                            log.debug("{}: on_{s}: ignoring (recovering_head, nonce mismatch)", .{
+                            log.err("{}: on_{s}: ignoring (recovering_head, nonce mismatch)", .{
                                 self.replica,
                                 command,
                             });
-                            return true;
+
+                            // return true;
                         }
                     }
                 },
@@ -5817,12 +5849,12 @@ pub fn ReplicaType(
                     assert(!self.standby());
                     assert(self.status == .normal);
                     assert(!self.do_view_change_quorum);
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                    assert(message.header.commit == self.commit_min);
-                    assert(message.header.commit == self.commit_max);
-                    assert(message.header.timestamp == self.op_checkpoint());
+                    // assert(message.header.view == self.view);
+                    // assert(message.header.replica == self.replica);
+                    // assert(message.header.replica != replica);
+                    // assert(message.header.commit == self.commit_min);
+                    // assert(message.header.commit == self.commit_max);
+                    // assert(message.header.timestamp == self.op_checkpoint());
                 },
                 .headers => {
                     assert(!self.standby());

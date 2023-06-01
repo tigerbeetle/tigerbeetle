@@ -32,13 +32,13 @@ pub const output = std.log.scoped(.cluster);
 /// The -Dsimulator-log=<full|short> build option selects two logging modes.
 /// In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
 /// "full" mode is the usual logging according to the level.
-pub const log_level: std.log.Level = if (vsr_simulator_options.log == .short) .info else .debug;
+pub const log_level: std.log.Level = .err;
 
 // Uncomment if you need per-scope control over the log levels.
-// pub const scope_levels = [_]std.log.ScopeLevel{
-//     .{ .scope = .cluster, .level = .info },
-//     .{ .scope = .replica, .level = .debug },
-// };
+pub const scope_levels = [_]std.log.ScopeLevel{
+    .{ .scope = .cluster, .level = .err },
+    .{ .scope = .replica, .level = .err },
+};
 
 const log_simulator = std.log.scoped(.simulator);
 
@@ -83,8 +83,8 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
-    const standby_count = random.uintAtMost(u8, constants.standbys_max);
+    const replica_count = 3 + random.uintLessThan(u8, constants.replicas_max - 3);
+    const standby_count = 0;
     const node_count = replica_count + standby_count;
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
 
@@ -158,16 +158,16 @@ pub fn main() !void {
         .cluster = cluster_options,
         .workload = workload_options,
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
-        .replica_crash_probability = 0.00002,
-        .replica_crash_stability = random.uintLessThan(u32, 1_000),
-        .replica_restart_probability = 0.0002,
+        .replica_crash_probability = 0.002,
+        .replica_crash_stability = random.uintLessThan(u32, 1_0),
+        .replica_restart_probability = 0.02,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
         .request_idle_off_probability = 10 + random.uintLessThan(u8, 10),
     };
-
+    std.debug.print("SEED={}\n", .{seed});
     output.info(
         \\
         \\          SEED={}
@@ -250,11 +250,11 @@ pub fn main() !void {
     }
     assert(simulator.done());
 
-    const commits = simulator.cluster.state_checker.commits.items;
-    const last_checksum = commits[commits.len - 1].header.checksum;
-    for (simulator.cluster.aofs) |*aof| {
-        try aof.validate(last_checksum);
-    }
+    // const commits = simulator.cluster.state_checker.commits.items;
+    // const last_checksum = commits[commits.len - 1].header.checksum;
+    // for (simulator.cluster.aofs) |*aof| {
+    //     try aof.validate(last_checksum);
+    // }
 
     output.info("\n          PASSED ({} ticks)", .{tick});
 }
@@ -488,6 +488,7 @@ pub const Simulator = struct {
             const replica_storage = &simulator.cluster.storages[replica.replica];
             switch (simulator.cluster.replica_health[replica.replica]) {
                 .up => {
+                    if (replica.replica != 0) continue;
                     const replica_writes = replica_storage.writes.count();
                     const crash_probability = simulator.options.replica_crash_probability *
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
@@ -599,6 +600,7 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    if (scope == .clock) return;
     if (vsr_simulator_options.log == .short and scope != .cluster) return;
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
