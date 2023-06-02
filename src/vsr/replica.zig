@@ -1713,7 +1713,7 @@ pub fn ReplicaType(
             assert(message.header.op - message.header.commit <=
                 constants.pipeline_prepare_queue_max);
 
-            if (message.header.view == self.log_view and message.header.op <= self.op) {
+            if (message.header.view == self.log_view and message.header.op < self.op) {
                 // We were already in this view prior to receiving the SV.
                 assert(self.status == .normal or self.status == .recovering_head);
 
