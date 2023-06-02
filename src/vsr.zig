@@ -25,7 +25,6 @@ pub const lsm = .{
     .grid = @import("lsm/grid.zig"),
     .groove = @import("lsm/groove.zig"),
     .forest = @import("lsm/forest.zig"),
-    .posted_groove = @import("lsm/posted_groove.zig"),
 };
 pub const testing = .{
     .cluster = @import("testing/cluster.zig"),
