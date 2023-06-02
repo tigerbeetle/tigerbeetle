@@ -211,10 +211,33 @@ pub fn StateMachineType(
             },
         );
 
-        const PostedGroove = @import("lsm/posted_groove.zig").PostedGrooveType(
+        const PostedGroove = GrooveType(
             Storage,
-            config.lsm_batch_multiple * constants.batch_max.create_transfers,
+            PostedGrooveValue,
+            .{
+                .value_count_max = .{
+                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .fulfillment = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                },
+                .ignored = &[_][]const u8{ "fulfillment", "padding" },
+                .derived = .{},
+            },
         );
+
+        const PostedGrooveValue = extern struct {
+            timestamp: u64,
+            fulfillment: enum(u8) {
+                posted = 0,
+                voided = 1,
+            },
+            padding: [7]u8,
+
+            comptime {
+                // Assert that there is no implicit padding.
+                assert(@sizeOf(PostedGrooveValue) == 16);
+                assert(@bitSizeOf(PostedGrooveValue) == 16 * 8);
+            }
+        };
 
         pub const Workload = WorkloadType(StateMachine);
 
@@ -456,9 +479,6 @@ pub fn StateMachineType(
 
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     self.forest.grooves.transfers.prefetch_enqueue(t.pending_id);
-                    // This prefetch isn't run yet, but enqueue it here as well to save an extra
-                    // iteration over transfers.
-                    self.forest.grooves.posted.prefetch_enqueue(t.pending_id);
                 }
             }
 
@@ -503,6 +523,10 @@ pub fn StateMachineType(
                         if (self.forest.grooves.accounts_immutable.get(p.credit_account_id)) |cr_immut| {
                             self.forest.grooves.accounts_mutable.prefetch_enqueue(cr_immut.timestamp);
                         }
+
+                        // This prefetch isn't run yet, but enqueue it here as well to save an extra
+                        // iteration over transfers.
+                        self.forest.grooves.posted.prefetch_enqueue(p.timestamp);
                     }
                 } else {
                     if (self.forest.grooves.accounts_immutable.get(t.debit_account_id)) |dr_immut| {
@@ -1076,9 +1100,11 @@ pub fn StateMachineType(
 
             if (self.get_transfer(t.id)) |e| return post_or_void_pending_transfer_exists(t, e, p);
 
-            if (self.get_posted(t.pending_id)) |posted| {
-                if (posted) return .pending_transfer_already_posted;
-                return .pending_transfer_already_voided;
+            if (self.get_posted(p.timestamp)) |posted| {
+                switch (posted.fulfillment) {
+                    .posted => return .pending_transfer_already_posted,
+                    .voided => return .pending_transfer_already_voided,
+                }
             }
 
             assert(p.timestamp < t.timestamp);
@@ -1101,7 +1127,15 @@ pub fn StateMachineType(
                 .amount = amount,
             });
 
-            self.forest.grooves.posted.put_no_clobber(t.pending_id, t.flags.post_pending_transfer);
+            self.forest.grooves.posted.put_no_clobber(&PostedGrooveValue{
+                .timestamp = p.timestamp,
+                .fulfillment = fulfillment: {
+                    if (t.flags.post_pending_transfer) break :fulfillment .posted;
+                    if (t.flags.void_pending_transfer) break :fulfillment .voided;
+                    unreachable;
+                },
+                .padding = [_]u8{0} ** 7,
+            });
 
             var dr_mut_new = self.forest.grooves.accounts_mutable.get(dr_immut.timestamp).?.*;
             var cr_mut_new = self.forest.grooves.accounts_mutable.get(cr_immut.timestamp).?.*;
@@ -1158,7 +1192,7 @@ pub fn StateMachineType(
             self.forest.grooves.accounts_mutable.put(&dr_mut);
             self.forest.grooves.accounts_mutable.put(&cr_mut);
 
-            self.forest.grooves.posted.remove(t.pending_id);
+            self.forest.grooves.posted.remove(p.timestamp);
             self.forest.grooves.transfers.remove(t.id);
         }
 
@@ -1220,8 +1254,11 @@ pub fn StateMachineType(
         }
 
         /// Returns whether a pending transfer, if it exists, has already been posted or voided.
-        fn get_posted(self: *const StateMachine, pending_id: u128) ?bool {
-            return self.forest.grooves.posted.get(pending_id);
+        fn get_posted(
+            self: *const StateMachine,
+            pending_timestamp: u64,
+        ) ?*const PostedGrooveValue {
+            return self.forest.grooves.posted.get(pending_timestamp);
         }
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
@@ -1262,7 +1299,7 @@ pub fn StateMachineType(
                     .tree_options_object = .{
                         .cache_entries_max = options.cache_entries_accounts,
                     },
-                    .tree_options_id = {}, // No ID tree at there's one already for AccountsMutable.
+                    .tree_options_id = {}, // No ID tree as there's one already for AccountsMutable.
                     .tree_options_index = .{
                         .debits_pending = .{},
                         .debits_posted = .{},
@@ -1291,8 +1328,12 @@ pub fn StateMachineType(
                     },
                 },
                 .posted = .{
-                    .cache_entries_max = options.cache_entries_posted,
                     .prefetch_entries_max = batch_transfers_max,
+                    .tree_options_object = .{
+                        .cache_entries_max = options.cache_entries_posted,
+                    },
+                    .tree_options_id = {},
+                    .tree_options_index = .{},
                 },
             };
         }

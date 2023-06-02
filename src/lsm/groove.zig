@@ -815,11 +815,15 @@ pub fn GrooveType(
                 const worker = LookupContext.parent(completion);
                 worker.lookup = undefined;
 
-                // The result must be non-null as we keep the ID (if any) and Object trees in sync.
-                const object = result.?;
-                assert(!ObjectTreeHelpers(Object).tombstone(object));
+                if (result) |object| {
+                    assert(!ObjectTreeHelpers(Object).tombstone(object));
+                    worker.context.groove.prefetch_objects.putAssumeCapacityNoClobber(object.*, {});
+                } else {
+                    // When there is an id tree, the result must be non-null,
+                    // as we keep the ID and Object trees in sync.
+                    assert(!has_id);
+                }
 
-                worker.context.groove.prefetch_objects.putAssumeCapacityNoClobber(object.*, {});
                 worker.lookup_start_next();
             }
         };
