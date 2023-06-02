@@ -22,9 +22,13 @@ jobs:
           dotnet-version: |
             3.1.x
             6.0.x
+            7.0.x
 
       - name: Install zig
         run: ./scripts/install_zig.sh
+
+      - name: Dotnet version
+        run: dotnet --version
 
       - name: Build dotnet
         working-directory: src/clients/dotnet
