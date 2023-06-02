@@ -264,6 +264,29 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     try c.request(22, 22);
 }
 
+test "Cluster: recovery: recovering head: idle cluster" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    var b = t.replica(.B1);
+
+    try c.request(20, 20);
+
+    b.stop();
+    b.corrupt(.{ .wal_prepare = 21 });
+    b.corrupt(.{ .wal_header = 21 });
+
+    try b.open();
+    try expectEqual(b.status(), .recovering_head);
+    try expectEqual(b.op_head(), 20);
+
+    t.run();
+
+    try expectEqual(b.status(), .normal);
+    try expectEqual(b.op_head(), 20);
+}
+
 test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
