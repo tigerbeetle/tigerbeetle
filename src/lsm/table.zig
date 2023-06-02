@@ -101,15 +101,12 @@ pub fn TableType(
 
         // Export hashmap context for Key and Value
         pub const HashMapContextValue = struct {
-            pub fn eql(_: HashMapContextValue, a: Value, b: Value) bool {
+            pub inline fn eql(_: HashMapContextValue, a: Value, b: Value) bool {
                 return compare_keys(key_from_value(&a), key_from_value(&b)) == .eq;
             }
 
-            pub fn hash(_: HashMapContextValue, value: Value) u64 {
-                // TODO(King): this erros out with "unable to hash type void" due to
-                // CompositeKey(T) struct containing .padding which may be void at comptime.
-                const key = key_from_value(&value);
-                return std.hash_map.getAutoHashFn(Key, HashMapContextValue)(.{}, key);
+            pub inline fn hash(_: HashMapContextValue, value: Value) u64 {
+                return stdx.hash_inline(key_from_value(&value));
             }
         };
 
@@ -521,7 +518,7 @@ pub fn TableType(
                 const filter_bytes = filter_block_filter(builder.filter_block);
                 for (values) |*value| {
                     const key = key_from_value(value);
-                    const fingerprint = bloom_filter.Fingerprint.create(mem.asBytes(&key));
+                    const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
                     bloom_filter.add(fingerprint, filter_bytes);
                 }
 

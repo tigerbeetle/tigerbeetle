@@ -11,7 +11,7 @@ namespace TigerBeetle.Tests
     [TestClass]
     public class IntegrationTests
     {
-        private static Client GetClient(int maxConcurrency = 32) => new(0, new string[] { TBServer.TB_PORT }, maxConcurrency);
+        private static Client GetClient(int concurrencyMax = 32) => new(0, new string[] { TBServer.TB_PORT }, concurrencyMax);
 
         private static readonly Account[] accounts = new[]
         {
@@ -101,20 +101,20 @@ namespace TigerBeetle.Tests
 
         [TestMethod]
         [ExpectedException(typeof(ArgumentException))]
-        public void ConstructorWithZeroMaxConcurrency()
+        public void ConstructorWithZeroConcurrencyMax()
         {
             _ = new Client(0, new string[] { "3000" }, 0);
         }
 
         [TestMethod]
         [ExpectedException(typeof(ArgumentException))]
-        public void ConstructorWithNegativeMaxConcurrency()
+        public void ConstructorWithNegativeConcurrencyMax()
         {
             _ = new Client(0, new string[] { "3000" }, -1);
         }
 
         [TestMethod]
-        public void ConstructorWithInvalidMaxConcurrency()
+        public void ConstructorWithInvalidConcurrencyMax()
         {
             try
             {
@@ -123,7 +123,7 @@ namespace TigerBeetle.Tests
             }
             catch (InitializationException exception)
             {
-                Assert.AreEqual(InitializationStatus.PacketsCountInvalid, exception.Status);
+                Assert.AreEqual(InitializationStatus.ConcurrencyMaxInvalid, exception.Status);
             }
         }
 
@@ -713,21 +713,26 @@ namespace TigerBeetle.Tests
 
         /// <summary>
         /// This test asserts that a single Client can be shared by multiple concurrent tasks
-        /// Even if a limited "maxConcurrency" value forces new tasks to wait running tasks to complete
         /// </summary>
 
         [TestMethod]
         [DoNotParallelize]
-        public void ConcurrentTasksTest()
+        public void ConcurrencyTest() => ConcurrencyTest(isAsync: false);
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void ConcurrencyTestAsync() => ConcurrencyTest(isAsync: true);
+
+        private void ConcurrencyTest(bool isAsync)
         {
-            const int TASKS_QTY = 20;
-            int MAX_CONCURRENCY = TASKS_QTY / 2;
+            const int TASKS_QTY = 32;
+            int MAX_CONCURRENCY = 32;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
 
-            var results = client.CreateAccounts(accounts);
-            Assert.IsTrue(results.Length == 0);
+            var errors = client.CreateAccounts(accounts);
+            Assert.IsTrue(errors.Length == 0);
 
             var list = new List<Task<CreateTransferResult>>();
 
@@ -743,12 +748,13 @@ namespace TigerBeetle.Tests
                     Amount = 100,
                 };
 
-                /// Starts multiple tasks using a client with a limited maxConcurrency
-                var task = Task.Run(() => client.CreateTransfer(transfer));
+                /// Starts multiple tasks.
+                var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
                 list.Add(task);
             }
 
-            Task.WaitAll(list.ToArray());
+            Task.WhenAll(list).Wait();
+
             Assert.IsTrue(list.All(x => x.Result == CreateTransferResult.Ok));
 
             var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
@@ -764,8 +770,81 @@ namespace TigerBeetle.Tests
         }
 
         /// <summary>
+        /// This test asserts that a single Client can be shared by multiple concurrent tasks
+        /// Even if a limited "concurrencyMax" value results in "ConcurrencyExceededException"
+        /// </summary>
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void ConcurrencyExceededTest() => ConcurrencyExceededTest(isAsync: false);
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void ConcurrencyExceededTestAsync() => ConcurrencyExceededTest(isAsync: true);
+
+        private void ConcurrencyExceededTest(bool isAsync)
+        {
+            const int TASKS_QTY = 32;
+            int MAX_CONCURRENCY = 2;
+
+            using var server = new TBServer();
+            using var client = GetClient(MAX_CONCURRENCY);
+
+            var errors = client.CreateAccounts(accounts);
+            Assert.IsTrue(errors.Length == 0);
+
+            var list = new List<Task<CreateTransferResult>>();
+
+            for (int i = 0; i < TASKS_QTY; i++)
+            {
+                var transfer = new Transfer
+                {
+                    Id = i + 1,
+                    CreditAccountId = accounts[0].Id,
+                    DebitAccountId = accounts[1].Id,
+                    Ledger = 1,
+                    Code = 1,
+                    Amount = 100,
+                };
+
+                /// Starts multiple tasks using a client with a limited concurrencyMax:
+                var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
+                list.Add(task);
+            }
+
+            try
+            {
+                // Ignoring exceptions from the tasks.
+                Task.WhenAll(list).Wait();
+            }
+            catch { }
+
+            // It's expected for some tasks to failt with ConcurrencyExceededException or ObjectDisposedException:
+            var successCount = list.Count(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok);
+            var failedCount = list.Count(x => x.IsFaulted &&
+                (AssertException<ConcurrencyExceededException>(x.Exception!) ||
+                AssertException<ObjectDisposedException>(x.Exception!)));
+            Assert.IsTrue(successCount > 0);
+            Assert.IsTrue(successCount + failedCount == TASKS_QTY);
+
+            // Asserting that either the task failed or succeeded.
+            Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
+
+            var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+            AssertAccounts(lookupAccounts);
+
+            // Assert that all tasks ran to the conclusion
+
+            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (ulong)(100 * successCount));
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0LU);
+
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0LU);
+            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (ulong)(100 * successCount));
+        }
+
+        /// <summary>
         /// This test asserts that Client.Dispose() will wait for any ongoing request to complete
-        /// And new requests will fail with ObjectDisposedException
+        /// And new requests will fail with ObjectDisposedException.
         /// </summary>
 
         [TestMethod]
@@ -778,8 +857,8 @@ namespace TigerBeetle.Tests
 
         private void ConcurrentTasksDispose(bool isAsync)
         {
-            const int TASKS_QTY = 20;
-            int MAX_CONCURRENCY = 2;
+            const int TASKS_QTY = 32;
+            int MAX_CONCURRENCY = 32;
 
             using var server = new TBServer();
             using var client = GetClient(MAX_CONCURRENCY);
@@ -801,28 +880,57 @@ namespace TigerBeetle.Tests
                     Amount = 100,
                 };
 
-                /// Starts multiple tasks using a client with a limited maxConcurrency
+                /// Starts multiple tasks.
                 var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
                 list.Add(task);
             }
 
-            // Waiting for just one task
+            // Waiting for just one task, the others may be pending.
             list.First().Wait();
 
-            // Disposes the client, forcing all tasks to finish if already submitted a message, or fail
+            // Disposes the client, waiting all placed requests to finish.
             client.Dispose();
 
             try
             {
-                // Ignoring exceptions from the tasks
+                // Ignoring exceptions from the tasks.
                 Task.WhenAll(list).Wait();
             }
             catch { }
 
-            // Asserting that either the task failed or succeeded
-            Assert.IsTrue(list.Any(x => x.Result == CreateTransferResult.Ok));
+            // Asserting that either the task failed or succeeded,
+            // at least one must be succeeded.
+            Assert.IsTrue(list.Any(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok));
             Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
         }
+
+        [TestMethod]
+        [ExpectedException(typeof(ObjectDisposedException))]
+        [DoNotParallelize]
+        public void DisposedClient()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            var accountResults = client.CreateAccounts(accounts);
+            Assert.IsTrue(accountResults.Length == 0);
+
+            client.Dispose();
+
+            var transfer = new Transfer
+            {
+                Id = 1,
+                CreditAccountId = accounts[0].Id,
+                DebitAccountId = accounts[1].Id,
+                Ledger = 1,
+                Code = 1,
+                Amount = 100,
+            };
+
+            _ = client.CreateTransfers(new Transfer[] { transfer });
+            Assert.IsTrue(false);
+        }
+
 
         private static void AssertAccounts(Account[] lookupAccounts)
         {
@@ -854,6 +962,16 @@ namespace TigerBeetle.Tests
             Assert.AreEqual(a.Amount, b.Amount);
             Assert.AreEqual(a.PendingId, b.PendingId);
             Assert.AreEqual(a.Timeout, b.Timeout);
+        }
+
+        private static bool AssertException<T>(Exception exception) where T : Exception
+        {
+            while (exception is AggregateException aggregateException && aggregateException.InnerException != null)
+            {
+                exception = aggregateException.InnerException;
+            }
+
+            return exception is T;
         }
     }
 

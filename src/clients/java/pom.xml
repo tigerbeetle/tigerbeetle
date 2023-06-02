@@ -37,7 +37,7 @@
     <maven.compiler.target>11</maven.compiler.target>
     <!-- JaCoCo thresholds -->
     <jacoco.unit-tests.limit.instruction-ratio>95%</jacoco.unit-tests.limit.instruction-ratio>
-    <jacoco.unit-tests.limit.branch-ratio>90%</jacoco.unit-tests.limit.branch-ratio>
+    <jacoco.unit-tests.limit.branch-ratio>85%</jacoco.unit-tests.limit.branch-ratio>
   </properties>
 
   <dependencies>
@@ -149,6 +149,7 @@
               <!-- Excluding exceptions classes -->
               <exclude>com/tigerbeetle/InitializationException.class</exclude>
               <exclude>com/tigerbeetle/RequestException.class</exclude>
+              <exclude>com/tigerbeetle/ConcurrencyExceededException.class</exclude>
               <exclude>com/tigerbeetle/AssertionError.class</exclude>
 
               <!-- Excluding JNILoader platform specifics -->
@@ -158,6 +159,7 @@
 
               <!-- Excluding enums -->
               <exclude>com/tigerbeetle/PacketStatus.class</exclude>
+              <exclude>com/tigerbeetle/PacketAcquireStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
 

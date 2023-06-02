@@ -218,8 +218,8 @@ In response to a `request_reply`:
 
 See also:
 
-  - [Integration: Client Session Lifecycle](../../docs/design/client-sessions.md#lifecycle)
-  - [Integration: Client Session Eviction](../../docs/design/client-sessions.md#eviction)
+  - [Integration: Client Session Lifecycle](../design/client-sessions.md#lifecycle)
+  - [Integration: Client Session Eviction](../design/client-sessions.md#eviction)
 
 ## Protocol: Repair Grid
 

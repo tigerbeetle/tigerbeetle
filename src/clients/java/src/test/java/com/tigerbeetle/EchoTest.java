@@ -34,7 +34,7 @@ public class EchoTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testConstructorNegativeMaxConcurrency() throws Throwable {
+    public void testConstructorNegativeConcurrencyMax() throws Throwable {
         try (var client = new EchoClient(0, "3000", -1)) {
 
         } catch (Throwable any) {
@@ -74,8 +74,8 @@ public class EchoTest {
         };
 
         final Random rnd = new Random(3);
-        final int maxConcurrency = 64;
-        try (var client = new EchoClient(0, "3000", maxConcurrency)) {
+        final int concurrencyMax = 64;
+        try (var client = new EchoClient(0, "3000", concurrencyMax)) {
 
             // Repeating the same test multiple times to stress the
             // cycle of message exhaustion followed by completions.
@@ -83,7 +83,7 @@ public class EchoTest {
             for (int repetition = 0; repetition < repetitionsMax; repetition++) {
 
                 final var list = new ArrayList<AsyncContext>();
-                for (int i = 0; i < maxConcurrency; i++) {
+                for (int i = 0; i < concurrencyMax; i++) {
 
                     // Submitting some random data to be echoed back:
                     final var batch =
@@ -139,8 +139,8 @@ public class EchoTest {
         }
 
         final Random rnd = new Random(4);
-        final int maxConcurrency = 64;
-        try (var client = new EchoClient(0, "3000", maxConcurrency)) {
+        final int concurrencyMax = 64;
+        try (var client = new EchoClient(0, "3000", concurrencyMax)) {
 
             // Repeating the same test multiple times to stress the
             // cycle of message exhaustion followed by completions.
@@ -148,7 +148,7 @@ public class EchoTest {
             for (int repetition = 0; repetition < repetitionsMax; repetition++) {
 
                 final var list = new ArrayList<ThreadContext>();
-                for (int i = 0; i < maxConcurrency; i++) {
+                for (int i = 0; i < concurrencyMax; i++) {
 
                     // Submitting some random data to be echoed back:
                     final var batch =

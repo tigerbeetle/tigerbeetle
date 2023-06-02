@@ -69,8 +69,8 @@ func WithClient(s testing.TB, withClient func(Client)) {
 	})
 
 	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
-	maxConcurrency := uint(32)
-	client, err := NewClient(TIGERBEETLE_CLUSTER_ID, addresses, maxConcurrency)
+	concurrencyMax := uint(32)
+	client, err := NewClient(TIGERBEETLE_CLUSTER_ID, addresses, concurrencyMax)
 	if err != nil {
 		s.Fatal(err)
 	}

@@ -9,14 +9,14 @@ namespace TigerBeetle
 {
     public sealed class Client : IDisposable
     {
-        private const int DEFAULT_MAX_CONCURRENCY = 32;
+        private const int DEFAULT_CONCURRENCY_MAX = 32;
 
         private readonly uint clusterID;
         private readonly NativeClient nativeClient;
 
-        public Client(uint clusterID, string[] addresses, int maxConcurrency = DEFAULT_MAX_CONCURRENCY)
+        public Client(uint clusterID, string[] addresses, int concurrencyMax = DEFAULT_CONCURRENCY_MAX)
         {
-            this.nativeClient = NativeClient.Init(clusterID, addresses, maxConcurrency);
+            this.nativeClient = NativeClient.Init(clusterID, addresses, concurrencyMax);
             this.clusterID = clusterID;
         }
 
