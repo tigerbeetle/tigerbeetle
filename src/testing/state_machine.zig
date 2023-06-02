@@ -40,7 +40,8 @@ pub fn StateMachineType(
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple,
                     .id = config.lsm_batch_multiple,
-                    .value = config.lsm_batch_multiple,
+                    // ×2: modifying a 'value' both inserts the new Thing, and removes the old one.
+                    .value = 2 * config.lsm_batch_multiple,
                 },
                 .ignored = &[_][]const u8{},
                 .derived = .{},

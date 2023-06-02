@@ -50,7 +50,6 @@ test "valid tb_client.h" {
         .{ tb_client.tb_status_t, "TB_STATUS" },
         .{ tb_client.tb_client_t, "tb_client_t" },
         .{ tb_client.tb_packet_t, "tb_packet_t" },
-        .{ tb_client.tb_packet_list_t, "tb_packet_list_t" },
         .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
     }) |c_export| {
         const ty: type = c_export[0];

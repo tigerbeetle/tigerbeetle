@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 
 const TableType = @import("table.zig").TableType;
@@ -411,20 +412,20 @@ pub fn GrooveType(
         const PrefetchIDs = std.AutoHashMapUnmanaged(PrimaryKey, void);
 
         const PrefetchObjectsContext = struct {
-            pub fn hash(_: PrefetchObjectsContext, object: Object) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&@field(object, primary_field)));
+            pub inline fn hash(_: PrefetchObjectsContext, object: Object) u64 {
+                return stdx.hash_inline(@field(object, primary_field));
             }
 
-            pub fn eql(_: PrefetchObjectsContext, a: Object, b: Object) bool {
+            pub inline fn eql(_: PrefetchObjectsContext, a: Object, b: Object) bool {
                 return @field(a, primary_field) == @field(b, primary_field);
             }
         };
         const PrefetchObjectsAdapter = struct {
-            pub fn hash(_: PrefetchObjectsAdapter, key: PrimaryKey) u64 {
-                return std.hash.Wyhash.hash(0, mem.asBytes(&key));
+            pub inline fn hash(_: PrefetchObjectsAdapter, key: PrimaryKey) u64 {
+                return stdx.hash_inline(key);
             }
 
-            pub fn eql(_: PrefetchObjectsAdapter, a_key: PrimaryKey, b_object: Object) bool {
+            pub inline fn eql(_: PrefetchObjectsAdapter, a_key: PrimaryKey, b_object: Object) bool {
                 return a_key == @field(b_object, primary_field);
             }
         };

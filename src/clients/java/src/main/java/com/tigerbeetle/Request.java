@@ -70,7 +70,7 @@ abstract class Request<TResponse extends Batch> {
             throw new IllegalArgumentException("Empty batch");
     }
 
-    public void beginRequest() {
+    public void beginRequest() throws ConcurrencyExceededException {
         nativeClient.submit(this);
     }
 
@@ -159,11 +159,6 @@ abstract class Request<TResponse extends Batch> {
 
     byte getOperation() {
         return this.operation.value;
-    }
-
-    void releasePermit() {
-        // Releasing the packet to be used by another thread
-        nativeClient.releasePermit();
     }
 
     /**

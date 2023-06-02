@@ -16,11 +16,11 @@
 
 A tree is a hierarchy of in-memory and on-disk tables. There are three categories of tables:
 
-- The [mutable table](table_mutable.zig) is an in-memory table.
+- The [mutable table](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/lsm/table_mutable.zig) is an in-memory table.
   - Each tree has a single mutable table.
   - All tree updates, inserts, and removes are applied to the mutable table.
   - The mutable table's size is allocated to accommodate a full bar of updates.
-- The [immutable table](table_immutable.zig) is an in-memory table.
+- The [immutable table](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/lsm/table_immutable.zig) is an in-memory table.
   - Each tree has a single immutable table.
   - The mutable table's contents are periodically moved to the immutable table,
     where they are stored while being flushed to level `0`.
@@ -28,7 +28,7 @@ A tree is a hierarchy of in-memory and on-disk tables. There are three categorie
   immutable on-disk tables.
   - Each tree has as many as `config.lsm_growth_factor ^ (level + 1)` tables per level.
     (`config.lsm_growth_factor` is typically 8).
-  - Within a given level and snapshot, the tables' key ranges are [disjoint](manifest_level.zig).
+  - Within a given level and snapshot, the tables' key ranges are [disjoint](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/lsm/manifest_level.zig).
 
 ## Compaction
 
@@ -100,7 +100,7 @@ Level 2     b───d e─────h i───k l───n o─p q──�
 ```
 
 Links:
-- [`Manifest.compaction_table`](manifest.zig)
+- [`Manifest.compaction_table`](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/lsm/manifest.zig)
 - [Constructing and Analyzing the LSM Compaction Design Space](http://vldb.org/pvldb/vol14/p2216-sarkar.pdf) describes the tradeoffs of various data movement policies. TigerBeetle implements the "least overlapping with parent" policy.
 - [Option of Compaction Priority](https://rocksdb.org/blog/2016/01/29/compaction_pri.html)
 
@@ -117,8 +117,9 @@ optimization should enable the tree's performance to approach that of an append-
 
 #### Compaction Table Overlap
 
-When compacting a table from level `A` to level `B`, what is the maximum number of level-`B` tables
-that may overlap the level-`A` table (i.e. the "worst case")?
+Applying [this](#compaction-selection-policy) selection policy while compacting a table
+from level A to level B, what is the maximum number of level-B tables that may overlap with the
+selected level-A table (i.e. the "worst case")?
 
 Perhaps surprisingly, this is `lsm_growth_factor`:
 
@@ -212,7 +213,7 @@ op  0   4   8  12  16  20  24  (op, snapshot)
 
 However, commits in the first measure following recovery from a checkpoint prefetch from a higher
 snapshot to avoid querying tables that were deleted at the checkpoint.
-See [`lookup_snapshot_max_for_checkpoint()`](tree.zig) for more detail.
+See [`lookup_snapshot_max_for_checkpoint()`](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/lsm/tree.zig) for more detail.
 
 #### Persistent Snapshots
 
@@ -251,7 +252,7 @@ At the end of the last beat of the compaction bar (`23`):
 ## Manifest
 
 The manifest is a tree's index of table locations and metadata.
-(Not to be confused with the [SuperBlock Manifest](/src/vsr/superblock_manifest.zig)).
+(Not to be confused with the [SuperBlock Manifest](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/vsr/superblock_manifest.zig)).
 
 Each manifest has two components:
 - a single [`ManifestLog`](#manifest-log) shared by all levels, and

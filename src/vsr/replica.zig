@@ -41,6 +41,24 @@ pub const Status = enum {
     recovering_head,
 };
 
+const CommitStage = enum {
+    /// Not committing.
+    idle,
+    /// About to start committing.
+    next,
+    next_journal,
+    next_pipeline,
+    prefetch_state_machine,
+    /// Ensure that the ClientReplies has at least one Write available.
+    setup_client_replies,
+    compact_state_machine,
+    checkpoint_state_machine,
+    checkpoint_client_replies,
+    checkpoint_superblock,
+    /// A commit just finished. Clean up before proceeding to the next.
+    cleanup,
+};
+
 const Nonce = u128;
 
 const Prepare = struct {
@@ -228,14 +246,8 @@ pub fn ReplicaType(
         /// * `replica.commit_max = replica.op - pipeline.queue.prepare_queue.count`.
         commit_max: u64,
 
-        /// Guards against concurrent commits.
-        ///
-        /// Set while:
-        /// * prefetching from storage, in preparation for a commit
-        /// * reading a prepare from storage in order to commit
-        /// * compacting storage
-        /// * checkpointing
-        committing: bool = false,
+        /// Guards against concurrent commits, and tracks the commit progress.
+        commit_stage: CommitStage = .idle,
 
         /// Whether we are reading a prepare from storage to construct the pipeline.
         pipeline_repairing: bool = false,
@@ -369,9 +381,6 @@ pub fn ReplicaType(
         /// 3. Crash.
         /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
         on_checkpoint_done: ?fn (replica: *const Self) void = null,
-
-        /// Called when `commit_prepare` finishes committing.
-        commit_callback: ?fn (*Self) void = null,
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
@@ -580,12 +589,10 @@ pub fn ReplicaType(
                 }
             }
 
-            assert(
-                (self.status == .recovering and self.solo()) or
-                    self.status == .normal or
-                    self.status == .view_change or
-                    self.status == .recovering_head,
-            );
+            maybe(self.status == .normal);
+            maybe(self.status == .view_change);
+            maybe(self.status == .recovering_head);
+            if (self.status == .recovering) assert(self.solo());
 
             // Asynchronously open the (Forest inside) StateMachine so that we can repair grid
             // blocks if necessary:
@@ -607,7 +614,7 @@ pub fn ReplicaType(
         fn state_machine_open_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
             assert(!self.state_machine_opened);
-            assert(!self.committing);
+            assert(self.commit_stage == .idle);
 
             log.debug("{}: state_machine_open_callback", .{self.replica});
 
@@ -881,12 +888,9 @@ pub fn ReplicaType(
             }
 
             if (self.commit_prepare) |message| {
-                assert(self.committing);
-                assert(self.commit_callback != null);
+                assert(self.commit_stage != .idle);
                 self.message_bus.unref(message);
                 self.commit_prepare = null;
-            } else {
-                assert(self.commit_callback == null);
             }
 
             var grid_reads = self.grid_reads.iterate();
@@ -1525,6 +1529,7 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.status == .view_change);
             assert(!self.do_view_change_quorum);
+            assert(self.primary_index(self.view) == self.replica);
             assert(message.header.view == self.view);
             DVCQuorum.verify_message(message);
 
@@ -2253,7 +2258,8 @@ pub fn ReplicaType(
             if (self.solo()) {
                 // Replica=1 doesn't write prepares concurrently to avoid gaps in its WAL.
                 assert(self.journal.writes.executing() <= 1);
-                assert(self.journal.writes.executing() == 1 or self.committing or
+                assert(self.journal.writes.executing() == 1 or
+                    self.commit_stage != .idle or
                     self.client_replies.writes.executing() > 0);
 
                 self.prepare_timeout.reset();
@@ -2677,6 +2683,54 @@ pub fn ReplicaType(
             unreachable;
         }
 
+        fn commit_dispatch(self: *Self, stage_new: CommitStage) void {
+            assert(self.commit_min <= self.commit_max);
+            assert(self.commit_min <= self.op);
+
+            const stage_old = self.commit_stage;
+            assert(stage_old != stage_new);
+
+            // TODO If syncing, abort commit chain.
+
+            self.commit_stage = switch (stage_new) {
+                .next => if (self.status == .normal and self.primary())
+                    CommitStage.next_pipeline
+                else
+                    CommitStage.next_journal,
+                else => stage_new,
+            };
+
+            log.debug("{}: commit_dispatch: {s}..{s} (commit_min={})", .{
+                self.replica,
+                @tagName(stage_old),
+                @tagName(self.commit_stage),
+                self.commit_min,
+            });
+
+            switch (self.commit_stage) {
+                .next => unreachable,
+                .next_journal => self.commit_journal_next(),
+                .next_pipeline => self.commit_pipeline_next(),
+                .prefetch_state_machine => self.commit_op_prefetch(),
+                .setup_client_replies => {
+                    self.client_replies.ready(commit_op_client_replies_ready_callback);
+                },
+                .compact_state_machine => self.state_machine.compact(
+                    commit_op_compact_callback,
+                    self.commit_prepare.?.header.op,
+                ),
+                .checkpoint_state_machine => {
+                    self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
+                },
+                .checkpoint_client_replies => {
+                    self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
+                },
+                .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
+                .cleanup => self.commit_op_cleanup(),
+                .idle => assert(self.commit_prepare == null),
+            }
+        }
+
         /// Commit ops up to commit number `commit` (inclusive).
         /// A function which calls `commit_journal()` to set `commit_max` must first call
         /// `view_jump()`. Otherwise, we may fork the log.
@@ -2704,16 +2758,19 @@ pub fn ReplicaType(
             }
 
             if (!self.state_machine_opened) {
-                assert(!self.committing);
+                assert(self.commit_stage == .idle);
                 return;
             }
 
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
-            if (self.committing) {
-                log.debug("{}: commit_journal: already committing...", .{self.replica});
+            if (self.commit_stage != .idle) {
+                log.debug("{}: commit_journal: already committing ({s}; commit_min={})", .{
+                    self.replica,
+                    @tagName(self.commit_stage),
+                    self.commit_min,
+                });
                 return;
             }
-            assert(!(self.status == .normal and self.primary()));
 
             // We check the hash chain before we read each op, rather than once upfront, because
             // it's possible for `commit_max` to change while we read asynchronously, after we
@@ -2725,14 +2782,13 @@ pub fn ReplicaType(
             // further ops, because `commit_max` may have been bumped and may refer to a different
             // op.
 
-            assert(!self.committing);
-            self.committing = true;
-
-            self.commit_journal_next();
+            assert(self.commit_stage == .idle);
+            self.commit_dispatch(.next_journal);
         }
 
         fn commit_journal_next(self: *Self) void {
-            assert(self.committing);
+            assert(self.commit_stage == .next_journal);
+            assert(self.commit_prepare == null);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(!(self.status == .normal and self.primary()));
@@ -2743,7 +2799,7 @@ pub fn ReplicaType(
 
             if (!self.valid_hash_chain("commit_journal_next")) {
                 assert(!self.solo());
-                self.commit_ops_done();
+                self.commit_dispatch(.idle);
                 return;
             }
 
@@ -2769,7 +2825,7 @@ pub fn ReplicaType(
                     );
                 }
             } else {
-                self.commit_ops_done();
+                self.commit_dispatch(.idle);
                 // This is an optimization to expedite the view change before the `repair_timeout`:
                 if (self.status == .view_change and self.repairs_allowed()) self.repair();
 
@@ -2786,11 +2842,12 @@ pub fn ReplicaType(
         }
 
         fn commit_journal_next_callback(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
-            assert(self.committing);
+            assert(self.commit_stage == .next_journal);
+            assert(self.commit_prepare == null);
             assert(destination_replica == null);
 
             if (prepare == null) {
-                self.commit_ops_done();
+                self.commit_dispatch(.idle);
                 log.debug("{}: commit_journal_next_callback: prepare == null", .{self.replica});
                 if (self.solo()) @panic("cannot recover corrupt prepare");
                 return;
@@ -2800,7 +2857,7 @@ pub fn ReplicaType(
                 .normal => {},
                 .view_change => {
                     if (self.primary_index(self.view) != self.replica) {
-                        self.commit_ops_done();
+                        self.commit_dispatch(.idle);
                         log.debug("{}: commit_journal_next_callback: no longer primary view={}", .{
                             self.replica,
                             self.view,
@@ -2821,47 +2878,28 @@ pub fn ReplicaType(
             const op = self.commit_min + 1;
             assert(prepare.?.header.op == op);
 
-            self.commit_op_prefetch(prepare.?, commit_journal_callback);
-        }
-
-        fn commit_journal_callback(self: *Self) void {
-            assert(self.committing);
-            assert(self.commit_min <= self.commit_max);
-            assert(self.commit_min <= self.op);
-
-            if (self.status == .normal and self.primary()) {
-                if (self.pipeline.queue.prepare_queue.empty()) {
-                    self.commit_ops_done();
-                } else {
-                    self.commit_pipeline_next();
-                }
-            } else {
-                self.commit_journal_next();
-            }
+            self.commit_prepare = prepare.?.ref();
+            self.commit_dispatch(.prefetch_state_machine);
         }
 
         /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
         ///
-        /// 1. prefetch
-        /// 2. commit_op: Update the state machine and the replica's commit_min/commit_max.
-        /// 3. compact
-        /// 4. checkpoint: (Only called when `commit_min == op_checkpoint_trigger`).
-        /// 5. done: Call the `callback` that was passed to `commit_op_prefetch`.
-        fn commit_op_prefetch(
-            self: *Self,
-            prepare: *Message,
-            callback: fn (*Self) void,
-        ) void {
-            assert(self.committing);
+        /// 1. Prefetch.
+        /// 2. Commit_op: Update the state machine and the replica's commit_min/commit_max.
+        /// 3. Compact.
+        /// 4. Checkpoint: (Only called when `commit_min == op_checkpoint_trigger`).
+        /// 5. Done. Go to step 1 to repeat for the next op.
+        fn commit_op_prefetch(self: *Self) void {
             assert(self.state_machine_opened);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
-            assert(self.commit_prepare == null);
-            assert(self.commit_callback == null);
-            assert(prepare.header.command == .prepare);
-            assert(prepare.header.operation != .root);
-            assert(prepare.header.op == self.commit_min + 1);
-            assert(prepare.header.op <= self.op);
+            assert(self.commit_stage == .prefetch_state_machine);
+            assert(self.commit_prepare.?.header.operation != .root);
+            assert(self.commit_prepare.?.header.command == .prepare);
+            assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+            assert(self.commit_prepare.?.header.op <= self.op);
+
+            const prepare = self.commit_prepare.?;
 
             tracer.start(
                 &self.tracer_slot_commit,
@@ -2869,8 +2907,6 @@ pub fn ReplicaType(
                 @src(),
             );
 
-            self.commit_prepare = prepare.ref();
-            self.commit_callback = callback;
             self.state_machine.prefetch(
                 commit_op_prefetch_callback,
                 prepare.header.op,
@@ -2881,21 +2917,18 @@ pub fn ReplicaType(
 
         fn commit_op_prefetch_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
-            assert(self.committing);
+            assert(self.commit_stage == .prefetch_state_machine);
             assert(self.commit_prepare != null);
-            assert(self.commit_callback != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
 
-            // Ensure that the ClientReplies has at least one Write available.
             maybe(self.client_replies.writes.available() == 0);
-            self.client_replies.ready(commit_op_client_replies_ready);
+            self.commit_dispatch(.setup_client_replies);
         }
 
-        fn commit_op_client_replies_ready(client_replies: *ClientReplies) void {
+        fn commit_op_client_replies_ready_callback(client_replies: *ClientReplies) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
-            assert(self.committing);
+            assert(self.commit_stage == .setup_client_replies);
             assert(self.commit_prepare != null);
-            assert(self.commit_callback != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
             assert(self.client_replies.writes.available() > 0);
 
@@ -2938,13 +2971,12 @@ pub fn ReplicaType(
                 }
             }
 
-            self.state_machine.compact(commit_op_compact_callback, self.commit_prepare.?.header.op);
+            self.commit_dispatch(.compact_state_machine);
         }
 
         fn commit_op_compact_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
-            assert(self.committing);
-            assert(self.commit_callback != null);
+            assert(self.commit_stage == .compact_state_machine);
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
 
@@ -2975,16 +3007,15 @@ pub fn ReplicaType(
                 assert(self.grid.write_queue.empty());
                 assert(self.grid.write_iops.executing() == 0);
 
-                self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
+                self.commit_dispatch(.checkpoint_state_machine);
             } else {
-                self.commit_op_done();
+                self.commit_dispatch(.cleanup);
             }
         }
 
         fn commit_op_checkpoint_state_machine_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
-            assert(self.committing);
-            assert(self.commit_callback != null);
+            assert(self.commit_stage == .checkpoint_state_machine);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
@@ -2992,19 +3023,26 @@ pub fn ReplicaType(
             assert(self.grid.write_queue.empty());
             assert(self.grid.write_iops.executing() == 0);
 
-            self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
+            self.commit_dispatch(.checkpoint_client_replies);
         }
 
         fn commit_op_checkpoint_client_replies_callback(client_replies: *ClientReplies) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
-            assert(self.committing);
-            assert(self.commit_callback != null);
+            assert(self.commit_stage == .checkpoint_client_replies);
+
+            self.commit_dispatch(.checkpoint_superblock);
+        }
+
+        fn commit_op_checkpoint_superblock(self: *Self) void {
+            assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
             assert(self.grid.read_faulty_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(self.grid.write_iops.executing() == 0);
+            assert(self.op_checkpoint_trigger() == self.op);
+            assert(self.op_checkpoint_trigger() <= self.commit_max);
 
             // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
             //
@@ -3031,8 +3069,7 @@ pub fn ReplicaType(
 
         fn commit_op_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
-            assert(self.committing);
-            assert(self.commit_callback != null);
+            assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
 
@@ -3051,12 +3088,11 @@ pub fn ReplicaType(
             );
 
             if (self.on_checkpoint_done) |on_checkpoint| on_checkpoint(self);
-            self.commit_op_done();
+            self.commit_dispatch(.cleanup);
         }
 
-        fn commit_op_done(self: *Self) void {
-            const callback = self.commit_callback.?;
-            assert(self.committing);
+        fn commit_op_cleanup(self: *Self) void {
+            assert(self.commit_stage == .cleanup);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_trigger());
 
@@ -3064,21 +3100,19 @@ pub fn ReplicaType(
 
             self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
-            self.commit_callback = null;
 
             tracer.end(
                 &self.tracer_slot_commit,
                 .{ .commit = .{ .op = op } },
             );
 
-            callback(self);
+            self.commit_dispatch(.next);
         }
 
         fn commit_op(self: *Self, prepare: *const Message) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
-            assert(self.committing);
+            assert(self.commit_stage == .setup_client_replies);
             assert(self.commit_prepare.? == prepare);
-            assert(self.commit_callback != null);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.client_replies.writes.available() > 0);
@@ -3222,22 +3256,25 @@ pub fn ReplicaType(
             assert(self.pipeline.queue.prepare_queue.count > 0);
 
             if (!self.state_machine_opened) {
-                assert(!self.committing);
+                assert(self.commit_stage == .idle);
                 return;
             }
 
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
-            if (self.committing) {
-                log.debug("{}: commit_pipeline: already committing...", .{self.replica});
+            if (self.commit_stage != .idle) {
+                log.debug("{}: commit_pipeline: already committing ({s}; commit_min={})", .{
+                    self.replica,
+                    @tagName(self.commit_stage),
+                    self.commit_min,
+                });
                 return;
             }
 
-            self.committing = true;
-            self.commit_pipeline_next();
+            self.commit_dispatch(.next_pipeline);
         }
 
         fn commit_pipeline_next(self: *Self) void {
-            assert(self.committing);
+            assert(self.commit_stage == .next_pipeline);
             assert(self.status == .normal);
             assert(self.primary());
 
@@ -3250,7 +3287,7 @@ pub fn ReplicaType(
                 if (!prepare.ok_quorum_received) {
                     // Eventually handled by on_prepare_timeout().
                     log.debug("{}: commit_pipeline_next: waiting for quorum", .{self.replica});
-                    self.commit_ops_done();
+                    self.commit_dispatch(.idle);
                     return;
                 }
 
@@ -3258,27 +3295,11 @@ pub fn ReplicaType(
                 assert(count >= self.quorum_replication);
                 assert(count <= self.replica_count);
 
-                self.commit_op_prefetch(prepare.message, commit_pipeline_callback);
+                self.commit_prepare = prepare.message.ref();
+                self.commit_dispatch(.prefetch_state_machine);
             } else {
-                self.commit_ops_done();
+                self.commit_dispatch(.idle);
             }
-        }
-
-        fn commit_pipeline_callback(self: *Self) void {
-            assert(self.committing);
-            assert(self.commit_min <= self.commit_max);
-            assert(self.commit_min <= self.op);
-
-            if (self.status == .normal and self.primary()) {
-                self.commit_pipeline_next();
-            } else {
-                self.commit_ops_done();
-            }
-        }
-
-        fn commit_ops_done(self: *Self) void {
-            assert(self.committing);
-            self.committing = false;
         }
 
         fn copy_latest_headers_and_set_size(
@@ -6363,7 +6384,7 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.status == .recovering);
             assert(self.view == self.log_view);
-            assert(!self.committing);
+            assert(self.commit_stage == .idle);
             assert(self.pipeline == .cache);
             assert(self.journal.header_with_op(self.op) != null);
 
@@ -6380,7 +6401,7 @@ pub fn ReplicaType(
             assert(self.status == .recovering);
             assert(self.view == self.log_view);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
-            assert(!self.committing);
+            assert(self.commit_stage == .idle);
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
             assert(self.view_headers.command == .start_view);
@@ -6444,7 +6465,7 @@ pub fn ReplicaType(
             assert(self.view <= view_new);
             assert(self.replica != self.primary_index(view_new));
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
-            assert(!self.committing);
+            assert(self.commit_stage == .idle);
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.pipeline == .cache);
             assert(self.view_headers.command == .start_view);

@@ -55,6 +55,7 @@ jobs:
           path: src/clients/dotnet/TigerBeetle/bin/Release/*.nupkg
 
   prepare_validation_tests:
+    if: inputs.version == ''
     needs: build
     runs-on: ubuntu-latest
     name: Prepare validation tests
@@ -76,6 +77,7 @@ jobs:
           path: Program.cs
 
   run_validation_tests:
+    if: inputs.version == ''
     needs: prepare_validation_tests
     name: Validate OS
     strategy:
@@ -107,6 +109,7 @@ jobs:
         run: dotnet run
 
   run_validation_tests_on_containers:
+    if: inputs.version == ''
     needs: prepare_validation_tests
     name: Validate dotnet runtime
     strategy:

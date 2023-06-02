@@ -32,7 +32,7 @@ func main() {
 		port = "3000"
 	}
 
-	client, err := tb.NewClient(0, []string{port}, 1)
+	client, err := tb.NewClient(0, []string{port}, 32)
 	if err != nil {
 		log.Fatalf("Error creating client: %s", err)
 	}
