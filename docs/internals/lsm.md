@@ -1,3 +1,7 @@
+# LSM
+
+Documentation for (roughly) code in the `src/lsm` directory.
+
 # Glossary
 
 - _bar_/_measure_: `lsm_batch_multiple` beats; unit of incremental compaction.
