@@ -636,6 +636,10 @@ const ClockSimulator = struct {
         t1: ?i64,
         clock_simulator: *ClockSimulator,
 
+        pub fn clone(packet: *const Packet) Packet {
+            return packet.*;
+        }
+
         /// PacketSimulator requires this function, but we don't actually have anything to deinit.
         pub fn deinit(packet: *const Packet) void {
             _ = packet;

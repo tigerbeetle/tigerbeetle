@@ -12,6 +12,8 @@ pub const PacketSimulatorOptions = struct {
     client_count: u8,
     seed: u64,
 
+    recorded_count_max: u8 = 0,
+
     /// Mean for the exponential distribution used to calculate forward delay.
     one_way_delay_mean: u64,
     one_way_delay_min: u64,
@@ -89,9 +91,18 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             /// Commands in the set are delivered.
             /// Commands not in the set are dropped.
             filter: LinkFilter = LinkFilter.initFull(),
+            /// Commands in the set are recorded for a later replay.
+            record: LinkFilter = .{},
             /// We can arbitrary clog a path until a tick.
             clogged_till: u64 = 0,
         };
+
+        const RecordedPacket = struct {
+            callback: fn (packet: Packet, path: Path) void,
+            packet: Packet,
+            path: Path,
+        };
+        const Recorded = std.ArrayListUnmanaged(RecordedPacket);
 
         options: PacketSimulatorOptions,
         prng: std.rand.DefaultPrng,
@@ -100,6 +111,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         /// A send and receive path between each node in the network.
         /// Indexed by path_index().
         links: []Link,
+
+        /// Recorded messages for manual replay in unit-tests.
+        recorded: Recorded,
 
         /// Scratch space for automatically generating partitions.
         /// The "source of truth" for partitions is links[*].filter.
@@ -125,6 +139,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
             errdefer for (links) |link| link.queue.deinit();
 
+            var recorded = try Recorded.initCapacity(allocator, options.recorded_count_max);
+            errdefer recorded.deinit(allocator);
+
             const auto_partition = try allocator.alloc(bool, @as(usize, options.node_count));
             errdefer allocator.free(auto_partition);
             std.mem.set(bool, auto_partition, false);
@@ -137,6 +154,8 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 .options = options,
                 .prng = std.rand.DefaultPrng.init(options.seed),
                 .links = links,
+
+                .recorded = recorded,
 
                 .auto_partition_active = false,
                 .auto_partition = auto_partition,
@@ -151,6 +170,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 link.queue.deinit();
             }
 
+            while (self.recorded.popOrNull()) |packet| packet.packet.deinit();
+            self.recorded.deinit(allocator);
+
             allocator.free(self.links);
             allocator.free(self.auto_partition);
             allocator.free(self.auto_partition_nodes);
@@ -158,6 +180,25 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         pub fn link_filter(self: *Self, path: Path) *LinkFilter {
             return &self.links[self.path_index(path)].filter;
+        }
+
+        pub fn link_record(self: *Self, path: Path) *LinkFilter {
+            return &self.links[self.path_index(path)].record;
+        }
+
+        pub fn replay_recorded(self: *Self) void {
+            assert(self.recorded.items.len > 0);
+
+            var recording = false;
+            for (self.links) |*link| {
+                recording = recording or link.record.bits.count() > 0;
+                link.record = .{};
+            }
+            assert(recording);
+
+            while (self.recorded.popOrNull()) |packet| {
+                self.submit_packet(packet.packet, packet.callback, packet.path);
+            }
         }
 
         fn order_packets(context: void, a: LinkPacket, b: LinkPacket) math.Order {
@@ -314,31 +355,27 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     const queue = &self.links[self.path_index(path)].queue;
                     while (queue.peek()) |*link_packet| {
                         if (link_packet.expiry > self.ticks) break;
+
                         _ = queue.remove();
+                        defer link_packet.packet.deinit();
 
                         if (!self.links[self.path_index(path)].filter.contains(link_packet.packet.command())) {
                             log.warn("dropped packet (different partitions): from={} to={}", .{ from, to });
-                            link_packet.packet.deinit();
                             continue;
                         }
 
                         if (self.should_drop()) {
                             log.warn("dropped packet from={} to={}", .{ from, to });
-                            link_packet.packet.deinit();
                             continue;
                         }
 
                         if (self.should_replay()) {
-                            self.submit_packet(link_packet.packet, link_packet.callback, path);
-
+                            self.submit_packet(link_packet.packet.clone(), link_packet.callback, path);
                             log.debug("replayed packet from={} to={}", .{ from, to });
-
-                            link_packet.callback(link_packet.packet, path);
-                        } else {
-                            log.debug("delivering packet from={} to={}", .{ from, to });
-                            link_packet.callback(link_packet.packet, path);
-                            link_packet.packet.deinit();
                         }
+
+                        log.debug("delivering packet from={} to={}", .{ from, to });
+                        link_packet.callback(link_packet.packet, path);
                     }
 
                     const reverse_path: Path = .{ .source = to, .target = from };
@@ -357,7 +394,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         pub fn submit_packet(
             self: *Self,
-            packet: Packet,
+            packet: Packet, // Callee owned.
             callback: fn (packet: Packet, path: Path) void,
             path: Path,
         ) void {
@@ -378,6 +415,15 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 .packet = packet,
                 .callback = callback,
             }) catch unreachable;
+
+            const recording = self.links[self.path_index(path)].record.contains(packet.command());
+            if (recording) {
+                self.recorded.addOneAssumeCapacity().* = .{
+                    .packet = packet.clone(),
+                    .callback = callback,
+                    .path = path,
+                };
+            }
         }
     };
 }
