@@ -609,9 +609,10 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     try expectEqual(b1.status(), .recovering_head);
     t.run();
 
-    a0.stop();
     b1.pass_all(.R_, .bidirectional);
     b2.pass_all(.R_, .bidirectional);
+    a0.stop();
+    a0.drop_all(.R_, .outgoing);
     t.run();
 
     // The cluster is stuck trying to repair op=30 (requesting the prepare).
@@ -621,6 +622,7 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     try expectEqual(b1.op_head(), 30);
 
     // A0 provides prepare=30.
+    a0.pass_all(.R_, .outgoing);
     try a0.open();
     t.run();
     try expectEqual(t.replica(.R_).status(), .normal);
