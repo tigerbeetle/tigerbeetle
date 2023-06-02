@@ -574,3 +574,15 @@ $ .\scripts\install.bat
 $ if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
 ```
 
+#### `InvalidFormat` error
+
+If you see a bunch of `InvalidFormat` errors and the
+build fails, clear the local and global Zig caches and
+redo the steps installing Zig and building the client.
+
+```console
+$ rmdir -Force $HOME\AppData\Local\zig
+$ git clean -xfd
+$ # Now follow steps above from `.\scripts\install_zig.bat` on.
+```
+

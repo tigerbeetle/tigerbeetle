@@ -685,6 +685,18 @@ const Generator = struct {
                     language.developer_setup_pwsh_commands,
                 }),
             );
+
+            mw.header(4, "`InvalidFormat` error");
+            mw.paragraph(
+                \\If you see a bunch of `InvalidFormat` errors and the
+                \\build fails, clear the local and global Zig caches and
+                \\redo the steps installing Zig and building the client.
+            );
+            mw.commands(
+                \\rmdir -Force $HOME\AppData\Local\zig
+                \\git clean -xfd
+                \\# Now follow steps above from `.\scripts\install_zig.bat` on.
+            );
         } else {
             mw.paragraph("Not yet supported.");
         }
