@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # TODO: Make this print a nice messages if commands are missing
 # TODO: Make this cache between runs for local dev
-set -e
+set -ex
 
 # This script builds the docs website for the currently checked out
 # branch.
@@ -19,5 +19,7 @@ REPO="https://github.com/tigerbeetledb/tigerbeetle"
 if [[ -n "$SOURCE_REPO" ]]; then
     REPO="${SOURCE_REPO}"
 fi
+
+echo "HERE! $REPO"
 
 ( cd docs_website && npm install && ./scripts/build.sh "$BRANCH" "$REPO" )
