@@ -341,6 +341,16 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             try cluster.open_replica(replica_index, nonce, time);
             cluster.replicas[replica_index].ok_op_max = ok_op_max;
             cluster.replicas[replica_index].ok_op_view_max = ok_op_view_max;
+            if (cluster.replicas[replica_index].status == .recovering_head) {
+                const lost_head = cluster.replicas[replica_index].ok_op_max > cluster.replicas[replica_index].op;
+                if (lost_head) {
+                    std.debug.print("{} -> {}; lost-head = {}\n", .{
+                        cluster.replicas[replica_index].ok_op_max,
+                        cluster.replicas[replica_index].op,
+                        lost_head,
+                    });
+                }
+            }
 
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
