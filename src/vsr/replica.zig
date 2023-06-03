@@ -385,6 +385,7 @@ pub fn ReplicaType(
         /// 3. Crash.
         /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
         on_checkpoint_done: ?fn (replica: *const Self) void = null,
+        on_message_sent: ?fn (replica: *const Self, message: *Message) void = null,
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
@@ -5939,6 +5940,10 @@ pub fn ReplicaType(
                         std.mem.sliceAsBytes(self.superblock.working.vsr_headers().slice),
                     ));
                 }
+            }
+
+            if (self.on_message_sent) |on_message_sent| {
+                on_message_sent(self, message);
             }
 
             if (replica == self.replica) {
