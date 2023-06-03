@@ -27,6 +27,13 @@ pub const Network = struct {
         network: *Network,
         message: *Message,
 
+        pub fn clone(packet: *const Packet) Packet {
+            return Packet{
+                .network = packet.network,
+                .message = packet.message.ref(),
+            };
+        }
+
         pub fn deinit(packet: *const Packet) void {
             packet.network.message_pool.unref(packet.message);
         }
@@ -91,7 +98,8 @@ pub const Network = struct {
             allocator,
             // +1 so we can allocate an extra packet when all packet queues are at capacity,
             // so that `PacketSimulator.submit_packet` can choose which packet to drop.
-            1 + @as(usize, options.path_maximum_capacity) * path_count,
+            1 + @as(usize, options.path_maximum_capacity) * path_count +
+                options.recorded_count_max,
         );
         errdefer message_pool.deinit(allocator);
 
@@ -160,6 +168,17 @@ pub const Network = struct {
             .source = network.process_to_address(path.source),
             .target = network.process_to_address(path.target),
         });
+    }
+
+    pub fn link_record(network: *Network, path: Path) *LinkFilter {
+        return network.packet_simulator.link_record(.{
+            .source = network.process_to_address(path.source),
+            .target = network.process_to_address(path.target),
+        });
+    }
+
+    pub fn replay_recorded(network: *Network) void {
+        return network.packet_simulator.replay_recorded();
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {

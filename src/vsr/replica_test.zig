@@ -204,6 +204,61 @@ test "Cluster: recovery: grid corruption (disjoint)" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_trigger_2);
 }
 
+test "Cluster: recovery: recovering_head, outdated start view" {
+    // 1. Wait for B1 to ok op=21.
+    // 2. Restart B1 while corrupting op=21, so that it gets into a .recovering_head with op=20.
+    // 3. Try make B1 forget about op=21 by delivering it an outdated .start_view with op=20.
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+    });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    var a = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    try c.request(20, 20);
+
+    b1.stop();
+    b1.corrupt(.{ .wal_prepare = 20 });
+
+    try expectEqual(b1.open(), .ok);
+    try expectEqual(b1.status(), .recovering_head);
+    try expectEqual(b1.op_head(), 19);
+
+    b1.record(.A0, .incoming, .start_view);
+    t.run();
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b1.op_head(), 20);
+
+    b2.drop_all(.R_, .bidirectional);
+
+    try c.request(21, 21);
+
+    b1.stop();
+    b1.corrupt(.{ .wal_prepare = 21 });
+
+    try expectEqual(b1.open(), .ok);
+    try expectEqual(b1.status(), .recovering_head);
+    try expectEqual(b1.op_head(), 20);
+
+    // TODO Explicit code coverage marks: This should hit the
+    // "on_start_view: ignoring (recovering_head, nonce mismatch)"
+    a.stop();
+    b1.replay_recorded();
+    t.run();
+
+    try expectEqual(b1.status(), .recovering_head);
+    try expectEqual(b1.op_head(), 20);
+
+    // Should B1 erroneously accept op=20 as head, unpartitioning B2 here would lead to a data loss.
+    b2.pass_all(.R_, .bidirectional);
+    t.run();
+    try expectEqual(a.open(), .ok);
+    try c.request(22, 22);
+}
+
 test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
@@ -744,6 +799,7 @@ const TestContext = struct {
                 .path_maximum_capacity = 128,
                 .path_clog_duration_mean = 0,
                 .path_clog_probability = 0,
+                .recorded_count_max = 16,
             },
             .storage = .{
                 .read_latency_min = 1,
@@ -1057,6 +1113,22 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.constSlice()) |path| t.cluster.network.link_filter(path).remove(command);
+    }
+
+    pub fn record(
+        t: *const TestReplicas,
+        peer: ProcessSelector,
+        direction: LinkDirection,
+        command: vsr.Command,
+    ) void {
+        const paths = t.peer_paths(peer, direction);
+        for (paths.constSlice()) |path| t.cluster.network.link_record(path).insert(command);
+    }
+
+    pub fn replay_recorded(
+        t: *const TestReplicas,
+    ) void {
+        t.cluster.network.replay_recorded();
     }
 
     // -1: no route to self.
