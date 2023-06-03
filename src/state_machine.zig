@@ -245,8 +245,8 @@ pub fn StateMachineType(
             cache_entries_posted: u32,
         };
 
-        // Since only one context can be used at time,
-        // we use an union to save memory.
+        // Since prefetch contexts are used one at a time, it's safe to access
+        // the union's fields and reuse the same memory for all context instances.
         const PrefetchContext = extern union {
             accounts_immutable: AccountsImmutableGroove.PrefetchContext,
             accounts_mutable: AccountsMutableGroove.PrefetchContext,
@@ -259,7 +259,6 @@ pub fn StateMachineType(
             pub inline fn parent(completion: anytype) *StateMachine {
                 const T = @TypeOf(completion);
                 comptime assert(T == *AccountsImmutableGroove.PrefetchContext or
-                    T == *AccountsImmutableGroove.PrefetchContext or
                     T == *AccountsMutableGroove.PrefetchContext or
                     T == *TransfersGroove.PrefetchContext or
                     T == *PostedGroove.PrefetchContext);
