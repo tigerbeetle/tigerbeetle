@@ -264,6 +264,29 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     try c.request(22, 22);
 }
 
+test "Cluster: recovery: recovering head: idle cluster" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    var b = t.replica(.B1);
+
+    try c.request(20, 20);
+
+    b.stop();
+    b.corrupt(.{ .wal_prepare = 21 });
+    b.corrupt(.{ .wal_header = 21 });
+
+    try b.open();
+    try expectEqual(b.status(), .recovering_head);
+    try expectEqual(b.op_head(), 20);
+
+    t.run();
+
+    try expectEqual(b.status(), .normal);
+    try expectEqual(b.op_head(), 20);
+}
+
 test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
@@ -586,9 +609,10 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     try expectEqual(b1.status(), .recovering_head);
     t.run();
 
-    a0.stop();
     b1.pass_all(.R_, .bidirectional);
     b2.pass_all(.R_, .bidirectional);
+    a0.stop();
+    a0.drop_all(.R_, .outgoing);
     t.run();
 
     // The cluster is stuck trying to repair op=30 (requesting the prepare).
@@ -598,6 +622,7 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     try expectEqual(b1.op_head(), 30);
 
     // A0 provides prepare=30.
+    a0.pass_all(.R_, .outgoing);
     try a0.open();
     t.run();
     try expectEqual(t.replica(.R_).status(), .normal);
