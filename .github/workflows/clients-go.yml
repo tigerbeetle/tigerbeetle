@@ -26,7 +26,7 @@ jobs:
 
   publish:
     if: inputs.version != ''
-    needs: binaries
+    needs: [samples_integration_test, docs]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -46,7 +46,7 @@ jobs:
   samples_integration_test:
     timeout-minutes: 20
 
-    if: inputs.version == ''
+    if: inputs.version != ''
     needs: binaries
 
     # We use self hosted runners for M1 here. See macos.yml for an explaination
@@ -83,7 +83,6 @@ jobs:
   docs:
     timeout-minutes: 20
 
-    if: inputs.version == ''
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read
@@ -104,14 +103,14 @@ jobs:
           # Specifically for self-hosted M1 runners, OK if this fails on other envs.
           rm -rf /Users/macos/Library/Caches/go-build
 
-          ./scripts/build.sh client_docs -- --language go
+          ./scripts/build.sh client_docs -- --language go ${{ inputs.version == '' && '--no-validate' || '' }}
 
       # Set CC='zig.exe cc' for Windows.
       - if: matrix.os == 'windows-latest'
         run: |
           $env:CC = "$(pwd)\zig\zig.exe cc"
           .\scripts\build.bat client_docs
-          .\zig-out\bin\client_docs --language go
+          .\zig-out\bin\client_docs --language go ${{ inputs.version == '' && '--no-validate' || '' }}
 
       - if: matrix.os == 'ubuntu-latest'
         run: ./scripts/fail_on_diff.sh
