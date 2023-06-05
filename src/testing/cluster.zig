@@ -393,6 +393,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             replica.on_compact = on_replica_compact;
             replica.on_checkpoint_start = on_replica_checkpoint_start;
             replica.on_checkpoint_done = on_replica_checkpoint_done;
+            replica.on_message_sent = on_replica_message_sent;
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
         }
 
@@ -480,6 +481,13 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             cluster.storage_checker.replica_checkpoint(replica) catch |err| {
                 fatal(.correctness, "storage checker error: {}", .{err});
             };
+        }
+
+        fn on_replica_message_sent(replica: *const Replica, message: *Message) void {
+            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.context.?));
+            assert(cluster.replica_health[replica.replica] == .up);
+
+            cluster.state_checker.on_message(message);
         }
 
         /// Print an error message and then exit with an exit code.
