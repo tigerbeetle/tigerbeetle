@@ -413,6 +413,7 @@ pub fn StateMachineType(
             const callback = self.prefetch_callback.?;
             self.prefetch_input = null;
             self.prefetch_callback = null;
+            self.prefetch_context = undefined;
 
             tracer.end(
                 &self.tracer_slot,
