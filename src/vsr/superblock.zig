@@ -19,6 +19,7 @@ const crypto = std.crypto;
 const mem = std.mem;
 const meta = std.meta;
 const os = std.os;
+const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
@@ -199,6 +200,8 @@ pub const SuperBlockHeader = extern struct {
                     assert(old.commit_max == 0);
                     assert(old.log_view == 0);
                     assert(old.view == 0);
+                    assert(old.status == .healthy);
+                    assert(new.status == .healthy);
                 } else {
                     assert(old.commit_min_checksum == new.commit_min_checksum);
                 }
@@ -208,6 +211,7 @@ pub const SuperBlockHeader = extern struct {
             assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
             assert(meta.eql(old.members, new.members));
+            maybe(old.status == new.status);
 
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
@@ -227,7 +231,7 @@ pub const SuperBlockHeader = extern struct {
         /// The commits from the bar following commit_min were in the mutable table, and
         /// thus not preserved in the checkpoint.
         /// But the corresponding `compact()` updates were preserved, and must not be repeated
-        /// to ensure determinstic storage.
+        /// to ensure deterministic storage.
         pub fn op_compacted(state: VSRState, op: u64) bool {
             // If commit_min is 0, we have never checkpointed, so no compactions are checkpointed.
             return state.commit_min > 0 and op <= state.commit_min + constants.lsm_batch_multiple;
