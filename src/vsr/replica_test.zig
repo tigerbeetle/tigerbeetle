@@ -1354,7 +1354,7 @@ const TestReplicas = struct {
         return @as(std.meta.Tag(vsr.SyncStage), t.sync_stage());
     }
 
-    fn sync_target(t: *const TestReplicas) ?vsr.SyncTargetCanonical {
+    fn sync_target(t: *const TestReplicas) ?vsr.SyncTarget {
         return t.sync_stage().target();
     }
 
