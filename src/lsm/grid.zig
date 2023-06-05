@@ -647,7 +647,7 @@ pub fn GridType(comptime Storage: type) type {
                 const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
                 assert(header.op == read.address);
 
-                if (grid.superblock.working.vsr_state.status == .syncing) {
+                if (grid.superblock.working.vsr_state.flags.syncing) {
                     // During sync, allow an inconsistent cache.
                     // We will clean the cache when sync concludes.
                     // (This allows us to not completely reset the cache completely every time the

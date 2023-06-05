@@ -44,20 +44,20 @@ Checkpoints:
 3. Wait for grid IO to finish. (See `Grid.cancel()`.)
 4. Wait for a usable sync target to arrive. (Usually we already have one.)
 5. Update superblock headers:
-    - Set `vsr_state.status=syncing`.
+    - Set `vsr_state.flags.syncing=true`.
     - Bump `vsr_state.commit_min`/`vsr_state.commit_min_checksum` to the sync target op/op-checksum.
     - Bump `replica.commit_min`. (If `replica.commit_min` exceeds `replica.op`, transition to `status=recovering_head`).
 6. [Request superblock trailers](#6-request-superblock-trailers).
 7. Request and write manifest log blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
 8. Request and write table blocks. (TODO: This step is not implemented yet.)
 9. Update superblock headers and trailers:
-    - Set `vsr_state.status=healthy`.
+    - Set `vsr_state.flags.syncing=false`.
     - Write the target checkpoint's trailers.
 10. Done.
 
 If a newer sync target is discovered during steps *4*-*8*, go to step *3*.
 
-If we recover with a superblock `vsr_state.status=syncing`, go to step *4*.
+If we recover with a superblock `vsr_state.flags.syncing=true`, go to step *4*.
 
 ### 0: Scenarios
 
@@ -78,7 +78,7 @@ Causes of number 3:
 
 State sync is initially triggered by any of the following:
 
-- The replica recovered from a restart, and its superblock `vsr_state.status=syncing`.
+- The replica recovered from a restart, and its superblock `vsr_state.flags.syncing=true`.
   (It was syncing prior to the restart.)
 - The replica discovers the canonical checkpoint for its current wrap, and that it [doesn't match](#storage-determinism) its own current checkpoint.
 - The replica receives a SV which indicates that it has lagged so far behind the cluster that its log cannot possibly intersect.
