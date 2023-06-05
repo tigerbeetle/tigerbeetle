@@ -70,7 +70,7 @@ jobs:
 
   publish:
     if: inputs.version != ''
-    needs: [build]
+    needs: [samples_integration_test, docs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -87,6 +87,8 @@ jobs:
 
   samples_integration_test:
     timeout-minutes: 20
+
+    if: inputs.version != ''
 
     needs: build
     strategy:
@@ -135,7 +137,7 @@ jobs:
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
       - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_docs
-      - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node
+      - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node ${{ inputs.version == '' && '--no-validate' || '' }}
 
       - if: matrix.os == 'ubuntu-latest'
         run: ./scripts/fail_on_diff.sh
