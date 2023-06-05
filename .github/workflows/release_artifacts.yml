@@ -49,7 +49,7 @@ jobs:
         echo "version=$version" >> "$GITHUB_OUTPUT"
   
   build_and_upload_binaries:
-    needs: version
+    needs: [client-dotnet, client-go, client-node, client-java]
     strategy:
       matrix:
         debug: ["", "--debug"]
@@ -125,7 +125,7 @@ jobs:
 
   # For the Docker image
   linux:
-    needs: version
+    needs: [client-dotnet, client-go, client-node, client-java]
     uses: ./.github/workflows/linux.yml
     with:
       version: ${{needs.version.outputs.version}}
