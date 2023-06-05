@@ -898,7 +898,7 @@ test "Cluster: sync: partition, lag, sync (transition from manifest log repair)"
     try expectEqual(t.replica(.R_).sync_status(), .none);
 }
 
-test "Cluster: sync: sync, crash, restart (vsr_state.status=sync_start)" {
+test "Cluster: sync: sync, crash, restart (vsr_state.flags.syncing)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 

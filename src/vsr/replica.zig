@@ -212,7 +212,7 @@ pub fn ReplicaType(
         opened: bool,
 
         /// Invariants:
-        /// * sync_state == .none implies superblock.working.vsr_state.status == .healthy
+        /// * sync_state == .none implies !superblock.working.vsr_state.flags.syncing
         sync_stage: SyncStage = .none,
         /// The latest discovered *canonical* checkpoint.
         /// Kept up-to-date during every status, while syncing or healthy.
@@ -594,9 +594,8 @@ pub fn ReplicaType(
             const header_head = self.journal.header_with_op(self.op).?;
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
-            switch (self.superblock.working.vsr_state.status) {
-                .healthy => {},
-                .syncing => self.sync_start_from_recovering(),
+            if (self.superblock.working.vsr_state.flags.syncing) {
+                self.sync_start_from_recovering();
             }
 
             if (self.solo()) {
@@ -6155,7 +6154,7 @@ pub fn ReplicaType(
             }
 
             assert(self.status == .normal);
-            assert(self.superblock.working.vsr_state.status == .healthy);
+            assert(!self.superblock.working.vsr_state.flags.syncing);
             // After a view change, replicas send prepare_oks for ops with older views.
             // However, we only send to the primary of the current view (see below where we send).
             assert(header.view <= self.view);
@@ -7495,7 +7494,7 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.status == .recovering);
             assert(self.sync_stage == .none);
-            assert(self.superblock.working.vsr_state.status == .syncing);
+            assert(self.superblock.working.vsr_state.flags.syncing);
 
             log.debug("{}: sync_start_from_recovering", .{self.replica});
 
@@ -7735,7 +7734,7 @@ pub fn ReplicaType(
             self.sync_message_timeout.start();
             self.grid.cache_mark();
 
-            if (self.superblock.working.vsr_state.status == .syncing and
+            if (self.superblock.working.vsr_state.flags.syncing and
                 self.superblock.working.vsr_state.commit_min == stage.target.checkpoint_op)
             {
                 // This was already our sync target prior to crash/recover.
@@ -7764,7 +7763,7 @@ pub fn ReplicaType(
         fn sync_superblock_start_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
             assert(self.sync_stage == .write_sync_start);
-            assert(self.superblock.staging.vsr_state.status == .syncing);
+            assert(self.superblock.staging.vsr_state.flags.syncing);
 
             const stage = self.sync_stage.write_sync_start;
             assert(stage.target.checkpoint_op == self.superblock.working.vsr_state.commit_min);
@@ -7818,7 +7817,7 @@ pub fn ReplicaType(
 
         fn sync_superblock_done(self: *Self) void {
             assert(self.sync_stage == .write_sync_done);
-            assert(self.superblock.staging.vsr_state.status == .syncing);
+            assert(self.superblock.staging.vsr_state.flags.syncing);
 
             self.superblock.sync_done(sync_superblock_done_callback, &self.superblock_context);
         }
@@ -7837,7 +7836,7 @@ pub fn ReplicaType(
             assert(superblock.checkpoint_id() == stage.target.checkpoint_id);
             assert(superblock.vsr_state.commit_min == stage.target.checkpoint_op);
             assert(superblock.vsr_state.commit_min_checksum == stage.target.checkpoint_op_checksum);
-            assert(superblock.vsr_state.status == .healthy);
+            assert(!superblock.vsr_state.flags.syncing);
 
             // Trim the grid cache of any entries which may have been removed from the LSM.
             self.grid.cache_sweep();
