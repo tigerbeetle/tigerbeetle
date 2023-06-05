@@ -240,6 +240,7 @@ pub const configs = struct {
 
         // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
         // but a different type from a nominal typing perspective.
+        base.process.log_level = @intToEnum(std.log.Level, @enumToInt(build_options.config_log_level));
         base.process.tracer_backend = @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
         base.process.hash_log_mode = @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
         base.process.aof_record = build_options.config_aof_record;
