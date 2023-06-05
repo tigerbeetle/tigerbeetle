@@ -44,6 +44,8 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
 
   samples_integration_test:
+    timeout-minutes: 20
+
     if: inputs.version == ''
     needs: binaries
 
@@ -79,6 +81,8 @@ jobs:
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language go --sample ${{ matrix.sample }}
 
   docs:
+    timeout-minutes: 20
+
     if: inputs.version == ''
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
@@ -108,6 +112,6 @@ jobs:
           $env:CC = "$(pwd)\zig\zig.exe cc"
           .\scripts\build.bat client_docs
           .\zig-out\bin\client_docs --language go
-      
+
       - if: matrix.os == 'ubuntu-latest'
         run: ./scripts/fail_on_diff.sh

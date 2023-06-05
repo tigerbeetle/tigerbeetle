@@ -86,6 +86,8 @@ jobs:
           TIGERBEETLE_NODE_PUBLISH_KEY: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
 
   samples_integration_test:
+    timeout-minutes: 20
+
     needs: build
     strategy:
       matrix:
@@ -114,6 +116,8 @@ jobs:
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node --sample ${{ matrix.sample }}
 
   docs:
+    timeout-minutes: 20
+
     strategy:
       matrix:
         # Windows not yet supported.
