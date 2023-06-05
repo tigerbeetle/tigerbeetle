@@ -175,6 +175,8 @@ jobs:
         docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java
 
   samples_integration_test:
+    timeout-minutes: 20
+
     if: inputs.version == ''
     needs: build_and_publish
 
@@ -226,6 +228,8 @@ jobs:
     - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language java --sample ${{ matrix.sample }}
 
   docs:
+    timeout-minutes: 20
+
     if: inputs.version == ''
 
     # We use self hosted runners for M1 here. See macos.yml for an explaination
@@ -263,7 +267,7 @@ jobs:
       run: |
         export PATH="$PATH:$(pwd)/apache-maven-3.9.1/bin"
         ./scripts/build.sh client_docs -- --language java
-      
+
     - if: matrix.os == 'windows-latest'
       run: |
         $env:PATH += "$(pwd)/apache-maven-3.9.1/bin"
