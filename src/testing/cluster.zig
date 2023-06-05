@@ -526,11 +526,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .sync => switch (replica.sync_stage) {
                     .request_trailers => {
                         cluster.log_replica(.sync_start, replica.replica);
-                        cluster.sync_checker.replica_sync_start(replica.replica, replica);
+                        cluster.sync_checker.replica_sync_start(replica);
                     },
                     .done => {
                         cluster.log_replica(.sync_done, replica.replica);
-                        cluster.sync_checker.replica_sync_done(replica.replica, replica);
+                        cluster.sync_checker.replica_sync_done(replica);
                         if (cluster.replica_diverged.isSet(replica.replica)) {
                             cluster.replica_diverged.unset(replica.replica);
                             log.debug("{}: on_sync_done: clearing deviation", .{replica.replica});

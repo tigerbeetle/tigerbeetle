@@ -39,11 +39,10 @@ pub fn SyncCheckerType(comptime Replica: type) type {
         /// the safe limit.
         pub fn replica_sync_start(
             checker: *SyncChecker,
-            replica_index: u8,
             replica: *const Replica,
         ) void {
             if (replica.standby()) return;
-            checker.replicas_syncing.set(replica_index);
+            checker.replicas_syncing.set(replica.replica);
 
             // This implicitly checks that R=1 and R=2 clusters never state sync.
             // Don't count standbys since they aren't part of the replication quorum.
@@ -62,11 +61,12 @@ pub fn SyncCheckerType(comptime Replica: type) type {
 
         pub fn replica_sync_done(
             checker: *SyncChecker,
-            replica_index: u8,
             replica: *const Replica,
         ) void {
-            _ = replica;
-            checker.replicas_syncing.unset(replica_index);
+            if (replica.standby()) return;
+            assert(checker.replicas_syncing.isSet(replica.replica));
+
+            checker.replicas_syncing.unset(replica.replica);
         }
 
         pub fn check_sync_stage(checker: *SyncChecker, replica: *const Replica) void {
