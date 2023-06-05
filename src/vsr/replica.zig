@@ -22,7 +22,7 @@ const Command = vsr.Command;
 const Version = vsr.Version;
 const VSRState = vsr.VSRState;
 const SyncStage = vsr.SyncStage;
-const SyncTargetCanonical = vsr.SyncTargetCanonical;
+const SyncTarget = vsr.SyncTarget;
 const SyncTargetCandidate = vsr.SyncTargetCandidate;
 const SyncTargetQuorum = vsr.SyncTargetQuorum;
 const SyncTrailer = vsr.SyncTrailer;
@@ -216,7 +216,7 @@ pub fn ReplicaType(
         sync_stage: SyncStage = .none,
         /// The latest discovered *canonical* checkpoint.
         /// Kept up-to-date during every status, while syncing or healthy.
-        sync_target_max: ?SyncTargetCanonical = null,
+        sync_target_max: ?SyncTarget = null,
         sync_target_quorum: SyncTargetQuorum = .{},
 
         /// The current view.

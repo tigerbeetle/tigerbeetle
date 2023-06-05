@@ -36,10 +36,10 @@ pub const SyncStage = union(enum) {
     request_target,
 
     /// superblock.sync_start()
-    write_sync_start: struct { target: SyncTargetCanonical },
+    write_sync_start: struct { target: SyncTarget },
 
     request_trailers: struct {
-        target: SyncTargetCanonical,
+        target: SyncTarget,
         manifest: SyncTrailer = .{},
         free_set: SyncTrailer = .{},
         client_sessions: SyncTrailer = .{},
@@ -49,14 +49,14 @@ pub const SyncStage = union(enum) {
         }
     },
 
-    request_manifest_logs: struct { target: SyncTargetCanonical },
+    request_manifest_logs: struct { target: SyncTarget },
 
     /// superblock.sync_done()
-    write_sync_done: struct { target: SyncTargetCanonical },
+    write_sync_done: struct { target: SyncTarget },
 
-    done: struct { target: SyncTargetCanonical },
+    done: struct { target: SyncTarget },
 
-    pub fn target(stage: *const SyncStage) ?SyncTargetCanonical {
+    pub fn target(stage: *const SyncStage) ?SyncTarget {
         return switch (stage.*) {
             .none,
             .cancel_commit,
@@ -80,7 +80,7 @@ pub const SyncTargetCandidate = struct {
     /// The checksum of the prepare corresponding to checkpoint_op.
     checkpoint_op_checksum: u128,
 
-    pub fn canonical(target: SyncTargetCandidate) SyncTargetCanonical {
+    pub fn canonical(target: SyncTargetCandidate) SyncTarget {
         return .{
             .checkpoint_id = target.checkpoint_id,
             .checkpoint_op = target.checkpoint_op,
@@ -89,7 +89,7 @@ pub const SyncTargetCandidate = struct {
     }
 };
 
-pub const SyncTargetCanonical = struct {
+pub const SyncTarget = struct {
     /// The target's checkpoint identifier.
     checkpoint_id: u128,
     /// The op_checkpoint() that corresponds to the checkpoint id.
