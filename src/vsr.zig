@@ -256,6 +256,9 @@ pub const Header = extern struct {
     /// * A `do_view_change` sets this to a bitset, with set bits indicating headers
     ///   in the message body which it has definitely not prepared (i.e. "nack").
     ///   The corresponding header may be an actual prepare header, or it may be a "blank" header.
+    /// * A `request_start_view` sets this to a unique nonce, to detect outdated SVs.
+    /// * A `start_view` sets this to zero for a new view, and to a nonce from an RSV when
+    ///   responding to the RSV.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `request_reply` sets this to the checksum of the reply being requested.
     ///
@@ -621,7 +624,6 @@ pub const Header = extern struct {
         assert(self.command == .start_view);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -631,7 +633,6 @@ pub const Header = extern struct {
         assert(self.command == .request_start_view);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";

@@ -41,8 +41,8 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             //   X X X 3 X 6 X 9  X  X  X  14  X  17  X  20
             //
             //   Eytzinger layout:
-            //    0 1  2 3 4  5 6 7 8 9 10 11 12 13 14
-            //   10 4 15 1 7 12 1 0 2 5  8 11 13 16 19
+            //    0 1  2 3 4  5 6  7 8 9 10 11 12 13 14
+            //   10 4 15 1 7 12 18 0 2 5  8 11 13 16 19
             //
             // Note, we only support building a full Eytzinger tree of 2^k-1 keys.
             // The last layer in the binary search tree for n=21 is not included

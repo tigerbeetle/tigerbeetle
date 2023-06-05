@@ -158,8 +158,6 @@ pub const Storage = struct {
         const sector_count = @divExact(size, constants.sector_size);
         const memory = try allocator.allocAdvanced(u8, constants.sector_size, size, .exact);
         errdefer allocator.free(memory);
-        // TODO: random data
-        mem.set(u8, memory, 0);
 
         var memory_written = try std.DynamicBitSetUnmanaged.initEmpty(allocator, sector_count);
         errdefer memory_written.deinit(allocator);
@@ -332,16 +330,16 @@ pub const Storage = struct {
             storage.fault_faulty_sectors(read.zone, read.offset, read.buffer.len);
         }
 
-        if (storage.faulty) {
-            // Corrupt faulty sectors.
-            var sectors = SectorRange.from_zone(read.zone, read.offset, read.buffer.len);
-            const sectors_min = sectors.min;
-            while (sectors.next()) |sector| {
-                if (storage.faults.isSet(sector)) {
-                    const faulty_sector_offset = (sector - sectors_min) * constants.sector_size;
-                    const faulty_sector_bytes = read.buffer[faulty_sector_offset..][0..constants.sector_size];
-                    storage.prng.random().bytes(faulty_sector_bytes);
-                }
+        // Fill faulty or uninitialized sectors with random data.
+        var sectors = SectorRange.from_zone(read.zone, read.offset, read.buffer.len);
+        const sectors_min = sectors.min;
+        while (sectors.next()) |sector| {
+            const faulty = storage.faulty and storage.faults.isSet(sector);
+            const uninit = !storage.memory_written.isSet(sector);
+            if (faulty or uninit) {
+                const sector_offset = (sector - sectors_min) * constants.sector_size;
+                const sector_bytes = read.buffer[sector_offset..][0..constants.sector_size];
+                storage.prng.random().bytes(sector_bytes);
             }
         }
 
