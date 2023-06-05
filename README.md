@@ -247,9 +247,9 @@ accounted for!
 
 For further reading:
 
-* [Running a 3-node cluster locally with docker-compose](https://docs.tigerbeetle.com/deployment/with-docker-compose)
-* [Run a single-node cluster with Docker](https://docs.tigerbeetle.com/deployment/with-docker)
-* [Run a single-node cluster from source](https://docs.tigerbeetle.com/deployment/single-binary)
+* [Running a 3-node cluster locally with docker-compose](https://docs.tigerbeetle.com/quick-start/with-docker-compose)
+* [Run a single-node cluster with Docker](https://docs.tigerbeetle.com/quick-start/with-docker)
+* [Run a single-node cluster](https://docs.tigerbeetle.com/quick-start/single-binary)
 
 ## Clients
 
@@ -260,6 +260,7 @@ For further reading:
 
 ## Community
 
+* [Projects using TigerBeetle developed by community members.](./docs/COMMUNITY_PROJECTS.md)
 * [Join the TigerBeetle chat on Slack.](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
 * [Follow us on Twitter](https://twitter.com/TigerBeetleDB), [YouTube](https://www.youtube.com/@tigerbeetledb), and [Twitch](https://www.twitch.tv/tigerbeetle).
 * [Subscribe to our monthly newsletter for the backstory on recent database changes.](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)

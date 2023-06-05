@@ -46,12 +46,12 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
     t.replica(.R0).corrupt(.{ .wal_prepare = 22 });
 
     // 2/3 can't commit when 1/2 is status=recovering_head.
-    try expectEqual(t.replica(.R0).open(), .ok);
+    try t.replica(.R0).open();
     try expectEqual(t.replica(.R0).status(), .recovering_head);
-    try expectEqual(t.replica(.R1).open(), .ok);
+    try t.replica(.R1).open();
     try c.request(24, 20);
     // With the aid of the last replica, the cluster can recover.
-    try expectEqual(t.replica(.R2).open(), .ok);
+    try t.replica(.R2).open();
     try c.request(24, 24);
     try expectEqual(t.replica(.R_).commit(), 24);
 }
@@ -66,7 +66,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt left of head, 3/3 
     try c.request(20, 20);
     t.replica(.R_).stop();
     t.replica(.R_).corrupt(.{ .wal_prepare = 10 });
-    try expectEqual(t.replica(.R_).open(), .ok);
+    try t.replica(.R_).open();
     t.run();
 
     // The same prepare is lost by all WALs, so the cluster can never recover.
@@ -84,7 +84,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt root)" {
     try c.request(20, 20);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 0 });
-    try expectEqual(t.replica(.R0).open(), .ok);
+    try t.replica(.R0).open();
 
     try c.request(21, 21);
     try expectEqual(t.replica(.R_).commit(), 21);
@@ -104,7 +104,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
     while (slot < slot_count) : (slot += 1) {
         t.replica(.R0).corrupt(.{ .wal_prepare = slot });
     }
-    try expectEqual(t.replica(.R0).open(), .ok);
+    try t.replica(.R0).open();
     try expectEqual(t.replica(.R0).status(), .recovering_head);
 
     try c.request(slot_count, slot_count);
@@ -122,7 +122,12 @@ test "Cluster: recovery: WAL prepare corruption (R=1, corrupt between checkpoint
     try c.request(20, 20);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 15 });
-    try expectEqual(t.replica(.R0).open(), .WALCorrupt);
+    if (t.replica(.R0).open()) {
+        unreachable;
+    } else |err| switch (err) {
+        error.WALCorrupt => {},
+        else => unreachable,
+    }
 }
 
 test "Cluster: recovery: WAL header corruption (R=1)" {
@@ -134,7 +139,7 @@ test "Cluster: recovery: WAL header corruption (R=1)" {
     try c.request(20, 20);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_header = 15 });
-    try expectEqual(t.replica(.R0).open(), .ok);
+    try t.replica(.R0).open();
     try c.request(30, 30);
 }
 
@@ -154,7 +159,7 @@ test "Cluster: recovery: WAL torn prepare, standby with intact prepare (R=1 S=1)
     try c.request(20, 20);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_header = 20 });
-    try expectEqual(t.replica(.R0).open(), .ok);
+    try t.replica(.R0).open();
     try c.request(30, 30);
     try expectEqual(t.replica(.R0).commit(), 30);
     try expectEqual(t.replica(.S0).commit(), 30);
@@ -192,7 +197,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
         }
     }
 
-    try expectEqual(t.replica(.R_).open(), .ok);
+    try t.replica(.R_).open();
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
@@ -202,6 +207,84 @@ test "Cluster: recovery: grid corruption (disjoint)" {
     try c.request(checkpoint_trigger_2, checkpoint_trigger_2);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
     try expectEqual(t.replica(.R_).commit(), checkpoint_trigger_2);
+}
+
+test "Cluster: recovery: recovering_head, outdated start view" {
+    // 1. Wait for B1 to ok op=21.
+    // 2. Restart B1 while corrupting op=21, so that it gets into a .recovering_head with op=20.
+    // 3. Try make B1 forget about op=21 by delivering it an outdated .start_view with op=20.
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+    });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    var a = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    try c.request(20, 20);
+
+    b1.stop();
+    b1.corrupt(.{ .wal_prepare = 20 });
+
+    try b1.open();
+    try expectEqual(b1.status(), .recovering_head);
+    try expectEqual(b1.op_head(), 19);
+
+    b1.record(.A0, .incoming, .start_view);
+    t.run();
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b1.op_head(), 20);
+
+    b2.drop_all(.R_, .bidirectional);
+
+    try c.request(21, 21);
+
+    b1.stop();
+    b1.corrupt(.{ .wal_prepare = 21 });
+
+    try b1.open();
+    try expectEqual(b1.status(), .recovering_head);
+    try expectEqual(b1.op_head(), 20);
+
+    // TODO Explicit code coverage marks: This should hit the
+    // "on_start_view: ignoring (recovering_head, nonce mismatch)"
+    a.stop();
+    b1.replay_recorded();
+    t.run();
+
+    try expectEqual(b1.status(), .recovering_head);
+    try expectEqual(b1.op_head(), 20);
+
+    // Should B1 erroneously accept op=20 as head, unpartitioning B2 here would lead to a data loss.
+    b2.pass_all(.R_, .bidirectional);
+    t.run();
+    try a.open();
+    try c.request(22, 22);
+}
+
+test "Cluster: recovery: recovering head: idle cluster" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    var b = t.replica(.B1);
+
+    try c.request(20, 20);
+
+    b.stop();
+    b.corrupt(.{ .wal_prepare = 21 });
+    b.corrupt(.{ .wal_header = 21 });
+
+    try b.open();
+    try expectEqual(b.status(), .recovering_head);
+    try expectEqual(b.op_head(), 20);
+
+    t.run();
+
+    try expectEqual(b.status(), .normal);
+    try expectEqual(b.op_head(), 20);
 }
 
 test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
@@ -467,7 +550,7 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, trunc
         b2.drop(.__, .incoming, .headers);
 
         b2.stop();
-        try expectEqual(b2.open(), .ok);
+        try b2.open();
         try expectEqual(b2.status(), .recovering_head);
         t.run();
 
@@ -522,13 +605,14 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
 
     // We can't learn op=30's prepare, only its header (via start_view).
     b1.drop(.R_, .bidirectional, .prepare);
-    try expectEqual(b1.open(), .ok);
+    try b1.open();
     try expectEqual(b1.status(), .recovering_head);
     t.run();
 
-    a0.stop();
     b1.pass_all(.R_, .bidirectional);
     b2.pass_all(.R_, .bidirectional);
+    a0.stop();
+    a0.drop_all(.R_, .outgoing);
     t.run();
 
     // The cluster is stuck trying to repair op=30 (requesting the prepare).
@@ -538,7 +622,8 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     try expectEqual(b1.op_head(), 30);
 
     // A0 provides prepare=30.
-    try expectEqual(a0.open(), .ok);
+    a0.pass_all(.R_, .outgoing);
+    try a0.open();
     t.run();
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).commit(), 30);
@@ -645,8 +730,8 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     // - R0 never received op=22 (it had already crashed), so it nacks.
     // - R1 did receive op=22, but upon recovering its WAL, it was corrupt, so it cannot nack.
     // The cluster must wait form R2 before recovering.
-    try expectEqual(t.replica(.R0).open(), .ok);
-    try expectEqual(t.replica(.R1).open(), .ok);
+    try t.replica(.R0).open();
+    try t.replica(.R1).open();
     // TODO Explicit code coverage marks: This should hit the "quorum received, awaiting repair"
     // log line in on_do_view_change().
     t.run();
@@ -654,7 +739,7 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     try expectEqual(t.replica(.R1).status(), .view_change);
 
     // R2 provides the missing header, allowing the view-change to succeed.
-    try expectEqual(t.replica(.R2).open(), .ok);
+    try t.replica(.R2).open();
     t.run();
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).commit(), 24);
@@ -676,7 +761,7 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     t.replica(.R1).corrupt(.{ .wal_prepare = 22 });
     t.replica(.R2).corrupt(.{ .wal_prepare = 22 });
 
-    try expectEqual(t.replica(.R_).open(), .ok);
+    try t.replica(.R_).open();
     // TODO Explicit code coverage marks: This should hit the "quorum received, deadlocked"
     // log line in on_do_view_change().
     t.run();
@@ -744,6 +829,7 @@ const TestContext = struct {
                 .path_maximum_capacity = 128,
                 .path_clog_duration_mean = 0,
                 .path_clog_probability = 0,
+                .recorded_count_max = 16,
             },
             .storage = .{
                 .read_latency_min = 1,
@@ -891,20 +977,18 @@ const TestReplicas = struct {
         }
     }
 
-    // TODO(Zig) Return ?anyerror when "unable to make error union out of null literal" is fixed.
-    pub fn open(t: *TestReplicas) enum { ok, WALInvalid, WALCorrupt } {
+    pub fn open(t: *TestReplicas) !void {
         for (t.replicas.constSlice()) |r| {
             log.info("{}: restart replica", .{r});
             t.cluster.restart_replica(r) catch |err| {
                 assert(t.replicas.len == 1);
                 return switch (err) {
-                    error.WALCorrupt => .WALCorrupt,
-                    error.WALInvalid => .WALInvalid,
+                    error.WALCorrupt => return error.WALCorrupt,
+                    error.WALInvalid => return error.WALInvalid,
                     else => @panic("unexpected error"),
                 };
             };
         }
-        return .ok;
     }
 
     pub fn index(t: *const TestReplicas) u8 {
@@ -1057,6 +1141,22 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.constSlice()) |path| t.cluster.network.link_filter(path).remove(command);
+    }
+
+    pub fn record(
+        t: *const TestReplicas,
+        peer: ProcessSelector,
+        direction: LinkDirection,
+        command: vsr.Command,
+    ) void {
+        const paths = t.peer_paths(peer, direction);
+        for (paths.constSlice()) |path| t.cluster.network.link_record(path).insert(command);
+    }
+
+    pub fn replay_recorded(
+        t: *const TestReplicas,
+    ) void {
+        t.cluster.network.replay_recorded();
     }
 
     // -1: no route to self.

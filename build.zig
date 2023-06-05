@@ -32,6 +32,12 @@ pub fn build(b: *std.build.Builder) void {
         b.option(config.ConfigBase, "config", "Base configuration.") orelse .default,
     );
 
+    options.addOption(
+        std.log.Level,
+        "config_log_level",
+        b.option(std.log.Level, "config-log-level", "Log level.") orelse .info,
+    );
+
     const tracer_backend = b.option(
         config.TracerBackend,
         "tracer-backend",

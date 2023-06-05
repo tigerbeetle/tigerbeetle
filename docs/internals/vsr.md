@@ -1,3 +1,7 @@
+# VSR
+
+Documentation for (roughly) code in the `src/vsr` directory.
+
 # Glossary
 
 - _checkpoint_: Ensure that all updates from the past wrap of the WAL are durable in the _grid_, then advance the replica's recovery point by updating the superblock. After a checkpoint, the checkpointed WAL entries are safe to be overwritten by the next wrap. (Sidenote: in consensus literature this is sometimes called snapshotting. But we use that term to mean something else.)

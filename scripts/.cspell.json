@@ -129,6 +129,8 @@
 	"checkpointing",
 	"checkpointed",
 	"getenv",
-        "freeset"
+        "freeset",
+	"tigerbeetlex",
+	"Jepsen"
     ]
 }
