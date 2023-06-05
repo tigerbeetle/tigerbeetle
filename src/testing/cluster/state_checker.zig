@@ -16,6 +16,11 @@ const Commits = std.ArrayList(struct {
     replicas: ReplicaSet = ReplicaSet.initEmpty(),
 });
 
+const ReplicaHead = struct {
+    view: u32,
+    op: u64,
+};
+
 const log = std.log.scoped(.state_checker);
 
 pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
@@ -32,6 +37,9 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
         /// The number of times the canonical state has been advanced.
         requests_committed: u64 = 0,
+
+        /// Tracks the latest op acked by a replica across restarts.
+        replica_head_max: []ReplicaHead,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -51,21 +59,46 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 .replicas = commit_replicas,
             });
 
+            var replica_head_max = try allocator.alloc(ReplicaHead, replicas.len);
+            errdefer allocator.free(replica_head_max);
+            for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
+
             return Self{
                 .replica_count = @intCast(u8, replicas.len),
                 .commits = commits,
                 .replicas = replicas,
                 .clients = clients,
+                .replica_head_max = replica_head_max,
             };
         }
 
         pub fn deinit(state_checker: *Self) void {
+            const allocator = state_checker.commits.allocator;
             state_checker.commits.deinit();
+            allocator.free(state_checker.replica_head_max);
+        }
+
+        pub fn on_message(state_checker: *Self, message: *const Message) void {
+            if (message.header.command == .prepare_ok) {
+                const head = &state_checker.replica_head_max[message.header.replica];
+                if (message.header.view > head.view or
+                    (message.header.view == head.view and message.header.op > head.op))
+                {
+                    head.view = message.header.view;
+                    head.op = message.header.op;
+                }
+            }
         }
 
         /// Returns whether the replica's state changed since the last check_state().
         pub fn check_state(state_checker: *Self, replica_index: u8) !void {
             const replica = &state_checker.replicas[replica_index];
+
+            if (replica.status != .recovering_head) {
+                const head_max = &state_checker.replica_head_max[replica_index];
+                assert(replica.view > head_max.view or
+                    (replica.view == head_max.view and replica.op >= head_max.op));
+            }
 
             const commit_root = replica.superblock.working.vsr_state.commit_min_checksum;
 
