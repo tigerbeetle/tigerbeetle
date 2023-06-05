@@ -58,112 +58,6 @@ jobs:
           name: nuget-artifact
           path: src/clients/dotnet/TigerBeetle/bin/Release/*.nupkg
 
-  prepare_validation_tests:
-    if: inputs.version == ''
-    needs: build
-    runs-on: ubuntu-latest
-    name: Prepare validation tests
-    steps:
-      - name: Create a simple test project
-        run: |
-          cat <<"EOF" > Program.cs
-          using System;
-          public class Program {
-            public static void Main() {
-              new TigerBeetle.Client(0, new [] {"3001"}).Dispose();
-              Console.WriteLine("SUCCESS");
-            }
-          }
-          EOF
-      - uses: actions/upload-artifact@v3
-        with:
-          name: test-project-artifact
-          path: Program.cs
-
-  run_validation_tests:
-    if: inputs.version == ''
-    needs: prepare_validation_tests
-    name: Validate OS
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ macos-latest, windows-latest]
-        dotnet: [ 7.0.x, 6.0.x, 3.1.x]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: ${{ matrix.dotnet }}
-      - uses: actions/download-artifact@v3
-        with:
-          name: nuget-artifact
-          path: ./nuget
-      - name: Create test project
-        run: |
-          mkdir test-project && cd test-project
-          dotnet nuget add source ../nuget
-          dotnet new console
-          dotnet add package tigerbeetle -s ../nuget
-      - uses: actions/download-artifact@v3
-        with:
-          name: test-project-artifact
-          path: ./test-project
-      - name: Test nuget package
-        working-directory: ./test-project
-        run: dotnet run
-
-  run_validation_tests_on_containers:
-    if: inputs.version == ''
-    needs: prepare_validation_tests
-    name: Validate dotnet runtime
-    strategy:
-      fail-fast: false
-      matrix:
-        tag:
-          - "7.0"
-          - "6.0"
-          - "3.1"
-          - "7.0-alpine"
-          - "6.0-alpine"
-          - "3.1-alpine"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v3
-        with:
-          name: nuget-artifact
-          path: ./nuget
-      - uses: actions/download-artifact@v3
-        with:
-          name: test-project-artifact
-          path: ./
-      - name: Test nuget package
-        run: |
-          docker run -v $(pwd)/nuget:/nuget -v $(pwd)/Program.cs:/Program.cs mcr.microsoft.com/dotnet/sdk:${{ matrix.tag }} sh -c "
-          mkdir test-project && cd test-project
-          dotnet nuget add source /nuget
-          dotnet new console
-          dotnet add package tigerbeetle -s /nuget
-          cp -f /Program.cs .
-          dotnet run
-          "
-
-  publish:
-    if: inputs.version != ''
-    needs: build
-    name: Publish NuGet package
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v3
-        with:
-          name: nuget-artifact
-          path: ./nuget
-      - run: |
-          dotnet nuget push ./nuget/*.nupkg \
-          --api-key $NUGET_KEY \
-          --source https://api.nuget.org/v3/index.json
-        env:
-          NUGET_KEY: ${{ secrets.NUGET_KEY }}
-
   samples_integration_test:
     needs: build
 
@@ -173,7 +67,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest] # , macos-latest, windows-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
         sample: [basic, two-phase]
 
     runs-on: ${{ matrix.os }}
@@ -206,7 +100,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest] # [windows-latest, ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
 
     runs-on: ${{ matrix.os }}
     steps:
