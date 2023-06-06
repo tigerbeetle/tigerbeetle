@@ -2433,6 +2433,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .size = @sizeOf(Header) + (size - offset),
                 .parent = self.superblock.staging.checkpoint_id(),
+                .client = self.superblock.staging.vsr_state.previous_checkpoint_id,
                 .op = self.op_checkpoint(),
                 .request = offset,
                 .context = self.superblock.staging.free_set_checksum,
@@ -2475,6 +2476,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .size = @sizeOf(Header) + (size - offset),
                 .parent = self.superblock.staging.checkpoint_id(),
+                .client = self.superblock.staging.vsr_state.commit_min_checksum,
                 .op = self.op_checkpoint(),
                 .request = offset,
                 .context = self.superblock.staging.client_sessions_checksum,
@@ -2516,7 +2518,7 @@ pub fn ReplicaType(
             self.superblock.manifest.clear();
             self.superblock.manifest.decode(manifest_buffer);
 
-            if (stage.done()) self.sync_request_manifest_logs();
+            if (stage.done()) self.sync_request_trailers_callback();
         }
 
         fn on_sync_free_set(self: *Self, message: *Message) void {
@@ -2526,6 +2528,10 @@ pub fn ReplicaType(
 
             const stage = &self.sync_stage.request_trailers;
             assert(stage.target.checkpoint_id == message.header.parent);
+            assert(stage.previous_checkpoint_id == null or
+                stage.previous_checkpoint_id.? == message.header.client);
+
+            stage.previous_checkpoint_id = message.header.client;
 
             log.debug("{}: on_sync_free_set: op={} checkpoint_id={x:0>32}", .{
                 self.replica,
@@ -2547,7 +2553,7 @@ pub fn ReplicaType(
             self.superblock.free_set.clear();
             self.superblock.free_set.decode(free_set_buffer);
 
-            if (stage.done()) self.sync_request_manifest_logs();
+            if (stage.done()) self.sync_request_trailers_callback();
         }
 
         fn on_sync_client_sessions(self: *Self, message: *Message) void {
@@ -2557,6 +2563,10 @@ pub fn ReplicaType(
 
             const stage = &self.sync_stage.request_trailers;
             assert(stage.target.checkpoint_id == message.header.parent);
+            assert(stage.checkpoint_op_checksum == null or
+                stage.checkpoint_op_checksum.? == message.header.client);
+
+            stage.checkpoint_op_checksum = message.header.client;
 
             log.debug("{}: on_sync_client_sessions: op={} checkpoint_id={x:0>32}", .{
                 self.replica,
@@ -2578,7 +2588,7 @@ pub fn ReplicaType(
             self.superblock.client_sessions.clear();
             self.superblock.client_sessions.decode(client_sessions_buffer);
 
-            if (stage.done()) self.sync_request_manifest_logs();
+            if (stage.done()) self.sync_request_trailers_callback();
         }
 
         fn on_ping_timeout(self: *Self) void {
@@ -2592,7 +2602,6 @@ pub fn ReplicaType(
                 // Checkpoint information:
                 .parent = self.superblock.working.checkpoint_id(),
                 .op = self.op_checkpoint(),
-                .client = self.superblock.working.vsr_state.commit_min_checksum,
             };
 
             self.send_header_to_other_replicas_and_standbys(ping);
@@ -2749,7 +2758,6 @@ pub fn ReplicaType(
                 .timestamp = self.clock.monotonic(),
                 .op = self.superblock.working.vsr_state.commit_min,
                 .parent = self.superblock.working.checkpoint_id(),
-                .client = self.superblock.working.vsr_state.commit_min_checksum,
             });
         }
 
@@ -5064,7 +5072,7 @@ pub fn ReplicaType(
                 const op_checkpoint_trigger_previous =
                     self.op_checkpoint() + constants.lsm_batch_multiple;
                 if (op <= op_checkpoint_trigger_previous) {
-                    return self.superblock.working.parent_checkpoint_id;
+                    return self.superblock.working.vsr_state.previous_checkpoint_id;
                 }
             }
             return self.superblock.working.checkpoint_id();
@@ -7614,7 +7622,7 @@ pub fn ReplicaType(
                         target.checkpoint_id,
                         self.sync_target_max.?.checkpoint_id,
                     });
-                    self.sync_stage = .{ .write_sync_start = .{ .target = self.sync_target_max.? } };
+                    self.sync_stage = .{ .request_trailers = .{ .target = self.sync_target_max.? } };
                 }
             }
 
@@ -7627,7 +7635,7 @@ pub fn ReplicaType(
                         (target.checkpoint_op == self.op_checkpoint() and
                         target.checkpoint_id != self.superblock.working.checkpoint_id()))
                     {
-                        self.sync_stage = .{ .write_sync_start = .{ .target = target } };
+                        self.sync_stage = .{ .request_trailers = .{ .target = target } };
                     }
                 }
             }
@@ -7656,8 +7664,8 @@ pub fn ReplicaType(
                 .cancel_commit => {}, // Waiting for an uninterruptible commit step.
                 .cancel_grid => self.grid.cancel(sync_cancel_grid_callback),
                 .request_target => {}, // Waiting for a usable sync target.
+                .request_trailers => self.sync_message_timeout.start(),
                 .write_sync_start => self.sync_superblock_start(),
-                .request_trailers => assert(self.sync_message_timeout.ticking),
                 .request_manifest_logs => self.sync_request_manifest_logs(),
                 .write_sync_done => self.sync_superblock_done(),
                 .done => {
@@ -7714,9 +7722,9 @@ pub fn ReplicaType(
             self.sync_dispatch(.request_target);
         }
 
-        fn sync_superblock_start(self: *Self) void {
+        fn sync_request_trailers_callback(self: *Self) void {
             assert(!self.solo());
-            assert(self.sync_stage == .write_sync_start);
+            assert(self.sync_stage == .request_trailers);
             assert(!self.superblock.updating(.checkpoint));
             assert(self.superblock.storage.next_tick_queue_lsm.empty());
             assert(self.commit_stage == .idle);
@@ -7727,11 +7735,38 @@ pub fn ReplicaType(
             assert(self.grid.write_queue.empty());
             if (self.status == .normal) assert(!self.primary());
 
+            const stage = self.sync_stage.request_trailers;
+            assert(stage.done());
+
+            // TODO(Zig) Use named format specifiers to avoid mixups.
+            log.debug("{}: sync_request_trailers_callback: " ++
+                "checkpoint_op={} checkpoint_id={x:0>32} " ++
+                "manifest_checksum={x:0>32} " ++
+                "free_set_checksum={x:0>32} " ++
+                "client_sessions_checksum={x:0>32}", .{
+                self.replica,
+                stage.target.checkpoint_op,
+                stage.target.checkpoint_id,
+                stage.manifest.final.?.checksum,
+                stage.free_set.final.?.checksum,
+                stage.client_sessions.final.?.checksum,
+            });
+
+            self.sync_dispatch(.{ .write_sync_start = .{
+                .target = stage.target,
+                .previous_checkpoint_id = stage.previous_checkpoint_id.?,
+                .checkpoint_op_checksum = stage.checkpoint_op_checksum.?,
+            } });
+        }
+
+        fn sync_superblock_start(self: *Self) void {
+            assert(!self.solo());
+            assert(self.sync_stage == .write_sync_start);
+
             const stage = self.sync_stage.write_sync_start;
 
             self.state_machine_opened = false;
             self.state_machine.reset();
-            self.sync_message_timeout.start();
             self.grid.cache_mark();
 
             if (self.superblock.working.vsr_state.flags.syncing and
@@ -7739,7 +7774,9 @@ pub fn ReplicaType(
             {
                 // This was already our sync target prior to crash/recover.
                 assert(self.superblock.working.vsr_state.commit_min_checksum ==
-                    stage.target.checkpoint_op_checksum);
+                    stage.checkpoint_op_checksum);
+                assert(self.superblock.working.vsr_state.previous_checkpoint_id ==
+                    stage.previous_checkpoint_id);
                 assert(self.commit_max >= stage.target.checkpoint_op);
 
                 Self.sync_superblock_start_callback(&self.superblock_context);
@@ -7754,7 +7791,8 @@ pub fn ReplicaType(
                     .{
                         .commit_max = self.commit_max,
                         .commit_min = stage.target.checkpoint_op,
-                        .commit_min_checksum = stage.target.checkpoint_op_checksum,
+                        .commit_min_checksum = stage.checkpoint_op_checksum,
+                        .previous_checkpoint_id = stage.previous_checkpoint_id,
                     },
                 );
             }
@@ -7766,38 +7804,26 @@ pub fn ReplicaType(
             assert(self.superblock.staging.vsr_state.flags.syncing);
 
             const stage = self.sync_stage.write_sync_start;
+            assert(stage.target.checkpoint_op == self.op_checkpoint());
             assert(stage.target.checkpoint_op == self.superblock.working.vsr_state.commit_min);
-            assert(stage.target.checkpoint_op_checksum ==
+            assert(stage.checkpoint_op_checksum ==
                 self.superblock.working.vsr_state.commit_min_checksum);
+            assert(stage.previous_checkpoint_id ==
+                self.superblock.working.vsr_state.previous_checkpoint_id);
 
             self.commit_min = self.superblock.working.vsr_state.commit_min;
             if (self.op < self.commit_min) {
                 self.transition_to_recovering_head();
             }
 
-            self.sync_dispatch(.{ .request_trailers = .{ .target = stage.target } });
+            self.sync_dispatch(.{ .request_manifest_logs = .{ .target = stage.target } });
         }
 
         fn sync_request_manifest_logs(self: *Self) void {
-            assert(self.sync_stage == .request_trailers);
+            assert(self.sync_stage == .request_manifest_logs);
             assert(!self.state_machine_opened);
 
-            const stage = self.sync_stage.request_trailers;
-            assert(stage.done());
-            assert(stage.target.checkpoint_op == self.op_checkpoint());
-
-            // TODO(Zig) Use named format specifiers to avoid mixups.
-            log.debug("{}: sync_request_manifest_logs: checkpoint_op={} checkpoint_id={x:0>32}" ++
-                "manifest_checksum={x:0>32} " ++
-                "free_set_checksum={x:0>32} " ++
-                "client_sessions_checksum={x:0>32}", .{
-                self.replica,
-                stage.target.checkpoint_op,
-                stage.target.checkpoint_id,
-                stage.manifest.final.?.checksum,
-                stage.free_set.final.?.checksum,
-                stage.client_sessions.final.?.checksum,
-            });
+            const stage = self.sync_stage.request_manifest_logs;
 
             self.sync_stage = .{ .request_manifest_logs = .{ .target = stage.target } };
             self.state_machine.open(sync_request_manifest_logs_callback);
@@ -7835,7 +7861,6 @@ pub fn ReplicaType(
             const superblock = self.superblock.working;
             assert(superblock.checkpoint_id() == stage.target.checkpoint_id);
             assert(superblock.vsr_state.commit_min == stage.target.checkpoint_op);
-            assert(superblock.vsr_state.commit_min_checksum == stage.target.checkpoint_op_checksum);
             assert(!superblock.vsr_state.flags.syncing);
 
             // Trim the grid cache of any entries which may have been removed from the LSM.
@@ -8026,7 +8051,6 @@ pub fn ReplicaType(
             const candidate = SyncTargetCandidate{
                 .checkpoint_id = header.parent,
                 .checkpoint_op = header.op,
-                .checkpoint_op_checksum = header.client,
             };
 
             if (candidate.checkpoint_op == 0) return;

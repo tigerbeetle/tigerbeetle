@@ -278,8 +278,8 @@ pub const Header = extern struct {
     /// * A `do_view_change` sets this to a bitset of "present" prepares. If a bit is set, then
     ///   the corresponding header is not "blank", the replica has the prepare, and the prepare
     ///   is not known to be faulty.
-    /// * A `commit` sets this to the checksum of its op_checkpoint header.
-    /// * A `ping` sets this to the checksum of its op_checkpoint header.
+    /// * A `sync_free_set` sets this to the vsr_state.previous_checkpoint_id.
+    /// * A `sync_client_sessions` sets this to the vsr_state.commit_min_checksum.
     client: u128 = 0,
 
     /// The checksum of the message to which this message refers.
@@ -478,6 +478,7 @@ pub const Header = extern struct {
 
     fn invalid_ping(self: *const Header) ?[]const u8 {
         assert(self.command == .ping);
+        if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.view != 0) return "view != 0";
@@ -651,6 +652,7 @@ pub const Header = extern struct {
 
     fn invalid_commit(self: *const Header) ?[]const u8 {
         assert(self.command == .commit);
+        if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
         if (self.timestamp == 0) return "timestamp == 0";
         if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -847,7 +849,6 @@ pub const Header = extern struct {
 
     fn invalid_sync_free_set(self: *const Header) ?[]const u8 {
         assert(self.command == .sync_free_set);
-        if (self.client != 0) return "client != 0";
         if (self.view != 0) return "view != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -856,7 +857,6 @@ pub const Header = extern struct {
 
     fn invalid_sync_client_sessions(self: *const Header) ?[]const u8 {
         assert(self.command == .sync_client_sessions);
-        if (self.client != 0) return "client != 0";
         if (self.view != 0) return "view != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
