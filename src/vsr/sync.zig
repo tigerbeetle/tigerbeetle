@@ -13,12 +13,12 @@ const stdx = @import("../stdx.zig");
 ///   .none                  → .cancel_commit | .cancel_grid | .request_target
 ///   .cancel_commit         → .cancel_grid
 ///   .cancel_grid           → .request_target
-///   .request_target        → .write_sync_start
-///   .write_sync_start      → .write_sync_start | .request_trailers
-///   .request_trailers      → .write_sync_start | .cancel_grid | .request_manifest_logs
-///   .request_manifest_logs → .write_sync_start | .cancel_grid | .write_sync_done
-///   .write_sync_done       → .write_sync_start | .done
-///   .done                  → .write_sync_start | .none
+///   .request_target        → .request_trailers
+///   .request_trailers      → .request_trailers | .write_sync_start
+///   .write_sync_start      → .request_trailers | .request_manifest_logs
+///   .request_manifest_logs → .request_trailers | .cancel_grid | .write_sync_done
+///   .write_sync_done       → .request_trailers | .done
+///   .done                  → .request_trailers | .none
 ///
 pub const SyncStage = union(enum) {
     /// Not syncing.
@@ -26,7 +26,7 @@ pub const SyncStage = union(enum) {
 
     /// The commit lifecycle is in a stage that cannot be interrupted/cancelled.
     /// We are waiting until that stage completes.
-    /// When it completes, we will terminate the commit and progressing with sync.
+    /// When it completes, we will terminate the commit and resume sync.
     cancel_commit,
 
     /// Waiting for `Grid.cancel()`.
@@ -35,18 +35,31 @@ pub const SyncStage = union(enum) {
     /// We need to sync, but are waiting for a usable `sync_target_max`.
     request_target,
 
-    /// superblock.sync_start()
-    write_sync_start: struct { target: SyncTarget },
-
     request_trailers: struct {
         target: SyncTarget,
         manifest: SyncTrailer = .{},
         free_set: SyncTrailer = .{},
         client_sessions: SyncTrailer = .{},
+        /// Our new VSRState.previous_checkpoint_id.
+        /// Arrives with command=sync_free_set.
+        previous_checkpoint_id: ?u128 = null,
+        /// The checksum of the prepare corresponding to checkpoint_op.
+        /// Arrives with command=sync_client_sessions.
+        checkpoint_op_checksum: ?u128 = null,
 
         pub fn done(self: *const @This()) bool {
+            if (self.free_set.done) assert(self.previous_checkpoint_id != null);
+            if (self.client_sessions.done) assert(self.checkpoint_op_checksum != null);
+
             return self.manifest.done and self.free_set.done and self.client_sessions.done;
         }
+    },
+
+    /// superblock.sync_start()
+    write_sync_start: struct {
+        target: SyncTarget,
+        previous_checkpoint_id: u128,
+        checkpoint_op_checksum: u128,
     },
 
     request_manifest_logs: struct { target: SyncTarget },
@@ -77,14 +90,11 @@ pub const SyncTargetCandidate = struct {
     checkpoint_id: u128,
     /// The op_checkpoint() that corresponds to the checkpoint id.
     checkpoint_op: u64,
-    /// The checksum of the prepare corresponding to checkpoint_op.
-    checkpoint_op_checksum: u128,
 
     pub fn canonical(target: SyncTargetCandidate) SyncTarget {
         return .{
             .checkpoint_id = target.checkpoint_id,
             .checkpoint_op = target.checkpoint_op,
-            .checkpoint_op_checksum = target.checkpoint_op_checksum,
         };
     }
 };
@@ -94,8 +104,6 @@ pub const SyncTarget = struct {
     checkpoint_id: u128,
     /// The op_checkpoint() that corresponds to the checkpoint id.
     checkpoint_op: u64,
-    /// The checksum of the prepare corresponding to checkpoint_op.
-    checkpoint_op_checksum: u128,
 };
 
 pub const SyncTargetQuorum = struct {
@@ -119,8 +127,6 @@ pub const SyncTargetQuorum = struct {
             if (candidate.checkpoint_op == candidate_existing.checkpoint_op and
                 candidate.checkpoint_id == candidate_existing.checkpoint_id)
             {
-                assert(candidate.checkpoint_op_checksum ==
-                    candidate_existing.checkpoint_op_checksum);
                 return false;
             }
         }

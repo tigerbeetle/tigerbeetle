@@ -227,7 +227,8 @@ pub const ClientSessions = struct {
 
             const existing = &client_sessions.entries[entry_index];
             assert(existing.session == session);
-            assert(existing.header.client == client);
+            assert(existing.header.cluster == header.cluster);
+            assert(existing.header.client == header.client);
             assert(existing.header.commit < header.commit);
 
             existing.header = header.*;

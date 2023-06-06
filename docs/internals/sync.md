@@ -43,11 +43,12 @@ Checkpoints:
 2. Wait for non-grid commit operation to finish.
 3. Wait for grid IO to finish. (See `Grid.cancel()`.)
 4. Wait for a usable sync target to arrive. (Usually we already have one.)
-5. Update superblock headers:
+5. [Request superblock trailers](#5-request-superblock-trailers).
+6. Update superblock headers:
     - Set `vsr_state.flags.syncing=true`.
     - Bump `vsr_state.commit_min`/`vsr_state.commit_min_checksum` to the sync target op/op-checksum.
+    - Bump `vsr_state.previous_checkpoint_id` to the checkpoint id that is previous to our sync target (i.e. it isn't _our_ previous checkpoint).
     - Bump `replica.commit_min`. (If `replica.commit_min` exceeds `replica.op`, transition to `status=recovering_head`).
-6. [Request superblock trailers](#6-request-superblock-trailers).
 7. Request and write manifest log blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
 8. Request and write table blocks. (TODO: This step is not implemented yet.)
 9. Update superblock headers and trailers:
@@ -86,7 +87,7 @@ State sync is initially triggered by any of the following:
     - a WAL or grid repair is in progress and,
     - the replica's checkpoint is lagging behind the cluster's (far enough that the repair may never complete).
 
-### 6: Request Superblock Trailers
+### 5: Request Superblock Trailers
 
 The replica concurrently sends out three request messages, with the sync target identifier attached to each:
 

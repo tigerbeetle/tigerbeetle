@@ -100,6 +100,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .superblock = &superblock,
         .superblock_verify = &superblock_verify,
         .latest_vsr_state = SuperBlockHeader.VSRState{
+            .previous_checkpoint_id = 0,
             .commit_min_checksum = 0,
             .commit_min = 0,
             .commit_max = 0,
@@ -235,6 +236,7 @@ const Environment = struct {
         // faults for pending writes) and clear the read/write queues.
         env.superblock_verify.storage.copy(env.superblock.storage);
         env.superblock_verify.storage.reset();
+        env.superblock_verify.client_sessions.clear();
         env.superblock_verify.open(verify_callback, &env.context_verify);
 
         env.pending_verify = true;
@@ -332,6 +334,7 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = .{
+            .previous_checkpoint_id = env.superblock.staging.vsr_state.previous_checkpoint_id,
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum,
             .commit_min = env.superblock.staging.vsr_state.commit_min,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
@@ -384,6 +387,7 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = .{
+            .previous_checkpoint_id = env.superblock.staging.checkpoint_id(),
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
             .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
@@ -396,6 +400,20 @@ const Environment = struct {
                 .syncing = false,
             },
         };
+
+        // To mimic the replica, ClientSessions mutates between every checkpoint.
+        // This ensures that sequential checkpoint ids are never identical.
+        const session: u64 = 1;
+        var reply = vsr.Header{
+            .cluster = cluster,
+            .command = .reply,
+            .client = 456,
+            .commit = vsr_state.commit_min,
+        };
+        reply.set_checksum_body(&.{});
+        reply.set_checksum();
+
+        _ = env.superblock.client_sessions.put(session, &reply);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
