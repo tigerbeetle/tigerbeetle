@@ -51,6 +51,7 @@ jobs:
   build_and_upload_binaries:
     needs: version
     strategy:
+      max-parallel: 2
       matrix:
         debug: ["", "--debug"]
         target: [aarch64-linux, x86_64-linux, aarch64-macos, x86_64-macos, x86_64-windows]
@@ -87,7 +88,6 @@ jobs:
           "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip"
 
   # Publish all clients and Docker image.
-
   client-dotnet:
     needs: version
     uses: ./.github/workflows/clients-dotnet.yml

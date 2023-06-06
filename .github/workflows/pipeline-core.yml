@@ -1,0 +1,35 @@
+name: Core Pipeline
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  # Run on Merge queue
+  merge_group:
+
+  # Run CI for any PRs that target 'main' when they are opened or updated.
+  pull_request:
+    branches:
+      - 'main'
+    types:
+      - opened
+      - synchronize
+
+  workflow_call:
+
+jobs:
+  smoke:
+    uses: ./.github/workflows/smoke.yml
+  linux:
+    uses: ./.github/workflows/linux.yml
+  core-pipeline:
+    needs:
+      - smoke
+      - linux
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: All Core CI Jobs Passed
+        working-directory: ./
+        run: exit 0
