@@ -17,6 +17,8 @@ fi
 PORT=3001
 if command -v python &> /dev/null; then
     PORT=$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')
+elif command -v python3 &> /dev/null; then
+    PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1]); s.close()')
 fi
 
 COLOR_RED='\033[1;31m'
