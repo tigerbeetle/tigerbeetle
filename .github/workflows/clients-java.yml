@@ -57,7 +57,7 @@ jobs:
     - name: Save local package
       uses: actions/upload-artifact@v3
       with:
-        name: jar-artifact
+        name: jar-artifact-${{ inputs.version }}
         path: |
           src/clients/java/target/*.jar
           !src/clients/java/target/*javadoc.jar
@@ -91,7 +91,7 @@ jobs:
     - name: Restore local package
       uses: actions/download-artifact@v3
       with:
-        name: jar-artifact
+        name: jar-artifact-${{ inputs.version }}
         path: test/
 
     - name: Create a simple test program
@@ -204,7 +204,7 @@ jobs:
     - name: Download jar
       uses: actions/download-artifact@v3
       with:
-        name: jar-artifact
+        name: jar-artifact-${{ inputs.version }}
         path: src/clients/java/target/
 
     # Grab Zig
