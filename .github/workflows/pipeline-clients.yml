@@ -1,7 +1,7 @@
 name: Clients Pipeline
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: clients-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 on:
