@@ -10,5 +10,4 @@ apt-get install -y curl xz-utils
 
 ./scripts/install_zig.sh
 zig/zig build test
-./scripts/install.sh
 "

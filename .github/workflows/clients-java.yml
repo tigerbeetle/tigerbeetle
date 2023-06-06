@@ -6,13 +6,13 @@ on:
   workflow_call:
     secrets:
       MAVEN_GPG_SECRET_KEY:
-        required: true
+        required: false
       MAVEN_CENTRAL_USERNAME:
-        required: true
+        required: false
       MAVEN_CENTRAL_TOKEN:
-        required: true
+        required: false
       MAVEN_GPG_SECRET_KEY_PASSWORD:
-        required: true
+        required: false
     inputs:
       version:
         required: false
@@ -62,6 +62,7 @@ jobs:
           src/clients/java/target/*.jar
           !src/clients/java/target/*javadoc.jar
           !src/clients/java/target/*sources.jar
+
     - name: Publish to the Maven Central Repository
       if: inputs.version != ''
       working-directory: src/clients/java
