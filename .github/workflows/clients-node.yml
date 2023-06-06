@@ -31,10 +31,12 @@ jobs:
       - name: Upload binaries
         uses: actions/upload-artifact@v3
         with:
-          name: node-binaries
+          name: node-binaries-${{ inputs.version }}
           path: src/clients/node/tigerbeetle-node-*.tgz
 
   test_install:
+    if: inputs.version == ''
+
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read
@@ -51,7 +53,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v3
         with:
-          name: node-binaries
+          name: node-binaries-${{ inputs.version }}
           path: src/clients/node
 
       - run: ./scripts/test_install_on_${{ matrix.distro == 'mac' && 'host' || matrix.distro == 'mac-m1-12.6' && 'host' || matrix.distro == 'mac-m1-13.2' && 'host' || matrix.distro }}.sh
@@ -78,7 +80,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v3
         with:
-          name: node-binaries
+          name: node-binaries-${{ inputs.version }}
           path: src/clients/node
 
       - run: scripts/publish.sh
@@ -86,6 +88,7 @@ jobs:
           TIGERBEETLE_NODE_PUBLISH_KEY: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
 
   samples_integration_test:
+    if: inputs.version == ''
     timeout-minutes: 20
 
     needs: build
@@ -106,7 +109,7 @@ jobs:
       - name: Download dist
         uses: actions/download-artifact@v3
         with:
-          name: node-binaries
+          name: node-binaries-${{ inputs.version }}
           path: src/clients/node
 
       # Grab Zig
@@ -116,6 +119,7 @@ jobs:
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node --sample ${{ matrix.sample }}
 
   docs:
+    if: inputs.version == ''
     timeout-minutes: 20
 
     strategy:
