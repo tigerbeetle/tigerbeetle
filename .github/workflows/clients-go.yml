@@ -4,7 +4,7 @@ on:
   workflow_call:
     secrets:
       TIGERBEETLE_GO_DEPLOY_KEY:
-        required: true
+        required: false
     inputs:
       version:
         required: false
