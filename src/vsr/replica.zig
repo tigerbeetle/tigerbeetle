@@ -5942,14 +5942,13 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.on_message_sent) |on_message_sent| {
-                on_message_sent(self, message);
-            }
-
             if (replica == self.replica) {
                 assert(self.loopback_queue == null);
                 self.loopback_queue = message.ref();
             } else {
+                if (self.on_message_sent) |on_message_sent| {
+                    on_message_sent(self, message);
+                }
                 self.message_bus.send_message_to_replica(replica, message);
             }
         }
