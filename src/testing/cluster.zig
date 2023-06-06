@@ -365,7 +365,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             _ = replica.superblock.free_set.acquire(reservation).?;
         }
 
-        /// Returns whether the replica was crashed.
         /// Returns an error when the replica was unable to recover (open).
         pub fn restart_replica(cluster: *Self, replica_index: u8) !void {
             assert(cluster.replica_health[replica_index] == .down);
