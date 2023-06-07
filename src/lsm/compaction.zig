@@ -325,7 +325,6 @@ pub fn CompactionType(
 
                 compaction.iterator_b.start(.{
                     .grid = context.grid,
-                    .manifest = &context.tree.manifest,
                     .level = context.level_b,
                     .snapshot = context.op_min,
                     .tables = context.range_b.tables,
@@ -809,9 +808,14 @@ pub fn CompactionType(
 
             // Update snapshot_max for the optimal compaction table in level A, as well as the
             // tables in level B that intersect with it.
-            manifest.update_table(level_b - 1, snapshot_max, &compaction.context.table_info_a.table);
+            switch (compaction.context.table_info_a) {
+                .immutable => {},
+                .disk => |table_info| {
+                    manifest.update_table(level_b - 1, snapshot_max, @intToPtr(*TableInfo, @ptrToInt(&table_info)));
+                },
+            }
 
-            for (compaction.context.range_b.tables) |table| {
+            for (compaction.context.range_b.tables.slice()) |table| {
                 manifest.update_table(level_b, snapshot_max, table);
             }
 
@@ -836,11 +840,10 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
         const TableInfo = Manifest.TableInfo;
         const TableDataIterator = TableDataIteratorType(Storage);
 
-        pub const Context = struct { grid: *Grid, level: u8, snapshot: u64, tables: []*TableInfo };
+        pub const Context = struct { grid: *Grid, level: u8, snapshot: u64, tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor) };
 
         pub const IndexCallback = fn (
             it: *LevelBDataIterator,
-            table_info: TableInfo,
             index_block: BlockPtrConst,
         ) void;
         pub const DataCallback = fn (it: *LevelBDataIterator, data_block: ?BlockPtrConst) void;
@@ -917,7 +920,7 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
             if (it.table_data_iterator.empty() and it.table_index + 1 < it.context.tables.len) {
                 // Refill `table_data_iterator` before calling `table_next`.
                 it.table_index += 1;
-                const table_info = it.context.tables[it.table_index];
+                const table_info = it.context.tables.slice()[it.table_index];
                 it.callback = .{ .level_next = callback };
                 it.context.grid.read_block(
                     on_level_next,
@@ -952,6 +955,13 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
                 });
                 callback.on_index(it, block);
             }
+            it.callback = .{ .table_next = callback };
+            it.table_data_iterator.next(on_table_next);
+        }
+
+        fn table_next(it: *LevelBDataIterator, callback: Callback) void {
+            assert(it.callback == .none);
+
             it.callback = .{ .table_next = callback };
             it.table_data_iterator.next(on_table_next);
         }
