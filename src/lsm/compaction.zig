@@ -115,8 +115,6 @@ pub fn CompactionType(
         manifest_entries: std.BoundedArray(struct {
             operation: enum {
                 insert_to_level_b,
-                update_in_level_a,
-                update_in_level_b,
                 move_to_level_b,
             },
             table: TableInfo,
@@ -124,8 +122,6 @@ pub fn CompactionType(
             // Worst-case manifest updates:
             // See docs/internals/lsm.md "Compaction Table Overlap" for more detail.
             var count = 0;
-            count += 1; // Update the input table from level A.
-            count += constants.lsm_growth_factor; // Update the input tables from level B.
             count += constants.lsm_growth_factor + 1; // Insert the output tables to level B.
             // (In the move-table case, only a single TableInfo is inserted, and none are updated.)
             break :manifest_entries_max count;
@@ -410,20 +406,17 @@ pub fn CompactionType(
 
         fn on_index_block(
             iterator_b: *LevelBDataIterator,
-            table_info: TableInfo,
             index_block: BlockPtrConst,
         ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
+            compaction.release_index_block(index_block);
+        }
 
-            // Tables that we've compacted should become invisible at the end of this half-bar.
-            compaction.manifest_entries.appendAssumeCapacity(.{
-                .operation = .update_in_level_b,
-                .table = table_info,
-            });
-
+        fn release_index_block(compaction: *Compaction, index_block: BlockPtrConst) void {
             // Release the table's block addresses in the Grid as it will be made invisible.
-            // This is safe; iterator_b makes a copy of the block before calling us.
+            // This is safe; iterator_b makes a copy of the block before calling us, and
+            // iterator_a holds a copy for table A's index block.
             const grid = compaction.context.grid;
             for (Table.index_data_addresses_used(index_block)) |address| {
                 grid.release(address);
@@ -768,17 +761,7 @@ pub fn CompactionType(
                     compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick);
                 },
                 .exhausted => {
-                    // Mark the level_a table as invisible if it was provided;
-                    // it has been merged into level_b.
-                    // TODO: Release the grid blocks associated with level_a as well
-                    switch (compaction.context.table_info_a) {
-                        .immutable => {},
-                        .disk => |table| compaction.manifest_entries.appendAssumeCapacity(.{
-                            .operation = .update_in_level_a,
-                            .table = table,
-                        }),
-                    }
-
+                    compaction.release_index_block(compaction.index_block_a);
                     compaction.state = .next_tick;
                     compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
                 },
@@ -814,7 +797,6 @@ pub fn CompactionType(
 
         pub fn apply_to_manifest(compaction: *Compaction) void {
             assert(compaction.state == .tables_writing_done);
-
             compaction.state = .applied_to_manifest;
 
             // Each compaction's manifest (log) updates are deferred to the end of the last
@@ -824,11 +806,18 @@ pub fn CompactionType(
             const manifest = &compaction.context.tree.manifest;
             const level_b = compaction.context.level_b;
             const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
+
+            // Update snapshot_max for the optimal compaction table in level A, as well as the
+            // tables in level B that intersect with it.
+            manifest.update_table(level_b - 1, snapshot_max, &compaction.context.table_info_a.table);
+
+            for (compaction.context.range_b.tables) |table| {
+                manifest.update_table(level_b, snapshot_max, table);
+            }
+
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
                     .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
-                    .update_in_level_a => manifest.update_table(level_b - 1, snapshot_max, &entry.table),
-                    .update_in_level_b => manifest.update_table(level_b, snapshot_max, &entry.table),
                     .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
                 }
             }
@@ -870,6 +859,7 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
         index_block: BlockPtr,
         read: Grid.Read = undefined,
         next_tick: Grid.NextTick = undefined,
+
         callback: union(enum) {
             none,
             level_next: Callback,
@@ -917,14 +907,8 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
             });
         }
 
-        /// *May* call `callback.on_index` once with the next index block,
-        /// if we've finished the previous index block,
-        /// or with null if there are no more index blocks in the range.
-        ///
         /// *Will* call `callback.on_data` once with the next data block,
         /// or with null if there are no more data blocks in the range.
-        ///
-        /// For both callbacks, the block is only valid for the duration of the callback.
         pub fn next(it: *LevelBDataIterator, callback: Callback) void {
             assert(it.callback == .none);
             // If this is the last table that we're iterating and it.table_data_iterator.empty()
@@ -934,6 +918,7 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
                 // Refill `table_data_iterator` before calling `table_next`.
                 it.table_index += 1;
                 const table_info = it.context.tables[it.table_index];
+                it.callback = .{ .level_next = callback };
                 it.context.grid.read_block(
                     on_level_next,
                     &it.read,
@@ -941,7 +926,6 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
                     table_info.checksum,
                     .index,
                 );
-                it.callback = .{ .level_next = callback };
             } else {
                 it.table_next(callback);
             }
@@ -950,7 +934,6 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
         fn on_level_next(
             read: *Grid.Read,
             index_block: ?BlockPtrConst,
-            table_info: ?TableInfo,
         ) void {
             const it = @fieldParentPtr(LevelBDataIterator, "read", read);
             assert(it.table_data_iterator.empty());
@@ -961,25 +944,14 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
                 // `index_block` is only valid for this callback, so copy it's contents.
                 // TODO(jamii) This copy can be avoided if we bypass the cache.
                 stdx.copy_disjoint(.exact, u8, it.index_block, block);
-
+                const grid = it.context.grid;
                 it.table_data_iterator.start(.{
-                    .grid = it.context.grid,
+                    .grid = grid,
                     .addresses = Table.index_data_addresses_used(it.index_block),
                     .checksums = Table.index_data_checksums_used(it.index_block),
                 });
-
-                const on_index = callback.on_index;
-                on_index(it, table_info.?, block);
-            } else {
-                // If there are no more index blocks, we can just leave `table_data_iterator` empty.
+                callback.on_index(it, block);
             }
-
-            it.table_next(callback);
-        }
-
-        fn table_next(it: *LevelBDataIterator, callback: Callback) void {
-            assert(it.callback == .none);
-
             it.callback = .{ .table_next = callback };
             it.table_data_iterator.next(on_table_next);
         }
@@ -988,9 +960,7 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
             const it = @fieldParentPtr(LevelBDataIterator, "table_data_iterator", table_data_iterator);
             const callback = it.callback.table_next;
             it.callback = .none;
-
-            const on_data = callback.on_data;
-            on_data(it, data_block);
+            callback.on_data(it, data_block);
         }
     };
 }
