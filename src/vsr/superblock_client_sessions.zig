@@ -221,7 +221,7 @@ pub const ClientSessions = struct {
             const existing = &client_sessions.entries[entry_index];
             assert(existing.session == session);
             assert(existing.header.client == client);
-            assert(existing.header.commit > header.commit);
+            assert(existing.header.commit < header.commit);
 
             existing.header = header.*;
             return ReplySlot{ .index = entry_index };
