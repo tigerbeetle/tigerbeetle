@@ -158,9 +158,9 @@ pub fn main() !void {
         .cluster = cluster_options,
         .workload = workload_options,
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
-        .replica_crash_probability = 0.00002,
+        .replica_crash_probability = 0.0002,
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
-        .replica_restart_probability = 0.0002,
+        .replica_restart_probability = 0.002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = 1 + random.uintLessThan(u8, 99),
