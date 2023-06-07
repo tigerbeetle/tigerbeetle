@@ -4178,7 +4178,7 @@ pub fn ReplicaType(
                                 self.replica,
                                 command,
                             });
-                            return true;
+                            // return true;
                         }
                     }
                 },
