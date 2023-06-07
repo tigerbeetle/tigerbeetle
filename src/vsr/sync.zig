@@ -6,20 +6,6 @@ const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
-/// Initial stage: .none
-///
-/// Transitions:
-///
-///   .none                  → .cancel_commit | .cancel_grid | .request_target
-///   .cancel_commit         → .cancel_grid
-///   .cancel_grid           → .request_target
-///   .request_target        → .request_trailers
-///   .request_trailers      → .request_trailers | .write_sync_start
-///   .write_sync_start      → .request_trailers | .request_manifest_logs
-///   .request_manifest_logs → .request_trailers | .cancel_grid | .write_sync_done
-///   .write_sync_done       → .request_trailers | .done
-///   .done                  → .request_trailers | .none
-///
 pub const SyncStage = union(enum) {
     /// Not syncing.
     none,
@@ -68,6 +54,28 @@ pub const SyncStage = union(enum) {
     write_sync_done: struct { target: SyncTarget },
 
     done: struct { target: SyncTarget },
+
+    pub fn valid_transition(from: std.meta.Tag(SyncStage), to: std.meta.Tag(SyncStage)) bool {
+        return switch (from) {
+            .none => to == .cancel_commit or
+                to == .cancel_grid or
+                to == .request_target,
+            .cancel_commit => to == .cancel_grid,
+            .cancel_grid => to == .request_target,
+            .request_target => to == .request_target or
+                to == .request_trailers,
+            .request_trailers => to == .cancel_grid or
+                to == .write_sync_start,
+            .write_sync_start => to == .request_trailers or
+                to == .request_manifest_logs,
+            .request_manifest_logs => to == .cancel_grid or
+                to == .write_sync_done,
+            .write_sync_done => to == .request_trailers or
+                to == .done,
+            .done => to == .request_trailers or
+                to == .none,
+        };
+    }
 
     pub fn target(stage: *const SyncStage) ?SyncTarget {
         return switch (stage.*) {

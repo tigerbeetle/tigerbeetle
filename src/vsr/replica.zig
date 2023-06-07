@@ -7602,6 +7602,7 @@ pub fn ReplicaType(
         /// sync_dispatch() is called between every sync-state transition.
         fn sync_dispatch(self: *Self, state_new: SyncStage) void {
             assert(!self.solo());
+            assert(self.sync_stage.valid_transition(state_new));
             if (self.op < self.commit_min) assert(self.status == .recovering_head);
 
             const state_old = self.sync_stage;
