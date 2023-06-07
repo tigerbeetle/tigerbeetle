@@ -47,7 +47,6 @@ const alloc_block = @import("grid.zig").alloc_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
-const LevelDataIteratorType = @import("level_data_iterator.zig").LevelDataIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
@@ -65,7 +64,7 @@ pub fn CompactionType(
         const Manifest = ManifestType(Table, Storage);
         const CompactionRange = Manifest.CompactionRange;
         const TableDataIterator = TableDataIteratorType(Storage);
-        const LevelDataIterator = LevelDataIteratorType(Table, Storage);
+        const LevelBDataIterator = LevelBDataIteratorType(Table, Storage);
 
         const Key = Table.Key;
         const Value = Table.Value;
@@ -105,7 +104,7 @@ pub fn CompactionType(
 
         // Allocated during `init`.
         iterator_a: TableDataIterator,
-        iterator_b: LevelDataIterator,
+        iterator_b: LevelBDataIterator,
         index_block_a: BlockPtr,
         data_blocks: [2]BlockPtr,
         table_builder: Table.Builder,
@@ -169,7 +168,7 @@ pub fn CompactionType(
             var iterator_a = try TableDataIterator.init(allocator);
             errdefer iterator_a.deinit(allocator);
 
-            var iterator_b = try LevelDataIterator.init(allocator);
+            var iterator_b = try LevelBDataIterator.init(allocator);
             errdefer iterator_b.deinit(allocator);
 
             const index_block_a = try alloc_block(allocator);
@@ -333,8 +332,7 @@ pub fn CompactionType(
                     .manifest = &context.tree.manifest,
                     .level = context.level_b,
                     .snapshot = context.op_min,
-                    .key_min = context.range_b.key_min,
-                    .key_max = context.range_b.key_max,
+                    .tables = context.range_b.tables,
                 });
 
                 switch (context.table_info_a) {
@@ -411,7 +409,7 @@ pub fn CompactionType(
         }
 
         fn on_index_block(
-            iterator_b: *LevelDataIterator,
+            iterator_b: *LevelBDataIterator,
             table_info: TableInfo,
             index_block: BlockPtrConst,
         ) void {
@@ -442,7 +440,7 @@ pub fn CompactionType(
             compaction.iterator_next(data_block);
         }
 
-        fn iterator_next_b(iterator_b: *LevelDataIterator, data_block: ?BlockPtrConst) void {
+        fn iterator_next_b(iterator_b: *LevelBDataIterator, data_block: ?BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.iterator_next(data_block);
@@ -834,6 +832,165 @@ pub fn CompactionType(
                     .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
                 }
             }
+        }
+    };
+}
+
+pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type {
+    return struct {
+        const LevelBDataIterator = @This();
+
+        const Grid = GridType(Storage);
+        const BlockPtr = Grid.BlockPtr;
+        const BlockPtrConst = Grid.BlockPtrConst;
+        const Manifest = ManifestType(Table, Storage);
+        const TableInfo = Manifest.TableInfo;
+        const TableDataIterator = TableDataIteratorType(Storage);
+
+        pub const Context = struct { grid: *Grid, level: u8, snapshot: u64, tables: []*TableInfo };
+
+        pub const IndexCallback = fn (
+            it: *LevelBDataIterator,
+            table_info: TableInfo,
+            index_block: BlockPtrConst,
+        ) void;
+        pub const DataCallback = fn (it: *LevelBDataIterator, data_block: ?BlockPtrConst) void;
+        pub const Callback = struct {
+            on_index: IndexCallback,
+            on_data: DataCallback,
+        };
+
+        /// Passed by `start`.
+        context: Context,
+
+        /// Internal state.
+        table_data_iterator: TableDataIterator,
+        table_index: usize = 0,
+        // Local copy of index block, for use in `table_data_iterator`.
+        index_block: BlockPtr,
+        read: Grid.Read = undefined,
+        next_tick: Grid.NextTick = undefined,
+        callback: union(enum) {
+            none,
+            level_next: Callback,
+            table_next: Callback,
+        },
+
+        pub fn init(
+            allocator: mem.Allocator,
+        ) !LevelBDataIterator {
+            var table_data_iterator = try TableDataIterator.init(allocator);
+            errdefer table_data_iterator.deinit(allocator);
+
+            const index_block = try alloc_block(allocator);
+            errdefer allocator.free(index_block);
+
+            return LevelBDataIterator{
+                .context = undefined,
+                .table_data_iterator = table_data_iterator,
+                .index_block = index_block,
+                .callback = .none,
+            };
+        }
+
+        pub fn deinit(it: *LevelBDataIterator, allocator: mem.Allocator) void {
+            allocator.free(it.index_block);
+            it.table_data_iterator.deinit(allocator);
+            it.* = undefined;
+        }
+
+        pub fn start(
+            it: *LevelBDataIterator,
+            context: Context,
+        ) void {
+            assert(it.callback == .none);
+            it.* = .{
+                .context = context,
+                .table_data_iterator = it.table_data_iterator,
+                .index_block = it.index_block,
+                .callback = .none,
+            };
+            it.table_data_iterator.start(.{
+                .grid = context.grid,
+                .addresses = &.{},
+                .checksums = &.{},
+            });
+        }
+
+        /// *May* call `callback.on_index` once with the next index block,
+        /// if we've finished the previous index block,
+        /// or with null if there are no more index blocks in the range.
+        ///
+        /// *Will* call `callback.on_data` once with the next data block,
+        /// or with null if there are no more data blocks in the range.
+        ///
+        /// For both callbacks, the block is only valid for the duration of the callback.
+        pub fn next(it: *LevelBDataIterator, callback: Callback) void {
+            assert(it.callback == .none);
+            // If this is the last table that we're iterating and it.table_data_iterator.empty()
+            // is true, it.table_data_iterator.next takes care of calling callback.on_data with
+            // a null data block.
+            if (it.table_data_iterator.empty() and it.table_index + 1 < it.context.tables.len) {
+                // Refill `table_data_iterator` before calling `table_next`.
+                it.table_index += 1;
+                const table_info = it.context.tables[it.table_index];
+                it.context.grid.read_block(
+                    on_level_next,
+                    &it.read,
+                    table_info.address,
+                    table_info.checksum,
+                    .index,
+                );
+                it.callback = .{ .level_next = callback };
+            } else {
+                it.table_next(callback);
+            }
+        }
+
+        fn on_level_next(
+            read: *Grid.Read,
+            index_block: ?BlockPtrConst,
+            table_info: ?TableInfo,
+        ) void {
+            const it = @fieldParentPtr(LevelBDataIterator, "read", read);
+            assert(it.table_data_iterator.empty());
+            const callback = it.callback.level_next;
+            it.callback = .none;
+
+            if (index_block) |block| {
+                // `index_block` is only valid for this callback, so copy it's contents.
+                // TODO(jamii) This copy can be avoided if we bypass the cache.
+                stdx.copy_disjoint(.exact, u8, it.index_block, block);
+
+                it.table_data_iterator.start(.{
+                    .grid = it.context.grid,
+                    .addresses = Table.index_data_addresses_used(it.index_block),
+                    .checksums = Table.index_data_checksums_used(it.index_block),
+                });
+
+                const on_index = callback.on_index;
+                on_index(it, table_info.?, block);
+            } else {
+                // If there are no more index blocks, we can just leave `table_data_iterator` empty.
+            }
+
+            it.table_next(callback);
+        }
+
+        fn table_next(it: *LevelBDataIterator, callback: Callback) void {
+            assert(it.callback == .none);
+
+            it.callback = .{ .table_next = callback };
+            it.table_data_iterator.next(on_table_next);
+        }
+
+        fn on_table_next(table_data_iterator: *TableDataIterator, data_block: ?Grid.BlockPtrConst) void {
+            const it = @fieldParentPtr(LevelBDataIterator, "table_data_iterator", table_data_iterator);
+            const callback = it.callback.table_next;
+            it.callback = .none;
+
+            const on_data = callback.on_data;
+            on_data(it, data_block);
         }
     };
 }

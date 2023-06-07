@@ -482,6 +482,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             key_min: Key,
             /// The maximum key across both levels.
             key_max: Key,
+            // References to tables in level B that intersect with the chosen table in level A.
+            tables: []*TableInfo,
         };
 
         /// Returns the smallest visible range across level A and B that overlaps key_min/max.
@@ -535,6 +537,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 if (compare_keys(table.key_max, range.key_max) == .gt) {
                     range.key_max = table.key_max;
                 }
+                range.tables.push(&table);
             }
 
             assert(range.table_count > 0);
