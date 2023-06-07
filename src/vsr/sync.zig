@@ -162,7 +162,7 @@ pub const SyncTargetQuorum = struct {
 /// The SyncTrailer assembles the pieces of these trailers, tracking the progress so that
 /// the replica knows how much of the trailer still needs to be requested.
 pub const SyncTrailer = struct {
-    pub const chunk_size_max = constants.message_body_size_max;
+    pub const chunk_size_max = constants.sync_trailer_message_body_size_max;
 
     /// The next offset to fetch.
     offset: u32 = 0,

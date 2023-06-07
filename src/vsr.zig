@@ -840,6 +840,7 @@ pub const Header = extern struct {
 
     fn invalid_sync_manifest(self: *const Header) ?[]const u8 {
         assert(self.command == .sync_manifest);
+        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) return "size > max";
         if (self.client != 0) return "client != 0";
         if (self.view != 0) return "view != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -849,6 +850,7 @@ pub const Header = extern struct {
 
     fn invalid_sync_free_set(self: *const Header) ?[]const u8 {
         assert(self.command == .sync_free_set);
+        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) return "size > max";
         if (self.view != 0) return "view != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -857,6 +859,7 @@ pub const Header = extern struct {
 
     fn invalid_sync_client_sessions(self: *const Header) ?[]const u8 {
         assert(self.command == .sync_client_sessions);
+        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) return "size > max";
         if (self.view != 0) return "view != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.operation != .reserved) return "operation != .reserved";

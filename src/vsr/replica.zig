@@ -2372,24 +2372,28 @@ pub fn ReplicaType(
             defer self.message_bus.unref(reply);
 
             const offset = message.header.request;
-            const size = self.superblock.staging.manifest_size;
+            const size_total = self.superblock.staging.manifest_size;
+            const size_send = @intCast(u32, @minimum(
+                size_total - offset,
+                constants.sync_trailer_message_body_size_max,
+            ));
             stdx.copy_disjoint(
                 .inexact,
                 u8,
                 reply.buffer[@sizeOf(Header)..],
-                self.superblock.manifest_buffer[offset..][0 .. size - offset],
+                self.superblock.manifest_buffer[offset..][0..size_send],
             );
 
             if (constants.verify) {
                 assert(self.superblock.staging.manifest_checksum ==
-                    vsr.checksum(self.superblock.manifest_buffer[0..size]));
+                    vsr.checksum(self.superblock.manifest_buffer[0..size_total]));
             }
 
             reply.header.* = .{
                 .command = .sync_manifest,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .size = @sizeOf(Header) + (size - offset),
+                .size = @sizeOf(Header) + size_send,
                 .parent = self.superblock.staging.checkpoint_id(),
                 .op = self.op_checkpoint(),
                 .request = offset,
@@ -2414,24 +2418,28 @@ pub fn ReplicaType(
             defer self.message_bus.unref(reply);
 
             const offset = message.header.request;
-            const size = self.superblock.staging.free_set_size;
+            const size_total = self.superblock.staging.free_set_size;
+            const size_send = @intCast(u32, @minimum(
+                size_total - offset,
+                constants.sync_trailer_message_body_size_max,
+            ));
             stdx.copy_disjoint(
                 .inexact,
                 u8,
                 reply.buffer[@sizeOf(Header)..],
-                self.superblock.free_set_buffer[offset..][0 .. size - offset],
+                self.superblock.free_set_buffer[offset..][0..size_send],
             );
 
             if (constants.verify) {
                 assert(self.superblock.staging.free_set_checksum ==
-                    vsr.checksum(self.superblock.free_set_buffer[0..size]));
+                    vsr.checksum(self.superblock.free_set_buffer[0..size_total]));
             }
 
             reply.header.* = .{
                 .command = .sync_free_set,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .size = @sizeOf(Header) + (size - offset),
+                .size = @sizeOf(Header) + size_send,
                 .parent = self.superblock.staging.checkpoint_id(),
                 .client = self.superblock.staging.vsr_state.previous_checkpoint_id,
                 .op = self.op_checkpoint(),
@@ -2457,24 +2465,28 @@ pub fn ReplicaType(
             defer self.message_bus.unref(reply);
 
             const offset = message.header.request;
-            const size = self.superblock.staging.client_sessions_size;
+            const size_total = self.superblock.staging.client_sessions_size;
+            const size_send = @intCast(u32, @minimum(
+                size_total - offset,
+                constants.sync_trailer_message_body_size_max,
+            ));
             stdx.copy_disjoint(
                 .inexact,
                 u8,
                 reply.buffer[@sizeOf(Header)..],
-                self.superblock.client_sessions_buffer[offset..][0 .. size - offset],
+                self.superblock.client_sessions_buffer[offset..][0..size_send],
             );
 
             if (constants.verify) {
                 assert(self.superblock.staging.client_sessions_checksum ==
-                    vsr.checksum(self.superblock.client_sessions_buffer[0..size]));
+                    vsr.checksum(self.superblock.client_sessions_buffer[0..size_total]));
             }
 
             reply.header.* = .{
                 .command = .sync_client_sessions,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .size = @sizeOf(Header) + (size - offset),
+                .size = @sizeOf(Header) + size_send,
                 .parent = self.superblock.staging.checkpoint_id(),
                 .client = self.superblock.staging.vsr_state.commit_min_checksum,
                 .op = self.op_checkpoint(),
