@@ -115,6 +115,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     (replica.view == head_max.view and replica.op >= head_max.op));
             }
 
+            const commit_root_op = replica.superblock.working.vsr_state.commit_min;
             const commit_root = replica.superblock.working.vsr_state.commit_min_checksum;
 
             const commit_a = state_checker.commit_mins[replica_index];
@@ -125,7 +126,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             assert(header_b == null or header_b.?.op == commit_b);
 
             const checksum_a = state_checker.commits.items[commit_a].header.checksum;
-            const checksum_b = if (header_b) |h| h.checksum else commit_root;
+            // Even if we have header_b, if its op is commit_root_op, we can't trust it.
+            // If we just finished state sync, the header in our log might not have been
+            // committed (it might be left over from before sync).
+            const checksum_b = if (commit_b == commit_root_op) commit_root else header_b.?.checksum;
 
             assert(checksum_b != commit_root or replica.commit_min == replica.superblock.working.vsr_state.commit_min);
             assert((commit_a == commit_b) == (checksum_a == checksum_b));
@@ -148,6 +152,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
 
             if (header_b == null) return;
+            assert(header_b.?.checksum == checksum_b);
             assert(header_b.?.parent == checksum_a);
             assert(header_b.?.op > 0);
             assert(header_b.?.command == .prepare);
