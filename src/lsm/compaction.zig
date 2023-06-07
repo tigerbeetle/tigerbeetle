@@ -416,6 +416,7 @@ pub fn CompactionType(
             // Release the table's block addresses in the Grid as it will be made invisible.
             // This is safe; iterator_b makes a copy of the block before calling us, and
             // iterator_a holds a copy for table A's index block.
+
             const grid = compaction.context.grid;
             for (Table.index_data_addresses_used(index_block)) |address| {
                 grid.release(address);
@@ -760,7 +761,13 @@ pub fn CompactionType(
                     compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick);
                 },
                 .exhausted => {
-                    compaction.release_index_block(compaction.index_block_a);
+                    switch (compaction.context.table_info_a) {
+                        .immutable => {},
+                        .disk => |_| {
+                            log.debug("Compaction input has been exhausted, releasing grid blocks for level A table with index block: {*}.", .{compaction.index_block_a});
+                            compaction.release_index_block(compaction.index_block_a);
+                        },
+                    }
                     compaction.state = .next_tick;
                     compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
                 },
