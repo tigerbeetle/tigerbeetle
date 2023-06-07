@@ -594,10 +594,6 @@ pub fn ReplicaType(
             const header_head = self.journal.header_with_op(self.op).?;
             assert(header_head.view <= self.superblock.working.vsr_state.log_view);
 
-            if (self.superblock.working.vsr_state.flags.syncing) {
-                self.sync_start_from_recovering();
-            }
-
             if (self.solo()) {
                 if (self.journal.faulty.count > 0) return error.WALCorrupt;
                 assert(self.op_head_certain());
@@ -640,6 +636,10 @@ pub fn ReplicaType(
             maybe(self.status == .view_change);
             maybe(self.status == .recovering_head);
             if (self.status == .recovering) assert(self.solo());
+
+            if (self.superblock.working.vsr_state.flags.syncing) {
+                self.sync_start_from_open();
+            }
 
             // Asynchronously open the (Forest inside) StateMachine so that we can repair grid
             // blocks if necessary:
@@ -7498,13 +7498,15 @@ pub fn ReplicaType(
         }
 
         /// We just recovered, and our superblock indicates that we were mid-sync.
-        fn sync_start_from_recovering(self: *Self) void {
+        fn sync_start_from_open(self: *Self) void {
             assert(!self.solo());
-            assert(self.status == .recovering);
+            assert(self.status != .recovering);
             assert(self.sync_stage == .none);
+            assert(self.commit_stage == .idle);
+            assert(self.commit_min == self.op_checkpoint());
             assert(self.superblock.working.vsr_state.flags.syncing);
 
-            log.debug("{}: sync_start_from_recovering", .{self.replica});
+            log.debug("{}: sync_start_from_open", .{self.replica});
 
             self.sync_dispatch(.request_target);
         }
