@@ -74,7 +74,7 @@ pub fn CompactionType(
 
         pub const TableInfoA = union(enum) {
             immutable: []const Value,
-            disk: TableInfo,
+            disk: *TableInfo,
         };
 
         pub const Context = struct {
@@ -305,7 +305,7 @@ pub fn CompactionType(
                 );
 
                 const snapshot_max = snapshot_max_for_table_input(context.op_min);
-                const table_a = &context.table_info_a.disk;
+                const table_a = context.table_info_a.disk;
                 assert(table_a.snapshot_max >= snapshot_max);
 
                 compaction.manifest_entries.appendAssumeCapacity(.{
@@ -361,7 +361,7 @@ pub fn CompactionType(
                 .addresses = Table.index_data_addresses_used(compaction.index_block_a),
                 .checksums = Table.index_data_checksums_used(compaction.index_block_a),
             });
-
+            compaction.release_table_blocks(compaction.index_block_a);
             compaction.state = .compacting;
             compaction.loop_start();
         }
@@ -424,7 +424,7 @@ pub fn CompactionType(
             for (Table.index_filter_addresses_used(index_block)) |address| {
                 grid.release(address);
             }
-            grid.release(Table.index_block_address(index_block));
+            grid.release(Table.block_address(index_block));
         }
 
         fn iterator_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
@@ -761,13 +761,6 @@ pub fn CompactionType(
                     compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick);
                 },
                 .exhausted => {
-                    switch (compaction.context.table_info_a) {
-                        .immutable => {},
-                        .disk => |_| {
-                            log.debug("Compaction input has been exhausted, releasing grid blocks for level A table with index block: {*}.", .{compaction.index_block_a});
-                            compaction.release_table_blocks(compaction.index_block_a);
-                        },
-                    }
                     compaction.state = .next_tick;
                     compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
                 },
@@ -816,21 +809,14 @@ pub fn CompactionType(
 
             if (!can_move_table) {
                 switch (compaction.context.table_info_a) {
-                    .immutable => {
-                        log.debug("# of tables in Level {} that intersect with the immutable table: {}.", .{ level_b, compaction.context.range_b.tables.len });
-                    },
+                    .immutable => {},
                     .disk => |table_info| {
-                        log.debug("Updating table {*} in Level A ({}) with snapshot_max {}.", .{ &table_info, level_b - 1, snapshot_max });
-                        log.debug("# of tables in Level {} that intersect with the selected table in level {}: {}.", .{ level_b, level_b -% 1, compaction.context.range_b.tables.len });
-                        manifest.update_table(level_b - 1, snapshot_max, @intToPtr(*TableInfo, @ptrToInt(&table_info)));
+                        manifest.update_table(level_b - 1, snapshot_max, table_info);
                     },
                 }
                 for (compaction.context.range_b.tables.slice()) |table| {
-                    log.debug("Updating table {*} in Level {} with snapshot_max {}.", .{ table, level_b, snapshot_max });
                     manifest.update_table(level_b, snapshot_max, table);
                 }
-            } else {
-                log.debug("Compaction involves moving table to Level {}", .{level_b});
             }
         }
         pub fn apply_to_manifest(compaction: *Compaction) void {
@@ -942,9 +928,8 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
             // If this is the last table that we're iterating and it.table_data_iterator.empty()
             // is true, it.table_data_iterator.next takes care of calling callback.on_data with
             // a null data block.
-            if (it.table_data_iterator.empty() and it.table_index + 1 < it.context.tables.len) {
+            if (it.table_data_iterator.empty() and it.table_index < it.context.tables.len) {
                 // Refill `table_data_iterator` before calling `table_next`.
-                it.table_index += 1;
                 const table_info = it.context.tables.slice()[it.table_index];
                 it.callback = .{ .level_next = callback };
                 it.context.grid.read_block(
@@ -972,16 +957,15 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
                 // `index_block` is only valid for this callback, so copy it's contents.
                 // TODO(jamii) This copy can be avoided if we bypass the cache.
                 stdx.copy_disjoint(.exact, u8, it.index_block, block);
-                const grid = it.context.grid;
                 it.table_data_iterator.start(.{
-                    .grid = grid,
+                    .grid = it.context.grid,
                     .addresses = Table.index_data_addresses_used(it.index_block),
                     .checksums = Table.index_data_checksums_used(it.index_block),
                 });
                 callback.on_index(it, block);
             }
-            it.callback = .{ .table_next = callback };
-            it.table_data_iterator.next(on_table_next);
+            it.table_index += 1;
+            it.table_next(callback);
         }
 
         fn table_next(it: *LevelBDataIterator, callback: Callback) void {

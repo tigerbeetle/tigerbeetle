@@ -210,12 +210,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         /// Updates the snapshot_max on the provide table for the given level.
         /// The table provided is mutable to allow its snapshot_max to be updated.
-        pub fn update_table(
-            manifest: *Manifest,
-            level: u8,
-            snapshot: u64,
-            table: *TableInfo,
-        ) void {
+        pub fn update_table(manifest: *Manifest, level: u8, snapshot: u64, table: *TableInfo) void {
             const manifest_level = &manifest.levels[level];
 
             assert(table.snapshot_max >= snapshot);
@@ -456,7 +451,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 const range = manifest.compaction_range(level_a + 1, table.key_min, table.key_max);
                 if (optimal == null or range.table_count < optimal.?.range.table_count) {
                     optimal = .{
-                        .table = table.*,
+                        .table = @intToPtr(*TableInfo, @ptrToInt(table)),
                         .range = range,
                     };
                 }
@@ -471,7 +466,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub const CompactionTableRange = struct {
-            table: TableInfo,
+            table: *TableInfo,
             range: CompactionRange,
         };
 
