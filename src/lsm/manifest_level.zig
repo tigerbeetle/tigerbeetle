@@ -82,6 +82,22 @@ pub fn ManifestLevelType(
         }
 
         /// Set snapshot_max for the given table in the ManifestLevel.
+        /// This function assumes that the argument `table` is a stable pointer to
+        /// a table within the segmented array.
+        /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
+        pub fn set_snapshot_max_stable_ptr(level: *Self, snapshot: u64, table: *TableInfo) void {
+            assert(snapshot < lsm.snapshot_latest);
+            assert(table.snapshot_max == math.maxInt(u64));
+
+            const key_min = table.key_min;
+            const key_max = table.key_max;
+            assert(compare_keys(key_min, key_max) != .gt);
+            assert(table.snapshot_max == math.maxInt(u64));
+            table.snapshot_max = snapshot;
+            level.table_count_visible -= 1;
+        }
+
+        /// Set snapshot_max for the given table in the ManifestLevel.
         ///
         /// * The table is mutable so that this function can update its snapshot.
         /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
@@ -376,7 +392,6 @@ pub fn ManifestLevelType(
         /// The function is only used for verification; it is not performance-critical.
         pub fn contains(level: Self, table: *const TableInfo) bool {
             assert(constants.verify);
-
             var level_tables = level.iterator(.visible, &.{
                 table.snapshot_min,
             }, .ascending, KeyRange{
