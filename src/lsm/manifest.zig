@@ -219,7 +219,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest_level = &manifest.levels[level];
 
             assert(table.snapshot_max >= snapshot);
-            manifest_level.set_snapshot_max(snapshot, table);
+            manifest_level.set_snapshot_max_stable_ptr(snapshot, table);
             assert(table.snapshot_max == snapshot);
 
             // Append update changes to the manifest log.
@@ -518,24 +518,30 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
             );
 
-            while (it.next()) |table_const| : (range.table_count += 1) {
-                assert(table_const.visible(snapshot_latest));
-                assert(compare_keys(table_const.key_min, table_const.key_max) != .gt);
-                assert(compare_keys(table_const.key_max, range.key_min) != .lt);
-                assert(compare_keys(table_const.key_min, range.key_max) != .gt);
+            while (it.next()) |table| : (range.table_count += 1) {
+                assert(table.visible(snapshot_latest));
+                assert(compare_keys(table.key_min, table.key_max) != .gt);
+                assert(compare_keys(table.key_max, range.key_min) != .lt);
+                assert(compare_keys(table.key_min, range.key_max) != .gt);
 
                 // The first iterated table.key_min/max may overlap range.key_min/max entirely.
-                if (compare_keys(table_const.key_min, range.key_min) == .lt) {
-                    range.key_min = table_const.key_min;
+                if (compare_keys(table.key_min, range.key_min) == .lt) {
+                    range.key_min = table.key_min;
                 }
 
                 // Thereafter, iterated tables may/may not extend the range in ascending order.
-                if (compare_keys(table_const.key_max, range.key_max) == .gt) {
-                    range.key_max = table_const.key_max;
+                if (compare_keys(table.key_max, range.key_max) == .gt) {
+                    range.key_max = table.key_max;
                 }
                 // This const cast is safe as we know that the memory pointed to is in fact
                 // mutable. That is, the table is not in the .text or .rodata section.
-                range.tables.appendAssumeCapacity(@intToPtr(*TableInfo, @ptrToInt(table_const)));
+                // We set the capacity of range.tables to lsm_growth_factor, since that is the
+                // maximum number of tables that can intersect with a table in Level A. We needn't
+                // add any more table pointers to this array, since this table won't get selected
+                // if it intersects with > lsm_growth_factor number of tables.
+                if (range.tables.len < range.tables.capacity()) {
+                    range.tables.appendAssumeCapacity(@intToPtr(*TableInfo, @ptrToInt(table)));
+                }
             }
 
             assert(range.table_count > 0);
