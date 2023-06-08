@@ -409,10 +409,10 @@ pub fn CompactionType(
         ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
-            compaction.release_index_block(index_block);
+            compaction.release_table_blocks(index_block);
         }
 
-        fn release_index_block(compaction: *Compaction, index_block: BlockPtrConst) void {
+        fn release_table_blocks(compaction: *Compaction, index_block: BlockPtrConst) void {
             // Release the table's block addresses in the Grid as it will be made invisible.
             // This is safe; iterator_b makes a copy of the block before calling us, and
             // iterator_a holds a copy for table A's index block.
@@ -765,7 +765,7 @@ pub fn CompactionType(
                         .immutable => {},
                         .disk => |_| {
                             log.debug("Compaction input has been exhausted, releasing grid blocks for level A table with index block: {*}.", .{compaction.index_block_a});
-                            compaction.release_index_block(compaction.index_block_a);
+                            compaction.release_table_blocks(compaction.index_block_a);
                         },
                     }
                     compaction.state = .next_tick;
@@ -801,6 +801,38 @@ pub fn CompactionType(
             callback(compaction);
         }
 
+        // Update snapshot_max for the optimal compaction table in level A, as well as the
+        // tables in level B that intersect with it. This should only be done if table in level A
+        // has been compacted with tables from level B. If no compaction is required, i.e.
+        // table in level A is moved to level B, then .move_to_level_b is pushed
+        // to compaction.manifest_entries, we needn't update snapshot_max.
+        pub fn update_snapshot_max(compaction: *Compaction) void {
+            const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
+            const can_move_table =
+                compaction.context.table_info_a == .disk and
+                compaction.context.range_b.table_count == 1;
+            const level_b = compaction.context.level_b;
+            const manifest = &compaction.context.tree.manifest;
+
+            if (!can_move_table) {
+                switch (compaction.context.table_info_a) {
+                    .immutable => {
+                        log.debug("# of tables in Level {} that intersect with the immutable table: {}.", .{ level_b, compaction.context.range_b.tables.len });
+                    },
+                    .disk => |table_info| {
+                        log.debug("Updating table {*} in Level A ({}) with snapshot_max {}.", .{ &table_info, level_b - 1, snapshot_max });
+                        log.debug("# of tables in Level {} that intersect with the selected table in level {}: {}.", .{ level_b, level_b -% 1, compaction.context.range_b.tables.len });
+                        manifest.update_table(level_b - 1, snapshot_max, @intToPtr(*TableInfo, @ptrToInt(&table_info)));
+                    },
+                }
+                for (compaction.context.range_b.tables.slice()) |table| {
+                    log.debug("Updating table {*} in Level {} with snapshot_max {}.", .{ table, level_b, snapshot_max });
+                    manifest.update_table(level_b, snapshot_max, table);
+                }
+            } else {
+                log.debug("Compaction involves moving table to Level {}", .{level_b});
+            }
+        }
         pub fn apply_to_manifest(compaction: *Compaction) void {
             assert(compaction.state == .tables_writing_done);
             compaction.state = .applied_to_manifest;
@@ -811,21 +843,7 @@ pub fn CompactionType(
             // TODO: If compaction is sequential, deferring manifest updates is unnecessary.
             const manifest = &compaction.context.tree.manifest;
             const level_b = compaction.context.level_b;
-            const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
-
-            // Update snapshot_max for the optimal compaction table in level A, as well as the
-            // tables in level B that intersect with it.
-            switch (compaction.context.table_info_a) {
-                .immutable => {},
-                .disk => |table_info| {
-                    manifest.update_table(level_b - 1, snapshot_max, @intToPtr(*TableInfo, @ptrToInt(&table_info)));
-                },
-            }
-
-            for (compaction.context.range_b.tables.slice()) |table| {
-                manifest.update_table(level_b, snapshot_max, table);
-            }
-
+            compaction.update_snapshot_max();
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
                     .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
