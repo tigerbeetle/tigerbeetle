@@ -794,11 +794,11 @@ pub fn CompactionType(
             callback(compaction);
         }
 
-        // Update snapshot_max for the optimal compaction table in level A, as well as the
-        // tables in level B that intersect with it. This should only be done if table in level A
-        // has been compacted with tables from level B. If no compaction is required, i.e.
-        // table in level A is moved to level B, then .move_to_level_b is pushed
-        // to compaction.manifest_entries, we needn't update snapshot_max.
+        // Updates snapshot_max for the optimal compaction table in level A, as well as the
+        // tables in level B that intersect with it. Updating snapshot_max marks the table as
+        // invisible, these tables are then deleted from the level using remove_invisible_tables.
+        // * Assumption: This function directly uses pointers to the tables in the ManifestLevel
+        // to perform updates. This avoids extra queries to the ManifestLevel for these tables.
         pub fn update_snapshot_max(compaction: *Compaction) void {
             const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
             const can_move_table =
@@ -806,7 +806,10 @@ pub fn CompactionType(
                 compaction.context.range_b.table_count == 1;
             const level_b = compaction.context.level_b;
             const manifest = &compaction.context.tree.manifest;
-
+            // Update snapshot_max only if table in level A has been compacted
+            // with tables from level B. If no compaction is required, i.e.
+            // if a table in level A can simply be moved to level B, we needn't
+            // update snapshot_max.
             if (!can_move_table) {
                 switch (compaction.context.table_info_a) {
                     .immutable => {},
@@ -829,6 +832,11 @@ pub fn CompactionType(
             // TODO: If compaction is sequential, deferring manifest updates is unnecessary.
             const manifest = &compaction.context.tree.manifest;
             const level_b = compaction.context.level_b;
+
+            // update_snapshot_max() MUST be called before insert_table() and move_table() since
+            // it directly uses pointers to the ManifestLevel tables to perform updates.
+            // Calling insert_table() and move_table() before update_snapshot_max() will cause
+            // these pointers to become invalid.
             compaction.update_snapshot_max();
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
@@ -840,6 +848,16 @@ pub fn CompactionType(
     };
 }
 
+// Iterates over the data blocks in a level B table. References to the level B
+// tables to be iterated over are passed via the `tables` field in the context,
+// in the start() function.
+// * Assumption: This iterator works under the assumption that the references to
+// the tables are stable. For references fetched from the ManifestLevel, this
+// assumption only holds true till move_table & insert_table are called as a part
+// of apply_to_manifest. This is because move_table & insert_table are both operations
+// that insert/remove tables from the ManifestLevel segmented arrays, which could cause
+// rearrangements in the memory layout of the arrays. These rearrangements could
+// cause our table references to get invalidated.
 pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type {
     return struct {
         const LevelBDataIterator = @This();
