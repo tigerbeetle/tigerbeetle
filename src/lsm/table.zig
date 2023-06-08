@@ -521,6 +521,12 @@ pub fn TableType(
                 assert(options.address > 0);
                 assert(builder.value_count > 0);
 
+                if (constants.verify) {
+                    if (builder.data_blocks_in_filter == 0) {
+                        assert(zeroes(filter_block_filter(builder.filter_block)));
+                    }
+                }
+
                 const block = builder.data_block;
                 const values_max = Table.data_block_values(block);
                 assert(values_max.len == data.block_value_count_max);
@@ -972,6 +978,14 @@ pub fn TableType(
             }
         }
     };
+}
+
+fn zeroes(bytes: []const u8) bool {
+    var word_bits: u64 = 0;
+    for (std.mem.bytesAsSlice(u64, bytes)) |word| {
+        word_bits |= word;
+    }
+    return word_bits == 0;
 }
 
 test "Table" {
