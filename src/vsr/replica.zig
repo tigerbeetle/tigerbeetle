@@ -2303,6 +2303,15 @@ pub fn ReplicaType(
             }
             assert(self.grid_repair_message_timeout.ticking);
 
+            if (self.grid.cancelling) {
+                log.debug("{}: on_block: ignoring; grid is cancelling (address={} checksum={}", .{
+                    self.replica,
+                    message.header.op,
+                    message.header.checksum,
+                });
+                return;
+            }
+
             switch (self.grid.writing(message.header.op, null)) {
                 .init => unreachable,
                 .repair => {

@@ -476,7 +476,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
             assert(address == header.op);
             assert(grid.superblock.opened);
-            maybe(grid.cancelling);
+            assert(!grid.cancelling);
             assert(!grid.superblock.free_set.is_free(address));
             assert(grid.faulty(address, header.checksum));
             assert(grid.writing(address, block.*) == .none);
