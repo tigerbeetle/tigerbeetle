@@ -1778,6 +1778,35 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     null,
             });
         }
+
+        pub fn trailer(
+            superblock: *const SuperBlock,
+            trailer_: enum { manifest, free_set, client_sessions },
+        ) struct {
+            buffer: []const u8,
+            size: u32,
+            checksum: u128,
+        } {
+            assert(superblock.opened);
+
+            return switch (trailer_) {
+                .manifest => .{
+                    .buffer = superblock.manifest_buffer,
+                    .size = superblock.staging.manifest_size,
+                    .checksum = superblock.staging.manifest_checksum,
+                },
+                .free_set => .{
+                    .buffer = superblock.free_set_buffer,
+                    .size = superblock.staging.free_set_size,
+                    .checksum = superblock.staging.free_set_checksum,
+                },
+                .client_sessions => .{
+                    .buffer = superblock.client_sessions_buffer,
+                    .size = superblock.staging.client_sessions_size,
+                    .checksum = superblock.staging.client_sessions_checksum,
+                },
+            };
+        }
     };
 }
 

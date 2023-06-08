@@ -2368,138 +2368,39 @@ pub fn ReplicaType(
             assert(message.header.command == .request_sync_manifest);
             if (self.ignore_sync_request_message(message)) return;
 
-            const reply = self.message_bus.get_message();
-            defer self.message_bus.unref(reply);
+            assert(message.header.op == self.superblock.staging.vsr_state.commit_min);
+            assert(message.header.parent == self.superblock.staging.checkpoint_id());
 
-            const offset = message.header.request;
-            const size_total = self.superblock.staging.manifest_size;
-            const size_send = @intCast(u32, @minimum(
-                size_total - offset,
-                constants.sync_trailer_message_body_size_max,
-            ));
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                reply.buffer[@sizeOf(Header)..],
-                self.superblock.manifest_buffer[offset..][0..size_send],
-            );
-
-            if (constants.verify) {
-                assert(self.superblock.staging.manifest_checksum ==
-                    vsr.checksum(self.superblock.manifest_buffer[0..size_total]));
-            }
-
-            reply.header.* = .{
-                .command = .sync_manifest,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .size = @sizeOf(Header) + size_send,
-                .parent = self.superblock.staging.checkpoint_id(),
-                .op = self.op_checkpoint(),
-                .request = offset,
-                .context = self.superblock.staging.manifest_checksum,
-                .commit = self.superblock.staging.manifest_size,
-            };
-            reply.header.set_checksum_body(reply.body());
-            reply.header.set_checksum();
-
-            // Note that our checkpoint may not be canonical — that is the syncing replica's
-            // responsibility to check.
-            self.send_message_to_replica(message.header.replica, reply);
+            self.send_sync_trailer(message.header.command, .{
+                .offset = message.header.request,
+                .replica = message.header.replica,
+            });
         }
 
         fn on_request_sync_free_set(self: *Self, message: *Message) void {
             assert(message.header.command == .request_sync_free_set);
             if (self.ignore_sync_request_message(message)) return;
 
-            assert(self.superblock.staging.checkpoint_id() == message.header.parent);
+            assert(message.header.op == self.superblock.staging.vsr_state.commit_min);
+            assert(message.header.parent == self.superblock.staging.checkpoint_id());
 
-            const reply = self.message_bus.get_message();
-            defer self.message_bus.unref(reply);
-
-            const offset = message.header.request;
-            const size_total = self.superblock.staging.free_set_size;
-            const size_send = @intCast(u32, @minimum(
-                size_total - offset,
-                constants.sync_trailer_message_body_size_max,
-            ));
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                reply.buffer[@sizeOf(Header)..],
-                self.superblock.free_set_buffer[offset..][0..size_send],
-            );
-
-            if (constants.verify) {
-                assert(self.superblock.staging.free_set_checksum ==
-                    vsr.checksum(self.superblock.free_set_buffer[0..size_total]));
-            }
-
-            reply.header.* = .{
-                .command = .sync_free_set,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .size = @sizeOf(Header) + size_send,
-                .parent = self.superblock.staging.checkpoint_id(),
-                .client = self.superblock.staging.vsr_state.previous_checkpoint_id,
-                .op = self.op_checkpoint(),
-                .request = offset,
-                .context = self.superblock.staging.free_set_checksum,
-                .commit = self.superblock.staging.free_set_size,
-            };
-            reply.header.set_checksum_body(reply.body());
-            reply.header.set_checksum();
-
-            // Note that our checkpoint may not be canonical — that is the syncing replica's
-            // responsibility to check.
-            self.send_message_to_replica(message.header.replica, reply);
+            self.send_sync_trailer(message.header.command, .{
+                .offset = message.header.request,
+                .replica = message.header.replica,
+            });
         }
 
         fn on_request_sync_client_sessions(self: *Self, message: *Message) void {
             assert(message.header.command == .request_sync_client_sessions);
             if (self.ignore_sync_request_message(message)) return;
 
-            assert(self.superblock.staging.checkpoint_id() == message.header.parent);
+            assert(message.header.op == self.superblock.staging.vsr_state.commit_min);
+            assert(message.header.parent == self.superblock.staging.checkpoint_id());
 
-            const reply = self.message_bus.get_message();
-            defer self.message_bus.unref(reply);
-
-            const offset = message.header.request;
-            const size_total = self.superblock.staging.client_sessions_size;
-            const size_send = @intCast(u32, @minimum(
-                size_total - offset,
-                constants.sync_trailer_message_body_size_max,
-            ));
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                reply.buffer[@sizeOf(Header)..],
-                self.superblock.client_sessions_buffer[offset..][0..size_send],
-            );
-
-            if (constants.verify) {
-                assert(self.superblock.staging.client_sessions_checksum ==
-                    vsr.checksum(self.superblock.client_sessions_buffer[0..size_total]));
-            }
-
-            reply.header.* = .{
-                .command = .sync_client_sessions,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .size = @sizeOf(Header) + size_send,
-                .parent = self.superblock.staging.checkpoint_id(),
-                .client = self.superblock.staging.vsr_state.commit_min_checksum,
-                .op = self.op_checkpoint(),
-                .request = offset,
-                .context = self.superblock.staging.client_sessions_checksum,
-                .commit = self.superblock.staging.client_sessions_size,
-            };
-            reply.header.set_checksum_body(reply.body());
-            reply.header.set_checksum();
-
-            // Note that our checkpoint may not be canonical — that is the syncing replica's
-            // responsibility to check.
-            self.send_message_to_replica(message.header.replica, reply);
+            self.send_sync_trailer(message.header.command, .{
+                .offset = message.header.request,
+                .replica = message.header.replica,
+            });
         }
 
         fn on_sync_manifest(self: *Self, message: *Message) void {
@@ -8334,6 +8235,75 @@ pub fn ReplicaType(
             message.header.set_checksum();
 
             self.send_message_to_replica(self.choose_any_other_replica(), message);
+        }
+
+        fn send_sync_trailer(self: *Self, command: vsr.Command, parameters: struct {
+            offset: u32,
+            replica: u8,
+        }) void {
+            assert(!self.standby());
+            assert(self.sync_stage == .none);
+            assert(self.replica != parameters.replica);
+            assert(command == .request_sync_manifest or
+                command == .request_sync_free_set or
+                command == .request_sync_client_sessions);
+
+            const reply = self.message_bus.get_message();
+            defer self.message_bus.unref(reply);
+
+            const trailer = self.superblock.trailer(switch (command) {
+                .request_sync_manifest => .manifest,
+                .request_sync_free_set => .free_set,
+                .request_sync_client_sessions => .client_sessions,
+                else => unreachable,
+            });
+            assert(trailer.size >= parameters.offset);
+
+            const body_size = @intCast(u32, @minimum(
+                trailer.size - parameters.offset,
+                constants.sync_trailer_message_body_size_max,
+            ));
+            assert(body_size <= constants.message_body_size_max);
+
+            stdx.copy_disjoint(
+                .inexact,
+                u8,
+                reply.buffer[@sizeOf(Header)..],
+                trailer.buffer[parameters.offset..][0..body_size],
+            );
+
+            if (constants.verify) {
+                assert(trailer.checksum == vsr.checksum(trailer.buffer[0..trailer.size]));
+            }
+
+            reply.header.* = .{
+                .command = switch (command) {
+                    .request_sync_manifest => .sync_manifest,
+                    .request_sync_free_set => .sync_free_set,
+                    .request_sync_client_sessions => .sync_client_sessions,
+                    else => unreachable,
+                },
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .size = @sizeOf(Header) + body_size,
+                .parent = self.superblock.staging.checkpoint_id(),
+                .client = switch (command) {
+                    .request_sync_manifest => 0,
+                    .request_sync_free_set => self.superblock.staging.vsr_state.previous_checkpoint_id,
+                    .request_sync_client_sessions => self.superblock.staging.vsr_state.commit_min_checksum,
+                    else => unreachable,
+                },
+                .op = self.op_checkpoint(),
+                .request = parameters.offset,
+                .context = trailer.checksum,
+                .commit = trailer.size,
+            };
+            reply.header.set_checksum_body(reply.body());
+            reply.header.set_checksum();
+
+            // Note that our checkpoint may not be canonical — that is the syncing replica's
+            // responsibility to check.
+            self.send_message_to_replica(parameters.replica, reply);
         }
     };
 }
