@@ -21,8 +21,7 @@ pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerat
 
     assert(denominator > 0);
 
-    if (numerator == 0) return 0;
-    return @divFloor(numerator - 1, denominator) + 1;
+    return @divFloor(numerator - 1 + denominator, denominator);
 }
 
 test "div_ceil" {
