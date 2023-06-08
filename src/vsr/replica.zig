@@ -272,6 +272,11 @@ pub fn ReplicaType(
         /// The op number of the latest committed operation (according to the cluster).
         /// This is the commit number in terms of the VRR paper.
         ///
+        /// - When sync_stage=none and status≠recovering_head,
+        ///   this is the latest commit *within our view*.
+        /// - When sync_stage≠none or status=recovering_head,
+        ///   this is max(latest commit within our view, sync_target.op).
+        ///
         /// Invariants:
         /// * `replica.commit_max ≥ replica.commit_min`.
         /// * `replica.commit_max ≥ replica.op -| constants.pipeline_prepare_queue_max`.
@@ -2791,18 +2796,31 @@ pub fn ReplicaType(
             if (self.sync_target_max.?.checkpoint_op < self.op_checkpoint()) return;
             if (self.sync_target_max.?.checkpoint_id == self.superblock.working.checkpoint_id()) return;
 
-            if (self.commit_stage == .idle or
-                self.commit_stage == .next_journal)
             {
-                const primary_repair_min = (self.commit_max +
+                // commit_max is the highest committed op *within our view*.
+                // But due to our sync target (from pings), we might know that the cluster is even
+                // farther ahead in a view that we have not joined.
+                const primary_commit_max =
+                    std.math.max(self.commit_max, self.sync_target_max.?.checkpoint_op);
+                const primary_repair_min = (primary_commit_max +
                     constants.pipeline_prepare_queue_max) -|
                     (constants.journal_slot_count - 1);
-                const backup_repair_next = self.commit_min + 1;
-                if (backup_repair_next >= primary_repair_min) return;
-            } else {
-                // The above branch is only valid when we are waiting for a WAL prepare — it could
-                // get stuck waiting for a grid block. The cluster may be on the next checkpoint,
-                // and has overwritten the block that we are trying to retrieve.
+
+                const commit_next = self.commit_min + 1;
+                const commit_next_slot = self.journal.slot_with_op(commit_next);
+
+                // "stuck" is not actually certain, merely likely (see below).
+                const stuck_header =
+                    commit_next < primary_repair_min and
+                    !self.valid_hash_chain("repair_sync_timeout");
+
+                const stuck_prepare =
+                    commit_next < primary_repair_min and
+                    (commit_next_slot == null or self.journal.dirty.bit(commit_next_slot.?));
+
+                const stuck_grid = !self.grid.read_faulty_queue.empty();
+
+                if (!stuck_header and !stuck_prepare and !stuck_grid) return;
             }
 
             // At this point:
@@ -5071,7 +5089,7 @@ pub fn ReplicaType(
         }
 
         /// Panics if immediate neighbors in the same view would have a broken hash chain.
-        /// Assumes gaps and does not require that a preceeds b.
+        /// Assumes gaps and does not require that a precedes b.
         fn panic_if_hash_chain_would_break_in_the_same_view(
             self: *const Self,
             a: *const Header,
