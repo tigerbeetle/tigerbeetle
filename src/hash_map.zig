@@ -1,3 +1,6 @@
+// Backport "fetchRemove available" fix: https://github.com/ziglang/zig/pull/15989
+// onto 0.9.1's hashmap (https://raw.githubusercontent.com/ziglang/zig/6d44a6222d6eba600deb7f16c124bfa30628fb60/lib/std/hash_map.zig).
+
 const std = @import("std");
 const assert = debug.assert;
 const autoHash = std.hash.autoHash;
@@ -1086,6 +1089,7 @@ pub fn HashMapUnmanaged(
                 old_key.* = undefined;
                 old_val.* = undefined;
                 self.size -= 1;
+                self.available += 1;
                 return result;
             }
 
@@ -2081,4 +2085,28 @@ test "std.hash_map ensureUnusedCapacity" {
     // Repeated ensureUnusedCapacity() calls with no insertions between
     // should not change the capacity.
     try testing.expectEqual(capacity, map.capacity());
+}
+
+test "std.hash_map repeat fetchRemove" {
+    var map = AutoHashMapUnmanaged(u64, void){};
+    defer map.deinit(testing.allocator);
+
+    try map.ensureTotalCapacity(testing.allocator, 4);
+
+    map.putAssumeCapacity(0, {});
+    map.putAssumeCapacity(1, {});
+    map.putAssumeCapacity(2, {});
+    map.putAssumeCapacity(3, {});
+
+    // fetchRemove() should make slots available.
+    var i: usize = 0;
+    while (i < 10) : (i += 1) {
+        try testing.expect(map.fetchRemove(3) != null);
+        map.putAssumeCapacity(3, {});
+    }
+
+    try testing.expect(map.get(0) != null);
+    try testing.expect(map.get(1) != null);
+    try testing.expect(map.get(2) != null);
+    try testing.expect(map.get(3) != null);
 }
