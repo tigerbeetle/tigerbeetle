@@ -38,7 +38,8 @@ pub const ClientSessions = struct {
     };
 
     /// Values are indexes into `entries`.
-    const EntriesByClient = std.AutoHashMapUnmanaged(u128, usize);
+    /// TODO(Zig): Import from std. See https://github.com/ziglang/zig/pull/15989.
+    const EntriesByClient = @import("../hash_map.zig").AutoHashMapUnmanaged(u128, usize);
 
     /// Free entries are zeroed, both in `entries` and on-disk.
     entries: []Entry,
