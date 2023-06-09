@@ -7833,6 +7833,21 @@ pub fn ReplicaType(
                 return false;
             }
 
+            if (self.op == self.op_checkpoint()) {
+                // The head op almost always exceeds op_checkpoint because the
+                // previous checkpoint trigger is ahead of op_checkpoint by a measure.
+                //
+                // However, state sync arrives at the op_checkpoint unconventionally –
+                // the ops between the checkpoint and the previous checkpoint trigger may not be
+                // in our journal yet.
+                log.debug("{}: {s}: recently synced; waiting for ops (op=checkpoint={})", .{
+                    self.replica,
+                    method,
+                    self.op,
+                });
+                return false;
+            }
+
             // When commit_min=op_checkpoint, the checkpoint may be missing.
             // valid_hash_chain_between() will still verify that we are connected.
             const op_verify_min = std.math.max(self.commit_min, self.op_checkpoint() + 1);
