@@ -38,6 +38,22 @@ pub fn ManifestLevelType(
 
         pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max, .{});
 
+        pub const CompactionTableRange = struct {
+            table: *TableInfo,
+            range: CompactionRange,
+        };
+
+        pub const CompactionRange = struct {
+            /// The total number of tables in the compaction across both levels, always at least 1.
+            table_count: usize,
+            /// The minimum key across both levels.
+            key_min: Key,
+            /// The maximum key across both levels.
+            key_max: Key,
+            // References to tables in level B that intersect with the chosen table in level A.
+            tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor),
+        };
+
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
         // relative index into the node differ as the elements per node are different.
@@ -402,6 +418,85 @@ pub fn ManifestLevelType(
                 if (level_table.equal(table)) return true;
             }
             return false;
+        }
+
+        pub fn compaction_table(level: *const Self, next_level: *const Self) ?CompactionTableRange {
+            var optimal: ?CompactionTableRange = null;
+
+            const snapshots = [1]u64{lsm.snapshot_latest};
+            var iterations: usize = 0;
+            var it = level.iterator(
+                .visible,
+                &snapshots,
+                .ascending,
+                null, // All visible tables in the level therefore no KeyRange filter.
+            );
+
+            while (it.next()) |table| {
+                iterations += 1;
+
+                const range = next_level.compaction_range(table.key_min, table.key_max);
+                if (optimal == null or range.table_count < optimal.?.range.table_count) {
+                    optimal = .{
+                        .table = @intToPtr(*TableInfo, @ptrToInt(table)),
+                        .range = range,
+                    };
+                }
+                // If the table can be moved directly between levels then that is already optimal.
+                if (optimal.?.range.table_count == 1) break;
+            }
+            assert(iterations > 0);
+            assert(iterations == level.table_count_visible or
+                optimal.?.range.table_count == 1);
+
+            return optimal.?;
+        }
+
+        pub fn compaction_range(
+            level: *const Self,
+            key_min: Key,
+            key_max: Key,
+        ) CompactionRange {
+            var range = CompactionRange{ .table_count = 1, .key_min = key_min, .key_max = key_max, .tables = .{ .buffer = undefined } };
+            const snapshots = [_]u64{lsm.snapshot_latest};
+            var it = level.iterator(
+                .visible,
+                &snapshots,
+                .ascending,
+                KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
+            );
+
+            while (it.next()) |table| : (range.table_count += 1) {
+                assert(table.visible(lsm.snapshot_latest));
+                assert(compare_keys(table.key_min, table.key_max) != .gt);
+                assert(compare_keys(table.key_max, range.key_min) != .lt);
+                assert(compare_keys(table.key_min, range.key_max) != .gt);
+
+                // The first iterated table.key_min/max may overlap range.key_min/max entirely.
+                if (compare_keys(table.key_min, range.key_min) == .lt) {
+                    range.key_min = table.key_min;
+                }
+
+                // Thereafter, iterated tables may/may not extend the range in ascending order.
+                if (compare_keys(table.key_max, range.key_max) == .gt) {
+                    range.key_max = table.key_max;
+                }
+                // This const cast is safe as we know that the memory pointed to is in fact
+                // mutable. That is, the table is not in the .text or .rodata section.
+                // We set the capacity of range.tables to lsm_growth_factor, since that is the
+                // maximum number of tables that can intersect with a table in Level A. We needn't
+                // add any more table pointers to this array, since this table won't get selected
+                // if it intersects with > lsm_growth_factor number of tables.
+                if (range.tables.len < range.tables.capacity()) {
+                    range.tables.appendAssumeCapacity(@intToPtr(*TableInfo, @ptrToInt(table)));
+                }
+            }
+            assert(range.table_count > 0);
+            assert(compare_keys(range.key_min, range.key_max) != .gt);
+            assert(compare_keys(range.key_min, key_min) != .gt);
+            assert(compare_keys(range.key_max, key_max) != .lt);
+
+            return range;
         }
     };
 }

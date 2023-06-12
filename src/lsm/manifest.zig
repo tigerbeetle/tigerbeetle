@@ -119,6 +119,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
 
+        pub const CompactionRange = Level.CompactionRange;
         node_pool: *NodePool,
 
         levels: [constants.lsm_levels]Level,
@@ -422,9 +423,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         /// Returns the most optimal table for compaction from a level that is due for compaction.
         /// Returns null if the level is not due for compaction (table_count_visible < count_max).
-        pub fn compaction_table(manifest: *const Manifest, level_a: u8) ?CompactionTableRange {
+        pub fn compaction_table(manifest: *const Manifest, level_a: u8) ?Level.CompactionTableRange {
             // The last level is not compacted into another.
             assert(level_a < constants.lsm_levels - 1);
+            assert(level_a >= 0);
 
             const table_count_visible_max = table_count_max_for_level(growth_factor, level_a);
             assert(table_count_visible_max > 0);
@@ -433,53 +435,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             if (manifest_level.table_count_visible < table_count_visible_max) return null;
             // If even levels are compacted ahead of odd levels, then odd levels may burst.
             assert(manifest_level.table_count_visible <= table_count_visible_max + 1);
-
-            var optimal: ?CompactionTableRange = null;
-
-            const snapshots = [1]u64{snapshot_latest};
-            var iterations: usize = 0;
-            var it = manifest.levels[level_a].iterator(
-                .visible,
-                &snapshots,
-                .ascending,
-                null, // All visible tables in the level therefore no KeyRange filter.
-            );
-
-            while (it.next()) |table| {
-                iterations += 1;
-
-                const range = manifest.compaction_range(level_a + 1, table.key_min, table.key_max);
-                if (optimal == null or range.table_count < optimal.?.range.table_count) {
-                    optimal = .{
-                        .table = @intToPtr(*TableInfo, @ptrToInt(table)),
-                        .range = range,
-                    };
-                }
-                // If the table can be moved directly between levels then that is already optimal.
-                if (optimal.?.range.table_count == 1) break;
-            }
-            assert(iterations > 0);
-            assert(iterations == manifest_level.table_count_visible or
-                optimal.?.range.table_count == 1);
-
-            return optimal.?;
+            return manifest_level.compaction_table(&manifest.levels[level_a + 1]);
         }
-
-        pub const CompactionTableRange = struct {
-            table: *TableInfo,
-            range: CompactionRange,
-        };
-
-        pub const CompactionRange = struct {
-            /// The total number of tables in the compaction across both levels, always at least 1.
-            table_count: usize,
-            /// The minimum key across both levels.
-            key_min: Key,
-            /// The maximum key across both levels.
-            key_max: Key,
-            // References to tables in level B that intersect with the chosen table in level A.
-            tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor),
-        };
 
         /// Returns the smallest visible range across level A and B that overlaps key_min/max.
         ///
@@ -500,45 +457,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             key_min: Key,
             key_max: Key,
         ) CompactionRange {
+            assert(level_b >= 0);
             assert(level_b < constants.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
 
-            var range = CompactionRange{ .table_count = 1, .key_min = key_min, .key_max = key_max, .tables = .{ .buffer = undefined } };
-
-            const snapshots = [_]u64{snapshot_latest};
-            var it = manifest.levels[level_b].iterator(
-                .visible,
-                &snapshots,
-                .ascending,
-                KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
-            );
-
-            while (it.next()) |table| : (range.table_count += 1) {
-                assert(table.visible(snapshot_latest));
-                assert(compare_keys(table.key_min, table.key_max) != .gt);
-                assert(compare_keys(table.key_max, range.key_min) != .lt);
-                assert(compare_keys(table.key_min, range.key_max) != .gt);
-
-                // The first iterated table.key_min/max may overlap range.key_min/max entirely.
-                if (compare_keys(table.key_min, range.key_min) == .lt) {
-                    range.key_min = table.key_min;
-                }
-
-                // Thereafter, iterated tables may/may not extend the range in ascending order.
-                if (compare_keys(table.key_max, range.key_max) == .gt) {
-                    range.key_max = table.key_max;
-                }
-                // This const cast is safe as we know that the memory pointed to is in fact
-                // mutable. That is, the table is not in the .text or .rodata section.
-                // We set the capacity of range.tables to lsm_growth_factor, since that is the
-                // maximum number of tables that can intersect with a table in Level A. We needn't
-                // add any more table pointers to this array, since this table won't get selected
-                // if it intersects with > lsm_growth_factor number of tables.
-                if (range.tables.len < range.tables.capacity()) {
-                    range.tables.appendAssumeCapacity(@intToPtr(*TableInfo, @ptrToInt(table)));
-                }
-            }
-
+            const manifest_level: *const Level = &manifest.levels[level_b];
+            const range = manifest_level.compaction_range(key_min, key_max);
             assert(range.table_count > 0);
             assert(compare_keys(range.key_min, range.key_max) != .gt);
             assert(compare_keys(range.key_min, key_min) != .gt);
