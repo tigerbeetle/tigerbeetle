@@ -4355,6 +4355,11 @@ pub fn ReplicaType(
             // slot may have originally been op that is a wrap ahead.
             if (self.journal.faulty.bit(slot_op_head)) return false;
 
+            // If faulty, this slot may hold either:
+            // - op=op_checkpoint, or
+            // - op=op_checkpoint_trigger
+            if (self.journal.faulty.bit(slot_op_checkpoint)) return false;
+
             const slot_known_range = vsr.SlotRange{
                 .head = slot_op_checkpoint,
                 .tail = slot_op_head,
