@@ -71,7 +71,7 @@ pub fn PostedGrooveType(comptime Storage: type, value_count_max: usize) type {
             .general,
         );
 
-        const Tree = TreeType(Table, Storage, "posted_groove");
+        pub const Tree = TreeType(Table, Storage, "posted_groove");
         const Grid = GridType(Storage);
 
         const PrefetchIDs = std.AutoHashMapUnmanaged(u128, void);

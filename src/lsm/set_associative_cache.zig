@@ -90,6 +90,11 @@ pub fn SetAssociativeCache(
         const Count = meta.Int(.unsigned, layout.clock_bits);
         const Clock = meta.Int(.unsigned, clock_hand_bits);
 
+        /// We don't require `value_count_max` in `init` to be a power of 2, but we do require
+        /// it to be a multiple of `value_count_max_multiple`. The calculation below
+        /// follows from a multiple which will satisfy all asserts.
+        pub const value_count_max_multiple = layout.cache_line_size * layout.ways * layout.clock_bits;
+
         sets: u64,
 
         hits: u64 = 0,
@@ -128,13 +133,11 @@ pub fn SetAssociativeCache(
         clocks: PackedUnsignedIntegerArray(Clock),
 
         pub fn init(allocator: mem.Allocator, value_count_max: u64) !Self {
-            assert(math.isPowerOfTwo(value_count_max));
+            const sets = @divExact(value_count_max, layout.ways);
+
             assert(value_count_max > 0);
             assert(value_count_max >= layout.ways);
             assert(value_count_max % layout.ways == 0);
-
-            const sets = @divExact(value_count_max, layout.ways);
-            assert(math.isPowerOfTwo(sets));
 
             const values_size_max = value_count_max * @sizeOf(Value);
             assert(values_size_max >= layout.cache_line_size);
@@ -147,6 +150,8 @@ pub fn SetAssociativeCache(
             const clocks_size = @divExact(sets * clock_hand_bits, 8);
             assert(clocks_size >= layout.cache_line_size);
             assert(clocks_size % layout.cache_line_size == 0);
+
+            assert(value_count_max % value_count_max_multiple == 0);
 
             const tags = try allocator.alloc(Tag, value_count_max);
             errdefer allocator.free(tags);
