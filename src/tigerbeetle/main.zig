@@ -84,6 +84,7 @@ const Command = struct {
         command.fd = try IO.open_file(command.dir_fd, basename, data_file_size_min, if (must_create) .create else .open);
         errdefer os.close(command.fd);
 
+        // Check me bumped
         command.io = try IO.init(128, 0);
         errdefer command.io.deinit();
 

@@ -447,6 +447,8 @@ const TracerTracy = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
+        std.log.defaultLog(level, scope, format, args);
+
         const level_text = comptime level.asText();
         const prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
         const message = std.fmt.bufPrint(

@@ -925,7 +925,6 @@ pub fn GrooveType(
                                     break :blk @fieldParentPtr(Groove, "indexes", indexes);
                                 },
                             };
-
                             // Make sure the sync operation is currently running.
                             assert(groove.join_op == join_op);
                             assert(groove.join_callback != null);
