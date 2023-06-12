@@ -5,11 +5,7 @@ const allocator = std.testing.allocator;
 const log = std.log.scoped(.lsm_update_table_microbenchmark);
 const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const binary_search = @import("binary_search.zig");
 const lsm = @import("tree.zig");
-const Storage = @import("../testing/storage.zig").Storage;
-const TableInfo = @import("manifest.zig").TableInfoType(Table);
-const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
 
 const Key = u64;
 const Value = struct {
@@ -23,33 +19,6 @@ const manifest_node_size = constants.lsm_manifest_node_size;
 const table_count_max = lsm.table_count_max_for_tree(growth_factor, constants.lsm_levels);
 const Environment = @import("manifest_level_fuzz.zig").EnvironmentType(table_count_max, manifest_node_size);
 
-inline fn compare_keys(a: Key, b: Key) std.math.Order {
-    return std.math.order(a, b);
-}
-
-inline fn key_from_value(value: *const Value) Key {
-    return value.key;
-}
-
-inline fn tombstone_from_key(key: Key) Value {
-    return .{ .key = key, .tombstone = true };
-}
-
-inline fn tombstone(value: *const Value) bool {
-    return value.tombstone;
-}
-
-const Table = @import("table.zig").TableType(
-    Key,
-    Value,
-    compare_keys,
-    key_from_value,
-    std.math.maxInt(Key),
-    tombstone,
-    tombstone_from_key,
-    1, // Doesn't matter for this test.
-    .general,
-);
 const Levels = enum(u8) {
     a = 5,
     b,
