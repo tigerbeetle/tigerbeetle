@@ -108,10 +108,10 @@ pub fn CompactionType(
         // Allocated during `init`.
         iterator_a: TableDataIterator,
         iterator_b: LevelTableValueBlockIterator,
+        table_builder: Table.Builder,
         index_block_a: BlockPtr,
         index_block_b: BlockPtr,
         data_blocks: [2]BlockPtr,
-        table_builder: Table.Builder,
         last_keys_in: [2]?Key = .{ null, null },
 
         /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
@@ -226,15 +226,6 @@ pub fn CompactionType(
         }
 
         pub fn reset(compaction: *Compaction) void {
-            // Zero the blocks because alloc_block() returns a zeroed block.
-            std.mem.set(u8, compaction.index_block_a, 0);
-            std.mem.set(u8, compaction.index_block_b, 0);
-            std.mem.set(u8, compaction.data_blocks[0], 0);
-            std.mem.set(u8, compaction.data_blocks[1], 0);
-
-            compaction.iterator_a.reset();
-            compaction.iterator_b.reset();
-            compaction.table_builder.reset();
             compaction.* = .{
                 .tree_name = compaction.tree_name,
 
@@ -258,9 +249,20 @@ pub fn CompactionType(
                 .tracer_slot = null,
                 .iterator_tracer_slot = null,
             };
+
+            compaction.iterator_a.reset();
+            compaction.iterator_b.reset();
+            compaction.table_builder.reset();
+
+            // Zero the blocks because alloc_block() returns a zeroed block.
+            std.mem.set(u8, compaction.index_block_a, 0);
+            std.mem.set(u8, compaction.index_block_b, 0);
+            for (compaction.data_blocks) |data_block| {
+                std.mem.set(u8, data_block, 0);
+            }
         }
 
-        pub fn close(compaction: *Compaction) void {
+        pub fn transition_to_idle(compaction: *Compaction) void {
             assert(compaction.state == .applied_to_manifest);
 
             compaction.state = .idle;

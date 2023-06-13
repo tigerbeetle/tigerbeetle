@@ -182,7 +182,8 @@ comptime {
 /// - command=sync_free_set
 /// - command=sync_client_sessions
 ///
-/// In practice, this should always be as high as possible.
+/// In practice, this should always be as high as possible to minimize the number of round trips
+/// required for sync.
 /// It is configurable to make testing multipart trailers simple.
 pub const sync_trailer_message_body_size_max =
     config.process.sync_trailer_message_body_size_max orelse

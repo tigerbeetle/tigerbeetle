@@ -2308,7 +2308,7 @@ pub fn ReplicaType(
             }
             assert(self.grid_repair_message_timeout.ticking);
 
-            if (self.grid.cancelling) {
+            if (self.grid.canceling != null) {
                 log.debug("{}: on_block: ignoring; grid is cancelling (address={} checksum={}", .{
                     self.replica,
                     message.header.op,
@@ -7465,6 +7465,11 @@ pub fn ReplicaType(
                 self.superblock.staging.checkpoint_id(),
             });
 
+            // We learned that we are lagging behind the cluster, so we know we shouldn't actually
+            // be the primary. But we can't join a new view until the view's headers are within our
+            // `op_checkpoint_trigger`. We need to bump our `op_checkpoint` first – but that is async.
+            // So even if we are arriving at `sync_start_from_committing` via `on_start_view`,
+            // `on_start_view` leaves us as the "primary" for now.
             if (self.status == .normal and self.primary()) {
                 self.transition_to_view_change_status(self.view + 1);
             }

@@ -872,7 +872,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                             tree.compaction_table_immutable.context.range_b.key_max,
                         );
                         tree.table_immutable.clear();
-                        tree.compaction_table_immutable.close();
+                        tree.compaction_table_immutable.transition_to_idle();
                     },
                     else => unreachable,
                 }
@@ -900,7 +900,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                                 context.compaction.context.range_b.key_max,
                             );
                         }
-                        context.compaction.close();
+                        context.compaction.transition_to_idle();
                     },
                     else => unreachable,
                 }
