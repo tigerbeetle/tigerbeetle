@@ -55,7 +55,6 @@ inline fn tombstone(value: *const Value) bool {
     return value.tombstone;
 }
 
-const TableInfo = @import("manifest.zig").TableInfoType(Table);
 const Table = @import("table.zig").TableType(
     Key,
     Value,
@@ -240,7 +239,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             compare_keys,
             table_count_max,
         );
-
+        pub const TableInfo = @import("manifest.zig").TableInfoType(Table);
         pool: NodePool,
         level: ManifestLevel,
         buffer: TableBuffer,
@@ -328,7 +327,6 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
 
                 try env.tables.insert(index, table.*);
             }
-            log.debug("Number of visible tables: {}", .{env.level.table_count_visible});
         }
 
         fn generate_non_overlapping_table(env: *Environment, key: Key) TableInfo {
