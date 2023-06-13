@@ -420,12 +420,17 @@ pub fn ManifestLevelType(
             return false;
         }
 
-        pub fn compaction_table(level: *const Self, next_level: *const Self) ?CompactionTableRange {
+        /// Given two levels, returns the most optimal compaction table in the
+        /// level for which this function is invoked. The optimal table is one
+        /// that overlaps with the least number of tables in the second level.
+        /// This function exits early if it finds a table that doesn't
+        ///  overlap with any tables in the second level.
+        pub fn compaction_table(level_a: *const Self, level_b: *const Self) ?CompactionTableRange {
             var optimal: ?CompactionTableRange = null;
 
             const snapshots = [1]u64{lsm.snapshot_latest};
             var iterations: usize = 0;
-            var it = level.iterator(
+            var it = level_a.iterator(
                 .visible,
                 &snapshots,
                 .ascending,
@@ -435,7 +440,7 @@ pub fn ManifestLevelType(
             while (it.next()) |table| {
                 iterations += 1;
 
-                const range = next_level.compaction_range(table.key_min, table.key_max);
+                const range = level_b.compaction_range(table.key_min, table.key_max);
                 if (optimal == null or range.table_count < optimal.?.range.table_count) {
                     optimal = .{
                         .table = @intToPtr(*TableInfo, @ptrToInt(table)),
@@ -446,12 +451,86 @@ pub fn ManifestLevelType(
                 if (optimal.?.range.table_count == 1) break;
             }
             assert(iterations > 0);
-            assert(iterations == level.table_count_visible or
+            assert(iterations == level_a.table_count_visible or
                 optimal.?.range.table_count == 1);
 
             return optimal.?;
         }
 
+        /// Returns the next table in the range, after `key_exclusive` if provided.
+        ///
+        /// * The table returned is visible to `snapshot`.
+        pub fn next_table(
+            self: *const Self,
+            snapshot: u64,
+            key_min: Key,
+            key_max: Key,
+            key_exclusive: ?Key,
+            direction: Direction,
+        ) ?*const TableInfo {
+            assert(compare_keys(key_min, key_max) != .gt);
+
+            const snapshots = [_]u64{snapshot};
+
+            if (key_exclusive == null) {
+                return self.iterator(
+                    .visible,
+                    &snapshots,
+                    direction,
+                    KeyRange{ .key_min = key_min, .key_max = key_max },
+                ).next();
+            }
+
+            assert(compare_keys(key_exclusive.?, key_min) != .lt);
+            assert(compare_keys(key_exclusive.?, key_max) != .gt);
+
+            const key_min_exclusive = if (direction == .ascending) key_exclusive.? else key_min;
+            const key_max_exclusive = if (direction == .descending) key_exclusive.? else key_max;
+            assert(compare_keys(key_min_exclusive, key_max_exclusive) != .gt);
+
+            var it = self.iterator(
+                .visible,
+                &snapshots,
+                direction,
+                KeyRange{ .key_min = key_min_exclusive, .key_max = key_max_exclusive },
+            );
+
+            while (it.next()) |table| {
+                assert(table.visible(snapshot));
+                assert(compare_keys(table.key_min, table.key_max) != .gt);
+                assert(compare_keys(table.key_max, key_min_exclusive) != .lt);
+                assert(compare_keys(table.key_min, key_max_exclusive) != .gt);
+
+                // These conditions are required to avoid iterating over the same
+                // table twice. This is because the invoker sets key_exclusive to the
+                // key_max or key_max of the previous table returned by this function,
+                // based on the direction of iteration (ascending/descending).
+                // key_exclusive is then set as KeyRange.key_min or KeyRange.key_max for the next
+                // ManifestLevel query. This query would return the same table again,
+                // so it needs to be skipped.
+                const next = switch (direction) {
+                    .ascending => compare_keys(table.key_min, key_exclusive.?) == .gt,
+                    .descending => compare_keys(table.key_max, key_exclusive.?) == .lt,
+                };
+                if (next) return table;
+            }
+
+            return null;
+        }
+
+        /// Returns the smallest visible range across level A and B that overlaps key_min/max.
+        ///
+        /// For example, for a table in level 2, count how many tables overlap in level 3, and
+        /// determine the span of their entire key range, which may be broader or narrower.
+        ///
+        /// The range.table_count includes the input table from level A represented by key_min/max.
+        /// Thus range.table_count=1 means that the table may be moved directly between levels.
+        ///
+        /// The range keys are guaranteed to encompass all the relevant level A and level B tables:
+        ///   range.key_min = min(a.key_min, b.key_min)
+        ///   range.key_max = max(a.key_max, b.key_max)
+        ///
+        /// This last invariant is critical to ensuring that tombstones are dropped correctly.
         pub fn compaction_range(
             level: *const Self,
             key_min: Key,
