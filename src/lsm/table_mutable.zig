@@ -22,8 +22,7 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         const TableMutable = @This();
 
         const load_factor = 50;
-        /// TODO(Zig): Import from std. See https://github.com/ziglang/zig/pull/15989.
-        const Values = @import("../hash_map.zig").HashMapUnmanaged(
+        const Values = stdx.HashMapUnmanaged(
             Value,
             void,
             Table.HashMapContextValue,

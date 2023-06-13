@@ -4,6 +4,12 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+/// TODO(Zig): Remove these and import directly from std.
+/// See https://github.com/ziglang/zig/pull/15989.
+/// This backported HashMap is only needed when fetchRemove() will be used.
+pub const HashMapUnmanaged = @import("./hash_map.zig").HashMapUnmanaged;
+pub const AutoHashMapUnmanaged = @import("./hash_map.zig").AutoHashMapUnmanaged;
+
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
         switch (@typeInfo(@TypeOf(numerator))) {
