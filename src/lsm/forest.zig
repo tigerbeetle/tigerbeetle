@@ -137,9 +137,11 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).reset();
             }
+
             forest.node_pool.reset();
 
             forest.* = .{
+                // Don't reset the grid – replica is responsible for grid cancellation.
                 .grid = forest.grid,
                 .grooves = forest.grooves,
                 .node_pool = forest.node_pool,

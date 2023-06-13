@@ -152,13 +152,14 @@ pub fn GridType(comptime Storage: type) type {
 
         superblock: *SuperBlock,
 
-        // Each entry in cache has a corresponding block.
-        cache_blocks: []BlockPtr,
         cache: Cache,
-        /// Each bit corresponds to a cached block.
-        /// Tracks valid cache entries during state sync. At the conclusion of state sync,
-        /// unmarked entries are removed from the cache. This ensures that blocks which were
-        /// removed from the LSM during the synced-over period do not pollute the cache.
+        /// Each entry in cache has a corresponding block.
+        cache_blocks: []BlockPtr,
+        /// Each entry in cache has a corresponding bit.
+        /// This bit tracks whether the cache block is valid cache entries during state sync.
+        /// At the conclusion of state sync, unmarked entries are removed from the cache.
+        /// This ensures that blocks which were removed from the LSM during the interval of time
+        /// (i.e. compactions) that state sync skipped over do not pollute the cache.
         cache_valid: std.DynamicBitSetUnmanaged,
         cache_marking: bool = false,
 
@@ -178,9 +179,8 @@ pub fn GridType(comptime Storage: type) type {
         // True if there's a read thats resolving callbacks. If so, the read cache must not be invalidated.
         read_resolving: bool = false,
 
-        cancelling: bool = false,
-        cancel_callback: ?fn (*Grid) void = null,
-        cancel_next_tick: NextTick = undefined,
+        canceling: ?struct { callback: fn (*Grid) void } = null,
+        canceling_next_tick: NextTick = undefined,
 
         on_read_fault: ?fn (*Grid, *Grid.Read) void,
 
@@ -215,8 +215,8 @@ pub fn GridType(comptime Storage: type) type {
 
             return Grid{
                 .superblock = options.superblock,
-                .cache_blocks = cache_blocks,
                 .cache = cache,
+                .cache_blocks = cache_blocks,
                 .cache_valid = cache_valid,
                 .read_iop_blocks = read_iop_blocks,
                 .on_read_fault = options.on_read_fault,
@@ -229,34 +229,32 @@ pub fn GridType(comptime Storage: type) type {
             for (grid.read_iop_tracer_slots) |slot| assert(slot == null);
             for (grid.write_iop_tracer_slots) |slot| assert(slot == null);
 
-            grid.cache_valid.deinit(allocator);
-            grid.cache.deinit(allocator);
-
             for (grid.cache_blocks) |block| allocator.free(block);
             allocator.free(grid.cache_blocks);
+
+            grid.cache_valid.deinit(allocator);
+            grid.cache.deinit(allocator);
 
             grid.* = undefined;
         }
 
         pub fn cancel(grid: *Grid, callback: fn (*Grid) void) void {
-            assert(!grid.cancelling);
-            assert(grid.cancel_callback == null);
+            assert(grid.canceling == null);
 
-            grid.cancelling = true;
-            grid.cancel_callback = callback;
+            grid.canceling = .{ .callback = callback };
 
             grid.read_pending_queue.reset();
             grid.superblock.storage.reset_next_tick_lsm();
             grid.superblock.storage.on_next_tick(
                 .vsr,
                 cancel_tick_callback,
-                &grid.cancel_next_tick,
+                &grid.canceling_next_tick,
             );
         }
 
         fn cancel_tick_callback(next_tick: *NextTick) void {
-            const grid = @fieldParentPtr(Grid, "cancel_next_tick", next_tick);
-            if (!grid.cancelling) return;
+            const grid = @fieldParentPtr(Grid, "canceling_next_tick", next_tick);
+            if (grid.canceling == null) return;
 
             assert(grid.read_pending_queue.empty());
             assert(grid.superblock.storage.next_tick_queue_lsm.empty());
@@ -265,16 +263,15 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn cancel_join_callback(grid: *Grid) void {
-            assert(grid.cancelling);
+            assert(grid.canceling != null);
             assert(grid.superblock.storage.next_tick_queue_lsm.empty());
 
             if (grid.write_queue.empty() and
                 grid.write_iops.executing() == 0 and
                 grid.read_queue.empty())
             {
-                const callback = grid.cancel_callback.?;
-                grid.cancel_callback = null;
-                grid.cancelling = false;
+                const callback = grid.canceling.?.callback;
+                grid.canceling = null;
                 grid.read_faulty_queue.reset();
 
                 callback(grid);
@@ -312,7 +309,7 @@ pub fn GridType(comptime Storage: type) type {
             callback: fn (*Grid.NextTick) void,
             next_tick: *Grid.NextTick,
         ) void {
-            assert(!grid.cancelling);
+            assert(grid.canceling == null);
             grid.superblock.storage.on_next_tick(.lsm, callback, next_tick);
         }
 
@@ -434,7 +431,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
         ) void {
             assert(address > 0);
-            assert(!grid.cancelling);
+            assert(grid.canceling == null);
             assert(grid.writing(address, block.*) == .none);
             grid.assert_not_reading(address, block.*);
 
@@ -476,7 +473,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
             assert(address == header.op);
             assert(grid.superblock.opened);
-            assert(!grid.cancelling);
+            assert(grid.canceling == null);
             assert(!grid.superblock.free_set.is_free(address));
             assert(grid.faulty(address, header.checksum));
             assert(grid.writing(address, block.*) == .none);
@@ -579,11 +576,11 @@ pub fn GridType(comptime Storage: type) type {
             // This call must come after (logically) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
-            if (!grid.cancelling or completed_write.repair) {
+            if (grid.canceling == null or completed_write.repair) {
                 completed_write.callback(completed_write);
             }
 
-            if (grid.cancelling) grid.cancel_join_callback();
+            if (grid.canceling != null) grid.cancel_join_callback();
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -602,7 +599,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(block_type != .reserved);
 
             assert(grid.superblock.opened);
-            assert(!grid.cancelling);
+            assert(grid.canceling == null);
             assert(!grid.superblock.free_set.is_free(address));
             assert(grid.writing(address, null) != .init);
 
@@ -749,7 +746,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.cache.remove(read.address);
             grid.cache_valid.unset(cache_index);
 
-            if (grid.cancelling) {
+            if (grid.canceling) |_| {
                 grid.cancel_join_callback();
             } else {
                 // On the result of an invalid block, move the "root" read (and all others it
@@ -828,12 +825,12 @@ pub fn GridType(comptime Storage: type) type {
                 assert(pending_read.address == read.address);
                 assert(pending_read.checksum == read.checksum);
 
-                if (!grid.cancelling) {
+                if (grid.canceling == null) {
                     pending_read.callback(pending_read, block);
                 }
             }
 
-            if (grid.cancelling) {
+            if (grid.canceling) |_| {
                 grid.cancel_join_callback();
             } else {
                 // Then invoke the callback with the cache block (which should be valid for the duration
@@ -867,7 +864,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
 
             assert(grid.superblock.opened);
-            maybe(grid.cancelling);
+            maybe(grid.canceling == null);
             // We try to read the block even when it is free — if we recently released it,
             // it might be found on disk anyway.
             maybe(grid.superblock.free_set.is_free(address));
