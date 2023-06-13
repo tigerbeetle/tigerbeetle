@@ -130,6 +130,10 @@ pub fn CompactionType(
         // Passed by `start`.
         context: Context,
 
+        // Pased by `start`. Defines whether the move optimization applies to this
+        // compaction. This field is set to True if the optimal compaction
+        // table in level A can simply be moved to level B.
+        can_move_table: bool,
         grid_reservation: ?Grid.Reservation,
         drop_tombstones: bool,
 
@@ -198,7 +202,7 @@ pub fn CompactionType(
 
                 .input_state = .remaining,
                 .state = .idle,
-
+                .can_move_table = false,
                 .tracer_slot = null,
                 .iterator_tracer_slot = null,
             };
@@ -294,6 +298,7 @@ pub fn CompactionType(
 
                 .tracer_slot = compaction.tracer_slot,
                 .iterator_tracer_slot = compaction.iterator_tracer_slot,
+                .can_move_table = can_move_table,
             };
 
             if (can_move_table) {
@@ -412,10 +417,13 @@ pub fn CompactionType(
             compaction.release_table_blocks(index_block);
         }
 
+        // TODO: Support for LSM snapshots would require us to only remove blocks
+        // that are invisible.
         fn release_table_blocks(compaction: *Compaction, index_block: BlockPtrConst) void {
             // Release the table's block addresses in the Grid as it will be made invisible.
-            // This is safe; iterator_b makes a copy of the block before calling us, and
-            // iterator_a holds a copy for table A's index block.
+            // This is safe; compaction.iterator_b makes a copy of the index block for a
+            // table in Level B before calling us. Additionally, compaction.index_block_a holds
+            // a copy of the index block for the Level A table being compacted.
 
             const grid = compaction.context.grid;
             for (Table.index_data_addresses_used(index_block)) |address| {
@@ -794,34 +802,6 @@ pub fn CompactionType(
             callback(compaction);
         }
 
-        // Updates snapshot_max for the optimal compaction table in level A, as well as the
-        // tables in level B that intersect with it. Updating snapshot_max marks the table as
-        // invisible, these tables are then deleted from the level using remove_invisible_tables.
-        // * Assumption: This function directly uses pointers to the tables in the ManifestLevel
-        // to perform updates. This avoids extra queries to the ManifestLevel for these tables.
-        pub fn update_snapshot_max(compaction: *Compaction) void {
-            const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
-            const can_move_table =
-                compaction.context.table_info_a == .disk and
-                compaction.context.range_b.table_count == 1;
-            const level_b = compaction.context.level_b;
-            const manifest = &compaction.context.tree.manifest;
-            // Update snapshot_max only if table in level A has been compacted
-            // with tables from level B. If no compaction is required, i.e.
-            // if a table in level A can simply be moved to level B, we needn't
-            // update snapshot_max.
-            if (!can_move_table) {
-                switch (compaction.context.table_info_a) {
-                    .immutable => {},
-                    .disk => |table_info| {
-                        manifest.update_table(level_b - 1, snapshot_max, null, table_info);
-                    },
-                }
-                for (compaction.context.range_b.tables.slice()) |table| {
-                    manifest.update_table(level_b, snapshot_max, null, table);
-                }
-            }
-        }
         pub fn apply_to_manifest(compaction: *Compaction) void {
             assert(compaction.state == .tables_writing_done);
             compaction.state = .applied_to_manifest;
@@ -832,12 +812,28 @@ pub fn CompactionType(
             // TODO: If compaction is sequential, deferring manifest updates is unnecessary.
             const manifest = &compaction.context.tree.manifest;
             const level_b = compaction.context.level_b;
+            const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
 
-            // update_snapshot_max() MUST be called before insert_table() and move_table() since
-            // it directly uses pointers to the ManifestLevel tables to perform updates.
-            // Calling insert_table() and move_table() before update_snapshot_max() will cause
-            // these pointers to become invalid.
-            compaction.update_snapshot_max();
+            // Update snapshot_max only if table in level A has been compacted
+            // with tables from level B. If no compaction is required, i.e.
+            // if a table in level A can simply be moved to level B, we needn't
+            // update snapshot_max.
+            // This update MUST be done before insert_table() and move_table()
+            // since it directly uses pointers to the ManifestLevel tables to
+            // perform updates. Calling insert_table() and move_table() before
+            // this update will cause these pointers to become invalid.
+            if (!compaction.can_move_table) {
+                switch (compaction.context.table_info_a) {
+                    .immutable => {},
+                    .disk => |table_info| {
+                        manifest.update_table(level_b - 1, snapshot_max, .{ .from_level = table_info });
+                    },
+                }
+                for (compaction.context.range_b.tables.slice()) |table| {
+                    manifest.update_table(level_b, snapshot_max, .{ .from_level = table });
+                }
+            }
+
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
                     .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
@@ -869,7 +865,10 @@ pub fn LevelBDataIteratorType(comptime Table: type, comptime Storage: type) type
         const TableInfo = Manifest.TableInfo;
         const TableDataIterator = TableDataIteratorType(Storage);
 
-        pub const Context = struct { grid: *Grid, level: u8, snapshot: u64, tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor) };
+        pub const Context = struct { grid: *Grid, level: u8, snapshot: u64, tables: std.BoundedArray(
+            *TableInfo,
+            constants.lsm_growth_factor,
+        ) };
 
         pub const IndexCallback = fn (
             it: *LevelBDataIterator,

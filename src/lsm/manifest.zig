@@ -210,25 +210,22 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         /// Updates the snapshot_max on the provided table for the given level.
-        /// The table provided could either a pointer to the table in the
+        /// The table provided could either be a pointer to the table in the
         /// ManifestLevel or a pointer to a copy of that table.
-        pub fn update_table(
-            manifest: *Manifest,
-            level: u8,
-            snapshot: u64,
-            table_copy: ?*TableInfo,
-            table_manifest_level: ?*TableInfo,
-        ) void {
-            assert(table_copy != null or table_manifest_level != null);
-            assert(table_copy == null or table_manifest_level == null);
+        pub fn update_table(manifest: *Manifest, level: u8, snapshot: u64, table_enum: union(enum) {
+            copy: *TableInfo,
+            from_level: *TableInfo,
+        }) void {
             const manifest_level = &manifest.levels[level];
 
-            var table: *TableInfo = if (table_manifest_level != null) table_manifest_level.? else table_copy.?;
+            var table  = switch (table_enum) {
+                .copy => table_enum.copy,
+                .from_level => table_enum.from_level,
+            };
             assert(table.snapshot_max >= snapshot);
-            if (table_manifest_level) |_| {
-                manifest_level.set_snapshot_max_stable_ptr(snapshot, table);
-            } else {
-                manifest_level.set_snapshot_max(snapshot, table);
+            switch (table_enum) {
+                .copy => manifest_level.set_snapshot_max(snapshot, table),
+                .from_level =>  manifest_level.set_snapshot_max_stable_ptr(snapshot, table),
             }
             assert(table.snapshot_max == snapshot);
 
@@ -380,25 +377,26 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         /// Returns the next table in the range, after `key_exclusive` if provided.
-        pub fn next_table(
-            manifest: *const Manifest,
+        ///
+        /// * The table returned is visible to `snapshot`.
+        pub fn next_table(manifest: *const Manifest, parameters: struct {
             level: u8,
             snapshot: u64,
             key_min: Key,
             key_max: Key,
             key_exclusive: ?Key,
             direction: Direction,
-        ) ?*const TableInfo {
-            assert(level < constants.lsm_levels);
-            assert(compare_keys(key_min, key_max) != .gt);
-            const manifest_level: *const Level = &manifest.levels[level];
-            return manifest_level.next_table(
-                snapshot,
-                key_min,
-                key_max,
-                key_exclusive,
-                direction,
-            );
+        }) ?*const TableInfo {
+            assert(parameters.level < constants.lsm_levels);
+            assert(compare_keys(parameters.key_min, parameters.key_max) != .gt);
+            const manifest_level: *const Level = &manifest.levels[parameters.level];
+            return manifest_level.next_table(.{
+                .snapshot = parameters.snapshot,
+                .key_min = parameters.key_min,
+                .key_max = parameters.key_max,
+                .key_exclusive = parameters.key_exclusive,
+                .direction = parameters.direction,
+            });
         }
 
         /// Returns the most optimal table for compaction from a level that is due for compaction.
@@ -406,7 +404,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn compaction_table(manifest: *const Manifest, level_a: u8) ?Level.CompactionTableRange {
             // The last level is not compacted into another.
             assert(level_a < constants.lsm_levels - 1);
-            assert(level_a >= 0);
 
             const table_count_visible_max = table_count_max_for_level(growth_factor, level_a);
             assert(table_count_visible_max > 0);
@@ -453,13 +450,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             while (level_c < constants.lsm_levels) : (level_c += 1) {
                 const manifest_level: *const Level = &manifest.levels[level_c];
-                if (manifest_level.next_table(
-                    snapshot_latest,
-                    range.key_min,
-                    range.key_max,
-                    null,
-                    .ascending,
-                ) != null) {
+                if (manifest_level.next_table(.{
+                    .snapshot = snapshot_latest,
+                    .direction = .ascending,
+                    .key_min = range.key_min,
+                    .key_max = range.key_max,
+                    .key_exclusive = null,
+                }) != null) {
                     // If the range is being compacted into the last level then this is unreachable,
                     // as the last level has no subsequent levels and must always drop tombstones.
                     assert(level_b != constants.lsm_levels - 1);

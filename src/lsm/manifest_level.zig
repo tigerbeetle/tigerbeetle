@@ -150,7 +150,7 @@ pub fn ManifestLevelType(
         }
 
         /// Remove the given table from the level assuming it's visible to `lsm.snapshot_latest`.
-        /// Returns the same, unmodified table passed in to differentiate itself from 
+        /// Returns the same, unmodified table passed in to differentiate itself from
         /// remove_table_invisible and guard against using the wrong function.
         pub fn remove_table_visible(
             level: *Self,
@@ -424,7 +424,7 @@ pub fn ManifestLevelType(
         /// level for which this function is invoked. The optimal table is one
         /// that overlaps with the least number of tables in the second level.
         /// This function exits early if it finds a table that doesn't
-        ///  overlap with any tables in the second level.
+        /// overlap with any tables in the second level.
         pub fn compaction_table(level_a: *const Self, level_b: *const Self) ?CompactionTableRange {
             var optimal: ?CompactionTableRange = null;
 
@@ -460,17 +460,21 @@ pub fn ManifestLevelType(
         /// Returns the next table in the range, after `key_exclusive` if provided.
         ///
         /// * The table returned is visible to `snapshot`.
-        pub fn next_table(
-            self: *const Self,
+        pub fn next_table(self: *const Self, parameters: struct {
             snapshot: u64,
             key_min: Key,
             key_max: Key,
             key_exclusive: ?Key,
             direction: Direction,
-        ) ?*const TableInfo {
-            assert(compare_keys(key_min, key_max) != .gt);
-
+        }) ?*const TableInfo {
+            const key_min = parameters.key_min;
+            const key_max = parameters.key_max;
+            const key_exclusive = parameters.key_exclusive;
+            const direction = parameters.direction;
+            const snapshot = parameters.snapshot;
             const snapshots = [_]u64{snapshot};
+
+            assert(compare_keys(key_min, key_max) != .gt);
 
             if (key_exclusive == null) {
                 return self.iterator(
@@ -536,7 +540,12 @@ pub fn ManifestLevelType(
             key_min: Key,
             key_max: Key,
         ) CompactionRange {
-            var range = CompactionRange{ .table_count = 1, .key_min = key_min, .key_max = key_max, .tables = .{ .buffer = undefined } };
+            var range = CompactionRange{
+                .table_count = 1,
+                .key_min = key_min,
+                .key_max = key_max,
+                .tables = .{ .buffer = undefined },
+            };
             const snapshots = [_]u64{lsm.snapshot_latest};
             var it = level.iterator(
                 .visible,
