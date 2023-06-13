@@ -134,7 +134,9 @@ pub fn main() !void {
             .faulty_wal_headers = replica_count > 1,
             .faulty_wal_prepares = replica_count > 1,
             .faulty_client_replies = replica_count > 1,
-            .faulty_grid = replica_count > 1,
+            // >2 instead of >1 because in R=2, a lagging replica may sync to the leading replica,
+            // but then the leading replica may have the only copy of a block in the cluster.
+            .faulty_grid = replica_count > 2,
         },
         .state_machine = switch (state_machine) {
             .testing => .{ .lsm_forest_node_count = 4096 },
