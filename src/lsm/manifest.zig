@@ -209,13 +209,27 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
-        /// Updates the snapshot_max on the provide table for the given level.
-        /// The table provided is mutable to allow its snapshot_max to be updated.
-        pub fn update_table(manifest: *Manifest, level: u8, snapshot: u64, table: *TableInfo) void {
+        /// Updates the snapshot_max on the provided table for the given level.
+        /// The table provided could either a pointer to the table in the
+        /// ManifestLevel or a pointer to a copy of that table.
+        pub fn update_table(
+            manifest: *Manifest,
+            level: u8,
+            snapshot: u64,
+            table_copy: ?*TableInfo,
+            table_manifest_level: ?*TableInfo,
+        ) void {
+            assert(table_copy != null or table_manifest_level != null);
+            assert(table_copy == null or table_manifest_level == null);
             const manifest_level = &manifest.levels[level];
 
+            var table: *TableInfo = if (table_manifest_level != null) table_manifest_level.? else table_copy.?;
             assert(table.snapshot_max >= snapshot);
-            manifest_level.set_snapshot_max_stable_ptr(snapshot, table);
+            if (table_manifest_level) |_| {
+                manifest_level.set_snapshot_max_stable_ptr(snapshot, table);
+            } else {
+                manifest_level.set_snapshot_max(snapshot, table);
+            }
             assert(table.snapshot_max == snapshot);
 
             // Append update changes to the manifest log.
@@ -366,8 +380,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         /// Returns the next table in the range, after `key_exclusive` if provided.
-        ///
-        /// * The table returned is visible to `snapshot`.
         pub fn next_table(
             manifest: *const Manifest,
             level: u8,
@@ -379,46 +391,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         ) ?*const TableInfo {
             assert(level < constants.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
-
-            const snapshots = [_]u64{snapshot};
-
-            if (key_exclusive == null) {
-                return manifest.levels[level].iterator(
-                    .visible,
-                    &snapshots,
-                    direction,
-                    KeyRange{ .key_min = key_min, .key_max = key_max },
-                ).next();
-            }
-
-            assert(compare_keys(key_exclusive.?, key_min) != .lt);
-            assert(compare_keys(key_exclusive.?, key_max) != .gt);
-
-            const key_min_exclusive = if (direction == .ascending) key_exclusive.? else key_min;
-            const key_max_exclusive = if (direction == .descending) key_exclusive.? else key_max;
-            assert(compare_keys(key_min_exclusive, key_max_exclusive) != .gt);
-
-            var it = manifest.levels[level].iterator(
-                .visible,
-                &snapshots,
+            const manifest_level: *const Level = &manifest.levels[level];
+            return manifest_level.next_table(
+                snapshot,
+                key_min,
+                key_max,
+                key_exclusive,
                 direction,
-                KeyRange{ .key_min = key_min_exclusive, .key_max = key_max_exclusive },
             );
-
-            while (it.next()) |table| {
-                assert(table.visible(snapshot));
-                assert(compare_keys(table.key_min, table.key_max) != .gt);
-                assert(compare_keys(table.key_max, key_min_exclusive) != .lt);
-                assert(compare_keys(table.key_min, key_max_exclusive) != .gt);
-
-                const next = switch (direction) {
-                    .ascending => compare_keys(table.key_min, key_exclusive.?) == .gt,
-                    .descending => compare_keys(table.key_max, key_exclusive.?) == .lt,
-                };
-                if (next) return table;
-            }
-
-            return null;
         }
 
         /// Returns the most optimal table for compaction from a level that is due for compaction.
@@ -439,18 +419,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         /// Returns the smallest visible range across level A and B that overlaps key_min/max.
-        ///
-        /// For example, for a table in level 2, count how many tables overlap in level 3, and
-        /// determine the span of their entire key range, which may be broader or narrower.
-        ///
-        /// The range.table_count includes the input table from level A represented by key_min/max.
-        /// Thus range.table_count=1 means that the table may be moved directly between levels.
-        ///
-        /// The range keys are guaranteed to encompass all the relevant level A and level B tables:
-        ///   range.key_min = min(a.key_min, b.key_min)
-        ///   range.key_max = max(a.key_max, b.key_max)
-        ///
-        /// This last invariant is critical to ensuring that tombstones are dropped correctly.
         pub fn compaction_range(
             manifest: *const Manifest,
             level_b: u8,
@@ -482,16 +450,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(compare_keys(range.key_min, range.key_max) != .gt);
 
             var level_c: u8 = level_b + 1;
-            while (level_c < constants.lsm_levels) : (level_c += 1) {
-                const snapshots = [_]u64{snapshot_latest};
 
-                var it = manifest.levels[level_c].iterator(
-                    .visible,
-                    &snapshots,
+            while (level_c < constants.lsm_levels) : (level_c += 1) {
+                const manifest_level: *const Level = &manifest.levels[level_c];
+                if (manifest_level.next_table(
+                    snapshot_latest,
+                    range.key_min,
+                    range.key_max,
+                    null,
                     .ascending,
-                    KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
-                );
-                if (it.next() != null) {
+                ) != null) {
                     // If the range is being compacted into the last level then this is unreachable,
                     // as the last level has no subsequent levels and must always drop tombstones.
                     assert(level_b != constants.lsm_levels - 1);

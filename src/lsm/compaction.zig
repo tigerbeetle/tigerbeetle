@@ -814,11 +814,11 @@ pub fn CompactionType(
                 switch (compaction.context.table_info_a) {
                     .immutable => {},
                     .disk => |table_info| {
-                        manifest.update_table(level_b - 1, snapshot_max, table_info);
+                        manifest.update_table(level_b - 1, snapshot_max, null, table_info);
                     },
                 }
                 for (compaction.context.range_b.tables.slice()) |table| {
-                    manifest.update_table(level_b, snapshot_max, table);
+                    manifest.update_table(level_b, snapshot_max, null, table);
                 }
             }
         }
