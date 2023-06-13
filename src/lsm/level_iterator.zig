@@ -23,7 +23,7 @@ const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIterat
 // cause our table references to get invalidated.
 pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
     return struct {
-        const LevelBDataIterator = @This();
+        const LevelIterator = @This();
 
         const Grid = GridType(Storage);
         const BlockPtr = Grid.BlockPtr;
@@ -38,10 +38,10 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         ) };
 
         pub const IndexCallback = fn (
-            it: *LevelBDataIterator,
+            it: *LevelIterator,
             index_block: BlockPtrConst,
         ) void;
-        pub const DataCallback = fn (it: *LevelBDataIterator, data_block: ?BlockPtrConst) void;
+        pub const DataCallback = fn (it: *LevelIterator, data_block: ?BlockPtrConst) void;
         pub const Callback = struct {
             on_index: IndexCallback,
             on_data: DataCallback,
@@ -66,14 +66,14 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         pub fn init(
             allocator: mem.Allocator,
-        ) !LevelBDataIterator {
+        ) !LevelIterator {
             var table_data_iterator = try TableDataIterator.init(allocator);
             errdefer table_data_iterator.deinit(allocator);
 
             const index_block = try alloc_block(allocator);
             errdefer allocator.free(index_block);
 
-            return LevelBDataIterator{
+            return LevelIterator{
                 .context = undefined,
                 .table_data_iterator = table_data_iterator,
                 .index_block = index_block,
@@ -81,14 +81,14 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             };
         }
 
-        pub fn deinit(it: *LevelBDataIterator, allocator: mem.Allocator) void {
+        pub fn deinit(it: *LevelIterator, allocator: mem.Allocator) void {
             allocator.free(it.index_block);
             it.table_data_iterator.deinit(allocator);
             it.* = undefined;
         }
 
         pub fn start(
-            it: *LevelBDataIterator,
+            it: *LevelIterator,
             context: Context,
         ) void {
             assert(it.callback == .none);
@@ -107,7 +107,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         /// *Will* call `callback.on_data` once with the next data block,
         /// or with null if there are no more data blocks in the range.
-        pub fn next(it: *LevelBDataIterator, callback: Callback) void {
+        pub fn next(it: *LevelIterator, callback: Callback) void {
             assert(it.callback == .none);
             // If this is the last table that we're iterating and it.table_data_iterator.empty()
             // is true, it.table_data_iterator.next takes care of calling callback.on_data with
@@ -132,7 +132,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             read: *Grid.Read,
             index_block: ?BlockPtrConst,
         ) void {
-            const it = @fieldParentPtr(LevelBDataIterator, "read", read);
+            const it = @fieldParentPtr(LevelIterator, "read", read);
             assert(it.table_data_iterator.empty());
             const callback = it.callback.level_next;
             it.callback = .none;
@@ -152,7 +152,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             it.table_next(callback);
         }
 
-        fn table_next(it: *LevelBDataIterator, callback: Callback) void {
+        fn table_next(it: *LevelIterator, callback: Callback) void {
             assert(it.callback == .none);
 
             it.callback = .{ .table_next = callback };
@@ -160,7 +160,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         }
 
         fn on_table_next(table_data_iterator: *TableDataIterator, data_block: ?Grid.BlockPtrConst) void {
-            const it = @fieldParentPtr(LevelBDataIterator, "table_data_iterator", table_data_iterator);
+            const it = @fieldParentPtr(LevelIterator, "table_data_iterator", table_data_iterator);
             const callback = it.callback.table_next;
             it.callback = .none;
             callback.on_data(it, data_block);
