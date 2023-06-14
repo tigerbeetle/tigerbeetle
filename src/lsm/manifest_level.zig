@@ -54,7 +54,10 @@ pub fn ManifestLevelType(
             tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor),
         };
         pub const TableInfoPtr = union(enum) { copy: *TableInfo, from_level: *TableInfo };
-        pub const TableInfoPtrConst = union(enum) { copy: *const TableInfo, from_level: *const TableInfo };
+        pub const TableInfoPtrConst = union(enum) {
+            copy: *const TableInfo,
+            from_level: *const TableInfo,
+        };
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
         // relative index into the node differ as the elements per node are different.
@@ -136,7 +139,10 @@ pub fn ManifestLevelType(
                     // mutable. That is, the table is not in the .text or .rodata section. We do this
                     // to avoid duplicating the iterator code in order to expose only a const iterator
                     // in the public API.
-                    const level_table = @intToPtr(*TableInfo, @ptrToInt(level_table_const));
+                    const level_table = @intToPtr(
+                        *TableInfo,
+                        @ptrToInt(level_table_const),
+                    );
                     assert(level_table.equal(table));
                     assert(level_table.snapshot_max == math.maxInt(u64));
 
@@ -222,7 +228,11 @@ pub fn ManifestLevelType(
                 if (key_range) |range| {
                     assert(compare_keys(range.key_min, range.key_max) != .gt);
 
-                    if (level.iterator_start(range.key_min, range.key_max, direction)) |start| {
+                    if (level.iterator_start(
+                        range.key_min,
+                        range.key_max,
+                        direction,
+                    )) |start| {
                         break :blk level.tables.iterator_from_index(
                             level.keys.absolute_index_for_cursor(start),
                             direction,
@@ -237,9 +247,15 @@ pub fn ManifestLevelType(
                     }
                 } else {
                     switch (direction) {
-                        .ascending => break :blk level.tables.iterator_from_index(0, direction),
+                        .ascending => break :blk level.tables.iterator_from_index(
+                            0,
+                            direction,
+                        ),
                         .descending => {
-                            break :blk level.tables.iterator_from_cursor(level.tables.last(), .descending);
+                            break :blk level.tables.iterator_from_cursor(
+                                level.tables.last(),
+                                .descending,
+                            );
                         },
                     }
                 }
@@ -382,7 +398,10 @@ pub fn ManifestLevelType(
             key_cursor: Keys.Cursor,
             direction: Direction,
         ) Keys.Cursor {
-            var reverse = level.keys.iterator_from_cursor(key_cursor, direction.reverse());
+            var reverse = level.keys.iterator_from_cursor(
+                key_cursor,
+                direction.reverse(),
+            );
             assert(meta.eql(reverse.cursor, key_cursor));
 
             // This cursor will always point to a key equal to start_key.
@@ -657,7 +676,13 @@ pub fn TestContext(
         const NodePool = @import("node_pool.zig").NodePool;
 
         const TestPool = NodePool(node_size, @alignOf(TableInfo));
-        const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, compare_keys, table_count_max);
+        const TestLevel = ManifestLevelType(
+            TestPool,
+            Key,
+            TableInfo,
+            compare_keys,
+            table_count_max,
+        );
         const KeyRange = TestLevel.KeyRange;
 
         random: std.rand.Random,

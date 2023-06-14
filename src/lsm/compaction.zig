@@ -107,6 +107,7 @@ pub fn CompactionType(
         iterator_a: TableDataIterator,
         iterator_b: LevelIterator,
         index_block_a: BlockPtr,
+        index_block_b: BlockPtr,
         data_blocks: [2]BlockPtr,
         table_builder: Table.Builder,
         last_keys_in: [2]?Key = .{ null, null },
@@ -175,6 +176,9 @@ pub fn CompactionType(
             const index_block_a = try alloc_block(allocator);
             errdefer allocator.free(index_block_a);
 
+            const index_block_b = try alloc_block(allocator);
+            errdefer allocator.free(index_block_b);
+
             var data_blocks: [2]Grid.BlockPtr = undefined;
 
             data_blocks[0] = try alloc_block(allocator);
@@ -192,6 +196,7 @@ pub fn CompactionType(
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
                 .index_block_a = index_block_a,
+                .index_block_b = index_block_b,
                 .data_blocks = data_blocks,
                 .table_builder = table_builder,
 
@@ -213,6 +218,7 @@ pub fn CompactionType(
             compaction.table_builder.deinit(allocator);
             for (compaction.data_blocks) |data_block| allocator.free(data_block);
             allocator.free(compaction.index_block_a);
+            allocator.free(compaction.index_block_b);
             compaction.iterator_b.deinit(allocator);
             compaction.iterator_a.deinit(allocator);
         }
@@ -285,6 +291,7 @@ pub fn CompactionType(
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
                 .index_block_a = compaction.index_block_a,
+                .index_block_b = compaction.index_block_b,
                 .data_blocks = compaction.data_blocks,
                 .table_builder = compaction.table_builder,
 
@@ -320,7 +327,10 @@ pub fn CompactionType(
                 });
 
                 compaction.state = .next_tick;
-                compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
+                compaction.context.grid.on_next_tick(
+                    done_on_next_tick,
+                    &compaction.next_tick,
+                );
             } else {
                 // Otherwise, start merging.
 
@@ -334,6 +344,7 @@ pub fn CompactionType(
                     .level = context.level_b,
                     .snapshot = context.op_min,
                     .tables = context.range_b.tables,
+                    .index_block = compaction.index_block_b,
                 });
 
                 switch (context.table_info_a) {
@@ -361,7 +372,12 @@ pub fn CompactionType(
 
             // `index_block` is only valid for this callback, so copy its contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.
-            stdx.copy_disjoint(.exact, u8, compaction.index_block_a, index_block);
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                compaction.index_block_a,
+                index_block,
+            );
             compaction.iterator_a.start(.{
                 .grid = compaction.context.grid,
                 .addresses = Table.index_data_addresses_used(compaction.index_block_a),
@@ -409,21 +425,22 @@ pub fn CompactionType(
             }
         }
 
-        fn on_index_block(
-            iterator_b: *LevelIterator,
-            index_block: BlockPtrConst,
-        ) void {
-            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
+        fn on_index_block(iterator_b: *LevelIterator) void {
+            const compaction = @fieldParentPtr(
+                Compaction,
+                "iterator_b",
+                iterator_b,
+            );
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
-            compaction.release_table_blocks(index_block);
+            compaction.release_table_blocks(compaction.index_block_b);
         }
 
         // TODO: Support for LSM snapshots would require us to only remove blocks
         // that are invisible.
         fn release_table_blocks(compaction: *Compaction, index_block: BlockPtrConst) void {
             // Release the table's block addresses in the Grid as it will be made invisible.
-            // This is safe; compaction.iterator_b makes a copy of the index block for a
-            // table in Level B before calling us. Additionally, compaction.index_block_a holds
+            // This is safe; compaction.index_block_b holds a of the index block for a
+            // table in Level B. Additionally, compaction.index_block_a holds
             // a copy of the index block for the Level A table being compacted.
 
             const grid = compaction.context.grid;
@@ -437,13 +454,21 @@ pub fn CompactionType(
         }
 
         fn iterator_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
-            const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
+            const compaction = @fieldParentPtr(
+                Compaction,
+                "iterator_a",
+                iterator_a,
+            );
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .a }));
             compaction.iterator_next(data_block);
         }
 
         fn iterator_next_b(iterator_b: *LevelIterator, data_block: ?BlockPtrConst) void {
-            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
+            const compaction = @fieldParentPtr(
+                Compaction,
+                "iterator_b",
+                iterator_b,
+            );
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.iterator_next(data_block);
         }
@@ -456,7 +481,12 @@ pub fn CompactionType(
             if (data_block) |block| {
                 // `data_block` is only valid for this callback, so copy its contents.
                 // TODO(jamii) This copy can be avoided if we bypass the cache.
-                stdx.copy_disjoint(.exact, u8, compaction.data_blocks[index], block);
+                stdx.copy_disjoint(
+                    .exact,
+                    u8,
+                    compaction.data_blocks[index],
+                    block,
+                );
                 compaction.values_in[index] =
                     Table.data_block_values_used(compaction.data_blocks[index]);
 
@@ -767,17 +797,27 @@ pub fn CompactionType(
             switch (compaction.input_state) {
                 .remaining => {
                     compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick);
+                    compaction.context.grid.on_next_tick(
+                        loop_on_next_tick,
+                        &compaction.next_tick,
+                    );
                 },
                 .exhausted => {
                     compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
+                    compaction.context.grid.on_next_tick(
+                        done_on_next_tick,
+                        &compaction.next_tick,
+                    );
                 },
             }
         }
 
         fn loop_on_next_tick(next_tick: *Grid.NextTick) void {
-            const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
+            const compaction = @fieldParentPtr(
+                Compaction,
+                "next_tick",
+                next_tick,
+            );
             assert(compaction.state == .next_tick);
             assert(compaction.input_state == .remaining);
 
@@ -786,7 +826,11 @@ pub fn CompactionType(
         }
 
         fn done_on_next_tick(next_tick: *Grid.NextTick) void {
-            const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
+            const compaction = @fieldParentPtr(
+                Compaction,
+                "next_tick",
+                next_tick,
+            );
             assert(compaction.state == .next_tick);
 
             compaction.state = .tables_writing_done;

@@ -32,15 +32,18 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         const TableInfo = Manifest.TableInfo;
         const TableDataIterator = TableDataIteratorType(Storage);
 
-        pub const Context = struct { grid: *Grid, level: u8, snapshot: u64, tables: std.BoundedArray(
-            *TableInfo,
-            constants.lsm_growth_factor,
-        ) };
+        pub const Context = struct {
+            grid: *Grid,
+            level: u8,
+            snapshot: u64,
+            index_block: BlockPtr,
+            tables: std.BoundedArray(
+                *TableInfo,
+                constants.lsm_growth_factor,
+            ),
+        };
 
-        pub const IndexCallback = fn (
-            it: *LevelIterator,
-            index_block: BlockPtrConst,
-        ) void;
+        pub const IndexCallback = fn (it: *LevelIterator) void;
         pub const DataCallback = fn (it: *LevelIterator, data_block: ?BlockPtrConst) void;
         pub const Callback = struct {
             on_index: IndexCallback,
@@ -53,8 +56,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
         /// Internal state.
         table_data_iterator: TableDataIterator,
         table_index: usize = 0,
-        // Local copy of index block, for use in `table_data_iterator`.
-        index_block: BlockPtr,
+
         read: Grid.Read = undefined,
         next_tick: Grid.NextTick = undefined,
 
@@ -70,19 +72,14 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             var table_data_iterator = try TableDataIterator.init(allocator);
             errdefer table_data_iterator.deinit(allocator);
 
-            const index_block = try alloc_block(allocator);
-            errdefer allocator.free(index_block);
-
             return LevelIterator{
                 .context = undefined,
                 .table_data_iterator = table_data_iterator,
-                .index_block = index_block,
                 .callback = .none,
             };
         }
 
         pub fn deinit(it: *LevelIterator, allocator: mem.Allocator) void {
-            allocator.free(it.index_block);
             it.table_data_iterator.deinit(allocator);
             it.* = undefined;
         }
@@ -95,7 +92,6 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             it.* = .{
                 .context = context,
                 .table_data_iterator = it.table_data_iterator,
-                .index_block = it.index_block,
                 .callback = .none,
             };
             it.table_data_iterator.start(.{
@@ -130,37 +126,49 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
         fn on_level_next(
             read: *Grid.Read,
-            index_block: ?BlockPtrConst,
+            index_block: BlockPtrConst,
         ) void {
-            const it = @fieldParentPtr(LevelIterator, "read", read);
+            const it = @fieldParentPtr(
+                LevelIterator,
+                "read",
+                read,
+            );
             assert(it.table_data_iterator.empty());
             const callback = it.callback.level_next;
             it.callback = .none;
-
-            if (index_block) |block| {
-                // `index_block` is only valid for this callback, so copy it's contents.
-                // TODO(jamii) This copy can be avoided if we bypass the cache.
-                stdx.copy_disjoint(.exact, u8, it.index_block, block);
-                it.table_data_iterator.start(.{
-                    .grid = it.context.grid,
-                    .addresses = Table.index_data_addresses_used(it.index_block),
-                    .checksums = Table.index_data_checksums_used(it.index_block),
-                });
-                callback.on_index(it, block);
-            }
+            // `index_block` is only valid for this callback, so copy it's contents.
+            // TODO(jamii) This copy can be avoided if we bypass the cache.
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                it.context.index_block,
+                index_block,
+            );
+            it.table_data_iterator.start(.{
+                .grid = it.context.grid,
+                .addresses = Table.index_data_addresses_used(it.context.index_block),
+                .checksums = Table.index_data_checksums_used(it.context.index_block),
+            });
+            callback.on_index(it);
             it.table_index += 1;
             it.table_next(callback);
         }
 
         fn table_next(it: *LevelIterator, callback: Callback) void {
             assert(it.callback == .none);
-
             it.callback = .{ .table_next = callback };
             it.table_data_iterator.next(on_table_next);
         }
 
-        fn on_table_next(table_data_iterator: *TableDataIterator, data_block: ?Grid.BlockPtrConst) void {
-            const it = @fieldParentPtr(LevelIterator, "table_data_iterator", table_data_iterator);
+        fn on_table_next(
+            table_data_iterator: *TableDataIterator,
+            data_block: ?Grid.BlockPtrConst,
+        ) void {
+            const it = @fieldParentPtr(
+                LevelIterator,
+                "table_data_iterator",
+                table_data_iterator,
+            );
             const callback = it.callback.table_next;
             it.callback = .none;
             callback.on_data(it, data_block);
