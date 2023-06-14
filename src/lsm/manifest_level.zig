@@ -53,7 +53,8 @@ pub fn ManifestLevelType(
             // References to tables in level B that intersect with the chosen table in level A.
             tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor),
         };
-
+        pub const TableInfoPtr = union(enum) { copy: *TableInfo, from_level: *TableInfo };
+        pub const TableInfoPtrConst = union(enum) { copy: *const TableInfo, from_level: *const TableInfo };
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
         // relative index into the node differ as the elements per node are different.
@@ -98,54 +99,54 @@ pub fn ManifestLevelType(
         }
 
         /// Set snapshot_max for the given table in the ManifestLevel.
-        /// This function assumes that the argument `table` is a stable pointer to
-        /// a table within the segmented array.
-        /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
-        pub fn set_snapshot_max_stable_ptr(level: *Self, snapshot: u64, table: *TableInfo) void {
-            assert(snapshot < lsm.snapshot_latest);
-            assert(table.snapshot_max == math.maxInt(u64));
-
-            const key_min = table.key_min;
-            const key_max = table.key_max;
-            assert(compare_keys(key_min, key_max) != .gt);
-            assert(table.snapshot_max == math.maxInt(u64));
-            table.snapshot_max = snapshot;
-            level.table_count_visible -= 1;
-        }
-
-        /// Set snapshot_max for the given table in the ManifestLevel.
-        ///
+        /// The table provided could either be a pointer to the table (from_level) in the
+        /// ManifestLevel or a pointer to a copy of that table (copy).
         /// * The table is mutable so that this function can update its snapshot.
         /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
         /// * Asserts that the table exists in the manifest.
-        pub fn set_snapshot_max(level: *Self, snapshot: u64, table: *TableInfo) void {
+        pub fn set_snapshot_max(level: *Self, snapshot: u64, table_union: TableInfoPtr) void {
             assert(snapshot < lsm.snapshot_latest);
-            assert(table.snapshot_max == math.maxInt(u64));
 
+            var table = switch (table_union) {
+                .copy => table_union.copy,
+                .from_level => table_union.from_level,
+            };
+            if (constants.verify) {
+                switch (table_union) {
+                    .copy => assert(level.contains(.{ .copy = table })),
+                    .from_level => assert(level.contains(.{ .from_level = table })),
+                }
+            }
+            assert(table.snapshot_max == math.maxInt(u64));
             const key_min = table.key_min;
             const key_max = table.key_max;
             assert(compare_keys(key_min, key_max) != .gt);
 
-            var it = level.iterator(
-                .visible,
-                @as(*const [1]u64, &lsm.snapshot_latest),
-                .ascending,
-                KeyRange{ .key_min = key_min, .key_max = key_max },
-            );
+            switch (table_union) {
+                .copy => {
+                    var it = level.iterator(
+                        .visible,
+                        @as(*const [1]u64, &lsm.snapshot_latest),
+                        .ascending,
+                        KeyRange{ .key_min = key_min, .key_max = key_max },
+                    );
 
-            const level_table_const = it.next().?;
-            // This const cast is safe as we know that the memory pointed to is in fact
-            // mutable. That is, the table is not in the .text or .rodata section. We do this
-            // to avoid duplicating the iterator code in order to expose only a const iterator
-            // in the public API.
-            const level_table = @intToPtr(*TableInfo, @ptrToInt(level_table_const));
-            assert(level_table.equal(table));
-            assert(level_table.snapshot_max == math.maxInt(u64));
+                    const level_table_const = it.next().?;
+                    // This const cast is safe as we know that the memory pointed to is in fact
+                    // mutable. That is, the table is not in the .text or .rodata section. We do this
+                    // to avoid duplicating the iterator code in order to expose only a const iterator
+                    // in the public API.
+                    const level_table = @intToPtr(*TableInfo, @ptrToInt(level_table_const));
+                    assert(level_table.equal(table));
+                    assert(level_table.snapshot_max == math.maxInt(u64));
 
-            level_table.snapshot_max = snapshot;
+                    level_table.snapshot_max = snapshot;
+                    assert(it.next() == null);
+                },
+                .from_level => {},
+            }
+
             table.snapshot_max = snapshot;
-
-            assert(it.next() == null);
             level.table_count_visible -= 1;
         }
 
@@ -408,14 +409,11 @@ pub fn ManifestLevelType(
         /// The function is only used for verification; it is not performance-critical.
         /// The table provided could either be a pointer to the table (from_level) in the
         /// ManifestLevel or a pointer to a copy of that table (copy).
-        pub fn contains(level: Self, table_enum: union(enum) {
-            copy: *const TableInfo,
-            from_level: *const TableInfo,
-        }) bool {
+        pub fn contains(level: Self, table_union: TableInfoPtrConst) bool {
             assert(constants.verify);
-            const table = switch (table_enum) {
-                .copy => table_enum.copy,
-                .from_level => table_enum.from_level,
+            const table = switch (table_union) {
+                .copy => table_union.copy,
+                .from_level => table_union.from_level,
             };
             var level_tables = level.iterator(.visible, &.{
                 table.snapshot_min,
@@ -424,7 +422,7 @@ pub fn ManifestLevelType(
                 .key_max = table.key_max,
             });
             while (level_tables.next()) |level_table| {
-                switch (table_enum) {
+                switch (table_union) {
                     // If the table provided is a pointer to a copy of the table,
                     // we check for equality of all important table properties.
                     .copy => {
@@ -435,7 +433,7 @@ pub fn ManifestLevelType(
                     // that the provided table is a valid pointer in the ManifestLevel.
                     .from_level => {
                         if (level_table == table) return true;
-                    }
+                    },
                 }
             }
             return false;
@@ -892,7 +890,7 @@ pub fn TestContext(
             const snapshot = context.take_snapshot();
 
             for (context.reference.items[index..][0..count]) |*table| {
-                context.level.set_snapshot_max(snapshot, table);
+                context.level.set_snapshot_max(snapshot, .{ .copy = table });
             }
 
             for (context.snapshot_tables.slice()) |tables| {

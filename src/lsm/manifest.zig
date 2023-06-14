@@ -205,35 +205,29 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.manifest_log.insert(log_level, table);
 
             if (constants.verify) {
-                assert(manifest_level.contains(.{.copy = table}));
+                assert(manifest_level.contains(.{ .copy = table }));
             }
         }
 
         /// Updates the snapshot_max on the provided table for the given level.
         /// The table provided could either be a pointer to the table (from_level) in the
         /// ManifestLevel or a pointer to a copy of that table (copy).
-        pub fn update_table(manifest: *Manifest, level: u8, snapshot: u64, table_enum: union(enum) {
-            copy: *TableInfo,
-            from_level: *TableInfo,
-        }) void {
+        pub fn update_table(manifest: *Manifest, level: u8, snapshot: u64, table_union: Level.TableInfoPtr) void {
             const manifest_level = &manifest.levels[level];
 
-            var table  = switch (table_enum) {
-                .copy => table_enum.copy,
-                .from_level => table_enum.from_level,
+            var table = switch (table_union) {
+                .copy => table_union.copy,
+                .from_level => table_union.from_level,
             };
 
-            if(constants.verify) {
-                switch (table_enum) {
-                    .copy => assert(manifest_level.contains(.{.copy = table})),
-                    .from_level => assert(manifest_level.contains(.{.from_level = table})),
+            if (constants.verify) {
+                switch (table_union) {
+                    .copy => assert(manifest_level.contains(.{ .copy = table })),
+                    .from_level => assert(manifest_level.contains(.{ .from_level = table })),
                 }
             }
             assert(table.snapshot_max >= snapshot);
-            switch (table_enum) {
-                .copy => manifest_level.set_snapshot_max(snapshot, table),
-                .from_level =>  manifest_level.set_snapshot_max_stable_ptr(snapshot, table),
-            }
+            manifest_level.set_snapshot_max(snapshot, table_union);
             assert(table.snapshot_max == snapshot);
 
             // Append update changes to the manifest log.
@@ -254,8 +248,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest_level_b = &manifest.levels[level_b];
 
             if (constants.verify) {
-                assert(manifest_level_a.contains(.{.copy = table}));
-                assert(!manifest_level_b.contains(.{.copy = table}));
+                assert(manifest_level_a.contains(.{ .copy = table }));
+                assert(!manifest_level_b.contains(.{ .copy = table }));
             }
 
             // First, remove the table from level A without appending changes to the manifest log.
@@ -271,8 +265,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.manifest_log.insert(@intCast(u7, level_b), table);
 
             if (constants.verify) {
-                assert(!manifest_level_a.contains(.{.copy = table}));
-                assert(manifest_level_b.contains(.{.copy = table}));
+                assert(!manifest_level_a.contains(.{ .copy = table }));
+                assert(manifest_level_b.contains(.{ .copy = table }));
             }
         }
 
