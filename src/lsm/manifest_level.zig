@@ -406,8 +406,17 @@ pub fn ManifestLevelType(
         }
 
         /// The function is only used for verification; it is not performance-critical.
-        pub fn contains(level: Self, table: *const TableInfo) bool {
+        /// The table provided could either be a pointer to the table (from_level) in the
+        /// ManifestLevel or a pointer to a copy of that table (copy).
+        pub fn contains(level: Self, table_enum: union(enum) {
+            copy: *const TableInfo,
+            from_level: *const TableInfo,
+        }) bool {
             assert(constants.verify);
+            const table = switch (table_enum) {
+                .copy => table_enum.copy,
+                .from_level => table_enum.from_level,
+            };
             var level_tables = level.iterator(.visible, &.{
                 table.snapshot_min,
             }, .ascending, KeyRange{
@@ -415,7 +424,19 @@ pub fn ManifestLevelType(
                 .key_max = table.key_max,
             });
             while (level_tables.next()) |level_table| {
-                if (level_table.equal(table)) return true;
+                switch (table_enum) {
+                    // If the table provided is a pointer to a copy of the table,
+                    // we check for equality of all important table properties.
+                    .copy => {
+                        if (level_table.equal(table)) return true;
+                    },
+                    // If the table provided is a pointer to the table in the ManifestLevel,
+                    // we check for equality of the pointers. This is to ensure
+                    // that the provided table is a valid pointer in the ManifestLevel.
+                    .from_level => {
+                        if (level_table == table) return true;
+                    }
+                }
             }
             return false;
         }
