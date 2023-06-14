@@ -22,7 +22,12 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
         const TableMutable = @This();
 
         const load_factor = 50;
-        const Values = std.HashMapUnmanaged(Value, void, Table.HashMapContextValue, load_factor);
+        const Values = stdx.HashMapUnmanaged(
+            Value,
+            void,
+            Table.HashMapContextValue,
+            load_factor,
+        );
 
         pub const ValuesCache = SetAssociativeCache(
             Key,
