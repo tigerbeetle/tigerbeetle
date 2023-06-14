@@ -119,7 +119,21 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
 
-        pub const CompactionRange = Level.CompactionRange;
+        const CompactionTableRange = struct {
+            table: *TableInfo,
+            range: CompactionRange,
+        };
+
+        pub const CompactionRange = struct {
+            /// The total number of tables in the compaction across both levels, always at least 1.
+            table_count: usize,
+            /// The minimum key across both levels.
+            key_min: Key,
+            /// The maximum key across both levels.
+            key_max: Key,
+            // References to tables in level B that intersect with the chosen table in level A.
+            tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor),
+        };
         node_pool: *NodePool,
 
         levels: [constants.lsm_levels]Level,
@@ -359,7 +373,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshot: u64) void {
             for (manifest.levels) |_, level| {
-                manifest.assert_no_invisible_tables_at_level(@intCast(u8, level), snapshot);
+                manifest.assert_no_invisible_tables_at_level(
+                    @intCast(u8, level),
+                    snapshot,
+                );
             }
         }
 
@@ -400,41 +417,76 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             });
         }
 
-        /// Returns the most optimal table for compaction from a level that is due for compaction.
+        /// Returns the most optimal table from a level that is due for compaction.
+        /// The optimal compaction table is one that overlaps with the least number
+        /// of tables in the next level.
         /// Returns null if the level is not due for compaction (table_count_visible < count_max).
-        pub fn compaction_table(manifest: *const Manifest, level_a: u8) ?Level.CompactionTableRange {
+        pub fn compaction_table(manifest: *const Manifest, level_a: u8) ?CompactionTableRange {
             // The last level is not compacted into another.
             assert(level_a < constants.lsm_levels - 1);
 
             const table_count_visible_max = table_count_max_for_level(growth_factor, level_a);
             assert(table_count_visible_max > 0);
 
-            const manifest_level: *const Level = &manifest.levels[level_a];
-            if (manifest_level.table_count_visible < table_count_visible_max) return null;
+            const manifest_level_a: *const Level = &manifest.levels[level_a];
+            const manifest_level_b: *const Level = &manifest.levels[level_a + 1];
+            if (manifest_level_a.table_count_visible < table_count_visible_max) return null;
             // If even levels are compacted ahead of odd levels, then odd levels may burst.
-            assert(manifest_level.table_count_visible <= table_count_visible_max + 1);
-            return manifest_level.compaction_table(&manifest.levels[level_a + 1]);
+            assert(manifest_level_a.table_count_visible <= table_count_visible_max + 1);
+
+            const least_overlap_table = manifest_level_a.table_with_least_overlap(
+                manifest_level_b,
+                growth_factor,
+            ) orelse return null;
+
+            const compaction_table_range = CompactionTableRange{
+                .table = least_overlap_table.table,
+                .range = CompactionRange{
+                // The range.table_count includes the input table from
+                // level A represented by key_min/max. Thus, range.table_count=1
+                // means that the table may be moved directly between levels.
+                .table_count = least_overlap_table.range.tables.len + 1,
+                .key_min = least_overlap_table.range.key_min,
+                .key_max = least_overlap_table.range.key_max,
+                .tables = least_overlap_table.range.tables,
+                },
+            };
+            return compaction_table_range;
         }
 
-        /// Returns the smallest visible range across level A and B that overlaps key_min/max.
-        pub fn compaction_range(
+        /// Returns the smallest visible range of tables across the immutable table
+        /// and Level 0 that overlaps with the given key range: [key_min, key_max].
+        pub fn immutable_table_compaction_range(
             manifest: *const Manifest,
-            level_b: u8,
             key_min: Key,
             key_max: Key,
         ) CompactionRange {
-            assert(level_b >= 0);
-            assert(level_b < constants.lsm_levels);
             assert(compare_keys(key_min, key_max) != .gt);
-
+            const level_b = 0;
             const manifest_level: *const Level = &manifest.levels[level_b];
-            const range = manifest_level.compaction_range(key_min, key_max);
-            assert(range.table_count > 0);
+
+            // We are guaranteed to get a non-null range because Level 0 has
+            // growth_max number of tables, so the number of tables that intersect
+            // with the immutable table can be no more than growth_max.
+            const range = manifest_level.overlapping_tables(
+                key_min,
+                key_max,
+                growth_factor,
+            ) orelse unreachable;
+
             assert(compare_keys(range.key_min, range.key_max) != .gt);
             assert(compare_keys(range.key_min, key_min) != .gt);
             assert(compare_keys(range.key_max, key_max) != .lt);
 
-            return range;
+            return .{
+                // The range.table_count includes the input table from
+                // level A represented by key_min/max. Thus, range.table_count=1
+                // means that the table may be moved directly between levels.
+                .table_count = range.tables.len + 1,
+                .key_min = range.key_min,
+                .key_max = range.key_max,
+                .tables = range.tables,
+            };
         }
 
         /// If no subsequent levels have any overlap, then tombstones must be dropped.
