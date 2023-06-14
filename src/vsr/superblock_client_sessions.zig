@@ -38,7 +38,7 @@ pub const ClientSessions = struct {
     };
 
     /// Values are indexes into `entries`.
-    const EntriesByClient = std.AutoHashMapUnmanaged(u128, usize);
+    const EntriesByClient = stdx.AutoHashMapUnmanaged(u128, usize);
 
     /// Free entries are zeroed, both in `entries` and on-disk.
     entries: []Entry,
