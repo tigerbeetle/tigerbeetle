@@ -678,8 +678,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(values_count > 0);
 
             const level_b: u8 = 0;
-            const range = tree.manifest.compaction_range(
-                level_b,
+            const range = tree.manifest.immutable_table_compaction_range(
                 tree.table_immutable.key_min(),
                 tree.table_immutable.key_max(),
             );

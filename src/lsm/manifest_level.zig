@@ -38,14 +38,11 @@ pub fn ManifestLevelType(
 
         pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max, .{});
 
-        pub const CompactionTableRange = struct {
+        pub const LeastOverlapTable = struct {
             table: *TableInfo,
-            range: CompactionRange,
+            range: OverlapRange,
         };
-
-        pub const CompactionRange = struct {
-            /// The total number of tables in the compaction across both levels, always at least 1.
-            table_count: usize,
+        pub const OverlapRange = struct {
             /// The minimum key across both levels.
             key_min: Key,
             /// The maximum key across both levels.
@@ -458,14 +455,19 @@ pub fn ManifestLevelType(
             return false;
         }
 
-        /// Given two levels, returns the most optimal compaction table in the
-        /// level for which this function is invoked. The optimal table is one
-        /// that overlaps with the least number of tables in the second level.
-        /// This function exits early if it finds a table that doesn't
-        /// overlap with any tables in the second level.
-        pub fn compaction_table(level_a: *const Self, level_b: *const Self) ?CompactionTableRange {
-            var optimal: ?CompactionTableRange = null;
-
+        /// Given two levels (where A is the level on which this function
+        /// is invoked and B is the other level), finds a table in Level A that
+        /// overlaps with the least number of tables in Level B.
+        ///
+        /// * Exits early if it finds a table that doesn't overlap with any
+        ///   tables in the second level.
+        pub fn table_with_least_overlap(
+            level_a: *const Self,
+            level_b: *const Self,
+            max_overlapping_tables: usize,
+        ) ?LeastOverlapTable {
+            assert(max_overlapping_tables <= constants.lsm_growth_factor);
+            var optimal: ?LeastOverlapTable = null;
             const snapshots = [1]u64{lsm.snapshot_latest};
             var iterations: usize = 0;
             var it = level_a.iterator(
@@ -478,19 +480,23 @@ pub fn ManifestLevelType(
             while (it.next()) |table| {
                 iterations += 1;
 
-                const range = level_b.compaction_range(table.key_min, table.key_max);
-                if (optimal == null or range.table_count < optimal.?.range.table_count) {
+                const range = level_b.overlapping_tables(
+                    table.key_min,
+                    table.key_max,
+                    max_overlapping_tables,
+                ) orelse continue;
+                if (optimal == null or range.tables.len < optimal.?.range.tables.len) {
                     optimal = .{
                         .table = @intToPtr(*TableInfo, @ptrToInt(table)),
                         .range = range,
                     };
                 }
                 // If the table can be moved directly between levels then that is already optimal.
-                if (optimal.?.range.table_count == 1) break;
+                if (optimal.?.range.tables.len == 0) break;
             }
             assert(iterations > 0);
             assert(iterations == level_a.table_count_visible or
-                optimal.?.range.table_count == 1);
+                optimal.?.range.tables.len == 0);
 
             return optimal.?;
         }
@@ -560,26 +566,29 @@ pub fn ManifestLevelType(
             return null;
         }
 
-        /// Returns the smallest visible range across level A and B that overlaps key_min/max.
-        ///
-        /// For example, for a table in level 2, count how many tables overlap in level 3, and
-        /// determine the span of their entire key range, which may be broader or narrower.
-        ///
-        /// The range.table_count includes the input table from level A represented by key_min/max.
-        /// Thus range.table_count=1 means that the table may be moved directly between levels.
+        /// Returns the smallest visible range of tables in the given level
+        /// that overlap with the given range: [key_min, key_max], or null
+        /// if the number of tables that intersect with the range is > max_overlapping_tables.
         ///
         /// The range keys are guaranteed to encompass all the relevant level A and level B tables:
         ///   range.key_min = min(a.key_min, b.key_min)
         ///   range.key_max = max(a.key_max, b.key_max)
         ///
         /// This last invariant is critical to ensuring that tombstones are dropped correctly.
-        pub fn compaction_range(
+        ///
+        /// * Assumption: Currently, we only support a maximum of lsm_growth_factor
+        ///   overlapping tables. This is because OverlapRange.tables is a
+        ///   BoundedArray of size lsm_growth_factor. This works with our current
+        ///   compaction strategy that is guaranteed to choose a table with that
+        ///   intersects with <= lsm_growth_factor tables in the next level.
+        pub fn overlapping_tables(
             level: *const Self,
             key_min: Key,
             key_max: Key,
-        ) CompactionRange {
-            var range = CompactionRange{
-                .table_count = 1,
+            max_overlapping_tables: usize,
+        ) ?OverlapRange {
+            assert(max_overlapping_tables <= constants.lsm_growth_factor);
+            var range = OverlapRange{
                 .key_min = key_min,
                 .key_max = key_max,
                 .tables = .{ .buffer = undefined },
@@ -592,7 +601,7 @@ pub fn ManifestLevelType(
                 KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
             );
 
-            while (it.next()) |table| : (range.table_count += 1) {
+            while (it.next()) |table| {
                 assert(table.visible(lsm.snapshot_latest));
                 assert(compare_keys(table.key_min, table.key_max) != .gt);
                 assert(compare_keys(table.key_max, range.key_min) != .lt);
@@ -609,15 +618,15 @@ pub fn ManifestLevelType(
                 }
                 // This const cast is safe as we know that the memory pointed to is in fact
                 // mutable. That is, the table is not in the .text or .rodata section.
-                // We set the capacity of range.tables to lsm_growth_factor, since that is the
-                // maximum number of tables that can intersect with a table in Level A. We needn't
-                // add any more table pointers to this array, since this table won't get selected
-                // if it intersects with > lsm_growth_factor number of tables.
-                if (range.tables.len < range.tables.capacity()) {
-                    range.tables.appendAssumeCapacity(@intToPtr(*TableInfo, @ptrToInt(table)));
+                if (range.tables.len < max_overlapping_tables) {
+                    range.tables.appendAssumeCapacity(@intToPtr(
+                        *TableInfo,
+                        @ptrToInt(table),
+                    ));
+                } else {
+                    return null;
                 }
             }
-            assert(range.table_count > 0);
             assert(compare_keys(range.key_min, range.key_max) != .gt);
             assert(compare_keys(range.key_min, key_min) != .gt);
             assert(compare_keys(range.key_max, key_max) != .lt);
