@@ -390,7 +390,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 const env_table = env.find_exact(level_table);
                 assert(level_table.equal(env_table));
 
-                env.level.set_snapshot_max(env.snapshot, env_table);
+                env.level.set_snapshot_max(env.snapshot, .{.copy=env_table});
                 assert(env_table.snapshot_max == env.snapshot);
                 assert(!env_table.visible(lsm.snapshot_latest));
                 assert(env_table.visible(env.snapshot));
