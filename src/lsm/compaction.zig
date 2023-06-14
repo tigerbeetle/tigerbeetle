@@ -38,6 +38,7 @@ const Allocator = std.mem.Allocator;
 
 const log = std.log.scoped(.compaction);
 const tracer = @import("../tracer.zig");
+const FIFO = @import("../fifo.zig").FIFO;
 
 const constants = @import("../constants.zig");
 
@@ -103,7 +104,7 @@ pub fn CompactionType(
             b = 1,
         };
 
-        const CompactionWrite = struct { write: Grid.Write, compaction: *Compaction };
+        const CompactionWrite = struct { write: Grid.Write, compaction: *Compaction, block: BlockPtr, next: ?*CompactionWrite = null, };
 
         // Passed by `init`.
         tree_name: []const u8,
@@ -115,10 +116,8 @@ pub fn CompactionType(
         data_blocks: [2]BlockPtr,
         table_builder: Table.Builder,
         last_keys_in: [2]?Key = .{ null, null },
-        cache_blocks: []BlockPtr,
-        grid_writes: [32]CompactionWrite,
-        cache_blocks_used: usize = 0,
-        cache_blocks_final_wait: usize = 0,
+        compaction_writes: []CompactionWrite,
+        compaction_writes_fifo: FIFO(CompactionWrite) = .{ .name = "compaction_writes" },
 
         /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
         /// they are applied deterministically relative to other concurrent compactions.
@@ -164,16 +163,18 @@ pub fn CompactionType(
             compacting,
             iterator_init_a,
             iterator_next: InputLevel,
-            tables_writing: struct { pending: usize },
             tables_writing_done,
             applied_to_manifest,
         },
-
+        tables_writing: struct { pending: usize, want_finish: bool } = undefined,
+        tables_writing_init: bool = false,
         next_tick: Grid.NextTick = undefined,
         read: Grid.Read = undefined,
 
         tracer_slot: ?tracer.SpanStart,
         iterator_tracer_slot: ?tracer.SpanStart,
+
+        timer: std.time.Timer = undefined,
 
         pub fn init(allocator: Allocator, tree_name: []const u8) !Compaction {
             var iterator_a = try TableDataIterator.init(allocator);
@@ -193,15 +194,23 @@ pub fn CompactionType(
             data_blocks[1] = try alloc_block(allocator);
             errdefer allocator.free(data_blocks[1]);
 
-            const cache_blocks_count = 32;
-            const cache_blocks = try allocator.alloc(BlockPtr, cache_blocks_count);
-            errdefer allocator.free(cache_blocks);
+            var compaction_writes = try allocator.alloc(CompactionWrite, 128);
+            errdefer allocator.free(compaction_writes);
 
-            for (cache_blocks) |*cache_block, i| {
-                errdefer for (cache_blocks[0..i]) |block| allocator.free(block);
-                cache_block.* = try alloc_block(allocator);
+            const compaction_write_blocks = try allocator.alloc(BlockPtr, compaction_writes.len);
+            errdefer allocator.free(compaction_write_blocks);
+
+            for (compaction_write_blocks) |*compaction_write_block, i| {
+                errdefer for (compaction_write_blocks[0..i]) |block| allocator.free(block);
+                compaction_write_block.* = try alloc_block(allocator);
             }
-            errdefer for (cache_blocks) |block| allocator.free(block);
+
+            var compaction_writes_fifo: FIFO(CompactionWrite) = .{ .name = "compaction_writes" };
+            for (compaction_writes) |*compaction_write, i| {
+                compaction_write.next = null;
+                compaction_write.block = compaction_write_blocks[i];
+                compaction_writes_fifo.push(compaction_write);
+            }
 
             var table_builder = try Table.Builder.init(allocator);
             errdefer table_builder.deinit(allocator);
@@ -223,11 +232,12 @@ pub fn CompactionType(
 
                 .input_state = .remaining,
                 .state = .idle,
-                .cache_blocks = cache_blocks,
 
                 .tracer_slot = null,
                 .iterator_tracer_slot = null,
-                .grid_writes = undefined,
+                .timer = std.time.Timer.start() catch @panic("foo"),
+                .compaction_writes = compaction_writes,
+                .compaction_writes_fifo = compaction_writes_fifo,
             };
         }
 
@@ -328,11 +338,12 @@ pub fn CompactionType(
                 .input_state = .remaining,
                 .state = .compacting,
                 .target_blocks_written = target_blocks_written,
-                .cache_blocks = compaction.cache_blocks,
-                .grid_writes = compaction.grid_writes,
+                .compaction_writes = compaction.compaction_writes,
+                .compaction_writes_fifo = compaction.compaction_writes_fifo,
 
                 .tracer_slot = compaction.tracer_slot,
                 .iterator_tracer_slot = compaction.iterator_tracer_slot,
+                .timer = compaction.timer,
             };
 
             if (can_move_table) {
@@ -537,19 +548,30 @@ pub fn CompactionType(
                 @src(),
             );
 
+            // compaction.timer.reset();
+            // var mode: enum {skipped, copy, copy_drop_tombstones, merge} = undefined;
+
             if (values_in[0].len == 0 and values_in[1].len == 0) {
                 compaction.input_state = .exhausted;
+                // mode = .skipped;
             } else if (values_in[0].len == 0) {
                 compaction.copy(.b);
+                // mode = .copy;
             } else if (values_in[1].len == 0) {
                 if (compaction.drop_tombstones) {
                     compaction.copy_drop_tombstones();
+                    // mode = .copy_drop_tombstones;
                 } else {
                     compaction.copy(.a);
+                    // mode = .copy;
                 }
             } else {
                 compaction.merge();
+                // mode = .merge;
             }
+
+            // const time = compaction.timer.read();
+            // std.log.debug("{s}: Took {}ns to generate a data block by {}", .{compaction.tree_name, time, mode});
 
             tracer.end(
                 &tracer_slot,
@@ -685,7 +707,10 @@ pub fn CompactionType(
             const input_exhausted = compaction.input_state == .exhausted;
             const table_builder = &compaction.table_builder;
 
-            compaction.state = .{ .tables_writing = .{ .pending = 0 } };
+            if (!compaction.tables_writing_init) {
+                compaction.tables_writing = .{ .pending = 0, .want_finish = false };
+                compaction.tables_writing_init = true;
+            }
 
             // Flush the data block if needed.
             if (table_builder.data_block_full() or
@@ -743,65 +768,50 @@ pub fn CompactionType(
                 WriteBlock(.index).write_block(compaction);
             }
 
-            WriteBlock(.index).check_and_flush_cache(compaction);
-
-            if (compaction.state.tables_writing.pending == 0) {
-                compaction.write_finish();
-            }
+            compaction.write_finish();
         }
 
         const WriteBlockField = enum { data, filter, index };
         fn WriteBlock(comptime write_block_field: WriteBlockField) type {
             return struct {
                 fn write_block(compaction: *Compaction) void {
-                    assert(compaction.state == .tables_writing);
 
                     const block = switch (write_block_field) {
                         .data => compaction.table_builder.data_block,
                         .filter => compaction.table_builder.filter_block,
                         .index => compaction.table_builder.index_block,
                     };
-                    stdx.copy_disjoint(.exact, u8, compaction.cache_blocks[compaction.cache_blocks_used], block);
-                    compaction.cache_blocks_used += 1;
-                    std.log.debug("{s}: Fast cache write for {}...", .{ compaction.tree_name, Table.block_address(block) });
-                }
-
-                fn check_and_flush_cache(compaction: *Compaction) void {
-                    // Ensure there's always room for at least 3 blocks...
-                    if (compaction.cache_blocks_used >= compaction.cache_blocks.len - 3) {
-                        // Cache is full, we have to do a flush.
-                        std.log.debug("{s}: Flushing cache since it has {}...", .{ compaction.tree_name, compaction.cache_blocks_used });
-                        for (compaction.cache_blocks[0..compaction.cache_blocks_used]) |*cache_block, i| {
-                            compaction.state.tables_writing.pending += 1;
-                            compaction.grid_writes[i].compaction = compaction;
-                            compaction.context.grid.write_block(
-                                on_write,
-                                &compaction.grid_writes[i].write,
-                                cache_block,
-                                Table.block_address(cache_block.*),
-                            );
-                            std.log.debug("{s}: grid._writeblock, just wrote {}, pending is {}...", .{ compaction.tree_name, Table.block_address(cache_block.*), compaction.state.tables_writing.pending });
-                        }
-                    }
+                    const compaction_write = compaction.compaction_writes_fifo.pop().?;
+                    stdx.copy_disjoint(.exact, u8, compaction_write.block, block);
+                    compaction_write.compaction = compaction;
+                    // Could just use fifo count
+                    compaction.tables_writing.pending += 1;
+                    // std.log.info("{s}: On writing, just wrote {}, pending is {}...", .{ compaction.tree_name, Table.block_address(compaction_write.block), compaction.tables_writing.pending });
+                    compaction.context.grid.write_block(
+                        on_write,
+                        &compaction_write.write,
+                        &compaction_write.block,
+                        Table.block_address(compaction_write.block),
+                    );
                 }
 
                 fn on_write(write: *Grid.Write) void {
-                    const compaction = @fieldParentPtr(CompactionWrite, "write", write).compaction;
-                    assert(compaction.state == .tables_writing);
-                    compaction.state.tables_writing.pending -= 1;
-                    std.log.debug("{s}: On write callback, just wrote {}, pending is {}...", .{ compaction.tree_name, write.address, compaction.state.tables_writing.pending });
-                    if (compaction.state.tables_writing.pending == 0) {
-                        std.log.debug("{s}: Done flushing cache, calling write_finish...", .{compaction.tree_name});
-                        compaction.cache_blocks_used = 0;
-                        compaction.write_finish();
+                    const compaction_write = @fieldParentPtr(CompactionWrite, "write", write);
+                    const compaction = compaction_write.compaction;
+                    compaction.tables_writing.pending -= 1;
+                    compaction.compaction_writes_fifo.push(compaction_write);
+                    // std.log.info("{s}: On write callback, just wrote {}, pending is {}...", .{ compaction.tree_name, write.address, compaction.tables_writing.pending });
+
+                    if (compaction.tables_writing.pending == 0 and compaction.tables_writing.want_finish) {
+                        compaction.state = .next_tick;
+                        compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
                     }
                 }
             };
         }
 
         fn write_finish(compaction: *Compaction) void {
-            assert(compaction.state == .tables_writing);
-            assert(compaction.state.tables_writing.pending == 0);
+            // assert(compaction.state == .tables_writing);
 
             // tracer.end(
             //     &compaction.iterator_tracer_slot,
@@ -828,8 +838,12 @@ pub fn CompactionType(
                         }),
                     }
 
-                    compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
+                    if (compaction.tables_writing.pending > 0) {
+                        compaction.tables_writing.want_finish = true;
+                    } else {
+                        compaction.state = .next_tick;
+                        compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
+                    }
                 },
             }
         }
@@ -841,24 +855,11 @@ pub fn CompactionType(
 
             if (compaction.data_blocks_written == compaction.target_blocks_written) {
                 const callback = compaction.context.callback;
-                // std.log.debug("{s}: Calling callback since we've done our blocks_outstanding work", .{compaction.tree_name});
+                std.log.info("{s}: Calling callback since we've done our blocks_outstanding work", .{compaction.tree_name});
                 callback(compaction);
             } else {
-                // std.log.debug("{s}: data_blocks_written is {}, target_blocks_written is {}", .{compaction.tree_name, compaction.data_blocks_written, compaction.target_blocks_written});
+                std.log.info("{s}: data_blocks_written is {}, target_blocks_written is {}", .{compaction.tree_name, compaction.data_blocks_written, compaction.target_blocks_written});
                 compaction.loop_start();
-            }
-        }
-
-        fn on_final_write(write: *Grid.Write) void {
-            const compaction = @fieldParentPtr(CompactionWrite, "write", write).compaction;
-            compaction.cache_blocks_final_wait -= 1;
-            if (compaction.cache_blocks_final_wait == 0) {
-                std.log.debug("{s}: Flushed all remainig blocks", .{compaction.tree_name});
-                compaction.cache_blocks_used = 0;
-                compaction.state = .tables_writing_done;
-
-                const callback = compaction.context.callback;
-                callback(compaction);
             }
         }
 
@@ -866,35 +867,21 @@ pub fn CompactionType(
             const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
             assert(compaction.state == .next_tick);
 
-            if (compaction.cache_blocks_used > 0) {
-                std.log.debug("{s}: Still have {} unflushed cache blocks", .{ compaction.tree_name, compaction.cache_blocks_used });
+            const callback = compaction.context.callback;
+            callback(compaction);
 
-                for (compaction.cache_blocks[0..compaction.cache_blocks_used]) |*cache_block, i| {
-                    std.log.debug("{s}: Flushing block {}", .{ compaction.tree_name, Table.block_address(cache_block.*) });
-                    compaction.cache_blocks_final_wait += 1;
-                    compaction.grid_writes[i].compaction = compaction;
-                    compaction.context.grid.write_block(
-                        on_final_write,
-                        &compaction.grid_writes[i].write,
-                        cache_block,
-                        Table.block_address(cache_block.*),
-                    );
-                }
-            } else {
-                compaction.state = .tables_writing_done;
+            compaction.tables_writing_init = false;
+            compaction.state = .tables_writing_done;
 
-                // tracer.end(
-                //     &compaction.tracer_slot,
-                //     .{ .tree_compaction = .{
-                //         .tree_name = compaction.tree_name,
-                //         .level_b = compaction.context.level_b,
-                //     } },
-                // );
+            // tracer.end(
+            //     &compaction.tracer_slot,
+            //     .{ .tree_compaction = .{
+            //         .tree_name = compaction.tree_name,
+            //         .level_b = compaction.context.level_b,
+            //     } },
+            // );
 
-                // std.log.debug("{s}: Calling callback since we've exhausted all work", .{compaction.tree_name});
-                const callback = compaction.context.callback;
-                callback(compaction);
-            }
+            // std.log.debug("{s}: Calling callback since we've exhausted all work", .{compaction.tree_name});
         }
 
         pub fn apply_to_manifest(compaction: *Compaction) void {

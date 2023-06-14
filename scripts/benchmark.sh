@@ -11,7 +11,7 @@ trap onerror EXIT
 echo "Formatting replica..."
 
 # Be careful to use a benchmark-specific filename so that we don't erase a real data file:
-FILE="/tmp/0_0.tigerbeetle.benchmark"
+FILE="./0_0.tigerbeetle.benchmark"
 if [ -f "$FILE" ]; then
     rm "$FILE"
 fi

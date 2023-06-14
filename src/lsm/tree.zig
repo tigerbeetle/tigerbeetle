@@ -674,7 +674,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
                     tree.lookup_snapshot_max = tree.compaction_op + 1;
 
-                    std.log.debug("{s} started half_bar_start...", .{tree_name});
+                    std.log.info("{s} started half_bar_start...", .{tree_name});
                     // HACK - we need asserts on our next_tick
                     // tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 },
