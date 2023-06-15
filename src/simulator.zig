@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("./stdx.zig");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
@@ -271,6 +272,10 @@ pub fn main() !void {
             break;
         }
     } else {
+        if (simulator.primary_outside_of_core()) {
+            stdx.unimplemented("repair requires reachable primary");
+        }
+
         output.info("no liveness, final cluster state (core={b})", .{simulator.core.mask});
         simulator.cluster.log_cluster();
         output.err("you can reproduce this failure with seed={}", .{seed});
@@ -425,6 +430,30 @@ pub const Simulator = struct {
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
         simulator.options.replica_crash_probability = 0;
         simulator.options.replica_restart_probability = 0;
+    }
+
+    // If a primary ends up being outside of a core, and is only partially connected to the core,
+    // the core might fail to converge, as parts of the repair protocol rely on primary-sent
+    // `.start_view_change` messages. Until we fix this issue, we special-case this scenario in
+    // VOPR and don't treat it as a liveness failure.
+    pub fn primary_outside_of_core(simulator: *const Simulator) bool {
+        assert(simulator.core.count() > 0);
+
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.cluster.replica_health[replica.replica] == .up and
+                replica.status == .normal and replica.primary() and
+                !simulator.core.isSet(replica.replica))
+            {
+                // `replica` considers itself a primary, check that the core thinks so as well.
+                var it = simulator.core.iterator(.{});
+                while (it.next()) |replica_core_index| {
+                    if (simulator.cluster.replicas[replica_core_index].view != replica.view) {
+                        break;
+                    }
+                } else return true;
+            }
+        }
+        return false;
     }
 
     fn on_cluster_reply(
