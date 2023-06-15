@@ -38,23 +38,63 @@ pub fn ManifestLevelType(
 
         pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max, .{});
 
+        /// A TableInfo reference could either be a pointer to the table (internal) in the
+        /// ManifestLevel or a pointer to a copy of that table (external).
+        pub const TableInfoReference = union(enum) {
+            internal: struct { table_info: *TableInfo, generation: u64 },
+            external: struct { table_info: *TableInfo },
+
+            pub fn table(table_ref: TableInfoReference) *TableInfo {
+                return switch (table_ref) {
+                    .internal => table_ref.internal.table_info,
+                    .external => table_ref.external.table_info,
+                };
+            }
+
+            pub fn generation(table_ref: TableInfoReference) u64 {
+                assert(table_ref == .internal);
+                return table_ref.internal.generation;
+            }
+
+            pub fn to_const(table_ref: TableInfoReference) TableInfoReferenceConst {
+                return switch (table_ref) {
+                    .internal => .{ .internal = .{
+                        .table_info = table_ref.internal.table_info,
+                        .generation = table_ref.internal.generation,
+                    } },
+                    .external => .{ .external = .{ .table_info = table_ref.external.table_info } },
+                };
+            }
+        };
+        pub const TableInfoReferenceConst = union(enum) {
+            internal: struct { table_info: *const TableInfo, generation: u64 },
+            external: struct { table_info: *const TableInfo },
+            pub fn table(table_ref: TableInfoReferenceConst) *const TableInfo {
+                return switch (table_ref) {
+                    .internal => table_ref.internal.table_info,
+                    .external => table_ref.external.table_info,
+                };
+            }
+            fn generation(table_ref: TableInfoReferenceConst) u64 {
+                assert(table_ref == .internal);
+                return table_ref.internal.generation;
+            }
+        };
+
         pub const LeastOverlapTable = struct {
-            table: *TableInfo,
+            table: TableInfoReference,
             range: OverlapRange,
         };
+
         pub const OverlapRange = struct {
             /// The minimum key across both levels.
             key_min: Key,
             /// The maximum key across both levels.
             key_max: Key,
             // References to tables in level B that intersect with the chosen table in level A.
-            tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor),
+            tables: std.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
         };
-        pub const TableInfoPtr = union(enum) { copy: *TableInfo, from_level: *TableInfo };
-        pub const TableInfoPtrConst = union(enum) {
-            copy: *const TableInfo,
-            from_level: *const TableInfo,
-        };
+
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
         // relative index into the node differ as the elements per node are different.
@@ -66,6 +106,11 @@ pub fn ManifestLevelType(
         /// The number of tables visible to snapshot_latest.
         /// Used to enforce table_count_max_for_level().
         table_count_visible: u32 = 0,
+
+        /// A monotonically increasing generation number that is incremented in insert_table() &
+        /// decremented in remove_table(). This is used detect invalid TableInfo references
+        /// when a caller is using an `internal` TableInfoReference/TableInfoReferenceConst.
+        generation: u32 = 0,
 
         pub fn init(allocator: mem.Allocator) !Self {
             var keys = try Keys.init(allocator);
@@ -86,14 +131,26 @@ pub fn ManifestLevelType(
         }
 
         /// Inserts the given table into the ManifestLevel.
-        pub fn insert_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
+        pub fn insert_table(
+            level: *Self,
+            node_pool: *NodePool,
+            table_ref: TableInfoReferenceConst,
+        ) void {
+            assert(table_ref == .external);
+            const table = table_ref.table();
+
             assert(level.keys.len() == level.tables.len());
 
             const absolute_index = level.keys.insert_element(node_pool, table.key_max);
             assert(absolute_index < level.keys.len());
+
             level.tables.insert_elements(node_pool, absolute_index, &[_]TableInfo{table.*});
+            if(constants.verify) {
+                assert(level.contains(table_ref));
+            }
 
             if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
+            level.generation +%= 1;
 
             assert(level.keys.len() == level.tables.len());
         }
@@ -102,26 +159,20 @@ pub fn ManifestLevelType(
         /// * The table is mutable so that this function can update its snapshot.
         /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
         /// * Asserts that the table exists in the manifest.
-        pub fn set_snapshot_max(level: *Self, snapshot: u64, table_union: TableInfoPtr) void {
-            var table = switch (table_union) {
-                .copy => table_union.copy,
-                .from_level => table_union.from_level,
-            };
+        pub fn set_snapshot_max(level: *Self, snapshot: u64, table_ref: TableInfoReference) void {
+            var table = table_ref.table();
             const key_min = table.key_min;
             const key_max = table.key_max;
 
             if (constants.verify) {
-                switch (table_union) {
-                    .copy => assert(level.contains(.{ .copy = table })),
-                    .from_level => assert(level.contains(.{ .from_level = table })),
-                }
+                assert(level.contains(table_ref.to_const()));
             }
             assert(snapshot < lsm.snapshot_latest);
             assert(table.snapshot_max == math.maxInt(u64));
             assert(compare_keys(key_min, key_max) != .gt);
 
-            switch (table_union) {
-                .copy => {
+            switch (table_ref) {
+                .external => {
                     var it = level.iterator(
                         .visible,
                         @as(*const [1]u64, &lsm.snapshot_latest),
@@ -134,17 +185,14 @@ pub fn ManifestLevelType(
                     // mutable. That is, the table is not in the .text or .rodata section. We do this
                     // to avoid duplicating the iterator code in order to expose only a const iterator
                     // in the public API.
-                    const level_table = @intToPtr(
-                        *TableInfo,
-                        @ptrToInt(level_table_const),
-                    );
+                    const level_table = @intToPtr(*TableInfo, @ptrToInt(level_table_const));
                     assert(level_table.equal(table));
                     assert(level_table.snapshot_max == math.maxInt(u64));
 
                     level_table.snapshot_max = snapshot;
                     assert(it.next() == null);
                 },
-                .from_level => {},
+                .internal => {},
             }
 
             table.snapshot_max = snapshot;
@@ -157,12 +205,14 @@ pub fn ManifestLevelType(
         pub fn remove_table_visible(
             level: *Self,
             node_pool: *NodePool,
-            table: *const TableInfo,
-        ) *const TableInfo {
+            table_ref: TableInfoReferenceConst,
+        ) TableInfoReferenceConst {
+            const table = table_ref.table();
             assert(table.visible(lsm.snapshot_latest));
-            level.remove_table(node_pool, table);
+
+            level.remove_table(node_pool, table_ref);
             level.table_count_visible -= 1;
-            return table;
+            return table_ref;
         }
 
         /// Remove the given table from the ManifestLevel, asserting that it is not visible
@@ -171,14 +221,17 @@ pub fn ManifestLevelType(
             level: *Self,
             node_pool: *NodePool,
             snapshots: []const u64,
-            table: *const TableInfo,
+            table_ref: TableInfoReferenceConst,
         ) void {
-            assert(table.invisible(snapshots));
-            level.remove_table(node_pool, table);
+            assert(table_ref.table().invisible(snapshots));
+            level.remove_table(node_pool, table_ref);
         }
 
-        fn remove_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
+        fn remove_table(level: *Self, node_pool: *NodePool, table_ref: TableInfoReferenceConst) void {
             assert(level.keys.len() == level.tables.len());
+
+            const table = table_ref.table();
+
             assert(compare_keys(table.key_min, table.key_max) != .gt);
 
             // Use `key_min` for both ends of the iterator; we are looking for a single table.
@@ -191,6 +244,7 @@ pub fn ManifestLevelType(
                     level.keys.remove_elements(node_pool, absolute_index, 1);
                     level.tables.remove_elements(node_pool, absolute_index, 1);
                     assert(level.keys.len() == level.tables.len());
+                    level.generation +%= 1;
                     return;
                 }
             }
@@ -411,14 +465,9 @@ pub fn ManifestLevelType(
         }
 
         /// The function is only used for verification; it is not performance-critical.
-        /// The table provided could either be a pointer to the table (from_level) in the
-        /// ManifestLevel or a pointer to a copy of that table (copy).
-        pub fn contains(level: Self, table_union: TableInfoPtrConst) bool {
+        pub fn contains(level: Self, table_ref: TableInfoReferenceConst) bool {
             assert(constants.verify);
-            const table = switch (table_union) {
-                .copy => table_union.copy,
-                .from_level => table_union.from_level,
-            };
+            const table = table_ref.table();
             var level_tables = level.iterator(.visible, &.{
                 table.snapshot_min,
             }, .ascending, KeyRange{
@@ -426,17 +475,21 @@ pub fn ManifestLevelType(
                 .key_max = table.key_max,
             });
             while (level_tables.next()) |level_table| {
-                switch (table_union) {
+                switch (table_ref) {
                     // If the table provided is a pointer to a copy of the table,
                     // we check for equality of all important table properties.
-                    .copy => {
+                    .external => {
                         if (level_table.equal(table)) return true;
                     },
                     // If the table provided is a pointer to the table in the ManifestLevel,
                     // we check for equality of the pointers. This is to ensure
-                    // that the provided table is a valid pointer in the ManifestLevel.
-                    .from_level => {
-                        if (level_table == table) return true;
+                    // that the provided table is a valid pointer in the ManifestLevel. Also,
+                    // we check for equality of the generation numbers to ensure no insert_table or
+                    // remove_table calls have been made since the table reference was obtained.
+                    .internal => {
+                        if (level_table == table and level.generation == table_ref.generation()) {
+                            return true;
+                        }
                     },
                 }
             }
@@ -470,15 +523,20 @@ pub fn ManifestLevelType(
             while (it.next()) |table| {
                 iterations += 1;
 
-                const range = level_b.overlapping_tables(
+                const range = level_b.tables_overlapping_with_key_range(
                     table.key_min,
                     table.key_max,
                     snapshot,
                     max_overlapping_tables,
                 ) orelse continue;
                 if (optimal == null or range.tables.len < optimal.?.range.tables.len) {
-                    optimal = .{
-                        .table = @intToPtr(*TableInfo, @ptrToInt(table)),
+                    optimal = LeastOverlapTable{
+                        .table = TableInfoReference{
+                            .internal = .{
+                                .table_info = @intToPtr(*TableInfo, @ptrToInt(table)),
+                                .generation = level_a.generation,
+                            },
+                        },
                         .range = range,
                     };
                 }
@@ -572,7 +630,7 @@ pub fn ManifestLevelType(
         ///   BoundedArray of size lsm_growth_factor. This works with our current
         ///   compaction strategy that is guaranteed to choose a table with that
         ///   intersects with <= lsm_growth_factor tables in the next level.
-        pub fn overlapping_tables(
+        pub fn tables_overlapping_with_key_range(
             level: *const Self,
             key_min: Key,
             key_max: Key,
@@ -612,10 +670,11 @@ pub fn ManifestLevelType(
                 // This const cast is safe as we know that the memory pointed to is in fact
                 // mutable. That is, the table is not in the .text or .rodata section.
                 if (range.tables.len < max_overlapping_tables) {
-                    range.tables.appendAssumeCapacity(@intToPtr(
-                        *TableInfo,
-                        @ptrToInt(table),
-                    ));
+                    var table_info_reference = TableInfoReference{.internal = .{
+                        .table_info = @intToPtr(*TableInfo, @ptrToInt(table)),
+                        .generation = level.generation,
+                    }};
+                    range.tables.appendAssumeCapacity(table_info_reference);
                 } else {
                     return null;
                 }
@@ -911,7 +970,7 @@ pub fn TestContext(
             const snapshot = context.take_snapshot();
 
             for (context.reference.items[index..][0..count]) |*table| {
-                context.level.set_snapshot_max(snapshot, .{ .copy = table });
+                context.level.set_snapshot_max(snapshot, .{.external{ .table_info = table }});
             }
 
             for (context.snapshot_tables.slice()) |tables| {

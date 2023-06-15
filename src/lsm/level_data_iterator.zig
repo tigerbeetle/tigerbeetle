@@ -40,7 +40,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
 
             // `tables` contains TableInfo references from ManifestLevel.
             tables: std.BoundedArray(
-                *TableInfo,
+                Manifest.TableInfoReference,
                 constants.lsm_growth_factor,
             ),
         };
@@ -112,13 +112,13 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             // a null data block.
             if (it.table_data_iterator.empty() and it.table_index < it.context.tables.len) {
                 // Refill `table_data_iterator` before calling `table_next`.
-                const table_info = it.context.tables.slice()[it.table_index];
+                const table_ref = it.context.tables.slice()[it.table_index];
                 it.callback = .{ .level_next = callback };
                 it.context.grid.read_block(
                     on_level_next,
                     &it.read,
-                    table_info.address,
-                    table_info.checksum,
+                    table_ref.table().address,
+                    table_ref.table().checksum,
                     .index,
                 );
             } else {
