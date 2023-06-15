@@ -7721,7 +7721,6 @@ pub fn ReplicaType(
 
             self.state_machine_opened = false;
             self.state_machine.reset();
-            self.grid.cache_mark();
 
             if (self.superblock.working.vsr_state.flags.syncing and
                 self.superblock.working.vsr_state.commit_min == stage.target.checkpoint_op)
@@ -7780,6 +7779,7 @@ pub fn ReplicaType(
             const stage = self.sync_stage.request_manifest_logs;
 
             self.sync_stage = .{ .request_manifest_logs = .{ .target = stage.target } };
+            self.grid.cache_invalidate();
             self.state_machine.open(sync_request_manifest_logs_callback);
         }
 
@@ -7817,10 +7817,7 @@ pub fn ReplicaType(
             assert(superblock.vsr_state.commit_min == stage.target.checkpoint_op);
             assert(!superblock.vsr_state.flags.syncing);
 
-            // Trim the grid cache of any entries which may have been removed from the LSM.
-            self.grid.cache_sweep();
             self.sync_message_timeout.stop();
-
             self.sync_dispatch(.{ .done = .{ .target = stage.target } });
         }
 
