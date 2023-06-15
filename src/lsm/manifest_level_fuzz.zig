@@ -4,7 +4,7 @@
 //!
 //! Applies operations to both the ManifestLevel and a separate table buffer to ensure the tables in
 //! both match up along the way. Sporadic usage similar to Manifest/Tree is applied to make sure it
-//! covers a good amount of positive space. 
+//! covers a good amount of positive space.
 //!
 //! Under various interleavings (those not common during normal usage but still allowed), tables are
 //! inserted and eventually either have their snapshot_max updated to the current snapshot or
@@ -253,9 +253,16 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             const node_pool_size = ManifestLevel.Keys.node_count_max +
                 ManifestLevel.Tables.node_count_max;
             env.pool = try NodePool.init(allocator, node_pool_size);
+            errdefer env.pool.deinit(allocator);
+
             env.level = try ManifestLevel.init(allocator);
+            errdefer env.level.deinit(allocator, &env.pool);
+
             env.buffer = TableBuffer.init(allocator);
+            errdefer env.buffer.deinit();
+
             env.tables = TableBuffer.init(allocator);
+            errdefer env.tables.deinit();
 
             env.random = random;
             env.snapshot = 1; // the first snapshot is reserved.
@@ -390,7 +397,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 const env_table = env.find_exact(level_table);
                 assert(level_table.equal(env_table));
 
-                env.level.set_snapshot_max(env.snapshot, .{.copy=env_table});
+                env.level.set_snapshot_max(env.snapshot, .{ .copy = env_table });
                 assert(env_table.snapshot_max == env.snapshot);
                 assert(!env_table.visible(lsm.snapshot_latest));
                 assert(env_table.visible(env.snapshot));

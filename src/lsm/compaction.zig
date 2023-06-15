@@ -47,7 +47,7 @@ const alloc_block = @import("grid.zig").alloc_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
-const LevelIteratorType = @import("level_iterator.zig").LevelIteratorType;
+const LevelIteratorType = @import("level_data_iterator.zig").LevelIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
@@ -135,7 +135,7 @@ pub fn CompactionType(
         // Pased by `start`. Defines whether the move optimization applies to this
         // compaction. This field is set to True if the optimal compaction
         // table in level A can simply be moved to level B.
-        can_move_table: bool,
+        move_table: bool,
         grid_reservation: ?Grid.Reservation,
         drop_tombstones: bool,
 
@@ -208,7 +208,7 @@ pub fn CompactionType(
 
                 .input_state = .remaining,
                 .state = .idle,
-                .can_move_table = false,
+                .move_table = false,
                 .tracer_slot = null,
                 .iterator_tracer_slot = null,
             };
@@ -254,7 +254,7 @@ pub fn CompactionType(
                 @src(),
             );
 
-            const can_move_table =
+            const move_table =
                 context.table_info_a == .disk and
                 context.range_b.table_count == 1;
 
@@ -270,7 +270,7 @@ pub fn CompactionType(
             // TODO(Compaction Pacing): Reserve smaller increments, at the start of each beat.
             // (And likewise release the reservation at the end of each beat, instead of at the
             // end of each half-bar).
-            const grid_reservation = if (can_move_table)
+            const grid_reservation = if (move_table)
                 null
             else
                 context.grid.reserve(
@@ -306,10 +306,10 @@ pub fn CompactionType(
 
                 .tracer_slot = compaction.tracer_slot,
                 .iterator_tracer_slot = compaction.iterator_tracer_slot,
-                .can_move_table = can_move_table,
+                .move_table = move_table,
             };
 
-            if (can_move_table) {
+            if (move_table) {
                 // If we can just move the table, don't bother with compaction.
 
                 log.debug(
@@ -327,10 +327,7 @@ pub fn CompactionType(
                 });
 
                 compaction.state = .next_tick;
-                compaction.context.grid.on_next_tick(
-                    done_on_next_tick,
-                    &compaction.next_tick,
-                );
+                compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
             } else {
                 // Otherwise, start merging.
 
@@ -372,12 +369,7 @@ pub fn CompactionType(
 
             // `index_block` is only valid for this callback, so copy its contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                compaction.index_block_a,
-                index_block,
-            );
+            stdx.copy_disjoint(.exact, u8, compaction.index_block_a, index_block);
             compaction.iterator_a.start(.{
                 .grid = compaction.context.grid,
                 .addresses = Table.index_data_addresses_used(compaction.index_block_a),
@@ -426,11 +418,7 @@ pub fn CompactionType(
         }
 
         fn on_index_block(iterator_b: *LevelIterator) void {
-            const compaction = @fieldParentPtr(
-                Compaction,
-                "iterator_b",
-                iterator_b,
-            );
+            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.release_table_blocks(compaction.index_block_b);
         }
@@ -439,7 +427,7 @@ pub fn CompactionType(
         // that are invisible.
         fn release_table_blocks(compaction: *Compaction, index_block: BlockPtrConst) void {
             // Release the table's block addresses in the Grid as it will be made invisible.
-            // This is safe; compaction.index_block_b holds a of the index block for a
+            // This is safe; compaction.index_block_b holds a copy of the index block for a
             // table in Level B. Additionally, compaction.index_block_a holds
             // a copy of the index block for the Level A table being compacted.
 
@@ -454,21 +442,13 @@ pub fn CompactionType(
         }
 
         fn iterator_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
-            const compaction = @fieldParentPtr(
-                Compaction,
-                "iterator_a",
-                iterator_a,
-            );
+            const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .a }));
             compaction.iterator_next(data_block);
         }
 
         fn iterator_next_b(iterator_b: *LevelIterator, data_block: ?BlockPtrConst) void {
-            const compaction = @fieldParentPtr(
-                Compaction,
-                "iterator_b",
-                iterator_b,
-            );
+            const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.iterator_next(data_block);
         }
@@ -481,12 +461,7 @@ pub fn CompactionType(
             if (data_block) |block| {
                 // `data_block` is only valid for this callback, so copy its contents.
                 // TODO(jamii) This copy can be avoided if we bypass the cache.
-                stdx.copy_disjoint(
-                    .exact,
-                    u8,
-                    compaction.data_blocks[index],
-                    block,
-                );
+                stdx.copy_disjoint(.exact, u8, compaction.data_blocks[index], block);
                 compaction.values_in[index] =
                     Table.data_block_values_used(compaction.data_blocks[index]);
 
@@ -797,27 +772,17 @@ pub fn CompactionType(
             switch (compaction.input_state) {
                 .remaining => {
                     compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(
-                        loop_on_next_tick,
-                        &compaction.next_tick,
-                    );
+                    compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick);
                 },
                 .exhausted => {
                     compaction.state = .next_tick;
-                    compaction.context.grid.on_next_tick(
-                        done_on_next_tick,
-                        &compaction.next_tick,
-                    );
+                    compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
                 },
             }
         }
 
         fn loop_on_next_tick(next_tick: *Grid.NextTick) void {
-            const compaction = @fieldParentPtr(
-                Compaction,
-                "next_tick",
-                next_tick,
-            );
+            const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
             assert(compaction.state == .next_tick);
             assert(compaction.input_state == .remaining);
 
@@ -826,11 +791,7 @@ pub fn CompactionType(
         }
 
         fn done_on_next_tick(next_tick: *Grid.NextTick) void {
-            const compaction = @fieldParentPtr(
-                Compaction,
-                "next_tick",
-                next_tick,
-            );
+            const compaction = @fieldParentPtr(Compaction, "next_tick", next_tick);
             assert(compaction.state == .next_tick);
 
             compaction.state = .tables_writing_done;
@@ -867,7 +828,7 @@ pub fn CompactionType(
             // since it directly uses pointers to the ManifestLevel tables to
             // perform updates. Calling insert_table() and move_table() before
             // this update will cause these pointers to become invalid.
-            if (!compaction.can_move_table) {
+            if (!compaction.move_table) {
                 switch (compaction.context.table_info_a) {
                     .immutable => {},
                     .disk => |table_info| {

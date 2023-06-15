@@ -138,12 +138,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             it.callback = .none;
             // `index_block` is only valid for this callback, so copy it's contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                it.context.index_block,
-                index_block,
-            );
+            stdx.copy_disjoint(.exact, u8, it.context.index_block, index_block);
             it.table_data_iterator.start(.{
                 .grid = it.context.grid,
                 .addresses = Table.index_data_addresses_used(it.context.index_block),
@@ -164,11 +159,7 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             table_data_iterator: *TableDataIterator,
             data_block: ?Grid.BlockPtrConst,
         ) void {
-            const it = @fieldParentPtr(
-                LevelIterator,
-                "table_data_iterator",
-                table_data_iterator,
-            );
+            const it = @fieldParentPtr(LevelIterator, "table_data_iterator", table_data_iterator);
             const callback = it.callback.table_next;
             it.callback = .none;
             callback.on_data(it, data_block);
