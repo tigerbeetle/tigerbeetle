@@ -156,12 +156,10 @@ pub fn GridType(comptime Storage: type) type {
         /// Each entry in cache has a corresponding block.
         cache_blocks: []BlockPtr,
         /// Each entry in cache has a corresponding bit.
-        /// This bit tracks whether the cache block is valid cache entries during state sync.
-        /// At the conclusion of state sync, unmarked entries are removed from the cache.
-        /// This ensures that blocks which were removed from the LSM during the interval of time
-        /// (i.e. compactions) that state sync skipped over do not pollute the cache.
+        /// This bit tracks whether the cache block is definitely valid (matches what should be on
+        /// disk). At the conclusion of state sync, all blocks are marked as invalid.
+        /// This enabled additional validation of cache consistency.
         cache_valid: std.DynamicBitSetUnmanaged,
-        cache_marking: bool = false,
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_iop_tracer_slots: [write_iops_max]?tracer.SpanStart = .{null} ** write_iops_max,
@@ -278,30 +276,9 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        pub fn cache_mark(grid: *Grid) void {
-            // Due to changing sync targets, the replica may call cache_mark() multiple times
-            // before calling cache_sweep().
-            maybe(grid.cache_marking);
-            grid.cache_marking = true;
-
+        pub fn cache_invalidate(grid: *Grid) void {
             var cache_indexes = grid.cache_valid.iterator(.{});
             while (cache_indexes.next()) |index| grid.cache_valid.unset(index);
-        }
-
-        pub fn cache_sweep(grid: *Grid) void {
-            assert(grid.cache_marking);
-            grid.cache_marking = false;
-
-            var cache_invalid = grid.cache_valid.iterator(.{ .kind = .unset });
-            while (cache_invalid.next()) |cache_index| {
-                grid.cache.remove_index(cache_index);
-            }
-
-            var cache_valid = grid.cache_valid.iterator(.{ .kind = .set });
-            while (cache_valid.next()) |cache_index| {
-                const cache_block = grid.cache_blocks[cache_index];
-                grid.verify_read(grid.cache.values[cache_index], cache_block);
-            }
         }
 
         pub fn on_next_tick(
@@ -627,7 +604,7 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            // Become the "root" read thats fetching the block for the given address.
+            // Become the "root" read that's fetching the block for the given address.
             // The fetch happens asynchronously to avoid stack-overflow and nested cache invalidation.
             grid.read_queue.push(read);
             grid.on_next_tick(read_block_tick_callback, &read.next_tick);
@@ -644,22 +621,16 @@ pub fn GridType(comptime Storage: type) type {
                 const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
                 assert(header.op == read.address);
 
-                if (grid.superblock.working.vsr_state.flags.syncing) {
-                    // During sync, allow an inconsistent cache.
-                    // We will clean the cache when sync concludes.
-                    // (This allows us to not completely reset the cache completely every time the
-                    // sync target changes).
-                } else {
-                    assert(header.checksum == read.checksum);
-                    if (constants.verify) grid.verify_read(read.address, cache_block);
-                }
-
                 if (header.checksum == read.checksum) {
+                    if (constants.verify) grid.verify_read(read.address, cache_block);
+
                     // Remove the "root" read so that the address is no longer actively reading / locked.
                     grid.read_queue.remove(read);
                     grid.read_block_resolve(read, cache_block);
                     grid.cache_valid.set(cache_index);
                     return;
+                } else {
+                    assert(!grid.cache_valid.isSet(cache_index));
                 }
             }
 
@@ -886,7 +857,10 @@ pub fn GridType(comptime Storage: type) type {
 
                 const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
                 assert(header.op == read.address);
-                if (constants.verify) grid.verify_read(read.address, cache_block);
+
+                if (grid.cache_valid.isSet(cache_index)) {
+                    if (constants.verify) grid.verify_read(read.address, cache_block);
+                }
 
                 if (header.checksum == read.checksum) {
                     stdx.copy_disjoint(.inexact, u8, read.block, cache_block[0..header.size]);
