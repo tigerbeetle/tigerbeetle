@@ -1305,9 +1305,9 @@ test "quorums" {
 
 /// Deterministically assigns replica_ids for the initial configuration.
 ///
-/// Eventualy, we want to identify replicas using random u128 ids to prevent operator errors.
+/// Eventually, we want to identify replicas using random u128 ids to prevent operator errors.
 /// However, that requires unergonomic two-step process for spinning a new cluster up.  To avoid
-/// needlessly compromizing the experience until reconfiguration is fully implemented, derive
+/// needlessly compromising the experience until reconfiguration is fully implemented, derive
 /// replica ids for the initial cluster deterministically.
 pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
     const IdSeed = packed struct {

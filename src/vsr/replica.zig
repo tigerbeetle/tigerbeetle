@@ -1594,7 +1594,7 @@ pub fn ReplicaType(
 
             if (count < threshold) {
                 log.debug("{}: on_start_view_change: view={} waiting for quorum " ++
-                    "({}/{}; replicas={b})", .{
+                    "({}/{}; replicas={b:0>6})", .{
                     self.replica,
                     self.view,
                     count,
@@ -1603,7 +1603,7 @@ pub fn ReplicaType(
                 });
                 return;
             }
-            log.debug("{}: on_start_view_change: view={} quorum received (replicas={b})", .{
+            log.debug("{}: on_start_view_change: view={} quorum received (replicas={b:0>6})", .{
                 self.replica,
                 self.view,
                 self.start_view_change_from_all_replicas.mask,
