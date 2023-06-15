@@ -119,8 +119,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
 
+        pub const TableInfoReference = Level.TableInfoReference;
+        pub const TableInfoReferenceConst = Level.TableInfoReferenceConst;
+
         const CompactionTableRange = struct {
-            table: *TableInfo,
+            table: TableInfoReference,
             range: CompactionRange,
         };
 
@@ -132,7 +135,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             /// The maximum key across both levels.
             key_max: Key,
             // References to tables in level B that intersect with the chosen table in level A.
-            tables: std.BoundedArray(*TableInfo, constants.lsm_growth_factor),
+            tables: std.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
         };
         node_pool: *NodePool,
 
@@ -194,7 +197,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(manifest.open_callback != null);
 
             assert(level < constants.lsm_levels);
-            manifest.levels[level].insert_table(manifest.node_pool, table);
+            manifest.levels[level].insert_table(manifest.node_pool, TableInfoReferenceConst{
+                .external = .{ .table_info = table },
+            });
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
@@ -209,39 +214,39 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn insert_table(
             manifest: *Manifest,
             level: u8,
-            table: *const TableInfo,
+            table_ref: TableInfoReferenceConst,
         ) void {
+            assert(table_ref == .external);
+            const table = table_ref.table();
             const manifest_level = &manifest.levels[level];
-            manifest_level.insert_table(manifest.node_pool, table);
+            manifest_level.insert_table(manifest.node_pool, table_ref);
 
             // Append insert changes to the manifest log.
             const log_level = @intCast(u7, level);
             manifest.manifest_log.insert(log_level, table);
 
             if (constants.verify) {
-                assert(manifest_level.contains(.{ .copy = table }));
+                assert(manifest_level.contains(table_ref));
             }
         }
 
         /// Updates the snapshot_max on the provided table for the given level.
         /// The table provided could either be a pointer to the table (from_level) in the
         /// ManifestLevel or a pointer to a copy of that table (copy).
-        pub fn update_table(manifest: *Manifest, level: u8, snapshot: u64, table_union: Level.TableInfoPtr) void {
+        pub fn update_table(
+            manifest: *Manifest,
+            level: u8,
+            snapshot: u64,
+            table_ref: TableInfoReference,
+        ) void {
             const manifest_level = &manifest.levels[level];
 
-            var table = switch (table_union) {
-                .copy => table_union.copy,
-                .from_level => table_union.from_level,
-            };
-
+            var table = table_ref.table();
             if (constants.verify) {
-                switch (table_union) {
-                    .copy => assert(manifest_level.contains(.{ .copy = table })),
-                    .from_level => assert(manifest_level.contains(.{ .from_level = table })),
-                }
+                assert(manifest_level.contains(table_ref.to_const()));
             }
             assert(table.snapshot_max >= snapshot);
-            manifest_level.set_snapshot_max(snapshot, table_union);
+            manifest_level.set_snapshot_max(snapshot, table_ref);
             assert(table.snapshot_max == snapshot);
 
             // Append update changes to the manifest log.
@@ -253,34 +258,36 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest: *Manifest,
             level_a: u8,
             level_b: u8,
-            table: *const TableInfo,
+            table_ref: TableInfoReferenceConst,
         ) void {
+            assert(table_ref == .external);
             assert(level_b == level_a + 1);
             assert(level_b < constants.lsm_levels);
 
             const manifest_level_a = &manifest.levels[level_a];
             const manifest_level_b = &manifest.levels[level_b];
+            const table = table_ref.table();
 
             if (constants.verify) {
-                assert(manifest_level_a.contains(.{ .copy = table }));
-                assert(!manifest_level_b.contains(.{ .copy = table }));
+                assert(manifest_level_a.contains(table_ref));
+                assert(!manifest_level_b.contains(table_ref));
             }
 
             // First, remove the table from level A without appending changes to the manifest log.
-            const removed = manifest_level_a.remove_table_visible(manifest.node_pool, table);
-            assert(table.equal(removed));
+            const removed = manifest_level_a.remove_table_visible(manifest.node_pool, table_ref);
+            assert(table.equal(removed.table()));
 
             // Then, insert the table into level B and append these changes to the manifest log.
             // To move a table w.r.t manifest log, a "remove" change should NOT be appended for
             // the previous level A; When replaying the log from open(), inserts are processed in
             // LIFO order and duplicates are ignored. This means the table will only be replayed in
             // level B instead of the old one in level A.
-            manifest_level_b.insert_table(manifest.node_pool, table);
+            manifest_level_b.insert_table(manifest.node_pool, table_ref);
             manifest.manifest_log.insert(@intCast(u7, level_b), table);
 
             if (constants.verify) {
-                assert(!manifest_level_a.contains(.{ .copy = table }));
-                assert(manifest_level_b.contains(.{ .copy = table }));
+                assert(!manifest_level_a.contains(table_ref));
+                assert(manifest_level_b.contains(table_ref));
             }
         }
 
@@ -314,7 +321,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
                 // Append remove changes to the manifest log and purge from memory (ManifestLevel):
                 manifest.manifest_log.remove(@intCast(u7, level), table);
-                manifest_level.remove_table_invisible(manifest.node_pool, &snapshots, table);
+                manifest_level.remove_table_invisible(manifest.node_pool, &snapshots, .{
+                    .internal = .{ .table_info = table, .generation = manifest_level.generation },
+                });
             }
 
             if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
@@ -466,7 +475,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // We are guaranteed to get a non-null range because Level 0 has
             // lsm_growth_factor number of tables, so the number of tables that intersect
             // with the immutable table can be no more than lsm_growth_factor.
-            const range = manifest_level.overlapping_tables(
+            const range = manifest_level.tables_overlapping_with_key_range(
                 key_min,
                 key_max,
                 snapshot_latest,

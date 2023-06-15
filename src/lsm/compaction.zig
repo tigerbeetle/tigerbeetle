@@ -73,9 +73,12 @@ pub fn CompactionType(
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;
 
+        const TableInfoReference = Manifest.TableInfoReference;
+        const TableInfoReferenceConst = Manifest.TableInfoReferenceConst;
+
         pub const TableInfoA = union(enum) {
             immutable: []const Value,
-            disk: *TableInfo,
+            disk: TableInfoReference,
         };
 
         pub const Context = struct {
@@ -318,7 +321,7 @@ pub fn CompactionType(
                 );
 
                 const snapshot_max = snapshot_max_for_table_input(context.op_min);
-                const table_a = context.table_info_a.disk;
+                const table_a = context.table_info_a.disk.table();
                 assert(table_a.snapshot_max >= snapshot_max);
 
                 compaction.manifest_entries.appendAssumeCapacity(.{
@@ -349,13 +352,13 @@ pub fn CompactionType(
                         compaction.values_in[0] = values;
                         compaction.loop_start();
                     },
-                    .disk => |table_info| {
+                    .disk => |table_ref| {
                         compaction.state = .iterator_init_a;
                         compaction.context.grid.read_block(
                             on_iterator_init_a,
                             &compaction.read,
-                            table_info.address,
-                            table_info.checksum,
+                            table_ref.table().address,
+                            table_ref.table().checksum,
                             .index,
                         );
                     },
@@ -832,18 +835,25 @@ pub fn CompactionType(
                 switch (compaction.context.table_info_a) {
                     .immutable => {},
                     .disk => |table_info| {
-                        manifest.update_table(level_b - 1, snapshot_max, .{ .from_level = table_info });
+                        manifest.update_table(level_b - 1, snapshot_max, table_info);
                     },
                 }
                 for (compaction.context.range_b.tables.slice()) |table| {
-                    manifest.update_table(level_b, snapshot_max, .{ .from_level = table });
+                    manifest.update_table(level_b, snapshot_max, table);
                 }
             }
 
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
-                    .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
-                    .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
+                    .insert_to_level_b => manifest.insert_table(
+                        level_b,
+                        TableInfoReferenceConst{ .external = .{ .table_info = &entry.table } },
+                    ),
+                    .move_to_level_b => manifest.move_table(
+                        level_b - 1,
+                        level_b,
+                        TableInfoReferenceConst{ .external = .{ .table_info = &entry.table } },
+                    ),
                 }
             }
         }
