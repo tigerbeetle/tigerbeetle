@@ -99,27 +99,25 @@ pub fn ManifestLevelType(
         }
 
         /// Set snapshot_max for the given table in the ManifestLevel.
-        /// The table provided could either be a pointer to the table (from_level) in the
-        /// ManifestLevel or a pointer to a copy of that table (copy).
         /// * The table is mutable so that this function can update its snapshot.
         /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
         /// * Asserts that the table exists in the manifest.
         pub fn set_snapshot_max(level: *Self, snapshot: u64, table_union: TableInfoPtr) void {
-            assert(snapshot < lsm.snapshot_latest);
-
             var table = switch (table_union) {
                 .copy => table_union.copy,
                 .from_level => table_union.from_level,
             };
+            const key_min = table.key_min;
+            const key_max = table.key_max;
+
             if (constants.verify) {
                 switch (table_union) {
                     .copy => assert(level.contains(.{ .copy = table })),
                     .from_level => assert(level.contains(.{ .from_level = table })),
                 }
             }
+            assert(snapshot < lsm.snapshot_latest);
             assert(table.snapshot_max == math.maxInt(u64));
-            const key_min = table.key_min;
-            const key_max = table.key_max;
             assert(compare_keys(key_min, key_max) != .gt);
 
             switch (table_union) {
@@ -225,11 +223,7 @@ pub fn ManifestLevelType(
                 if (key_range) |range| {
                     assert(compare_keys(range.key_min, range.key_max) != .gt);
 
-                    if (level.iterator_start(
-                        range.key_min,
-                        range.key_max,
-                        direction,
-                    )) |start| {
+                    if (level.iterator_start(range.key_min, range.key_max, direction)) |start| {
                         break :blk level.tables.iterator_from_index(
                             level.keys.absolute_index_for_cursor(start),
                             direction,
@@ -244,10 +238,7 @@ pub fn ManifestLevelType(
                     }
                 } else {
                     switch (direction) {
-                        .ascending => break :blk level.tables.iterator_from_index(
-                            0,
-                            direction,
-                        ),
+                        .ascending => break :blk level.tables.iterator_from_index(0, direction),
                         .descending => {
                             break :blk level.tables.iterator_from_cursor(
                                 level.tables.last(),
@@ -395,10 +386,7 @@ pub fn ManifestLevelType(
             key_cursor: Keys.Cursor,
             direction: Direction,
         ) Keys.Cursor {
-            var reverse = level.keys.iterator_from_cursor(
-                key_cursor,
-                direction.reverse(),
-            );
+            var reverse = level.keys.iterator_from_cursor(key_cursor, direction.reverse());
             assert(meta.eql(reverse.cursor, key_cursor));
 
             // This cursor will always point to a key equal to start_key.
@@ -464,11 +452,12 @@ pub fn ManifestLevelType(
         pub fn table_with_least_overlap(
             level_a: *const Self,
             level_b: *const Self,
+            snapshot: u64,
             max_overlapping_tables: usize,
         ) ?LeastOverlapTable {
             assert(max_overlapping_tables <= constants.lsm_growth_factor);
             var optimal: ?LeastOverlapTable = null;
-            const snapshots = [1]u64{lsm.snapshot_latest};
+            const snapshots = [1]u64{snapshot};
             var iterations: usize = 0;
             var it = level_a.iterator(
                 .visible,
@@ -483,6 +472,7 @@ pub fn ManifestLevelType(
                 const range = level_b.overlapping_tables(
                     table.key_min,
                     table.key_max,
+                    snapshot,
                     max_overlapping_tables,
                 ) orelse continue;
                 if (optimal == null or range.tables.len < optimal.?.range.tables.len) {
@@ -585,6 +575,7 @@ pub fn ManifestLevelType(
             level: *const Self,
             key_min: Key,
             key_max: Key,
+            snapshot: u64,
             max_overlapping_tables: usize,
         ) ?OverlapRange {
             assert(max_overlapping_tables <= constants.lsm_growth_factor);
@@ -593,7 +584,7 @@ pub fn ManifestLevelType(
                 .key_max = key_max,
                 .tables = .{ .buffer = undefined },
             };
-            const snapshots = [_]u64{lsm.snapshot_latest};
+            const snapshots = [1]u64{snapshot};
             var it = level.iterator(
                 .visible,
                 &snapshots,
@@ -685,13 +676,7 @@ pub fn TestContext(
         const NodePool = @import("node_pool.zig").NodePool;
 
         const TestPool = NodePool(node_size, @alignOf(TableInfo));
-        const TestLevel = ManifestLevelType(
-            TestPool,
-            Key,
-            TableInfo,
-            compare_keys,
-            table_count_max,
-        );
+        const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, compare_keys, table_count_max);
         const KeyRange = TestLevel.KeyRange;
 
         random: std.rand.Random,

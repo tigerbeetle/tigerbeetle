@@ -373,10 +373,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshot: u64) void {
             for (manifest.levels) |_, level| {
-                manifest.assert_no_invisible_tables_at_level(
-                    @intCast(u8, level),
-                    snapshot,
-                );
+                manifest.assert_no_invisible_tables_at_level(@intCast(u8, level), snapshot);
             }
         }
 
@@ -436,19 +433,20 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             const least_overlap_table = manifest_level_a.table_with_least_overlap(
                 manifest_level_b,
+                snapshot_latest,
                 growth_factor,
             ) orelse return null;
 
             const compaction_table_range = CompactionTableRange{
                 .table = least_overlap_table.table,
                 .range = CompactionRange{
-                // The range.table_count includes the input table from
-                // level A represented by key_min/max. Thus, range.table_count=1
-                // means that the table may be moved directly between levels.
-                .table_count = least_overlap_table.range.tables.len + 1,
-                .key_min = least_overlap_table.range.key_min,
-                .key_max = least_overlap_table.range.key_max,
-                .tables = least_overlap_table.range.tables,
+                    // The range.table_count includes the input table from
+                    // level A represented by key_min/max. Thus, range.table_count=1
+                    // means that the table may be moved directly between levels.
+                    .table_count = least_overlap_table.range.tables.len + 1,
+                    .key_min = least_overlap_table.range.key_min,
+                    .key_max = least_overlap_table.range.key_max,
+                    .tables = least_overlap_table.range.tables,
                 },
             };
             return compaction_table_range;
@@ -471,8 +469,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const range = manifest_level.overlapping_tables(
                 key_min,
                 key_max,
+                snapshot_latest,
                 growth_factor,
-            ) orelse unreachable;
+            ).?;
 
             assert(compare_keys(range.key_min, range.key_max) != .gt);
             assert(compare_keys(range.key_min, key_min) != .gt);
