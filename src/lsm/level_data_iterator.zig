@@ -37,6 +37,8 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             level: u8,
             snapshot: u64,
             index_block: BlockPtr,
+
+            // `tables` contains TableInfo references from ManifestLevel.
             tables: std.BoundedArray(
                 *TableInfo,
                 constants.lsm_growth_factor,

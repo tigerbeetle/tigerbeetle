@@ -464,8 +464,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const manifest_level: *const Level = &manifest.levels[level_b];
 
             // We are guaranteed to get a non-null range because Level 0 has
-            // growth_max number of tables, so the number of tables that intersect
-            // with the immutable table can be no more than growth_max.
+            // lsm_growth_factor number of tables, so the number of tables that intersect
+            // with the immutable table can be no more than lsm_growth_factor.
             const range = manifest_level.overlapping_tables(
                 key_min,
                 key_max,

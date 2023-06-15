@@ -456,6 +456,7 @@ pub fn ManifestLevelType(
             max_overlapping_tables: usize,
         ) ?LeastOverlapTable {
             assert(max_overlapping_tables <= constants.lsm_growth_factor);
+
             var optimal: ?LeastOverlapTable = null;
             const snapshots = [1]u64{snapshot};
             var iterations: usize = 0;
@@ -579,6 +580,7 @@ pub fn ManifestLevelType(
             max_overlapping_tables: usize,
         ) ?OverlapRange {
             assert(max_overlapping_tables <= constants.lsm_growth_factor);
+
             var range = OverlapRange{
                 .key_min = key_min,
                 .key_max = key_max,
