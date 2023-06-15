@@ -1058,6 +1058,37 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     try expectEqual(t.replica(.R_).op_checkpoint_id(), a0.op_checkpoint_id());
 }
 
+test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
+    const t = try TestContext.init(.{ .replica_count = 4 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+    var b3 = t.replica(.B3);
+
+    b2.stop();
+    b3.stop();
+
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    try expectEqual(a0.status(), .normal);
+    try expectEqual(b1.status(), .normal);
+
+    try b2.open();
+    try b3.open();
+    t.run();
+    t.run();
+
+    try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).sync_status(), .none);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas

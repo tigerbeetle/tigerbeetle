@@ -111,7 +111,9 @@ pub fn SyncCheckerType(comptime Replica: type) type {
             const index = checkpoint_index(sync_target.checkpoint_op);
             if (index < checker.canonical.items.len) {
                 if (checker.canonical.items[index] != sync_target.checkpoint_id) {
-                    log.err("{}: check_sync_target: mismatch (got={x:0>32} want={x:0>32})", .{
+                    log.err("{}: check_sync_target: mismatch (op={} got={x:0>32} want={x:0>32})", .{
+                        sync_target.replica,
+                        sync_target.checkpoint_op,
                         sync_target.checkpoint_id,
                         checker.canonical.items[index],
                     });
