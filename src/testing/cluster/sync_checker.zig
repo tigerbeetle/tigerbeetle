@@ -110,9 +110,15 @@ pub fn SyncCheckerType(comptime Replica: type) type {
 
             const index = checkpoint_index(sync_target.checkpoint_op);
             if (index < checker.canonical.items.len) {
+                if (checker.canonical.items[index] != sync_target.checkpoint_id) {
+                    log.err("{}: check_sync_target: mismatch (got={x:0>32} want={x:0>32})", .{
+                        sync_target.checkpoint_id,
+                        checker.canonical.items[index],
+                    });
+                }
                 assert(checker.canonical.items[index] == sync_target.checkpoint_id);
             } else {
-                assert(index == checker.canonical.items.len);
+                assert(checker.canonical.items.len == index);
                 checker.canonical.append(sync_target.checkpoint_id) catch unreachable;
 
                 log.debug("{}: check_sync_target: discovered canonical checkpoint " ++
