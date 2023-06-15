@@ -33,7 +33,7 @@ Replica roles:
 Checkpoints:
 
 - [_checkpoint id_/_checkpoint identifier_](#checkpoint-identifier): Uniquely identifies a particular checkpoint reproducibly across replicas.
-- [_canonical checkpoint_](#canonical-checkpoint): Any checkpoint which either: _A_: has any ops committed atop it by the primary, or _B_: a view-change quorum has reached.
+- [_canonical checkpoint_](#canonical-checkpoint): Any checkpoint which either: _A_: has any ops committed atop it by the primary, or _B_: a majority quorum has reached.
 - [_sync target_](#sync-target): The checkpoint identifier of the target of state sync. Every sync target is a canonical checkpoint.
 
 ## Algorithm
@@ -164,7 +164,7 @@ TODO(Big headers): Add checkpoint identifier to `command=prepare` too, so that a
 
 A _canonical_ checkpoint is a checkpoint:
 1. with an op committed atop it by the primary (discovery via `command=commit`), or
-2. that a view-change quorum of replicas have reached (discovery via `command=ping`), or
+2. that a majority quorum of replicas have reached (discovery via `command=ping`), or
 3. (when `R=2`: that a single replica has reached).
 
 The primary ignores `command=prepare_ok`s which have a different checkpoint id attached than they expect.
