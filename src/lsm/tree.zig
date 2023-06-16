@@ -719,7 +719,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             // Do not start compaction if level A does not require compaction.
             const table_range = tree.manifest.compaction_table(context.level_a) orelse return;
-            const table = table_range.table.table();
+            const table = table_range.table.table_info;
 
             assert(table_range.range.table_count >= 1);
             assert(table_range.range.table_count <= compaction_tables_input_max);

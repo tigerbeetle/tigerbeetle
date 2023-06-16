@@ -312,7 +312,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             for (tables) |*table| {
                 assert(table.visible(env.snapshot));
                 assert(table.visible(lsm.snapshot_latest));
-                env.level.insert_table(&env.pool, .{.external = .{ .table_info = table }});
+                env.level.insert_table(&env.pool, table);
             }
 
             // Insert the generated tables into the Environment for reference:
@@ -397,12 +397,12 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 const env_table = env.find_exact(level_table);
                 assert(level_table.equal(env_table));
 
-                env.level.set_snapshot_max(env.snapshot, .{.internal = .{
+                env.level.set_snapshot_max(env.snapshot, .{
                     .table_info = @intToPtr(*TableInfo, @ptrToInt(level_table)),
                     .generation = env.level.generation,
-                }});
+                });
                 // This is required to keep the table in the fuzzer's environment consistent with
-                // the table in the ManifestLevel. 
+                // the table in the ManifestLevel.
                 env_table.snapshot_max = env.snapshot;
                 assert(level_table.snapshot_max == env.snapshot);
                 assert(!level_table.visible(lsm.snapshot_latest));
@@ -457,9 +457,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 env.mark_removed_table(level_table);
 
                 assert(level_table.invisible(&snapshots));
-                env.level.remove_table_invisible(&env.pool, &snapshots, .{.external = .{
-                    .table_info = level_table,
-                }});
+                env.level.remove_table_invisible(&env.pool, &snapshots, level_table);
 
                 remove_amount -= 1;
                 if (remove_amount == 0) break;
@@ -482,10 +480,8 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 env.mark_removed_table(level_table);
 
                 assert(level_table.visible(lsm.snapshot_latest));
-                const removed = env.level.remove_table_visible(&env.pool, .{.external = .{
-                    .table_info = level_table,
-                }});
-                assert(removed.table().equal(level_table));
+                const removed = env.level.remove_table_visible(&env.pool, level_table);
+                assert(removed.equal(level_table));
 
                 remove_amount -= 1;
                 if (remove_amount == 0) break;
