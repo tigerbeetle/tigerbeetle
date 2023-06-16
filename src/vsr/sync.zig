@@ -41,19 +41,13 @@ pub const SyncStage = union(enum) {
         }
     },
 
-    /// superblock.sync_start()
-    write_sync_start: struct {
+    superblock_update: struct {
         target: SyncTarget,
         previous_checkpoint_id: u128,
         checkpoint_op_checksum: u128,
     },
 
-    request_manifest_logs: struct { target: SyncTarget },
-
-    /// superblock.sync_done()
-    write_sync_done: struct { target: SyncTarget },
-
-    done: struct { target: SyncTarget },
+    done,
 
     pub fn valid_transition(from: std.meta.Tag(SyncStage), to: std.meta.Tag(SyncStage)) bool {
         return switch (from) {
@@ -64,13 +58,9 @@ pub const SyncStage = union(enum) {
             .cancel_grid => to == .request_target,
             .request_target => to == .request_target or
                 to == .request_trailers,
-            .request_trailers => to == .cancel_grid or
-                to == .write_sync_start,
-            .write_sync_start => to == .request_trailers or
-                to == .request_manifest_logs,
-            .request_manifest_logs => to == .cancel_grid or
-                to == .write_sync_done,
-            .write_sync_done => to == .request_trailers or
+            .request_trailers => to == .request_trailers or
+                to == .superblock_update,
+            .superblock_update => to == .request_trailers or
                 to == .done,
             .done => to == .request_trailers or
                 to == .none,
@@ -83,12 +73,10 @@ pub const SyncStage = union(enum) {
             .cancel_commit,
             .cancel_grid,
             .request_target,
+            .done,
             => null,
-            .write_sync_start => |s| s.target,
             .request_trailers => |s| s.target,
-            .request_manifest_logs => |s| s.target,
-            .write_sync_done => |s| s.target,
-            .done => |s| s.target,
+            .superblock_update => |s| s.target,
         };
     }
 };

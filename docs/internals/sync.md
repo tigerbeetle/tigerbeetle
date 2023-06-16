@@ -12,12 +12,16 @@ State sync is used when when a lagging replica's log no longer intersects with t
 (VRR refers to state sync as "state transfer", but we already have [transfers](../reference/transfers.md) elsewhere.)
 
 In the context of state sync, "state" refers to:
-1. the grid (LSM data; acquired blocks only)
-2. the superblock manifest
-3. the superblock free set
-4. the superblock client sessions (TODO: What about client replies?)
-5. the superblock `vsr_state.commit_min`
-6. the superblock `vsr_state.commit_min_checksum`
+1. the superblock manifest
+2. the superblock free set
+3. the superblock client sessions
+4. the superblock `vsr_state.commit_min`
+5. the superblock `vsr_state.commit_min_checksum`
+6. the grid (LSM data; acquired blocks only)
+7. client replies
+
+However, state sync protocol itself only syncs the first 5.
+6/7 are replicated after state sync protocol, driven by grid repair and the disk scrubber.
 
 The target of state sync is the latest checkpoint of the healthy cluster.
 When we catch up to the latest checkpoint (or very close to it), then we can transition back to a healthy state.
@@ -45,20 +49,15 @@ Checkpoints:
 4. Wait for a usable sync target to arrive. (Usually we already have one.)
 5. [Request superblock trailers](#5-request-superblock-trailers).
 6. Update superblock headers:
-    - Set `vsr_state.flags.syncing=true`.
     - Bump `vsr_state.commit_min`/`vsr_state.commit_min_checksum` to the sync target op/op-checksum.
     - Bump `vsr_state.previous_checkpoint_id` to the checkpoint id that is previous to our sync target (i.e. it isn't _our_ previous checkpoint).
     - Bump `replica.commit_min`. (If `replica.commit_min` exceeds `replica.op`, transition to `status=recovering_head`).
+    - Write the target checkpoint's trailers.
 7. Request and write manifest log blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
 8. Request and write table blocks. (TODO: This step is not implemented yet.)
-9. Update superblock headers and trailers:
-    - Set `vsr_state.flags.syncing=false`.
-    - Write the target checkpoint's trailers.
-10. Done.
+9. Done.
 
 If a newer sync target is discovered during steps *4*-*8*, go to step *3*.
-
-If we recover with a superblock `vsr_state.flags.syncing=true`, go to step *4*.
 
 ### 0: Scenarios
 
@@ -79,8 +78,6 @@ Causes of number 3:
 
 State sync is initially triggered by any of the following:
 
-- The replica recovered from a restart, and its superblock `vsr_state.flags.syncing=true`.
-  (It was syncing prior to the restart.)
 - The replica discovers the canonical checkpoint for its current wrap, and that it [doesn't match](#storage-determinism) its own current checkpoint.
 - The replica receives a SV which indicates that it has lagged so far behind the cluster that its log cannot possibly intersect.
 - `repair_sync_timeout` fires, and:
@@ -111,13 +108,13 @@ Syncing replicas may:
 - [write prepares to their WAL](#syncing-replicas-write-prepares-to-their-wal)
 - assist with grid repair
 - join new views
+- send a `do_view_change`
 
 Syncing replicas must not:
 
 - [ack](#syncing-replicas-dont-ack-prepares)
 - commit prepares
 - be a primary
-- send a `do_view_change`
 
 #### Syncing Replicas write prepares to their WAL.
 
