@@ -146,7 +146,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         write: Grid.Write = undefined,
         write_callback: ?Callback = null,
 
-        flush_next_tick: Grid.NextTick = undefined,
+        next_tick: Grid.NextTick = undefined,
 
         pub fn init(allocator: mem.Allocator, grid: *Grid, tree_hash: u128) !ManifestLog {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
@@ -231,17 +231,29 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     .manifest,
                 );
             } else {
-                manifest_log.opened = true;
-                manifest_log.open_event = undefined;
-                manifest_log.open_iterator = undefined;
-
-                const callback = manifest_log.read_callback.?;
-                manifest_log.reading = false;
-                manifest_log.read_callback = null;
-                assert(manifest_log.read_block_reference == null);
-
-                callback(manifest_log);
+                // Use next_tick because the manifest may be empty (no blocks to read).
+                manifest_log.grid.on_next_tick(open_next_tick_callback, &manifest_log.next_tick);
             }
+        }
+
+        fn open_next_tick_callback(next_tick: *Grid.NextTick) void {
+            const manifest_log = @fieldParentPtr(ManifestLog, "next_tick", next_tick);
+            assert(!manifest_log.opened);
+            assert(manifest_log.reading);
+            assert(manifest_log.read_callback != null);
+            assert(!manifest_log.writing);
+            assert(manifest_log.write_callback == null);
+
+            manifest_log.opened = true;
+            manifest_log.open_event = undefined;
+            manifest_log.open_iterator = undefined;
+
+            const callback = manifest_log.read_callback.?;
+            manifest_log.reading = false;
+            manifest_log.read_callback = null;
+            assert(manifest_log.read_block_reference == null);
+
+            callback(manifest_log);
         }
 
         fn open_read_block_callback(read: *Grid.Read, block: Grid.BlockPtrConst) void {
@@ -394,7 +406,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             if (manifest_log.blocks_closed == 0) {
                 manifest_log.grid.on_next_tick(
                     flush_next_tick_callback,
-                    &manifest_log.flush_next_tick,
+                    &manifest_log.next_tick,
                 );
             } else {
                 manifest_log.write_block();
@@ -402,7 +414,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         fn flush_next_tick_callback(next_tick: *Grid.NextTick) void {
-            const manifest_log = @fieldParentPtr(ManifestLog, "flush_next_tick", next_tick);
+            const manifest_log = @fieldParentPtr(ManifestLog, "next_tick", next_tick);
             assert(manifest_log.writing);
 
             const callback = manifest_log.write_callback.?;
