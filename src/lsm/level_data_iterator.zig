@@ -117,8 +117,8 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
                 it.context.grid.read_block(
                     on_level_next,
                     &it.read,
-                    table_ref.table().address,
-                    table_ref.table().checksum,
+                    table_ref.table_info.address,
+                    table_ref.table_info.checksum,
                     .index,
                 );
             } else {

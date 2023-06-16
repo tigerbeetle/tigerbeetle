@@ -74,7 +74,6 @@ pub fn CompactionType(
         const tombstone = Table.tombstone;
 
         const TableInfoReference = Manifest.TableInfoReference;
-        const TableInfoReferenceConst = Manifest.TableInfoReferenceConst;
 
         pub const TableInfoA = union(enum) {
             immutable: []const Value,
@@ -321,7 +320,7 @@ pub fn CompactionType(
                 );
 
                 const snapshot_max = snapshot_max_for_table_input(context.op_min);
-                const table_a = context.table_info_a.disk.table();
+                const table_a = context.table_info_a.disk.table_info;
                 assert(table_a.snapshot_max >= snapshot_max);
 
                 compaction.manifest_entries.appendAssumeCapacity(.{
@@ -357,8 +356,8 @@ pub fn CompactionType(
                         compaction.context.grid.read_block(
                             on_iterator_init_a,
                             &compaction.read,
-                            table_ref.table().address,
-                            table_ref.table().checksum,
+                            table_ref.table_info.address,
+                            table_ref.table_info.checksum,
                             .index,
                         );
                     },
@@ -847,12 +846,12 @@ pub fn CompactionType(
                 switch (entry.operation) {
                     .insert_to_level_b => manifest.insert_table(
                         level_b,
-                        TableInfoReferenceConst{ .external = .{ .table_info = &entry.table } },
+                        &entry.table,
                     ),
                     .move_to_level_b => manifest.move_table(
                         level_b - 1,
                         level_b,
-                        TableInfoReferenceConst{ .external = .{ .table_info = &entry.table } },
+                        &entry.table,
                     ),
                 }
             }
