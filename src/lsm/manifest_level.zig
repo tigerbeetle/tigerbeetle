@@ -891,7 +891,10 @@ pub fn TestContext(
                 var it = context.level.tables.iterator_from_index(absolute_index, .ascending);
                 while (it.next()) |level_table| {
                     if (level_table.equal(table)) {
-                        context.level.set_snapshot_max(snapshot, level_table);
+                        context.level.set_snapshot_max(snapshot, .{
+                            .table_info = level_table,
+                            .generation = context.level.generation,
+                        });
                         table.snapshot_max = snapshot;
                         break;
                     }
