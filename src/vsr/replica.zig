@@ -7591,7 +7591,6 @@ pub fn ReplicaType(
         fn sync_cancel_commit_callback(self: *Self) void {
             assert(!self.solo());
             assert(self.sync_stage == .cancel_commit);
-            assert(!self.grid_repair_message_timeout.ticking);
 
             switch (self.commit_stage) {
                 .idle,
