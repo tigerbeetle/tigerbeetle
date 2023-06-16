@@ -38,7 +38,7 @@ pub fn ManifestLevelType(
 
         pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max, .{});
 
-        pub const TableInfoReference = struct { table_info: *TableInfo, generation: u64 };
+        pub const TableInfoReference = struct { table_info: *TableInfo, generation: u32 };
 
         pub const LeastOverlapTable = struct {
             table: TableInfoReference,
