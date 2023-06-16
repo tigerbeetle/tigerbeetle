@@ -117,16 +117,6 @@ pub const SuperBlockHeader = extern struct {
         [_]u8{0} ** vsr_headers_reserved_size,
 
     pub const VSRState = extern struct {
-        pub const Flags = packed struct {
-            syncing: bool,
-            reserved: u7 = 0,
-
-            comptime {
-                assert(@sizeOf(Flags) == @sizeOf(u8));
-                assert(@bitSizeOf(Flags) == @sizeOf(Flags) * 8);
-            }
-        };
-
         /// The checkpoint_id() of the checkpoint which last updated our commit_min.
         /// Following state sync, this is set to the last checkpoint that we skipped.
         previous_checkpoint_id: u128,
@@ -159,9 +149,7 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        flags: Flags,
-
-        reserved: [6]u8 = [_]u8{0} ** 6,
+        reserved: [7]u8 = [_]u8{0} ** 7,
 
         comptime {
             assert(@sizeOf(VSRState) == 272);
@@ -185,9 +173,6 @@ pub const SuperBlockHeader = extern struct {
                 .commit_max = 0,
                 .log_view = 0,
                 .view = 0,
-                .flags = .{
-                    .syncing = false,
-                },
             };
         }
 
@@ -196,7 +181,6 @@ pub const SuperBlockHeader = extern struct {
             assert(state.view >= state.log_view);
             assert(state.replica_count > 0);
             assert(state.replica_count <= constants.replicas_max);
-            assert(state.flags.reserved == 0);
             vsr.assert_valid_member(&state.members, state.replica_id);
         }
 
@@ -209,8 +193,6 @@ pub const SuperBlockHeader = extern struct {
                     assert(old.commit_max == 0);
                     assert(old.log_view == 0);
                     assert(old.view == 0);
-                    assert(!old.flags.syncing);
-                    assert(!new.flags.syncing);
                 } else {
                     assert(old.commit_min_checksum == new.commit_min_checksum);
                     assert(old.previous_checkpoint_id == new.previous_checkpoint_id);
@@ -222,7 +204,6 @@ pub const SuperBlockHeader = extern struct {
             assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
             assert(meta.eql(old.members, new.members));
-            maybe(old.flags.syncing == new.flags.syncing);
 
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
@@ -346,7 +327,6 @@ pub const SuperBlockHeader = extern struct {
         if (a.free_set_checksum != b.free_set_checksum) return false;
         if (a.client_sessions_checksum != b.client_sessions_checksum) return false;
         if (!meta.eql(a.vsr_state, b.vsr_state)) return false;
-        if (a.flags != b.flags) return false;
         if (!meta.eql(a.snapshots, b.snapshots)) return false;
         if (a.manifest_size != b.manifest_size) return false;
         if (a.free_set_size != b.free_set_size) return false;
@@ -506,7 +486,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             read: Storage.Read = undefined,
             read_threshold: ?Quorums.Threshold = null,
             copy: ?u8 = null,
-            /// Used by format(), checkpoint(), view_change(), sync_start(), and sync_done().
+            /// Used by format(), checkpoint(), view_change(), sync().
             vsr_state: ?SuperBlockHeader.VSRState = null,
             /// Used by format() and view_change().
             vsr_headers: ?vsr.Headers.ViewChangeArray = null,
@@ -549,13 +529,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
         quorums: Quorums = Quorums{},
 
         /// Staging trailers. These are modified between checkpoints, and are persisted on
-        /// checkpoint (or sync_done).
+        /// checkpoint and sync.
         manifest: Manifest,
         free_set: FreeSet,
         client_sessions: ClientSessions,
 
         /// Updated when:
-        /// - the trailer is serialized immediately before checkpoint or sync_done, and
+        /// - the trailer is serialized immediately before checkpoint or sync, and
         /// - used to construct the trailer during state sync.
         manifest_buffer: []align(constants.sector_size) u8,
         free_set_buffer: []align(constants.sector_size) u8,
@@ -716,9 +696,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .log_view = 0,
                     .view = 0,
                     .replica_count = options.replica_count,
-                    .flags = .{
-                        .syncing = false,
-                    },
                 },
                 .snapshots = undefined,
                 .manifest_size = 0,
@@ -787,7 +764,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
         ) void {
             assert(superblock.opened);
             assert(update.commit_min <= update.commit_max);
-            assert(!superblock.staging.vsr_state.flags.syncing);
             assert(superblock.staging.vsr_state.commit_min < update.commit_min);
             assert(superblock.staging.vsr_state.commit_min_checksum != update.commit_min_checksum);
 
@@ -831,12 +807,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.vsr_state.log_view <= update.log_view);
             assert(superblock.staging.vsr_state.log_view < update.log_view or
                 superblock.staging.vsr_state.view < update.view);
-
-            if (!superblock.staging.vsr_state.flags.syncing) {
-                // While syncing, our commit_min may jump ahead of our available headers.
-                // We don't participate in a view-change while syncing anyway, so it's fine.
-                assert(superblock.staging.vsr_state.commit_min <= update.headers.array.get(0).op);
-            }
+            // Usually the op-head is ahead of the commit_min. But this may not be the case, due to
+            // state sync that ran after the view_durable_update was queued, but before it executed.
+            maybe(superblock.staging.vsr_state.commit_min > update.headers.array.get(0).op); //  TODO???
 
             update.headers.verify();
             assert(update.view >= update.log_view);
@@ -858,18 +831,18 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
-        const UpdateSyncStart = struct {
+        const UpdateSync = struct {
             previous_checkpoint_id: u128,
             commit_min_checksum: u128,
             commit_min: u64,
             commit_max: u64,
         };
 
-        pub fn sync_start(
+        pub fn sync(
             superblock: *SuperBlock,
             callback: fn (context: *Context) void,
             context: *Context,
-            update: UpdateSyncStart,
+            update: UpdateSync,
         ) void {
             assert(superblock.opened);
             assert(update.commit_min >= superblock.staging.vsr_state.commit_min);
@@ -882,35 +855,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.commit_min_checksum = update.commit_min_checksum;
             vsr_state.commit_min = update.commit_min;
             vsr_state.commit_max = update.commit_max;
-            vsr_state.flags.syncing = true;
-            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
+            // VSRState is usually updated, but not if we are syncing to the same checkpoint op
+            // (i.e. if we are a divergent replica trying).
+            maybe(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
             context.* = .{
                 .superblock = superblock,
                 .callback = callback,
-                .caller = .sync_start,
-                .vsr_state = vsr_state,
-            };
-            superblock.log_context(context);
-            superblock.acquire(context);
-        }
-
-        pub fn sync_done(
-            superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
-            context: *Context,
-        ) void {
-            assert(superblock.opened);
-            assert(superblock.staging.vsr_state.flags.syncing);
-
-            var vsr_state = superblock.staging.vsr_state;
-            vsr_state.flags.syncing = false;
-            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
-
-            context.* = .{
-                .superblock = superblock,
-                .callback = callback,
-                .caller = .sync_done,
+                .caller = .sync,
                 .vsr_state = vsr_state,
             };
             superblock.log_context(context);
@@ -938,7 +890,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             context.vsr_state.?.assert_internally_consistent();
             assert(superblock.queue_head == context);
             assert(superblock.queue_tail == null);
-            assert(superblock.working.vsr_state.would_be_updated_by(context.vsr_state.?));
 
             superblock.staging.* = superblock.working.*;
             superblock.staging.sequence = superblock.staging.sequence + 1;
@@ -1323,7 +1274,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
                     assert(working.vsr_state.view == 0);
-                    assert(!working.vsr_state.flags.syncing);
                     assert(working.vsr_headers_count == 1);
 
                     assert(working.vsr_state.replica_count <= constants.replicas_max);
@@ -1344,7 +1294,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         "manifest_checksum={x:0>32} " ++
                         "free_set_checksum={x:0>32} " ++
                         "client_sessions_checksum={x:0>32} " ++
-                        "syncing={} commit_min_checksum={} commit_min={} commit_max={} " ++
+                        "commit_min_checksum={} commit_min={} commit_max={} " ++
                         "log_view={} view={}",
                     .{
                         @tagName(context.caller),
@@ -1357,7 +1307,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         superblock.working.manifest_checksum,
                         superblock.working.free_set_checksum,
                         superblock.working.client_sessions_checksum,
-                        superblock.working.vsr_state.flags.syncing,
                         superblock.working.vsr_state.commit_min_checksum,
                         superblock.working.vsr_state.commit_min,
                         superblock.working.vsr_state.commit_max,
@@ -1686,8 +1635,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 },
                 .checkpoint,
                 .view_change,
-                .sync_start,
-                .sync_done,
+                .sync,
                 => {
                     assert(meta.eql(superblock.staging.vsr_state, context.vsr_state.?));
                     assert(meta.eql(superblock.working.vsr_state, context.vsr_state.?));
@@ -1721,8 +1669,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .format,
                 .checkpoint,
                 .view_change,
-                .sync_start,
-                .sync_done,
+                .sync,
                 => switch (constants.superblock_copies) {
                     4 => 3,
                     6 => 4,
@@ -1744,7 +1691,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // TODO(Zig): Use named format specifiers when we upgrade past 0.9.
             // In 0.9 the test runner's log implementation does not support the named arguments.
             log.debug("{s}: " ++
-                "syncing={}..{} " ++
                 "commit_min={}..{} " ++
                 "commit_max={}..{} " ++
                 "commit_min_checksum={}..{} " ++
@@ -1752,9 +1698,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 "view={}..{} " ++
                 "head={}..{}", .{
                 @tagName(context.caller),
-
-                superblock.staging.vsr_state.flags.syncing,
-                context.vsr_state.?.flags.syncing,
 
                 superblock.staging.vsr_state.commit_min,
                 context.vsr_state.?.commit_min,
@@ -1815,8 +1758,7 @@ pub const Caller = enum {
     open,
     checkpoint,
     view_change,
-    sync_start,
-    sync_done,
+    sync,
 
     /// Beyond formatting and opening of the superblock, which are mutually exclusive of all
     /// other operations, only the following queue combinations are allowed:
@@ -1830,11 +1772,9 @@ pub const Caller = enum {
             .checkpoint = Set.init(.{ .view_change = true }),
             .view_change = Set.init(.{
                 .checkpoint = true,
-                .sync_start = true,
-                .sync_done = true,
+                .sync = true,
             }),
-            .sync_start = Set.init(.{ .view_change = true }),
-            .sync_done = Set.init(.{ .view_change = true }),
+            .sync = Set.init(.{ .view_change = true }),
         });
     };
 
@@ -1844,8 +1784,7 @@ pub const Caller = enum {
             .open => unreachable,
             .checkpoint => false,
             .view_change => true,
-            .sync_start => false,
-            .sync_done => false,
+            .sync => false,
         };
     }
 
@@ -1855,8 +1794,7 @@ pub const Caller = enum {
             .open => unreachable,
             .checkpoint => true,
             .view_change => false,
-            .sync_start => false,
-            .sync_done => true,
+            .sync => true,
         };
     }
 };

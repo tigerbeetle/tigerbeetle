@@ -855,83 +855,6 @@ test "Cluster: sync: partition, lag, sync (transition from idle)" {
     }
 }
 
-test "Cluster: sync: partition, lag, sync (transition from manifest log repair)" {
-    const t = try TestContext.init(.{ .replica_count = 3 });
-    defer t.deinit();
-
-    var c = t.clients(0, t.cluster.clients.len);
-    // Commit enough ops to force R2 to actually use its manifest when it recovers.
-    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
-
-    t.replica(.R2).drop_all(.R_, .bidirectional);
-    try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
-
-    // Crash R2, corrupt its entire grid, then restart it.
-    t.replica(.R2).stop();
-    var address: u64 = 1;
-    while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
-        t.replica(.R2).corrupt(.{ .grid_block = address });
-    }
-    try t.replica(.R2).open();
-
-    // R2 is stuck repairing manifest log blocks (during StateMachine.open()).
-    // But R2 makes no progress — it is partitioned.
-    t.run();
-    try expectEqual(t.replica(.R2).state_machine_opened(), false);
-
-    // Allow R2 to discover that it has lagged too far behind and must sync.
-    // But don't allow it to sync blocks yet — we want to ensure that those reads
-    // are still pending during the transition to state sync so that they must be
-    // cancelled by the grid.
-    t.replica(.R2).pass_all(.R_, .bidirectional);
-    t.replica(.R2).drop(.R_, .outgoing, .request_blocks);
-    t.run();
-
-    try expectEqual(t.replica(.R2).sync_status(), .request_manifest_logs);
-    // Now allow state sync to finish.
-    t.replica(.R2).pass(.R_, .outgoing, .request_blocks);
-    t.run();
-
-    try expectEqual(t.replica(.R_).status(), .normal);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
-    try expectEqual(t.replica(.R_).sync_status(), .none);
-}
-
-test "Cluster: sync: sync, crash, restart (vsr_state.flags.syncing)" {
-    const t = try TestContext.init(.{ .replica_count = 3 });
-    defer t.deinit();
-
-    var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
-
-    t.replica(.R2).drop_all(.R_, .bidirectional);
-    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
-
-    // Allow R2 to complete SyncStage.request_trailers, but get stuck
-    // during SyncStage.request_manifest_logs.
-    t.replica(.R2).pass_all(.R_, .bidirectional);
-    t.replica(.R2).drop(.R_, .outgoing, .request_blocks);
-    t.run();
-    try expectEqual(t.replica(.R2).sync_status(), .request_manifest_logs);
-    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_2);
-
-    // Crash/restart R2 — when it recovers, it is already syncing.
-    t.replica(.R2).stop();
-    try t.replica(.R2).open();
-    try expectEqual(t.replica(.R2).status(), .normal);
-    try expectEqual(t.replica(.R2).sync_status(), .request_target);
-    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), null);
-
-    t.replica(.R2).pass_all(.R_, .bidirectional);
-    t.run();
-
-    try expectEqual(t.replica(.R_).status(), .normal);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
-    try expectEqual(t.replica(.R_).sync_status(), .none);
-}
-
 test "Cluster: sync: sync, bump target, sync" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
@@ -944,20 +867,19 @@ test "Cluster: sync: sync, bump target, sync" {
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
 
     // Allow R2 to complete SyncStage.request_trailers, but get stuck
-    // during SyncStage.request_manifest_logs.
+    // during SyncStage.request_trailers.
     t.replica(.R2).pass_all(.R_, .bidirectional);
-    t.replica(.R2).drop(.R_, .outgoing, .request_blocks);
+    t.replica(.R2).drop(.R_, .outgoing, .request_sync_manifest);
     t.run();
-    try expectEqual(t.replica(.R2).sync_status(), .request_manifest_logs);
+    try expectEqual(t.replica(.R2).sync_status(), .request_trailers);
     try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_2);
 
     // R2 discovers the newer sync target and restarts sync.
-    t.replica(.R2).drop(.R_, .outgoing, .request_sync_manifest);
     try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
     try expectEqual(t.replica(.R2).sync_status(), .request_trailers);
     try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_3);
 
-    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.replica(.R2).pass(.R_, .bidirectional, .request_sync_manifest);
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
@@ -1020,7 +942,7 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
-    a0.drop(.R_, .bidirectional, .request_blocks); // (Block sync for now.)
+    a0.drop(.R_, .bidirectional, .request_sync_manifest); // (Block sync for now.)
     a0.diverge();
 
     // Prior to the checkpoint, the cluster has not realized that A0 diverged.
@@ -1035,20 +957,19 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     // A0 was forced to ignore B1/B2's acks since the checkpoint id didn't match its own.
     // Unable to commit, it stepped down as primary.
     try expectEqual(a0.role(), .backup);
-    // A0 may have committed trigger+1, but its commit_min would have backtracked when
-    // it started sync.
-    try expectEqual(a0.commit(), checkpoint_2);
     try expectEqual(b1.commit(), checkpoint_2_trigger);
     try expectEqual(b2.commit(), checkpoint_2_trigger);
+    // A0 may have committed trigger+1, but its commit_min will backtrack due to sync.
 
     // A0 has learned about B1/B2's canonical checkpoint — a checkpoint with the same op,
     // but a different identifier.
-    try expectEqual(a0.sync_status(), .request_manifest_logs);
+    try expectEqual(a0.sync_status(), .request_trailers);
+    try expectEqual(a0.sync_target_checkpoint_op(), checkpoint_2);
     try expectEqual(a0.sync_target_checkpoint_op(), t.replica(.R_).op_checkpoint());
     try expectEqual(a0.sync_target_checkpoint_id(), b1.op_checkpoint_id());
     try expectEqual(a0.sync_target_checkpoint_id(), b2.op_checkpoint_id());
 
-    a0.pass(.R_, .bidirectional, .request_blocks); // Allow sync again.
+    a0.pass(.R_, .bidirectional, .request_sync_manifest); // Allow sync again.
     t.run();
 
     // After syncing, A0 is back to the correct checkpoint.
