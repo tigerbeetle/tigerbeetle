@@ -892,7 +892,7 @@ pub fn TestContext(
                 while (it.next()) |level_table| {
                     if (level_table.equal(table)) {
                         context.level.set_snapshot_max(snapshot, .{
-                            .table_info = level_table,
+                            .table_info = @intToPtr(*TableInfo, @ptrToInt(level_table)),
                             .generation = context.level.generation,
                         });
                         table.snapshot_max = snapshot;
