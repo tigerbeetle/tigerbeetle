@@ -135,6 +135,8 @@ pub const Network = struct {
     }
 
     pub fn transition_to_liveness_mode(network: *Network, core: Core) void {
+        assert(core.count() > 0);
+
         network.packet_simulator.options.packet_loss_probability = 0;
         network.packet_simulator.options.packet_replay_probability = 0;
         network.packet_simulator.options.partition_probability = 0;

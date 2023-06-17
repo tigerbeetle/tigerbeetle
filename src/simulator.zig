@@ -239,9 +239,9 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
 
-    // Safety: replicas crash and restart; at any given point in time arbitrary many replicas may be
-    // crashed, but each replica restarts eventually. The cluster must process all requests without
-    // split-brain.
+    // Safety: replicas crash and restart; at any given point in time arbitrarily many replicas may
+    // be crashed, but each replica restarts eventually. The cluster must process all requests
+    // without split-brain.
     const ticks_max_requests = 5_000_000;
     var tick: u64 = 0;
     while (tick < ticks_max_requests) : (tick += 1) {
@@ -379,8 +379,12 @@ pub const Simulator = struct {
     }
 
     pub fn done(simulator: *const Simulator) bool {
-        assert(simulator.requests_sent <= simulator.options.requests_max);
         assert(simulator.core.count() > 0);
+        assert(simulator.requests_sent == simulator.options.requests_max);
+        assert(simulator.reply_sequence.empty());
+        for (simulator.cluster.clients) |*client| {
+            assert(client.request_queue.count == 0);
+        }
 
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica)) {
@@ -392,13 +396,6 @@ pub const Simulator = struct {
 
         simulator.cluster.state_checker.assert_cluster_convergence();
 
-        if (!simulator.reply_sequence.empty()) return false;
-        if (simulator.requests_sent < simulator.options.requests_max) return false;
-
-        for (simulator.cluster.clients) |*client| {
-            if (client.request_queue.count > 0) return false;
-        }
-        assert(simulator.requests_replied == simulator.requests_sent);
         return true;
     }
 
