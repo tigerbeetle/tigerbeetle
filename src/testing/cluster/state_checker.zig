@@ -174,6 +174,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
         pub fn assert_cluster_convergence(state_checker: *Self) void {
             for (state_checker.commits.items) |commit, i| {
+                assert(commit.replicas.count() > 0);
                 assert(commit.header.command == .prepare);
                 assert(commit.header.op == i);
                 if (i > 0) {
