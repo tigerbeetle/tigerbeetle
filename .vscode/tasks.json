@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "format debug server",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/format_debug_server.sh",
+            "args": [],
+            "problemMatcher": [],
+            "group": "build",
+        },
+        {
+            "label": "build tests",
+            "type": "shell",
+            "command": "${workspaceFolder}/zig/zig",
+            "args": [ "build", "test:build" ],
+            "problemMatcher": [],
+            "group": "build",
+        },        
+   ]
+}
