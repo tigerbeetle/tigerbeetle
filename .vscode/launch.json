@@ -6,7 +6,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/tigerbeetle",
-            "args": [ "start", "--addresses=3001", "0_0.tigerbeetle.debug" ],
+            "args": [ "start", "--addresses=127.0.0.1", "0_0.tigerbeetle.debug" ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
