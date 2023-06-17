@@ -169,11 +169,11 @@ pub fn CompactionType(
         iterator_tracer_slot: ?tracer.SpanStart,
 
         pub fn init(allocator: Allocator, tree_name: []const u8) !Compaction {
-            var iterator_a = try TableDataIterator.init(allocator);
-            errdefer iterator_a.deinit(allocator);
+            var iterator_a = try TableDataIterator.init();
+            errdefer iterator_a.deinit();
 
-            var iterator_b = try LevelIterator.init(allocator);
-            errdefer iterator_b.deinit(allocator);
+            var iterator_b = try LevelIterator.init();
+            errdefer iterator_b.deinit();
 
             const index_block_a = try alloc_block(allocator);
             errdefer allocator.free(index_block_a);
@@ -221,8 +221,8 @@ pub fn CompactionType(
             for (compaction.data_blocks) |data_block| allocator.free(data_block);
             allocator.free(compaction.index_block_a);
             allocator.free(compaction.index_block_b);
-            compaction.iterator_b.deinit(allocator);
-            compaction.iterator_a.deinit(allocator);
+            compaction.iterator_b.deinit();
+            compaction.iterator_a.deinit();
         }
 
         pub fn reset(compaction: *Compaction) void {

@@ -68,11 +68,9 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             table_next: Callback,
         },
 
-        pub fn init(
-            allocator: mem.Allocator,
-        ) !LevelIterator {
-            var table_data_iterator = try TableDataIterator.init(allocator);
-            errdefer table_data_iterator.deinit(allocator);
+        pub fn init() !LevelIterator {
+            var table_data_iterator = try TableDataIterator.init();
+            errdefer table_data_iterator.deinit();
 
             return LevelIterator{
                 .context = undefined,
@@ -81,8 +79,8 @@ pub fn LevelIteratorType(comptime Table: type, comptime Storage: type) type {
             };
         }
 
-        pub fn deinit(it: *LevelIterator, allocator: mem.Allocator) void {
-            it.table_data_iterator.deinit(allocator);
+        pub fn deinit(it: *LevelIterator) void {
+            it.table_data_iterator.deinit();
             it.* = undefined;
         }
 
