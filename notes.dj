@@ -1,0 +1,69 @@
+Client sends `command=.reconfigure`.
+Body is configuration -- a permutation of u128 ids.
+
+superblock stores:
+    - current epoch
+    - previous epoch, if any
+
+previous epoch info:
+  - members, to communicate wit
+  - replica, derivative of memebers
+  - epoch, for assertions
+  - op, to know when it is safe to retire epoch
+  - chceksum, to be able to advance the op through request_headers.
+
+If replica's previous epoch is not null, it broadcasts `.end_epoch`:
+    - configuration
+    - epoch = old (we can only trust replicas we know about)
+    - view = 0 (it yanks us into the next epoch anyway)
+
+Cross-epoch communication:
+
+- `.end_epoch` is broadcast in the old epoch
+- prepares can be from old epochs
+- client messages from previous epochs are ok
+- request prepare, request_headers can cross epoch bondaries in both directions.
+  A replica in the new epoch can send a request_ with an old epoch.
+  A replica in the new epoch can get a request_ with an old epoch.
+  Although we _move_ all folks to the new epoch, we want to check that standys don't respond.
+
+View change:
+
+Problem: new replicas doing view change don't know prepares from the old epoch. We might truncate
+ops.
+
+Solution: assert that DVC quorum for the new epoch contains at least the final prepare.
+
+
+Scenario:
+
+ABC|DE -> AB|CDE
+A,E down
+
+  C|D
+XB   X
+
+B moves to the new epoch via end_epoch.
+With B and D in the new epoch, they can select a primary
+
+Scenario:
+
+Replicas in the new epoch are missing final prepare.
+New replicas repair using request headers.
+Choices:
+  * Either they advance head using `headers` reply
+  * Or anyone can send `start_view`
+
+
+Invariants:
+
+If message.replica != null, then message.epoch != null
+
+
+
+TODO:
+
+- root prepare is reconfigure for epoch 0, first epoch is 1
+- store old epoch data in the superblock
+- we ignore all repairs from the old epoch during view change
+- stuff hash into end epoch

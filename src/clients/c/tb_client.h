@@ -148,6 +148,7 @@ typedef struct tb_create_transfers_result_t {
 } tb_create_transfers_result_t;
 
 typedef enum TB_OPERATION {
+    TB_OPERATION_RECONFIGURE = 3,
     TB_OPERATION_CREATE_ACCOUNTS = 128,
     TB_OPERATION_CREATE_TRANSFERS = 129,
     TB_OPERATION_LOOKUP_ACCOUNTS = 130,

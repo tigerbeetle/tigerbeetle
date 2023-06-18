@@ -36,6 +36,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         allocator: mem.Allocator,
         message_bus: MessageBus,
+        message_bus_members: [constants.nodes_max]u8,
 
         /// A universally unique identifier for the client (must not be zero).
         /// Used for routing replies back to the client via any network path (multi-path routing).
@@ -67,6 +68,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// The highest view number seen by the client in messages exchanged with the cluster.
         /// Used to locate the current primary, and provide more information to a partitioned primary.
         view: u32 = 0,
+
+        epoch: u32 = 0,
 
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
@@ -109,13 +112,20 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .{ .client = id },
                 message_pool,
                 Self.on_message,
+                Self.resolve_replica,
                 message_bus_options,
             );
             errdefer message_bus.deinit(allocator);
 
+            var message_bus_members = [_]u8{0} ** constants.nodes_max;
+            for (message_bus_members) |*member, index| {
+                member.* = @intCast(u8, index);
+            }
+
             var self = Self{
                 .allocator = allocator,
                 .message_bus = message_bus,
+                .message_bus_members = message_bus_members,
                 .id = id,
                 .cluster = cluster,
                 .replica_count = replica_count,
@@ -142,6 +152,16 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 self.message_bus.unref(inflight.message);
             }
             self.message_bus.deinit(allocator);
+        }
+
+        fn resolve_replica(message_bus: *MessageBus, header: *const Header) ?u8 {
+            const self = @fieldParentPtr(Self, "message_bus", message_bus);
+            if (header.epoch == self.epoch) {
+                for (self.message_bus_members) |member, index| {
+                    if (member == header.replica) return @intCast(u8, index) else unreachable;
+                }
+            }
+            return null;
         }
 
         pub fn on_message(message_bus: *MessageBus, message: *Message) void {
@@ -193,7 +213,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message: *Message,
             message_body_size: usize,
         ) void {
-            assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
+            assert(operation == .reconfigure or @enumToInt(operation) >= constants.vsr_operations_reserved);
 
             self.register();
             assert(self.request_number > 0);
@@ -539,7 +559,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.client == self.id);
             assert(message.header.cluster == self.cluster);
 
-            self.message_bus.send_message_to_replica(replica, message);
+            const message_bus_replica = self.message_bus_members[replica];
+            self.message_bus.send_message_to_replica(message_bus_replica, message);
         }
 
         fn send_request_for_the_first_time(self: *Self, message: *Message) void {

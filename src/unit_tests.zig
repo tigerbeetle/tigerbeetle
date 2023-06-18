@@ -1,3 +1,5 @@
+pub const log_level = .debug;
+
 test {
     _ = @import("ewah.zig");
     _ = @import("fifo.zig");

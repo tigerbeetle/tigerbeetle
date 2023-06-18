@@ -68,6 +68,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         /// The callback to be called when a message is received.
         on_message_callback: fn (message_bus: *Self, message: *Message) void,
 
+        /// Callback used to derive replica index of the sender of the given header.
+        resolve_replica_callback: fn (message_bus: *Self, header: *const Header) ?u8,
+
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
         /// Number of connections currently in use (i.e. connection.peer != .none).
@@ -96,6 +99,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             process: Process,
             message_pool: *MessagePool,
             on_message_callback: fn (message_bus: *Self, message: *Message) void,
+            resolve_replica_callback: fn (message_bus: *Self, header: *const Header) ?u8,
             options: Options,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
@@ -132,6 +136,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     .client => {},
                 },
                 .on_message_callback = on_message_callback,
+                .resolve_replica_callback = resolve_replica_callback,
                 .connections = connections,
                 .replicas = replicas,
                 .replicas_connect_attempts = replicas_connect_attempts,
@@ -801,7 +806,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 const header_peer: Connection.Peer = switch (header.peer_type()) {
                     .unknown => return true,
-                    .replica => .{ .replica = header.replica },
+                    .replica => .{
+                        .replica = bus.resolve_replica_callback(bus, header) orelse return true,
+                    },
                     .client => .{ .client = header.client },
                 };
 

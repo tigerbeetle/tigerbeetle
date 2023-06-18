@@ -98,9 +98,10 @@ pub fn ClockType(comptime Time: type) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            /// The size of the cluster, i.e. the number of clock sources (including this replica).
+            /// The number of clock sources (including this replica).
             replica_count: u8,
             replica: u8,
+            synchronization_disabled: bool,
             time: *Time,
         ) !Self {
             assert(replica_count > 0);
@@ -124,7 +125,7 @@ pub fn ClockType(comptime Time: type) type {
                 .epoch = epoch,
                 .window = window,
                 .marzullo_tuples = marzullo_tuples,
-                .synchronization_disabled = replica_count == 1, // A cluster of one cannot synchronize.
+                .synchronization_disabled = synchronization_disabled,
             };
 
             // Reset the current epoch to be unsynchronized,
@@ -273,12 +274,17 @@ pub fn ClockType(comptime Time: type) type {
             // Expire the current epoch if successive windows failed to synchronize:
             // Gradual clock drift prevents us from using an epoch for more than a few seconds.
             if (self.epoch.elapsed(self) >= epoch_max) {
-                log.err(
+                log.warn(
                     "{}: no agreement on cluster time (partitioned or too many clock faults)",
                     .{self.replica},
                 );
                 self.epoch.reset(self);
             }
+        }
+
+        pub fn reset(self: *Self) void {
+            self.epoch.reset(self);
+            self.window.reset(self);
         }
 
         /// Estimates the asymmetric delay for a sample compared to the previous window, according to
@@ -320,13 +326,13 @@ pub fn ClockType(comptime Time: type) type {
                 // We took too long to synchronize the window, expire stale samples...
                 const sources_sampled = self.window.sources_sampled();
                 if (sources_sampled <= @divTrunc(self.window.sources.len, 2)) {
-                    log.err("{}: synchronization failed, partitioned (sources={} samples={})", .{
+                    log.warn("{}: synchronization failed, partitioned (sources={} samples={})", .{
                         self.replica,
                         sources_sampled,
                         self.window.samples,
                     });
                 } else {
-                    log.err("{}: synchronization failed, no agreement (sources={} samples={})", .{
+                    log.warn("{}: synchronization failed, no agreement (sources={} samples={})", .{
                         self.replica,
                         sources_sampled,
                         self.window.samples,
@@ -396,7 +402,7 @@ pub fn ClockType(comptime Time: type) type {
                         fmt.fmtDurationSigned(delta),
                     });
                 } else {
-                    log.err("{}: system time is {} behind, clamping system time to cluster time", .{
+                    log.warn("{}: system time is {} behind, clamping system time to cluster time", .{
                         self.replica,
                         fmt.fmtDurationSigned(delta),
                     });
@@ -409,7 +415,7 @@ pub fn ClockType(comptime Time: type) type {
                         fmt.fmtDurationSigned(delta),
                     });
                 } else {
-                    log.err("{}: system time is {} ahead, clamping system time to cluster time", .{
+                    log.warn("{}: system time is {} ahead, clamping system time to cluster time", .{
                         self.replica,
                         fmt.fmtDurationSigned(delta),
                     });

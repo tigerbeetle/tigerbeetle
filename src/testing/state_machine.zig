@@ -24,6 +24,7 @@ pub fn StateMachineType(
             reserved = 0,
             root = 1,
             register = 2,
+            reconfigure = 3,
 
             echo = config.vsr_operations_reserved + 0,
         };
@@ -107,7 +108,7 @@ pub fn StateMachineType(
 
             switch (operation) {
                 .reserved, .root => unreachable,
-                .register => return 0,
+                .register, .reconfigure => return 0,
                 .echo => {
                     stdx.copy_disjoint(.inexact, u8, output, input);
                     return input.len;
@@ -173,6 +174,9 @@ fn WorkloadType(comptime StateMachine: type) type {
         random: std.rand.Random,
         requests_sent: usize = 0,
         requests_delivered: usize = 0,
+        reconfigured: bool = false,
+        epoch: u32 = 0,
+        members: [constants.nodes_max]u128 = undefined,
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -198,6 +202,7 @@ fn WorkloadType(comptime StateMachine: type) type {
 
         pub fn build_request(
             workload: *Workload,
+            replica_ids: *[constants.nodes_max]u128,
             client_index: usize,
             body: []align(@alignOf(vsr.Header)) u8,
         ) struct {
@@ -208,14 +213,28 @@ fn WorkloadType(comptime StateMachine: type) type {
 
             workload.requests_sent += 1;
 
-            // +1 for inclusive limit.
-            const size = workload.random.uintLessThan(usize, constants.message_body_size_max + 1);
-            workload.random.bytes(body[0..size]);
+            if (workload.random.uintLessThan(u8, 50) == 0 and !workload.reconfigured) {
+                workload.reconfigured = true;
+                const replicas_len = for (replica_ids) |id, i| {
+                    if (id == 0) break i;
+                } else replica_ids.len;
+                workload.random.shuffle(u128, replica_ids[0..replicas_len]);
+                stdx.copy_disjoint(.inexact, u8, body, std.mem.asBytes(replica_ids));
+                stdx.copy_disjoint(.exact, u128, workload.members[0..], replica_ids[0..]);
+                return .{
+                    .operation = .reconfigure,
+                    .size = @sizeOf([constants.nodes_max]u128),
+                };
+            } else {
+                // +1 for inclusive limit.
+                const size = workload.random.uintLessThan(usize, constants.message_body_size_max + 1);
+                workload.random.bytes(body[0..size]);
 
-            return .{
-                .operation = .echo,
-                .size = size,
-            };
+                return .{
+                    .operation = .echo,
+                    .size = size,
+                };
+            }
         }
 
         pub fn on_reply(
@@ -226,15 +245,14 @@ fn WorkloadType(comptime StateMachine: type) type {
             request_body: []align(@alignOf(vsr.Header)) const u8,
             reply_body: []align(@alignOf(vsr.Header)) const u8,
         ) void {
-            _ = workload;
             _ = client_index;
             _ = timestamp;
 
             workload.requests_delivered += 1;
             assert(workload.requests_delivered <= workload.requests_sent);
 
-            assert(operation.cast(StateMachine) == .echo);
-            assert(std.mem.eql(u8, request_body, reply_body));
+            assert(operation.cast(StateMachine) == .echo or operation.cast(StateMachine) == .reconfigure);
+            if (operation.cast(StateMachine) == .echo) assert(std.mem.eql(u8, request_body, reply_body));
         }
 
         pub const Options = struct {

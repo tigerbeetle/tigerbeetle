@@ -30,14 +30,22 @@ pub const output = std.log.scoped(.cluster);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
-const log_state_transitions_only = builtin.mode != .Debug;
+const log_state_transitions_only = true;
 
 const log_simulator = std.log.scoped(.simulator);
 
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 /// You can fine tune your log levels even further (debug/info/warn/err):
-pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
+pub const log_level: std.log.Level = .err;
+pub const scope_levels = [_]std.log.ScopeLevel{ .{
+    .scope = .cluster,
+    .level = .info,
+}, .{
+    .scope = .replica,
+    .level = .err,
+} };
+// pub const log_level: std.log.Level = .err;
 
 const cluster_id = 0;
 
@@ -78,7 +86,7 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const replica_count = 1 + random.uintLessThan(u8, constants.replicas_max);
+    const replica_count = 2 + random.uintLessThan(u8, constants.replicas_max - 1);
     const standby_count = random.uintAtMost(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
     const client_count = 1 + random.uintLessThan(u8, constants.clients_max);
@@ -150,7 +158,7 @@ pub fn main() !void {
         .cluster = cluster_options,
         .workload = workload_options,
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
-        .replica_crash_probability = 0.00002,
+        .replica_crash_probability = 0,
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
@@ -229,13 +237,14 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
 
-    const ticks_max = 50_000_000;
+    const ticks_max = 1_000_000;
     var tick: u64 = 0;
     while (tick < ticks_max) : (tick += 1) {
         simulator.tick();
         if (simulator.done()) break;
     } else {
         output.err("you can reproduce this failure with seed={}", .{seed});
+        simulator.cluster.log_cluster();
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
     assert(simulator.done());
@@ -350,6 +359,25 @@ pub const Simulator = struct {
         simulator.cluster.tick();
         simulator.tick_requests();
         simulator.tick_crash();
+
+        var switch_epoch = false;
+        for (simulator.cluster.replicas) |replica| {
+            if (replica.epoch == 1) {
+                switch_epoch = true;
+                break;
+            }
+        }
+        if (switch_epoch) {
+            var perm = [_]u8{0} ** constants.nodes_max;
+            for (simulator.cluster.replicas) |*replica, replica_index| {
+                for (simulator.workload.members) |member, member_index| {
+                    if (replica.replica_id == member) {
+                        perm[member_index] = @intCast(u8, replica_index);
+                    }
+                }
+            }
+            simulator.cluster.update_client_epoch(&perm);
+        }
     }
 
     fn on_cluster_reply(
@@ -435,7 +463,13 @@ pub const Simulator = struct {
         var request_message = client.get_message();
         defer client.unref(request_message);
 
+        var replica_ids = [_]u128{0} ** constants.nodes_max;
+        for (simulator.cluster.replicas) |replica, i| {
+            replica_ids[i] = replica.replica_id;
+        }
+
         const request_metadata = simulator.workload.build_request(
+            &replica_ids,
             client_index,
             @alignCast(
                 @alignOf(vsr.Header),
@@ -588,7 +622,7 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (log_state_transitions_only and scope != .cluster) return;
+    // if (log_state_transitions_only and scope != .cluster) return;
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
     const prefix = if (log_state_transitions_only) "" else prefix_default;

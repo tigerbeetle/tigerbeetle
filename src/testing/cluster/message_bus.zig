@@ -35,8 +35,10 @@ pub const MessageBus = struct {
         process: Process,
         message_pool: *MessagePool,
         on_message_callback: fn (message_bus: *MessageBus, message: *Message) void,
+        resolve_replica_callback: fn (message_bus: *MessageBus, header: *const Header) ?u8,
         options: Options,
     ) !MessageBus {
+        _ = resolve_replica_callback;
         return MessageBus{
             .network = options.network,
             .pool = message_pool,
