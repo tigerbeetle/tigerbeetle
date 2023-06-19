@@ -48,6 +48,14 @@ pub const Network = struct {
         target: Process,
     };
 
+    /// Core is a strongly-connected component of replicas containing a view change quorum.
+    /// It is used to define and check liveness --- if a core exists, it should converge
+    /// to normal status in a bounded number of ticks.
+    ///
+    /// At the moment, we require core members to have direct bidirectional connectivity, but this
+    /// could be relaxed in the future to indirect connectivity.
+    pub const Core = std.StaticBitSet(constants.nodes_max);
+
     allocator: std.mem.Allocator,
 
     options: NetworkOptions,
@@ -124,6 +132,28 @@ pub const Network = struct {
 
     pub fn tick(network: *Network) void {
         network.packet_simulator.tick();
+    }
+
+    pub fn transition_to_liveness_mode(network: *Network, core: Core) void {
+        assert(core.count() > 0);
+
+        network.packet_simulator.options.packet_loss_probability = 0;
+        network.packet_simulator.options.packet_replay_probability = 0;
+        network.packet_simulator.options.partition_probability = 0;
+        network.packet_simulator.options.unpartition_probability = 0;
+
+        var it_source = core.iterator(.{});
+        while (it_source.next()) |replica_source| {
+            var it_target = core.iterator(.{});
+            while (it_target.next()) |replica_target| {
+                if (replica_target != replica_source) {
+                    network.link_filter(.{
+                        .source = .{ .replica = @intCast(u8, replica_source) },
+                        .target = .{ .replica = @intCast(u8, replica_target) },
+                    }).* = LinkFilter.initFull();
+                }
+            }
+        }
     }
 
     pub fn link(network: *Network, process: Process, message_bus: *MessageBus) void {

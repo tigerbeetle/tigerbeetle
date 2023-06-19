@@ -4252,7 +4252,7 @@ pub fn ReplicaType(
 
         /// Returns whether the replica is the primary for the current view.
         /// This may be used only when the replica status is normal.
-        fn primary(self: *const Self) bool {
+        pub fn primary(self: *const Self) bool {
             assert(self.status == .normal);
             return self.primary_index(self.view) == self.replica;
         }
