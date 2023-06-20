@@ -134,8 +134,8 @@ pub fn CompactionType(
         // Passed by `start`.
         context: Context,
 
-        // Pased by `start`. Defines whether the move optimization applies to this
-        // compaction. This field is set to True if the optimal compaction
+        // Whether this compaction will use the move-table optimization.
+        // Specifically, this field is set to True if the optimal compaction
         // table in level A can simply be moved to level B.
         move_table: bool,
         grid_reservation: ?Grid.Reservation,
