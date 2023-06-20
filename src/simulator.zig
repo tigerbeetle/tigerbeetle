@@ -487,11 +487,11 @@ pub const Simulator = struct {
                 commit.request.header.request,
             });
 
-            if (commit.request.header.operation != .register) {
+            if (!commit.request.header.operation.reserved()) {
                 simulator.requests_replied += 1;
                 simulator.workload.on_reply(
                     commit.client_index,
-                    commit.reply.header.operation,
+                    commit.reply.header.operation.cast(StateMachine),
                     commit.reply.header.timestamp,
                     commit.request.body(),
                     commit.reply.body(),

@@ -314,7 +314,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         pub fn on_reply(
             self: *Self,
             client_index: usize,
-            operation: vsr.Operation,
+            operation: AccountingStateMachine.Operation,
             timestamp: u64,
             request_body: []align(@alignOf(vsr.Header)) const u8,
             reply_body: []align(@alignOf(vsr.Header)) const u8,
@@ -323,7 +323,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(request_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
             assert(reply_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
 
-            switch (operation.cast(AccountingStateMachine)) {
+            switch (operation) {
                 .create_accounts => self.auditor.on_create_accounts(
                     client_index,
                     timestamp,
@@ -348,7 +348,6 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     std.mem.bytesAsSlice(u128, request_body),
                     std.mem.bytesAsSlice(tb.Transfer, reply_body),
                 ),
-                else => unreachable,
             }
         }
 
