@@ -47,7 +47,7 @@ const alloc_block = @import("grid.zig").alloc_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
-const LevelIteratorType = @import("level_data_iterator.zig").LevelIteratorType;
+const LevelTableValueBlockIteratorType = @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
@@ -65,7 +65,7 @@ pub fn CompactionType(
         const Manifest = ManifestType(Table, Storage);
         const CompactionRange = Manifest.CompactionRange;
         const TableDataIterator = TableDataIteratorType(Storage);
-        const LevelIterator = LevelIteratorType(Table, Storage);
+        const LevelTableValueBlockIterator = LevelTableValueBlockIteratorType(Table, Storage);
 
         const Key = Table.Key;
         const Value = Table.Value;
@@ -107,7 +107,7 @@ pub fn CompactionType(
 
         // Allocated during `init`.
         iterator_a: TableDataIterator,
-        iterator_b: LevelIterator,
+        iterator_b: LevelTableValueBlockIterator,
         index_block_a: BlockPtr,
         index_block_b: BlockPtr,
         data_blocks: [2]BlockPtr,
@@ -172,7 +172,7 @@ pub fn CompactionType(
             var iterator_a = try TableDataIterator.init();
             errdefer iterator_a.deinit();
 
-            var iterator_b = try LevelIterator.init();
+            var iterator_b = try LevelTableValueBlockIterator.init();
             errdefer iterator_b.deinit();
 
             const index_block_a = try alloc_block(allocator);
@@ -419,7 +419,7 @@ pub fn CompactionType(
             }
         }
 
-        fn on_index_block(iterator_b: *LevelIterator) void {
+        fn on_index_block(iterator_b: *LevelTableValueBlockIterator) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.release_table_blocks(compaction.index_block_b);
@@ -449,7 +449,7 @@ pub fn CompactionType(
             compaction.iterator_next(data_block);
         }
 
-        fn iterator_next_b(iterator_b: *LevelIterator, data_block: ?BlockPtrConst) void {
+        fn iterator_next_b(iterator_b: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.iterator_next(data_block);
