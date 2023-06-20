@@ -210,7 +210,7 @@ pub fn CompactionType(
 
                 .input_state = .remaining,
                 .state = .idle,
-                .move_table = false,
+                .move_table = undefined,
                 .tracer_slot = null,
                 .iterator_tracer_slot = null,
             };
