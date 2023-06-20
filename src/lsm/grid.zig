@@ -73,6 +73,9 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             repair: bool,
             block: *BlockPtr,
+            /// The current checkpoint when the write began.
+            /// Used to verify that the checkpoint does not advance while the write is in progress.
+            checkpoint_id: u128,
 
             /// Link for the Grid.write_queue linked list.
             next: ?*Write = null,
@@ -89,6 +92,9 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
             block_type: BlockType,
+            /// The current checkpoint when the read began.
+            /// Used to verify that the checkpoint does not advance while the read is in progress.
+            checkpoint_id: u128,
 
             pending: ReadPending = .{},
             resolves: FIFO(ReadPending) = .{ .name = null },
@@ -156,10 +162,10 @@ pub fn GridType(comptime Storage: type) type {
         /// Each entry in cache has a corresponding block.
         cache_blocks: []BlockPtr,
         /// Each entry in cache has a corresponding bit.
-        /// This bit tracks whether the cache block is definitely valid (matches what should be on
-        /// disk). At the conclusion of state sync, all blocks are marked as invalid.
-        /// This enabled additional validation of cache consistency.
-        cache_valid: std.DynamicBitSetUnmanaged,
+        /// This bit tracks whether the cache block is definitely valid relative to the current
+        /// checkpoint (matches what should be on disk). At the conclusion of state sync, all blocks
+        /// are marked as invalid. This enables additional validation of cache consistency.
+        cache_coherent: std.DynamicBitSetUnmanaged,
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_iop_tracer_slots: [write_iops_max]?tracer.SpanStart = .{null} ** write_iops_max,
@@ -178,7 +184,7 @@ pub fn GridType(comptime Storage: type) type {
         read_resolving: bool = false,
 
         canceling: ?struct { callback: fn (*Grid) void } = null,
-        canceling_next_tick: NextTick = undefined,
+        canceling_tick_context: NextTick = undefined,
 
         on_read_fault: ?fn (*Grid, *Grid.Read) void,
 
@@ -190,9 +196,9 @@ pub fn GridType(comptime Storage: type) type {
             const cache_blocks = try allocator.alloc(BlockPtr, options.cache_blocks_count);
             errdefer allocator.free(cache_blocks);
 
-            var cache_valid =
+            var cache_coherent =
                 try std.DynamicBitSetUnmanaged.initEmpty(allocator, options.cache_blocks_count);
-            errdefer cache_valid.deinit(allocator);
+            errdefer cache_coherent.deinit(allocator);
 
             for (cache_blocks) |*cache_block, i| {
                 errdefer for (cache_blocks[0..i]) |block| allocator.free(block);
@@ -215,7 +221,7 @@ pub fn GridType(comptime Storage: type) type {
                 .superblock = options.superblock,
                 .cache = cache,
                 .cache_blocks = cache_blocks,
-                .cache_valid = cache_valid,
+                .cache_coherent = cache_coherent,
                 .read_iop_blocks = read_iop_blocks,
                 .on_read_fault = options.on_read_fault,
             };
@@ -230,7 +236,7 @@ pub fn GridType(comptime Storage: type) type {
             for (grid.cache_blocks) |block| allocator.free(block);
             allocator.free(grid.cache_blocks);
 
-            grid.cache_valid.deinit(allocator);
+            grid.cache_coherent.deinit(allocator);
             grid.cache.deinit(allocator);
 
             grid.* = undefined;
@@ -241,20 +247,26 @@ pub fn GridType(comptime Storage: type) type {
 
             grid.canceling = .{ .callback = callback };
 
+            grid.read_queue.reset();
             grid.read_pending_queue.reset();
+            grid.read_faulty_queue.reset();
+            grid.write_queue.reset();
             grid.superblock.storage.reset_next_tick_lsm();
             grid.superblock.storage.on_next_tick(
                 .vsr,
                 cancel_tick_callback,
-                &grid.canceling_next_tick,
+                &grid.canceling_tick_context,
             );
         }
 
         fn cancel_tick_callback(next_tick: *NextTick) void {
-            const grid = @fieldParentPtr(Grid, "canceling_next_tick", next_tick);
+            const grid = @fieldParentPtr(Grid, "canceling_tick_context", next_tick);
             if (grid.canceling == null) return;
 
+            assert(grid.read_queue.empty());
             assert(grid.read_pending_queue.empty());
+            assert(grid.read_faulty_queue.empty());
+            assert(grid.write_queue.empty());
             assert(grid.superblock.storage.next_tick_queue_lsm.empty());
 
             grid.cancel_join_callback();
@@ -263,22 +275,24 @@ pub fn GridType(comptime Storage: type) type {
         fn cancel_join_callback(grid: *Grid) void {
             assert(grid.canceling != null);
             assert(grid.superblock.storage.next_tick_queue_lsm.empty());
+            assert(grid.read_queue.empty());
+            assert(grid.read_pending_queue.empty());
+            assert(grid.read_faulty_queue.empty());
+            assert(grid.write_queue.empty());
 
-            if (grid.write_queue.empty() and
-                grid.write_iops.executing() == 0 and
-                grid.read_queue.empty())
+            if (grid.read_iops.executing() == 0 and
+                grid.write_iops.executing() == 0)
             {
                 const callback = grid.canceling.?.callback;
                 grid.canceling = null;
-                grid.read_faulty_queue.reset();
 
                 callback(grid);
             }
         }
 
         pub fn cache_invalidate(grid: *Grid) void {
-            var cache_indexes = grid.cache_valid.iterator(.{});
-            while (cache_indexes.next()) |index| grid.cache_valid.unset(index);
+            var cache_indexes = grid.cache_coherent.iterator(.{});
+            while (cache_indexes.next()) |index| grid.cache_coherent.unset(index);
         }
 
         pub fn on_next_tick(
@@ -426,6 +440,7 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .repair = false,
                 .block = block,
+                .checkpoint_id = grid.superblock.working.checkpoint_id(),
             };
 
             const iop = grid.write_iops.acquire() orelse {
@@ -460,6 +475,7 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .repair = true,
                 .block = block,
+                .checkpoint_id = grid.superblock.working.checkpoint_id(),
             };
 
             const iop = grid.write_iops.acquire() orelse {
@@ -503,19 +519,26 @@ pub fn GridType(comptime Storage: type) type {
 
             // We can only update the cache if the Grid is not resolving callbacks with a cache block.
             assert(!grid.read_resolving);
+            assert(grid.superblock.working.checkpoint_id() == completed_write.checkpoint_id);
 
             // Insert the write block into the cache, and give the evicted block to the writer.
             const cache_index = grid.cache.insert_index(&completed_write.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
             std.mem.set(u8, completed_write.block.*, 0);
-            grid.cache_valid.set(cache_index);
+            grid.cache_coherent.set(cache_index);
 
             const write_iop_index = grid.write_iops.index(iop);
             tracer.end(
                 &grid.write_iop_tracer_slots[write_iop_index],
                 .{ .grid_write_iop = .{ .index = write_iop_index } },
             );
+
+            if (grid.canceling) |_| {
+                grid.write_iops.release(iop);
+                grid.cancel_join_callback();
+                return;
+            }
 
             if (completed_write.repair) {
                 // We wait until the write completes to resolve the repair queue, to prevent
@@ -553,11 +576,7 @@ pub fn GridType(comptime Storage: type) type {
             // This call must come after (logically) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
-            if (grid.canceling == null or completed_write.repair) {
-                completed_write.callback(completed_write);
-            }
-
-            if (grid.canceling != null) grid.cancel_join_callback();
+            completed_write.callback(completed_write);
         }
 
         /// This function transparently handles recovery if the checksum fails.
@@ -585,6 +604,7 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .checksum = checksum,
                 .block_type = block_type,
+                .checkpoint_id = grid.superblock.working.checkpoint_id(),
                 .grid = grid,
             };
 
@@ -627,10 +647,10 @@ pub fn GridType(comptime Storage: type) type {
                     // Remove the "root" read so that the address is no longer actively reading / locked.
                     grid.read_queue.remove(read);
                     grid.read_block_resolve(read, cache_block);
-                    grid.cache_valid.set(cache_index);
+                    grid.cache_coherent.set(cache_index);
                     return;
                 } else {
-                    assert(!grid.cache_valid.isSet(cache_index));
+                    assert(!grid.cache_coherent.isSet(cache_index));
                 }
             }
 
@@ -679,12 +699,18 @@ pub fn GridType(comptime Storage: type) type {
             const grid = read.grid;
             const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
 
+            if (grid.canceling) |_| {
+                grid.read_iops.release(iop);
+                grid.cancel_join_callback();
+                return;
+            }
+
             // Insert the block into the cache, and give the evicted block to `iop`.
             const cache_index = grid.cache.insert_index(&read.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, iop_block, cache_block);
             std.mem.set(u8, iop_block.*, 0);
-            grid.cache_valid.set(cache_index);
+            grid.cache_coherent.set(cache_index);
 
             const read_iop_index = grid.read_iops.index(iop);
             tracer.end(
@@ -715,20 +741,16 @@ pub fn GridType(comptime Storage: type) type {
 
             // Don't cache a corrupt or incorrect block.
             grid.cache.remove(read.address);
-            grid.cache_valid.unset(cache_index);
+            grid.cache_coherent.unset(cache_index);
 
-            if (grid.canceling) |_| {
-                grid.cancel_join_callback();
+            // On the result of an invalid block, move the "root" read (and all others it
+            // resolves) to recovery queue. Future reads on the same address will see the "root"
+            // read in the recovery queue and enqueue to it.
+            grid.read_faulty_queue.push(read);
+            if (grid.on_read_fault) |on_read_fault| {
+                on_read_fault(grid, read);
             } else {
-                // On the result of an invalid block, move the "root" read (and all others it
-                // resolves) to recovery queue. Future reads on the same address will see the "root"
-                // read in the recovery queue and enqueue to it.
-                grid.read_faulty_queue.push(read);
-                if (grid.on_read_fault) |on_read_fault| {
-                    on_read_fault(grid, read);
-                } else {
-                    @panic("Grid.on_read_fault not set");
-                }
+                @panic("Grid.on_read_fault not set");
             }
         }
 
@@ -786,6 +808,8 @@ pub fn GridType(comptime Storage: type) type {
                 grid.read_resolving = false;
             }
 
+            assert(read.checkpoint_id == grid.superblock.working.checkpoint_id());
+
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             assert(header.op == read.address);
             assert(header.checksum == read.checksum);
@@ -795,19 +819,14 @@ pub fn GridType(comptime Storage: type) type {
                 const pending_read = @fieldParentPtr(Read, "pending", pending);
                 assert(pending_read.address == read.address);
                 assert(pending_read.checksum == read.checksum);
+                assert(pending_read.checkpoint_id == grid.superblock.working.checkpoint_id());
 
-                if (grid.canceling == null) {
-                    pending_read.callback(pending_read, block);
-                }
+                pending_read.callback(pending_read, block);
             }
 
-            if (grid.canceling) |_| {
-                grid.cancel_join_callback();
-            } else {
-                // Then invoke the callback with the cache block (which should be valid for the duration
-                // of the callback as any nested Grid calls cannot synchronously update the cache).
-                read.callback(read, block);
-            }
+            // Then invoke the callback with the cache block (which should be valid for the duration
+            // of the callback as any nested Grid calls cannot synchronously update the cache).
+            read.callback(read, block);
         }
 
         /// If the block is not present (or corrupt), we do not attempt to repair it — the repair's
@@ -858,7 +877,7 @@ pub fn GridType(comptime Storage: type) type {
                 const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
                 assert(header.op == read.address);
 
-                if (grid.cache_valid.isSet(cache_index)) {
+                if (grid.cache_coherent.isSet(cache_index)) {
                     if (constants.verify) grid.verify_read(read.address, cache_block);
                 }
 
@@ -870,21 +889,29 @@ pub fn GridType(comptime Storage: type) type {
                     std.mem.set(u8, read.block[0..header.size], 0);
                 }
 
-                // Use "vsr" on_next_tick() because Grid.cancel() can run concurrently with repairs.
-                grid.superblock.storage.on_next_tick(
-                    .vsr,
-                    read_block_repair_tick_callback,
-                    &read.next_tick,
-                );
-            } else {
-                grid.superblock.storage.read_sectors(
-                    read_block_repair_callback,
-                    &read.completion,
-                    read.block,
-                    .grid,
-                    block_offset(read.address),
-                );
+                if (header.checksum == read.checksum or
+                    grid.cache_coherent.isSet(cache_index))
+                {
+                    // Use "vsr" on_next_tick() because Grid.cancel() can run concurrently with repairs.
+                    grid.superblock.storage.on_next_tick(
+                        .vsr,
+                        read_block_repair_tick_callback,
+                        &read.next_tick,
+                    );
+                    return;
+                } else {
+                    // We have a cached entry (wrong block), but the cache is not coherent.
+                    // The block we actually want may be on disk.
+                }
             }
+
+            grid.superblock.storage.read_sectors(
+                read_block_repair_callback,
+                &read.completion,
+                read.block,
+                .grid,
+                block_offset(read.address),
+            );
         }
 
         fn read_block_repair_tick_callback(next_tick: *Grid.NextTick) void {

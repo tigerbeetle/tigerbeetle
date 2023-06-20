@@ -928,8 +928,8 @@ pub fn ReplicaType(
             assert(self.status == .recovering);
         }
 
-        /// Free all memory and unref all messages held by the replica
-        /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time
+        /// Free all memory and unref all messages held by the replica.
+        /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time.
         pub fn deinit(self: *Self, allocator: Allocator) void {
             assert(self.tracer_slot_checkpoint == null);
             assert(self.tracer_slot_commit == null);
@@ -7580,7 +7580,12 @@ pub fn ReplicaType(
             switch (self.sync_stage) {
                 .none => unreachable,
                 .cancel_commit => {}, // Waiting for an uninterruptible commit step.
-                .cancel_grid => self.grid.cancel(sync_cancel_grid_callback),
+                .cancel_grid => {
+                    self.grid_repair_message_timeout.stop();
+                    self.grid.cancel(sync_cancel_grid_callback);
+
+                    assert(self.grid.read_faulty_queue.empty());
+                },
                 .request_target => {}, // Waiting for a usable sync target.
                 .request_trailers => self.sync_message_timeout.start(),
                 .superblock_update => self.sync_superblock_update(),
@@ -7619,7 +7624,6 @@ pub fn ReplicaType(
         fn sync_cancel_grid_callback(grid: *Grid) void {
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(self.sync_stage == .cancel_grid);
-            assert(self.grid_writes.executing() == 0);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_faulty_queue.empty());
 
@@ -7631,7 +7635,17 @@ pub fn ReplicaType(
                 self.commit_stage = .idle;
             }
 
-            self.grid_repair_message_timeout.stop();
+            var grid_reads = self.grid_reads.iterate();
+            while (grid_reads.next()) |grid_read| {
+                self.message_bus.unref(grid_read.message);
+                self.grid_reads.release(grid_read);
+            }
+
+            var grid_writes = self.grid_writes.iterate();
+            while (grid_writes.next()) |grid_write| {
+                self.grid_writes.release(grid_write);
+            }
+
             self.sync_dispatch(.request_target);
         }
 
@@ -7643,10 +7657,11 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare == null);
             assert(!self.grid_repair_message_timeout.ticking);
-            assert(self.grid.read_pending_queue.empty());
             assert(self.grid.read_queue.empty());
+            assert(self.grid.read_pending_queue.empty());
             assert(self.grid.read_faulty_queue.empty());
             assert(self.grid.write_queue.empty());
+            assert(self.grid_writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
 
             const stage = self.sync_stage.request_trailers;
