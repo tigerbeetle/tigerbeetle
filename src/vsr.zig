@@ -188,17 +188,11 @@ pub const Operation = enum(u8) {
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
-    var checksum_empty_once = std.once(checksum_empty_init);
-    var checksum_empty: u128 = undefined;
-    fn checksum_empty_init() void {
-        checksum_empty = checksum(&.{});
-    }
-
     /// Aegis128 (used by checksum) uses hardware accelerated AES via inline asm which isn't
-    /// available at comptime. Instead of a constant, lazily initialize the empty block checksum.
-    fn checksum_body_empty() u128 {
-        checksum_empty_once.call();
-        return checksum_empty;
+    /// available at comptime. Use a hard-coded value instead and verify via a test.
+    const checksum_body_empty: u128 = 0x49F174618255402DE6E7E3C40D60CC83;
+    test "empty checksum" {
+        assert(checksum_body_empty == checksum(&.{}));
     }
 
     comptime {
@@ -417,7 +411,7 @@ pub const Header = extern struct {
         if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -432,7 +426,7 @@ pub const Header = extern struct {
         if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp == 0) return "timestamp == 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -448,7 +442,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.replica != 0) return "replica != 0";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -464,7 +458,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -486,7 +480,7 @@ pub const Header = extern struct {
                 if (self.context != 0) return "register: context != 0";
                 if (self.request != 0) return "register: request != 0";
                 // The .register operation carries no payload:
-                if (self.checksum_body != checksum_body_empty()) return "register: checksum_body != expected";
+                if (self.checksum_body != checksum_body_empty) return "register: checksum_body != expected";
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
@@ -515,7 +509,7 @@ pub const Header = extern struct {
                 if (self.op != 0) return "root: op != 0";
                 if (self.commit != 0) return "root: commit != 0";
                 if (self.timestamp != 0) return "root: timestamp != 0";
-                if (self.checksum_body != checksum_body_empty()) return "root: checksum_body != expected";
+                if (self.checksum_body != checksum_body_empty) return "root: checksum_body != expected";
                 if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
                 if (self.replica != 0) return "root: replica != 0";
             },
@@ -538,7 +532,7 @@ pub const Header = extern struct {
 
     fn invalid_prepare_ok(self: *const Header) ?[]const u8 {
         assert(self.command == .prepare_ok);
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
@@ -592,7 +586,7 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.timestamp == 0) return "timestamp == 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -607,7 +601,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -637,7 +631,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -651,7 +645,7 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit > self.op) return "op_min > op_max";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -664,7 +658,7 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -677,7 +671,7 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -720,7 +714,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
