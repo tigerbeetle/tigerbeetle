@@ -243,10 +243,12 @@ pub fn main() !void {
     // be crashed, but each replica restarts eventually. The cluster must process all requests
     // without split-brain.
     const ticks_max_requests = 5_000_000;
+    var tick_total: u64 = 0;
     var tick: u64 = 0;
     while (tick < ticks_max_requests) : (tick += 1) {
         const requests_replied_old = simulator.requests_replied;
         simulator.tick();
+        tick_total += 1;
         if (simulator.requests_replied > requests_replied_old) {
             tick = 0;
         }
@@ -268,6 +270,7 @@ pub fn main() !void {
     tick = 0;
     while (tick < ticks_max_convergence) : (tick += 1) {
         simulator.tick();
+        tick_total += 1;
         if (simulator.done()) {
             break;
         }
@@ -294,7 +297,7 @@ pub fn main() !void {
         }
     }
 
-    output.info("\n          PASSED ({} ticks)", .{tick});
+    output.info("\n          PASSED ({} ticks)", .{tick_total});
 }
 
 pub const Simulator = struct {
