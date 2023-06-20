@@ -2065,6 +2065,8 @@ pub fn ReplicaType(
             assert(requests.len > 0);
 
             request_loop: for (requests) |*request, i| {
+                for (std.mem.bytesAsSlice(u64, &request.reserved)) |word| assert(word == 0);
+
                 if (self.grid.faulty(request.block_address, null)) {
                     log.warn("{}: on_request_blocks: ignoring block request; faulty " ++
                         "(replica={} address={} checksum={})", .{
