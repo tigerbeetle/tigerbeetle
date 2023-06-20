@@ -149,92 +149,81 @@ func checkout_commit(commit string, tigerbeetle_directory string) error {
 	return nil
 }
 
+func get_github_content(path string, result interface{}) {
+	for {
+		get_request, err := http.NewRequest("GET", path, nil)
+		if err != nil {
+			log_error("unable to create get request")
+			panic(err.Error())
+		}
+
+		get_request.Header.Set("Authorization", "token "+developer_token)
+		res, err := http.DefaultClient.Do(get_request)
+		if err != nil {
+			log_error("Failed to send the HTTP request for the GitHub API")
+			panic(err.Error())
+		}
+
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close()
+
+		// Handle rate limiting:
+		// https://docs.github.com/en/rest/overview/resources-in-the-rest-api?apiVersion=2022-11-28#exceeding-the-rate-limit
+		if res.StatusCode == 403 && res.Header.Get("x-ratelimit-limit") == "0" {
+			reset_at := res.Header.Get("x-ratelimit-reset")
+			expires, err := strconv.ParseInt(reset_at, 10, 64)
+			if err != nil {
+				log_error(fmt.Sprintf("Failed to parse rate limit reset %s", reset_at))
+				panic(err.Error())
+			}
+			
+			deadline := time.Unix(expires, 0)
+			time.Sleep(deadline.Sub(time.Now()))
+			continue
+		}
+
+		if res.StatusCode > 299 {
+			log_error(
+				fmt.Sprintf(
+					"Response failed with status code: %d and\nbody: %s\n",
+					res.StatusCode,
+					body,
+				),
+			)
+			panic(err.Error())
+		}
+
+		if err != nil {
+			log_error("unable to receive a response from GitHub")
+			panic(err.Error())
+		}
+
+		err = json.Unmarshal(body, result)
+		if err != nil {
+			log_error("unable to unmarshall json")
+			panic(err.Error())
+		}
+
+		return
+	}	
+}
+
 func get_pull_requests(num_posts int, page_number int) []Issue {
 	pull_requests := []Issue{}
-	get_request, err := http.NewRequest(
-		"GET",
+	get_github_content(
 		fmt.Sprintf("%s/pulls?per_page=%d&page=%d", repository_url, num_posts, page_number),
-		nil,
+		&pull_requests,
 	)
-	if err != nil {
-		log_error("unable to create get request")
-		panic(err.Error())
-	}
-	get_request.Header.Set("Authorization", "token "+developer_token)
-	res, err := http.DefaultClient.Do(get_request)
-	if err != nil {
-		log_error("Failed to send the HTTP request for the GitHub API")
-		panic(err.Error())
-	}
-	defer res.Body.Close()
-
-	body, err := io.ReadAll(res.Body)
-
-	if res.StatusCode > 299 {
-		log_error(
-			fmt.Sprintf(
-				"Response failed with status code: %d and\nbody: %s\n",
-				res.StatusCode,
-				body,
-			),
-		)
-		panic(err.Error())
-	}
-	if err != nil {
-		log_error("unable to receive a response from GitHub")
-		panic(err.Error())
-	}
-
-	err = json.Unmarshal(body, &pull_requests)
-	if err != nil {
-		log_error("unable to unmarshall json")
-		panic(err.Error())
-	}
 
 	return pull_requests
 }
 
 func get_commits(branch_name string) string {
 	commits := []Commit{}
-	get_request, err := http.NewRequest(
-		"GET",
+	get_github_content(
 		fmt.Sprintf("%s/commits?per_page=1&sha=%s", repository_url, branch_name),
-		nil,
+		&commits,
 	)
-	if err != nil {
-		log_error("unable to create get request")
-		panic(err.Error())
-	}
-	get_request.Header.Set("Authorization", "token "+developer_token)
-	res, err := http.DefaultClient.Do(get_request)
-	if err != nil {
-		log_error("Failed to send the HTTP request for the GitHub API")
-		panic(err.Error())
-	}
-	defer res.Body.Close()
-
-	body, err := io.ReadAll(res.Body)
-
-	if res.StatusCode > 299 {
-		log_error(
-			fmt.Sprintf(
-				"Response failed with status code: %d and\nbody: %s\n",
-				res.StatusCode,
-				body,
-			),
-		)
-		panic(err.Error())
-	}
-	if err != nil {
-		log_error("unable to receive a response from GitHub")
-		panic(err.Error())
-	}
-
-	err = json.Unmarshal(body, &commits)
-	if err != nil {
-		log_error("unable to unmarshall json")
-		panic(err.Error())
-	}
 
 	if len(commits) > 0 && len(commits[0].Sha) > 0 {
 		return commits[0].Sha
