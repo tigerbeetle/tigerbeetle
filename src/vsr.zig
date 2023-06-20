@@ -155,31 +155,51 @@ pub const Operation = enum(u8) {
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
         assert(self.valid(StateMachine));
+        assert(!self.reserved());
         return @intToEnum(StateMachine.Operation, @enumToInt(self));
     }
 
     pub fn valid(self: Operation, comptime StateMachine: type) bool {
         check_state_machine_operations(StateMachine.Operation);
-        const operations = comptime std.enums.values(StateMachine.Operation);
-        inline for (operations) |op| {
-            if (@enumToInt(self) == @enumToInt(op)) {
-                return true;
+
+        inline for (.{ Operation, StateMachine.Operation }) |Enum| {
+            const ops = comptime std.enums.values(Enum);
+            inline for (ops) |op| {
+                if (@enumToInt(self) == @enumToInt(op)) {
+                    return true;
+                }
             }
         }
+
         return false;
     }
 
+    pub fn reserved(self: Operation) bool {
+        return @enumToInt(self) < constants.vsr_operations_reserved;
+    }
+
+    pub fn tag_name(self: Operation, comptime StateMachine: type) []const u8 {
+        assert(self.valid(StateMachine));
+        inline for (.{ Operation, StateMachine.Operation }) |Enum| {
+            inline for (@typeInfo(Enum).Enum.fields) |field| {
+                const op = @field(Enum, field.name);
+                if (@enumToInt(self) == @enumToInt(op)) {
+                    return field.name;
+                }
+            }
+        }
+        unreachable;
+    }
+
     fn check_state_machine_operations(comptime Op: type) void {
-        // TODO(Zig) More rigorous assertions here once "unable to evaluate constant expression"
-        // issues are fixed. (Loop over Operation and Op variants).
-        if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
-            @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
-        }
-        if (!@hasField(Op, "root") or std.meta.fieldInfo(Op, .root).value != 1) {
-            @compileError("StateMachine.Operation must have a 'root' field with value 1");
-        }
-        if (!@hasField(Op, "register") or std.meta.fieldInfo(Op, .register).value != 2) {
-            @compileError("StateMachine.Operation must have a 'register' field with value 2");
+        comptime assert(@typeInfo(Op).Enum.is_exhaustive);
+        comptime assert(@sizeOf(Op) == @sizeOf(Operation));
+        comptime assert(@bitSizeOf(Op) == @bitSizeOf(Operation));
+        inline for (@typeInfo(Op).Enum.fields) |field| {
+            const op = @field(Op, field.name);
+            if (@enumToInt(op) < constants.vsr_operations_reserved) {
+                @compileError("StateMachine.Operation is reserved");
+            }
         }
     }
 };

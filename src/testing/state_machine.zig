@@ -19,11 +19,6 @@ pub fn StateMachineType(
         pub const Workload = WorkloadType(StateMachine);
 
         pub const Operation = enum(u8) {
-            /// Operations reserved by VR protocol (for all state machines):
-            reserved = 0,
-            root = 1,
-            register = 2,
-
             echo = config.vsr_operations_reserved + 0,
         };
 
@@ -108,11 +103,10 @@ pub fn StateMachineType(
             state_machine: *StateMachine,
             operation: Operation,
             input: []u8,
-        ) u64 {
+        ) void {
+            _ = state_machine;
             _ = operation;
             _ = input;
-
-            return state_machine.prepare_timestamp;
         }
 
         pub fn prefetch(
@@ -156,8 +150,6 @@ pub fn StateMachineType(
             assert(op != 0);
 
             switch (operation) {
-                .reserved, .root => unreachable,
-                .register => return 0,
                 .echo => {
                     const thing = state_machine.forest.grooves.things.get(123);
                     const key: u64 = if (thing) |t| t.timestamp else timestamp;
@@ -269,7 +261,7 @@ fn WorkloadType(comptime StateMachine: type) type {
         pub fn on_reply(
             workload: *Workload,
             client_index: usize,
-            operation: vsr.Operation,
+            operation: StateMachine.Operation,
             timestamp: u64,
             request_body: []align(@alignOf(vsr.Header)) const u8,
             reply_body: []align(@alignOf(vsr.Header)) const u8,
@@ -280,7 +272,7 @@ fn WorkloadType(comptime StateMachine: type) type {
             workload.requests_delivered += 1;
             assert(workload.requests_delivered <= workload.requests_sent);
 
-            assert(operation.cast(StateMachine) == .echo);
+            assert(operation == .echo);
             assert(std.mem.eql(u8, request_body, reply_body));
         }
 

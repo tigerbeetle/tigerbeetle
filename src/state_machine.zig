@@ -226,11 +226,6 @@ pub fn StateMachineType(
         });
 
         pub const Operation = enum(u8) {
-            /// Operations reserved by VR protocol (for all state machines):
-            reserved = 0,
-            root = 1,
-            register = 2,
-
             /// Operations exported by TigerBeetle:
             create_accounts = config.vsr_operations_reserved + 0,
             create_transfers = config.vsr_operations_reserved + 1,
@@ -314,7 +309,6 @@ pub fn StateMachineType(
                 .create_transfers => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
-                else => unreachable,
             };
         }
 
@@ -324,7 +318,6 @@ pub fn StateMachineType(
                 .create_transfers => CreateTransfersResult,
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
-                else => unreachable,
             };
         }
 
@@ -344,18 +337,14 @@ pub fn StateMachineType(
             callback(self);
         }
 
-        /// Returns the header's timestamp.
-        pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) u64 {
-            switch (operation) {
-                .reserved => unreachable,
-                .root => unreachable,
-                .register => {},
-                .create_accounts => self.prepare_timestamp += mem.bytesAsSlice(Account, input).len,
-                .create_transfers => self.prepare_timestamp += mem.bytesAsSlice(Transfer, input).len,
-                .lookup_accounts => {},
-                .lookup_transfers => {},
-            }
-            return self.prepare_timestamp;
+        /// Updates `prepare_timestamp` to the highest timestamp of the response.
+        pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) void {
+            self.prepare_timestamp += switch (operation) {
+                .create_accounts => mem.bytesAsSlice(Account, input).len,
+                .create_transfers => mem.bytesAsSlice(Transfer, input).len,
+                .lookup_accounts => 0,
+                .lookup_transfers => 0,
+            };
         }
 
         pub fn prefetch(
@@ -368,13 +357,6 @@ pub fn StateMachineType(
             _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
-
-            // NOTE: prefetch(.register)'s callback should end up calling commit()
-            // (which is always async) instead of recursing, so this inline callback is fine.
-            if (operation == .register) {
-                callback(self);
-                return;
-            }
 
             tracer.start(
                 &self.tracer_slot,
@@ -392,7 +374,6 @@ pub fn StateMachineType(
             self.forest.grooves.posted.prefetch_setup(null);
 
             return switch (operation) {
-                .reserved, .root, .register => unreachable,
                 .create_accounts => {
                     self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
                 },
@@ -609,13 +590,10 @@ pub fn StateMachineType(
             );
 
             const result = switch (operation) {
-                .root => unreachable,
-                .register => 0,
                 .create_accounts => self.execute(.create_accounts, timestamp, input, output),
                 .create_transfers => self.execute(.create_transfers, timestamp, input, output),
                 .lookup_accounts => self.execute_lookup_accounts(input, output),
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
-                else => unreachable,
             };
 
             tracer.end(
@@ -1663,7 +1641,8 @@ fn check(comptime test_table: []const u8) !void {
                 assert(operation == null or operation.? == commit_operation);
 
                 context.state_machine.prepare_timestamp += 1;
-                const timestamp = context.state_machine.prepare(commit_operation, request.items);
+                context.state_machine.prepare(commit_operation, request.items);
+                const timestamp = context.state_machine.prepare_timestamp;
 
                 const reply_actual_buffer = try allocator.alignedAlloc(u8, 16, 4096);
                 defer allocator.free(reply_actual_buffer);

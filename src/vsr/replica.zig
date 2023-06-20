@@ -2926,12 +2926,18 @@ pub fn ReplicaType(
                 @src(),
             );
 
-            self.state_machine.prefetch(
-                commit_op_prefetch_callback,
-                prepare.header.op,
-                prepare.header.operation.cast(StateMachine),
-                prepare.body(),
-            );
+            if (prepare.header.operation.reserved()) {
+                // NOTE: this inline callback is fine because the next stage of committing,
+                // `.setup_client_replies`, is always async.
+                commit_op_prefetch_callback(&self.state_machine);
+            } else {
+                self.state_machine.prefetch(
+                    commit_op_prefetch_callback,
+                    prepare.header.op,
+                    prepare.header.operation.cast(StateMachine),
+                    prepare.body(),
+                );
+            }
         }
 
         fn commit_op_prefetch_callback(state_machine: *StateMachine) void {
@@ -3162,7 +3168,7 @@ pub fn ReplicaType(
                 self.primary_index(self.view) == self.replica,
                 prepare.header.op,
                 prepare.header.checksum,
-                @tagName(prepare.header.operation.cast(StateMachine)),
+                prepare.header.operation.tag_name(StateMachine),
             });
 
             const reply = self.message_bus.get_message();
@@ -3197,14 +3203,17 @@ pub fn ReplicaType(
                 }) catch @panic("aof failure");
             }
 
-            const reply_body_size = @intCast(u32, self.state_machine.commit(
-                prepare.header.client,
-                prepare.header.op,
-                prepare.header.timestamp,
-                prepare.header.operation.cast(StateMachine),
-                prepare.buffer[@sizeOf(Header)..prepare.header.size],
-                reply.buffer[@sizeOf(Header)..],
-            ));
+            const reply_body_size = if (prepare.header.operation.reserved())
+                0
+            else
+                @intCast(u32, self.state_machine.commit(
+                    prepare.header.client,
+                    prepare.header.op,
+                    prepare.header.timestamp,
+                    prepare.header.operation.cast(StateMachine),
+                    prepare.buffer[@sizeOf(Header)..prepare.header.size],
+                    reply.buffer[@sizeOf(Header)..],
+                ));
 
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or constants.aof_recovery);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
@@ -4554,10 +4563,13 @@ pub fn ReplicaType(
             );
             assert(self.state_machine.prepare_timestamp > self.state_machine.commit_timestamp);
 
-            const prepare_timestamp = self.state_machine.prepare(
-                message.header.operation.cast(StateMachine),
-                message.body(),
-            );
+            if (!message.header.operation.reserved()) {
+                self.state_machine.prepare(
+                    message.header.operation.cast(StateMachine),
+                    message.body(),
+                );
+            }
+            const prepare_timestamp = self.state_machine.prepare_timestamp;
 
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.parent = latest_entry.checksum;
