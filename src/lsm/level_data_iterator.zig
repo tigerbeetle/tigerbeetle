@@ -89,6 +89,8 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             context: Context,
         ) void {
             assert(it.callback == .none);
+            assert(context.level < constants.lsm_levels);
+
             it.* = .{
                 .context = context,
                 .table_data_iterator = it.table_data_iterator,

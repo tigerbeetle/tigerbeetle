@@ -122,8 +122,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const TableInfoReference = Level.TableInfoReference;
 
         const CompactionTableRange = struct {
-            table: TableInfoReference,
-            range: CompactionRange,
+            table_a: TableInfoReference,
+            range_b: CompactionRange,
         };
 
         pub const CompactionRange = struct {
@@ -408,8 +408,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }) ?*const TableInfo {
             assert(parameters.level < constants.lsm_levels);
             assert(compare_keys(parameters.key_min, parameters.key_max) != .gt);
-            const manifest_level: *const Level = &manifest.levels[parameters.level];
-            return manifest_level.next_table(.{
+            return manifest.levels[parameters.level].next_table(.{
                 .snapshot = parameters.snapshot,
                 .key_min = parameters.key_min,
                 .key_max = parameters.key_max,
@@ -442,8 +441,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             ) orelse return null;
 
             const compaction_table_range = CompactionTableRange{
-                .table = least_overlap_table.table,
-                .range = CompactionRange{
+                .table_a = least_overlap_table.table,
+                .range_b = CompactionRange{
                     // The range.table_count includes the input table from
                     // level A represented by key_min/max. Thus, range.table_count=1
                     // means that the table may be moved directly between levels.
@@ -503,7 +502,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(compare_keys(range.key_min, range.key_max) != .gt);
 
             var level_c: u8 = level_b + 1;
-
             while (level_c < constants.lsm_levels) : (level_c += 1) {
                 const manifest_level: *const Level = &manifest.levels[level_c];
                 if (manifest_level.next_table(.{
