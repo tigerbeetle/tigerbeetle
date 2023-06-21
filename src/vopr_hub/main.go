@@ -526,13 +526,6 @@ func decode_message(input vopr_message_byte_array) (vopr_message, error) {
 	return message, nil
 }
 
-// The write functionality is in its own function so it can run in its own Goroutine to allow the
-// connection to be closed without delays.
-func write_to_vopr_message_channel(message vopr_message, vopr_message_channel chan vopr_message) {
-	vopr_message_channel <- message
-	log_debug("Message has been added to channel for processing", message.hash[:])
-}
-
 // Reads and processes messages from the vopr_message_channel channel as they arrive.
 // Messages are only sent here after being decoded and validated.
 func worker(vopr_message_channel chan vopr_message) {
