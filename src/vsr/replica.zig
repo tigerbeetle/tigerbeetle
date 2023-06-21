@@ -1923,9 +1923,19 @@ pub fn ReplicaType(
             const op_max = message.header.op;
             assert(op_max >= op_min);
 
-            const count = self.copy_latest_headers_and_set_size(op_min, op_max, null, response);
-            assert(count >= 0);
-            assert(@divExact(response.header.size, @sizeOf(Header)) == 1 + count);
+            // We must add 1 because op_max and op_min are both inclusive:
+            const count_max = std.math.min(constants.request_headers_max, op_max - op_min + 1);
+            assert(count_max * @sizeOf(vsr.Header) <= constants.message_body_size_max);
+
+            const count = self.journal.copy_latest_headers_between(
+                op_min,
+                op_max,
+                std.mem.bytesAsSlice(
+                    Header,
+                    response.buffer[@sizeOf(Header)..][0 .. @sizeOf(Header) * count_max],
+                ),
+            );
+            assert(count <= count_max);
 
             if (count == 0) {
                 log.debug("{}: on_request_headers: ignoring (op={}..{}, no headers)", .{
@@ -1936,8 +1946,12 @@ pub fn ReplicaType(
                 return;
             }
 
+            response.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
             response.header.set_checksum_body(response.body());
             response.header.set_checksum();
+
+            // Assert that the headers are valid.
+            _ = message_body_as_headers(response);
 
             self.send_message_to_replica(message.header.replica, response);
         }
@@ -2901,6 +2915,61 @@ pub fn ReplicaType(
             self.commit_dispatch(.prefetch_state_machine);
         }
 
+        /// Commits, frees and pops as many prepares at the head of the pipeline as have quorum.
+        /// Can be called only when the replica is the primary.
+        /// Can be called only when the pipeline has at least one prepare.
+        fn commit_pipeline(self: *Self) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(self.pipeline.queue.prepare_queue.count > 0);
+
+            if (!self.state_machine_opened) {
+                assert(self.commit_stage == .idle);
+                return;
+            }
+
+            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
+            if (self.commit_stage != .idle) {
+                log.debug("{}: commit_pipeline: already committing ({s}; commit_min={})", .{
+                    self.replica,
+                    @tagName(self.commit_stage),
+                    self.commit_min,
+                });
+                return;
+            }
+
+            self.commit_dispatch(.next_pipeline);
+        }
+
+        fn commit_pipeline_next(self: *Self) void {
+            assert(self.commit_stage == .next_pipeline);
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            if (self.pipeline.queue.prepare_queue.head_ptr()) |prepare| {
+                assert(self.commit_min == self.commit_max);
+                assert(self.commit_min + 1 == prepare.message.header.op);
+                assert(self.commit_min + self.pipeline.queue.prepare_queue.count == self.op);
+                assert(self.journal.has(prepare.message.header));
+
+                if (!prepare.ok_quorum_received) {
+                    // Eventually handled by on_prepare_timeout().
+                    log.debug("{}: commit_pipeline_next: waiting for quorum", .{self.replica});
+                    self.commit_dispatch(.idle);
+                    return;
+                }
+
+                const count = prepare.ok_from_all_replicas.count();
+                assert(count >= self.quorum_replication);
+                assert(count <= self.replica_count);
+
+                self.commit_prepare = prepare.message.ref();
+                self.commit_dispatch(.prefetch_state_machine);
+            } else {
+                self.commit_dispatch(.idle);
+            }
+        }
+
         /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
         ///
         /// 1. Prefetch.
@@ -3263,9 +3332,9 @@ pub fn ReplicaType(
                 });
             } else {
                 if (reply.header.operation == .register) {
-                    self.create_client_table_entry(reply);
+                    self.client_table_entry_create(reply);
                 } else {
-                    self.update_client_table_entry(reply);
+                    self.client_table_entry_update(reply);
                 }
             }
 
@@ -3275,98 +3344,10 @@ pub fn ReplicaType(
             }
         }
 
-        /// Commits, frees and pops as many prepares at the head of the pipeline as have quorum.
-        /// Can be called only when the replica is the primary.
-        /// Can be called only when the pipeline has at least one prepare.
-        fn commit_pipeline(self: *Self) void {
-            assert(self.status == .normal);
-            assert(self.primary());
-            assert(self.pipeline.queue.prepare_queue.count > 0);
-
-            if (!self.state_machine_opened) {
-                assert(self.commit_stage == .idle);
-                return;
-            }
-
-            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
-            if (self.commit_stage != .idle) {
-                log.debug("{}: commit_pipeline: already committing ({s}; commit_min={})", .{
-                    self.replica,
-                    @tagName(self.commit_stage),
-                    self.commit_min,
-                });
-                return;
-            }
-
-            self.commit_dispatch(.next_pipeline);
-        }
-
-        fn commit_pipeline_next(self: *Self) void {
-            assert(self.commit_stage == .next_pipeline);
-            assert(self.status == .normal);
-            assert(self.primary());
-
-            if (self.pipeline.queue.prepare_queue.head_ptr()) |prepare| {
-                assert(self.commit_min == self.commit_max);
-                assert(self.commit_min + 1 == prepare.message.header.op);
-                assert(self.commit_min + self.pipeline.queue.prepare_queue.count == self.op);
-                assert(self.journal.has(prepare.message.header));
-
-                if (!prepare.ok_quorum_received) {
-                    // Eventually handled by on_prepare_timeout().
-                    log.debug("{}: commit_pipeline_next: waiting for quorum", .{self.replica});
-                    self.commit_dispatch(.idle);
-                    return;
-                }
-
-                const count = prepare.ok_from_all_replicas.count();
-                assert(count >= self.quorum_replication);
-                assert(count <= self.replica_count);
-
-                self.commit_prepare = prepare.message.ref();
-                self.commit_dispatch(.prefetch_state_machine);
-            } else {
-                self.commit_dispatch(.idle);
-            }
-        }
-
-        fn copy_latest_headers_and_set_size(
-            self: *const Self,
-            op_min: u64,
-            op_max: u64,
-            count_max: ?usize,
-            message: *Message,
-        ) usize {
-            assert(op_max >= op_min);
-            assert(count_max == null or count_max.? > 0);
-            assert(message.header.command == .headers);
-
-            const body_size_max = @sizeOf(Header) * std.math.min(
-                @divExact(message.buffer.len - @sizeOf(Header), @sizeOf(Header)),
-                // We must add 1 because op_max and op_min are both inclusive:
-                count_max orelse std.math.min(64, op_max - op_min + 1),
-            );
-            assert(body_size_max >= @sizeOf(Header));
-            assert(count_max == null or body_size_max == count_max.? * @sizeOf(Header));
-
-            const count = self.journal.copy_latest_headers_between(
-                op_min,
-                op_max,
-                std.mem.bytesAsSlice(
-                    Header,
-                    message.buffer[@sizeOf(Header)..][0..body_size_max],
-                ),
-            );
-
-            message.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
-
-            return count;
-        }
-
         /// Creates an entry in the client table when registering a new client session.
         /// Asserts that the new session does not yet exist.
         /// Evicts another entry deterministically, if necessary, to make space for the insert.
-        fn create_client_table_entry(self: *Self, reply: *Message) void {
+        fn client_table_entry_create(self: *Self, reply: *Message) void {
             assert(reply.header.command == .reply);
             assert(reply.header.operation == .register);
             assert(reply.header.client > 0);
@@ -3399,7 +3380,7 @@ pub fn ReplicaType(
 
                 assert(self.client_sessions().count() == constants.clients_max - 1);
 
-                log.err("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
+                log.err("{}: client_table_entry_create: clients={}/{} evicting client={}", .{
                     self.replica,
                     clients,
                     constants.clients_max,
@@ -3407,7 +3388,7 @@ pub fn ReplicaType(
                 });
             }
 
-            log.debug("{}: create_client_table_entry: write (client={} session={} request={})", .{
+            log.debug("{}: client_table_entry_create: write (client={} session={} request={})", .{
                 self.replica,
                 reply.header.client,
                 session,
@@ -3421,6 +3402,47 @@ pub fn ReplicaType(
 
             if (reply.header.size != @sizeOf(Header)) {
                 self.client_replies.write_reply(reply_slot, reply);
+            }
+        }
+
+        fn client_table_entry_update(self: *Self, reply: *Message) void {
+            assert(reply.header.command == .reply);
+            assert(reply.header.operation != .register);
+            assert(reply.header.client > 0);
+            assert(reply.header.op == reply.header.commit);
+            assert(reply.header.commit > 0);
+            assert(reply.header.request > 0);
+
+            if (self.client_sessions().get(reply.header.client)) |entry| {
+                assert(entry.header.command == .reply);
+                assert(entry.header.op == entry.header.commit);
+                assert(entry.header.commit >= entry.session);
+
+                assert(entry.header.client == reply.header.client);
+                assert(entry.header.request + 1 == reply.header.request);
+                assert(entry.header.op < reply.header.op);
+                assert(entry.header.commit < reply.header.commit);
+
+                // TODO Use this reply's prepare to cross-check against the entry's prepare, if we
+                // still have access to the prepare in the journal (it may have been snapshotted).
+
+                log.debug("{}: client_table_entry_update: client={} session={} request={}", .{
+                    self.replica,
+                    reply.header.client,
+                    entry.session,
+                    reply.header.request,
+                });
+
+                entry.header = reply.header.*;
+                if (entry.header.size != @sizeOf(Header)) {
+                    self.client_replies.write_reply(
+                        self.client_sessions().get_slot_for_header(reply.header).?,
+                        reply,
+                    );
+                }
+            } else {
+                // If no entry exists, then the session must have been evicted while being prepared.
+                // We can still send the reply, the next request will receive an eviction message.
             }
         }
 
@@ -6789,47 +6811,6 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum == false);
 
             self.send_do_view_change();
-        }
-
-        fn update_client_table_entry(self: *Self, reply: *Message) void {
-            assert(reply.header.command == .reply);
-            assert(reply.header.operation != .register);
-            assert(reply.header.client > 0);
-            assert(reply.header.op == reply.header.commit);
-            assert(reply.header.commit > 0);
-            assert(reply.header.request > 0);
-
-            if (self.client_sessions().get(reply.header.client)) |entry| {
-                assert(entry.header.command == .reply);
-                assert(entry.header.op == entry.header.commit);
-                assert(entry.header.commit >= entry.session);
-
-                assert(entry.header.client == reply.header.client);
-                assert(entry.header.request + 1 == reply.header.request);
-                assert(entry.header.op < reply.header.op);
-                assert(entry.header.commit < reply.header.commit);
-
-                // TODO Use this reply's prepare to cross-check against the entry's prepare, if we
-                // still have access to the prepare in the journal (it may have been snapshotted).
-
-                log.debug("{}: update_client_table_entry: client={} session={} request={}", .{
-                    self.replica,
-                    reply.header.client,
-                    entry.session,
-                    reply.header.request,
-                });
-
-                entry.header = reply.header.*;
-                if (entry.header.size != @sizeOf(Header)) {
-                    self.client_replies.write_reply(
-                        self.client_sessions().get_slot_for_header(reply.header).?,
-                        reply,
-                    );
-                }
-            } else {
-                // If no entry exists, then the session must have been evicted while being prepared.
-                // We can still send the reply, the next request will receive an eviction message.
-            }
         }
 
         /// Whether it is safe to commit or send prepare_ok messages.
