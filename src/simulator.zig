@@ -444,13 +444,14 @@ pub const Simulator = struct {
                 replica.status == .normal and replica.primary() and
                 !simulator.core.isSet(replica.replica))
             {
-                // `replica` considers itself a primary, check that the core thinks so as well.
+                // `replica` considers itself a primary, check that at least part of the core thinks
+                // so as well.
                 var it = simulator.core.iterator(.{});
                 while (it.next()) |replica_core_index| {
-                    if (simulator.cluster.replicas[replica_core_index].view != replica.view) {
-                        break;
+                    if (simulator.cluster.replicas[replica_core_index].view == replica.view) {
+                        return true;
                     }
-                } else return true;
+                }
             }
         }
         return false;
