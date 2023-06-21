@@ -338,7 +338,7 @@ pub fn StateMachineType(
         }
 
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
-        pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) void {
+        pub fn prepare(self: *StateMachine, operation: Operation, input: []align(16) u8) void {
             self.prepare_timestamp += switch (operation) {
                 .create_accounts => mem.bytesAsSlice(Account, input).len,
                 .create_transfers => mem.bytesAsSlice(Transfer, input).len,
