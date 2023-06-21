@@ -774,6 +774,8 @@ fn c_client(
 
         const shared_lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         const static_lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+        static_lib.bundle_compiler_rt = true;
+        static_lib.pie = true;
 
         for ([_]*std.build.LibExeObjStep{ shared_lib, static_lib }) |lib| {
             lib.setMainPkgPath("src");
