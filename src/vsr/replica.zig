@@ -3318,9 +3318,9 @@ pub fn ReplicaType(
                 });
             } else {
                 if (reply.header.operation == .register) {
-                    self.create_client_table_entry(reply);
+                    self.client_table_entry_create(reply);
                 } else {
-                    self.update_client_table_entry(reply);
+                    self.client_table_entry_update(reply);
                 }
             }
 
@@ -3366,7 +3366,7 @@ pub fn ReplicaType(
         /// Creates an entry in the client table when registering a new client session.
         /// Asserts that the new session does not yet exist.
         /// Evicts another entry deterministically, if necessary, to make space for the insert.
-        fn create_client_table_entry(self: *Self, reply: *Message) void {
+        fn client_table_entry_create(self: *Self, reply: *Message) void {
             assert(reply.header.command == .reply);
             assert(reply.header.operation == .register);
             assert(reply.header.client > 0);
@@ -3399,7 +3399,7 @@ pub fn ReplicaType(
 
                 assert(self.client_sessions().count() == constants.clients_max - 1);
 
-                log.err("{}: create_client_table_entry: clients={}/{} evicting client={}", .{
+                log.err("{}: client_table_entry_create: clients={}/{} evicting client={}", .{
                     self.replica,
                     clients,
                     constants.clients_max,
@@ -3407,7 +3407,7 @@ pub fn ReplicaType(
                 });
             }
 
-            log.debug("{}: create_client_table_entry: write (client={} session={} request={})", .{
+            log.debug("{}: client_table_entry_create: write (client={} session={} request={})", .{
                 self.replica,
                 reply.header.client,
                 session,
@@ -6791,7 +6791,7 @@ pub fn ReplicaType(
             self.send_do_view_change();
         }
 
-        fn update_client_table_entry(self: *Self, reply: *Message) void {
+        fn client_table_entry_update(self: *Self, reply: *Message) void {
             assert(reply.header.command == .reply);
             assert(reply.header.operation != .register);
             assert(reply.header.client > 0);
@@ -6812,7 +6812,7 @@ pub fn ReplicaType(
                 // TODO Use this reply's prepare to cross-check against the entry's prepare, if we
                 // still have access to the prepare in the journal (it may have been snapshotted).
 
-                log.debug("{}: update_client_table_entry: client={} session={} request={}", .{
+                log.debug("{}: client_table_entry_update: client={} session={} request={}", .{
                     self.replica,
                     reply.header.client,
                     entry.session,
