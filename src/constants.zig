@@ -247,6 +247,16 @@ comptime {
     assert(view_change_headers_max > view_change_headers_suffix_max);
 }
 
+/// The maximum number of headers to include with a response to a command=request_headers message.
+pub const request_headers_max = std.math.min(
+    @divFloor(message_body_size_max, @sizeOf(vsr.Header)),
+    64,
+);
+
+comptime {
+    assert(request_headers_max > 0);
+}
+
 /// The maximum number of block addresses/checksums requested by a single command=request_blocks.
 pub const grid_repair_request_max = config.process.grid_repair_request_max;
 
