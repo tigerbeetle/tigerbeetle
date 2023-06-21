@@ -2901,6 +2901,61 @@ pub fn ReplicaType(
             self.commit_dispatch(.prefetch_state_machine);
         }
 
+        /// Commits, frees and pops as many prepares at the head of the pipeline as have quorum.
+        /// Can be called only when the replica is the primary.
+        /// Can be called only when the pipeline has at least one prepare.
+        fn commit_pipeline(self: *Self) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(self.pipeline.queue.prepare_queue.count > 0);
+
+            if (!self.state_machine_opened) {
+                assert(self.commit_stage == .idle);
+                return;
+            }
+
+            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
+            if (self.commit_stage != .idle) {
+                log.debug("{}: commit_pipeline: already committing ({s}; commit_min={})", .{
+                    self.replica,
+                    @tagName(self.commit_stage),
+                    self.commit_min,
+                });
+                return;
+            }
+
+            self.commit_dispatch(.next_pipeline);
+        }
+
+        fn commit_pipeline_next(self: *Self) void {
+            assert(self.commit_stage == .next_pipeline);
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            if (self.pipeline.queue.prepare_queue.head_ptr()) |prepare| {
+                assert(self.commit_min == self.commit_max);
+                assert(self.commit_min + 1 == prepare.message.header.op);
+                assert(self.commit_min + self.pipeline.queue.prepare_queue.count == self.op);
+                assert(self.journal.has(prepare.message.header));
+
+                if (!prepare.ok_quorum_received) {
+                    // Eventually handled by on_prepare_timeout().
+                    log.debug("{}: commit_pipeline_next: waiting for quorum", .{self.replica});
+                    self.commit_dispatch(.idle);
+                    return;
+                }
+
+                const count = prepare.ok_from_all_replicas.count();
+                assert(count >= self.quorum_replication);
+                assert(count <= self.replica_count);
+
+                self.commit_prepare = prepare.message.ref();
+                self.commit_dispatch(.prefetch_state_machine);
+            } else {
+                self.commit_dispatch(.idle);
+            }
+        }
+
         /// Begin the commit path that is common between `commit_pipeline` and `commit_journal`:
         ///
         /// 1. Prefetch.
@@ -3272,61 +3327,6 @@ pub fn ReplicaType(
             if (self.primary_index(self.view) == self.replica) {
                 log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
                 self.send_reply_message_to_client(reply);
-            }
-        }
-
-        /// Commits, frees and pops as many prepares at the head of the pipeline as have quorum.
-        /// Can be called only when the replica is the primary.
-        /// Can be called only when the pipeline has at least one prepare.
-        fn commit_pipeline(self: *Self) void {
-            assert(self.status == .normal);
-            assert(self.primary());
-            assert(self.pipeline.queue.prepare_queue.count > 0);
-
-            if (!self.state_machine_opened) {
-                assert(self.commit_stage == .idle);
-                return;
-            }
-
-            // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
-            if (self.commit_stage != .idle) {
-                log.debug("{}: commit_pipeline: already committing ({s}; commit_min={})", .{
-                    self.replica,
-                    @tagName(self.commit_stage),
-                    self.commit_min,
-                });
-                return;
-            }
-
-            self.commit_dispatch(.next_pipeline);
-        }
-
-        fn commit_pipeline_next(self: *Self) void {
-            assert(self.commit_stage == .next_pipeline);
-            assert(self.status == .normal);
-            assert(self.primary());
-
-            if (self.pipeline.queue.prepare_queue.head_ptr()) |prepare| {
-                assert(self.commit_min == self.commit_max);
-                assert(self.commit_min + 1 == prepare.message.header.op);
-                assert(self.commit_min + self.pipeline.queue.prepare_queue.count == self.op);
-                assert(self.journal.has(prepare.message.header));
-
-                if (!prepare.ok_quorum_received) {
-                    // Eventually handled by on_prepare_timeout().
-                    log.debug("{}: commit_pipeline_next: waiting for quorum", .{self.replica});
-                    self.commit_dispatch(.idle);
-                    return;
-                }
-
-                const count = prepare.ok_from_all_replicas.count();
-                assert(count >= self.quorum_replication);
-                assert(count <= self.replica_count);
-
-                self.commit_prepare = prepare.message.ref();
-                self.commit_dispatch(.prefetch_state_machine);
-            } else {
-                self.commit_dispatch(.idle);
             }
         }
 
