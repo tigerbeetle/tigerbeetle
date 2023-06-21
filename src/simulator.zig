@@ -385,6 +385,9 @@ pub const Simulator = struct {
         simulator.cluster.deinit();
     }
 
+    // TODO(Table sync): replica_convergence() should check that scrubbing has finished syncing
+    // tables. Or if it didn't finish, verify that the blocks we are stuck waiting for do not exist
+    // in the living replicas.
     pub fn done(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
         assert(simulator.requests_sent == simulator.options.requests_max);

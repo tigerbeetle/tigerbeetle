@@ -371,7 +371,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             var nonce = cluster.replicas[replica_index].nonce + 1;
             // Pass the old replica's Time through to the new replica. It will continue to tick while
-            // the replica is crashed, to ensure the clocks don't desyncronize too far to recover.
+            // the replica is crashed, to ensure the clocks don't desynchronize too far to recover.
             var time = cluster.replicas[replica_index].time;
             try cluster.open_replica(replica_index, nonce, time);
             cluster.network.process_enable(.{ .replica = replica_index });

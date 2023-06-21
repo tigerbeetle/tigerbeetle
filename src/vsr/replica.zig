@@ -7937,7 +7937,10 @@ pub fn ReplicaType(
 
             if (candidate.checkpoint_op == 0) return;
             if (candidate.checkpoint_op < self.op_checkpoint()) return;
-            if (!self.sync_target_quorum.replace(header.replica, &candidate)) return;
+
+            if (!self.sync_target_quorum.replace(header.replica, &candidate)) {
+                if (header.command == .ping) return;
+            }
 
             if (self.sync_target_max != null and
                 self.sync_target_max.?.checkpoint_op >= candidate.checkpoint_op)
