@@ -1923,9 +1923,19 @@ pub fn ReplicaType(
             const op_max = message.header.op;
             assert(op_max >= op_min);
 
-            const count = self.copy_latest_headers_and_set_size(op_min, op_max, null, response);
-            assert(count >= 0);
-            assert(@divExact(response.header.size, @sizeOf(Header)) == 1 + count);
+            // We must add 1 because op_max and op_min are both inclusive:
+            const count_max = std.math.min(constants.request_headers_max, op_max - op_min + 1);
+            assert(count_max * @sizeOf(vsr.Header) <= constants.message_body_size_max);
+
+            const count = self.journal.copy_latest_headers_between(
+                op_min,
+                op_max,
+                std.mem.bytesAsSlice(
+                    Header,
+                    response.buffer[@sizeOf(Header)..][0 .. @sizeOf(Header) * count_max],
+                ),
+            );
+            assert(count <= count_max);
 
             if (count == 0) {
                 log.debug("{}: on_request_headers: ignoring (op={}..{}, no headers)", .{
@@ -1936,8 +1946,12 @@ pub fn ReplicaType(
                 return;
             }
 
+            response.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
             response.header.set_checksum_body(response.body());
             response.header.set_checksum();
+
+            // Assert that the headers are valid.
+            _ = message_body_as_headers(response);
 
             self.send_message_to_replica(message.header.replica, response);
         }
@@ -3430,39 +3444,6 @@ pub fn ReplicaType(
                 // If no entry exists, then the session must have been evicted while being prepared.
                 // We can still send the reply, the next request will receive an eviction message.
             }
-        }
-
-        fn copy_latest_headers_and_set_size(
-            self: *const Self,
-            op_min: u64,
-            op_max: u64,
-            count_max: ?usize,
-            message: *Message,
-        ) usize {
-            assert(op_max >= op_min);
-            assert(count_max == null or count_max.? > 0);
-            assert(message.header.command == .headers);
-
-            const body_size_max = @sizeOf(Header) * std.math.min(
-                @divExact(message.buffer.len - @sizeOf(Header), @sizeOf(Header)),
-                // We must add 1 because op_max and op_min are both inclusive:
-                count_max orelse std.math.min(64, op_max - op_min + 1),
-            );
-            assert(body_size_max >= @sizeOf(Header));
-            assert(count_max == null or body_size_max == count_max.? * @sizeOf(Header));
-
-            const count = self.journal.copy_latest_headers_between(
-                op_min,
-                op_max,
-                std.mem.bytesAsSlice(
-                    Header,
-                    message.buffer[@sizeOf(Header)..][0..body_size_max],
-                ),
-            );
-
-            message.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
-
-            return count;
         }
 
         /// Construct a SV/DVC message, including attached headers from the current log_view.
