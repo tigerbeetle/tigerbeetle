@@ -3330,39 +3330,6 @@ pub fn ReplicaType(
             }
         }
 
-        fn copy_latest_headers_and_set_size(
-            self: *const Self,
-            op_min: u64,
-            op_max: u64,
-            count_max: ?usize,
-            message: *Message,
-        ) usize {
-            assert(op_max >= op_min);
-            assert(count_max == null or count_max.? > 0);
-            assert(message.header.command == .headers);
-
-            const body_size_max = @sizeOf(Header) * std.math.min(
-                @divExact(message.buffer.len - @sizeOf(Header), @sizeOf(Header)),
-                // We must add 1 because op_max and op_min are both inclusive:
-                count_max orelse std.math.min(64, op_max - op_min + 1),
-            );
-            assert(body_size_max >= @sizeOf(Header));
-            assert(count_max == null or body_size_max == count_max.? * @sizeOf(Header));
-
-            const count = self.journal.copy_latest_headers_between(
-                op_min,
-                op_max,
-                std.mem.bytesAsSlice(
-                    Header,
-                    message.buffer[@sizeOf(Header)..][0..body_size_max],
-                ),
-            );
-
-            message.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
-
-            return count;
-        }
-
         /// Creates an entry in the client table when registering a new client session.
         /// Asserts that the new session does not yet exist.
         /// Evicts another entry deterministically, if necessary, to make space for the insert.
@@ -3422,6 +3389,80 @@ pub fn ReplicaType(
             if (reply.header.size != @sizeOf(Header)) {
                 self.client_replies.write_reply(reply_slot, reply);
             }
+        }
+
+        fn client_table_entry_update(self: *Self, reply: *Message) void {
+            assert(reply.header.command == .reply);
+            assert(reply.header.operation != .register);
+            assert(reply.header.client > 0);
+            assert(reply.header.op == reply.header.commit);
+            assert(reply.header.commit > 0);
+            assert(reply.header.request > 0);
+
+            if (self.client_sessions().get(reply.header.client)) |entry| {
+                assert(entry.header.command == .reply);
+                assert(entry.header.op == entry.header.commit);
+                assert(entry.header.commit >= entry.session);
+
+                assert(entry.header.client == reply.header.client);
+                assert(entry.header.request + 1 == reply.header.request);
+                assert(entry.header.op < reply.header.op);
+                assert(entry.header.commit < reply.header.commit);
+
+                // TODO Use this reply's prepare to cross-check against the entry's prepare, if we
+                // still have access to the prepare in the journal (it may have been snapshotted).
+
+                log.debug("{}: client_table_entry_update: client={} session={} request={}", .{
+                    self.replica,
+                    reply.header.client,
+                    entry.session,
+                    reply.header.request,
+                });
+
+                entry.header = reply.header.*;
+                if (entry.header.size != @sizeOf(Header)) {
+                    self.client_replies.write_reply(
+                        self.client_sessions().get_slot_for_header(reply.header).?,
+                        reply,
+                    );
+                }
+            } else {
+                // If no entry exists, then the session must have been evicted while being prepared.
+                // We can still send the reply, the next request will receive an eviction message.
+            }
+        }
+
+        fn copy_latest_headers_and_set_size(
+            self: *const Self,
+            op_min: u64,
+            op_max: u64,
+            count_max: ?usize,
+            message: *Message,
+        ) usize {
+            assert(op_max >= op_min);
+            assert(count_max == null or count_max.? > 0);
+            assert(message.header.command == .headers);
+
+            const body_size_max = @sizeOf(Header) * std.math.min(
+                @divExact(message.buffer.len - @sizeOf(Header), @sizeOf(Header)),
+                // We must add 1 because op_max and op_min are both inclusive:
+                count_max orelse std.math.min(64, op_max - op_min + 1),
+            );
+            assert(body_size_max >= @sizeOf(Header));
+            assert(count_max == null or body_size_max == count_max.? * @sizeOf(Header));
+
+            const count = self.journal.copy_latest_headers_between(
+                op_min,
+                op_max,
+                std.mem.bytesAsSlice(
+                    Header,
+                    message.buffer[@sizeOf(Header)..][0..body_size_max],
+                ),
+            );
+
+            message.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
+
+            return count;
         }
 
         /// Construct a SV/DVC message, including attached headers from the current log_view.
@@ -6789,47 +6830,6 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum == false);
 
             self.send_do_view_change();
-        }
-
-        fn client_table_entry_update(self: *Self, reply: *Message) void {
-            assert(reply.header.command == .reply);
-            assert(reply.header.operation != .register);
-            assert(reply.header.client > 0);
-            assert(reply.header.op == reply.header.commit);
-            assert(reply.header.commit > 0);
-            assert(reply.header.request > 0);
-
-            if (self.client_sessions().get(reply.header.client)) |entry| {
-                assert(entry.header.command == .reply);
-                assert(entry.header.op == entry.header.commit);
-                assert(entry.header.commit >= entry.session);
-
-                assert(entry.header.client == reply.header.client);
-                assert(entry.header.request + 1 == reply.header.request);
-                assert(entry.header.op < reply.header.op);
-                assert(entry.header.commit < reply.header.commit);
-
-                // TODO Use this reply's prepare to cross-check against the entry's prepare, if we
-                // still have access to the prepare in the journal (it may have been snapshotted).
-
-                log.debug("{}: client_table_entry_update: client={} session={} request={}", .{
-                    self.replica,
-                    reply.header.client,
-                    entry.session,
-                    reply.header.request,
-                });
-
-                entry.header = reply.header.*;
-                if (entry.header.size != @sizeOf(Header)) {
-                    self.client_replies.write_reply(
-                        self.client_sessions().get_slot_for_header(reply.header).?,
-                        reply,
-                    );
-                }
-            } else {
-                // If no entry exists, then the session must have been evicted while being prepared.
-                // We can still send the reply, the next request will receive an eviction message.
-            }
         }
 
         /// Whether it is safe to commit or send prepare_ok messages.
