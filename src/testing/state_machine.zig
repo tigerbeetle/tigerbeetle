@@ -102,7 +102,7 @@ pub fn StateMachineType(
         pub fn prepare(
             state_machine: *StateMachine,
             operation: Operation,
-            input: []u8,
+            input: []align(16) u8,
         ) void {
             _ = state_machine;
             _ = operation;
@@ -114,7 +114,7 @@ pub fn StateMachineType(
             callback: fn (*StateMachine) void,
             op: u64,
             operation: Operation,
-            input: []const u8,
+            input: []align(16) const u8,
         ) void {
             _ = op;
             _ = operation;
@@ -143,8 +143,8 @@ pub fn StateMachineType(
             op: u64,
             timestamp: u64,
             operation: Operation,
-            input: []const u8,
-            output: []u8,
+            input: []align(16) const u8,
+            output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             _ = client;
             assert(op != 0);
