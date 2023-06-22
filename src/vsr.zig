@@ -157,6 +157,8 @@ pub const Operation = enum(u8) {
     root = 1,
     /// The value 2 is reserved to register a client session with the cluster.
     register = 2,
+    /// The value 3 is reserved for reconfiguration request.
+    reconfigure = 3,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.
@@ -557,7 +559,11 @@ pub const Header = extern struct {
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
-                if (@enumToInt(self.operation) < constants.vsr_operations_reserved) {
+                if (self.operation == .reconfigure) {
+                    if (self.size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)) {
+                        return "size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)";
+                    }
+                } else if (@enumToInt(self.operation) < constants.vsr_operations_reserved) {
                     return "operation is reserved";
                 }
                 // Thereafter, the client must provide the session number in the context:
@@ -925,6 +931,271 @@ pub const BlockRequest = extern struct {
         assert(@bitSizeOf(BlockRequest) == @sizeOf(BlockRequest) * 8);
     }
 };
+
+/// Body of the builtin operation=.reconfigure request.
+pub const ReconfigurationRequest = extern struct {
+    /// The new list of members.
+    ///
+    /// Request is rejected if it is not a permutation of an existing list of members.
+    /// This is done to separate different failure modes of physically adding a new machine to the
+    /// cluster as opposed to logically changing the set of machines participating in quorums.
+    members: Members,
+    /// The new epoch.
+    ///
+    /// Request is rejected if it isn't exactly current epoch + 1, to protect from operator errors.
+    /// Although there's already an `epoch` field in vsr.Header, we don't want to rely on that for
+    /// reconfiguration itself, as it is updated automatically by the clients, and here we need
+    /// a manual confirmation from the operator.
+    epoch: u32,
+    /// The new replica count.
+    ///
+    /// At the moment, we require this to be equal to the old count.
+    replica_count: u8,
+    /// The new standby count.
+    ///
+    /// At the moment, we require this to be equal to the old count.
+    standby_count: u8,
+    reserved: [42]u8 = [_]u8{0} ** 42,
+    /// The result of this request. Set to zero by the client and filled-in by the primary when it
+    /// accepts a reconfiguration request.
+    result: ReconfigurationResult,
+
+    pub fn validate(
+        request: *const ReconfigurationRequest,
+        current: struct {
+            members: *const Members,
+            epoch: u32,
+            replica_count: u8,
+            standby_count: u8,
+        },
+    ) ReconfigurationResult {
+        assert(member_count(current.members) == current.replica_count + current.standby_count);
+
+        if (request.replica_count == 0) return .replica_count_zero;
+        if (request.replica_count > constants.replicas_max) return .replica_count_max_exceeded;
+        if (request.standby_count > constants.standbys_max) return .standby_count_max_exceeded;
+
+        if (!valid_members(&request.members)) return .members_invalid;
+        if (member_count(&request.members) != request.replica_count + request.standby_count) {
+            return .members_count_invalid;
+        }
+
+        if (!std.mem.allEqual(u8, &request.reserved, 0)) return .reserved_field;
+        if (request.result != .reserved) return .result_must_be_reserved;
+
+        if (request.replica_count != current.replica_count) return .different_replica_count;
+        if (request.standby_count != current.standby_count) return .different_standby_count;
+
+        if (current.epoch == std.math.maxInt(u32)) return .epoch_overflow;
+        if (request.epoch < current.epoch) return .epoch_in_the_past;
+        if (request.epoch > current.epoch + 1) return .epoch_in_the_future;
+
+        assert(valid_members(current.members));
+        assert(valid_members(&request.members));
+        assert(member_count(current.members) == member_count(&request.members));
+        // We have just asserted that the sets have no duplicates and have equal lengths,
+        // so it's enough to check that current.members ⊂ request.members.
+        for (current.members) |member_current| {
+            if (member_current == 0) break;
+            for (request.members) |member| {
+                if (member == member_current) break;
+            } else return .different_member_set;
+        }
+
+        const identical_members = std.mem.eql(u128, &request.members, current.members);
+        if (request.epoch == current.epoch) {
+            return if (identical_members) .configuration_applied else .configuration_conflict;
+        } else {
+            assert(request.epoch == current.epoch + 1);
+            if (identical_members) return .configuration_is_no_op;
+        }
+
+        return .ok;
+    }
+
+    comptime {
+        assert(@sizeOf(ReconfigurationRequest) == 256);
+        assert(@bitSizeOf(ReconfigurationRequest) == @sizeOf(ReconfigurationRequest) * 8);
+    }
+};
+
+pub const ReconfigurationResult = enum(u32) {
+    reserved = 0,
+    /// Reconfiguration request is valid.
+    /// The cluster is guaranteed to transition to the new epoch with the specified configuration.
+    ok = 1,
+
+    /// replica_count must be at least 1.
+    replica_count_zero = 2,
+    replica_count_max_exceeded = 3,
+    standby_count_max_exceeded = 4,
+
+    /// The Members array is syntactically invalid --- duplicate entries or internal zero entries.
+    members_invalid = 5,
+    /// The number of non-zero entries in Members array does not match the sum of replica_count
+    /// and standby_count.
+    members_count_invalid = 6,
+
+    /// A reserved field is non-zero.
+    reserved_field = 7,
+    /// result must be set to zero (.reserved).
+    result_must_be_reserved = 8,
+
+    /// epoch is in the past (smaller than the current epoch).
+    epoch_in_the_past = 9,
+    /// epoch is too far in the future (larger than current epoch + 1).
+    epoch_in_the_future = 10,
+    /// The epoch counter is saturated. No further reconfiguration is possible.
+    epoch_overflow = 11,
+
+    /// Reconfiguration changes the number of replicas, that is not currently supported.
+    different_replica_count = 12,
+    /// Reconfiguration changes the number of standbys, that is not currently supported.
+    different_standby_count = 13,
+    /// members must be a permutation of the current set of cluster members.
+    different_member_set = 14,
+
+    /// epoch is equal to the current epoch and configuration is the same.
+    /// This is a duplicate request.
+    configuration_applied = 15,
+    /// epoch is equal to the current epoch but configuration is different.
+    /// A conflicting reconfiguration request was accepted.
+    configuration_conflict = 16,
+    /// The request is valid, but there's no need to advance the epoch, because / configuration
+    /// exactly matches the current one.
+    configuration_is_no_op = 17,
+};
+
+test "ReconfigurationRequest" {
+    const ResultSet = std.EnumSet(ReconfigurationResult);
+
+    const Test = struct {
+        members: Members = to_members(.{ 1, 2, 3, 4 }),
+        epoch: u32 = 1,
+        replica_count: u8 = 3,
+        standby_count: u8 = 1,
+
+        tested: ResultSet = ResultSet{},
+
+        fn check(t: *@This(), request: ReconfigurationRequest, expected: ReconfigurationResult) !void {
+            const actual = request.validate(.{
+                .members = &t.members,
+                .epoch = t.epoch,
+                .replica_count = t.replica_count,
+                .standby_count = t.standby_count,
+            });
+
+            try std.testing.expectEqual(expected, actual);
+            t.tested.insert(expected);
+        }
+
+        fn to_members(m: anytype) Members {
+            var result = [_]u128{0} ** constants.nodes_max;
+            inline for (m) |member, index| result[index] = member;
+            return result;
+        }
+    };
+
+    var t: Test = .{};
+
+    const r: ReconfigurationRequest = .{
+        .members = Test.to_members(.{ 4, 1, 2, 3 }),
+        .epoch = 2,
+        .replica_count = 3,
+        .standby_count = 1,
+        .result = .reserved,
+    };
+
+    try t.check(r, .ok);
+
+    try t.check(
+        stdx.update(r, .{ .replica_count = 0 }),
+        .replica_count_zero,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .replica_count = 255 }),
+        .replica_count_max_exceeded,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .standby_count = constants.standbys_max + 1 }),
+        .standby_count_max_exceeded,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .members = Test.to_members(.{ 4, 1, 4, 3 }) }),
+        .members_invalid,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .members = Test.to_members(.{ 4, 1, 0, 2, 3 }) }),
+        .members_invalid,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .replica_count = 4 }),
+        .members_count_invalid,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .reserved = [_]u8{1} ** 42 }),
+        .reserved_field,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .result = .ok }),
+        .result_must_be_reserved,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .epoch = 0 }),
+        .epoch_in_the_past,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .epoch = 3 }),
+        .epoch_in_the_future,
+    );
+
+    t.epoch = std.math.maxInt(u32);
+    try t.check(r, .epoch_overflow);
+    t.epoch = 1;
+
+    try t.check(
+        stdx.update(r, .{ .members = Test.to_members(.{ 1, 2, 3 }), .replica_count = 2 }),
+        .different_replica_count,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .members = Test.to_members(.{ 1, 2, 3, 4, 5 }), .standby_count = 2 }),
+        .different_standby_count,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .members = Test.to_members(.{ 8, 1, 2, 3 }) }),
+        .different_member_set,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .epoch = 1, .members = Test.to_members(.{ 1, 2, 3, 4 }) }),
+        .configuration_applied,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .epoch = 1 }),
+        .configuration_conflict,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .members = Test.to_members(.{ 1, 2, 3, 4 }) }),
+        .configuration_is_no_op,
+    );
+
+    assert(t.tested.count() < ResultSet.initFull().count());
+    t.tested.insert(.reserved);
+    assert(t.tested.count() == ResultSet.initFull().count());
+}
 
 pub const Timeout = struct {
     name: []const u8,
@@ -1312,13 +1583,20 @@ test "quorums" {
     }
 }
 
+/// Set of replica_ids of cluster members, where order of ids determines replica indexes.
+///
+/// First replica_count elements are active replicas,
+/// then standby_count standbys, the rest are zeros.
+/// Order determines ring topology for replication.
+pub const Members = [constants.nodes_max]u128;
+
 /// Deterministically assigns replica_ids for the initial configuration.
 ///
 /// Eventually, we want to identify replicas using random u128 ids to prevent operator errors.
 /// However, that requires unergonomic two-step process for spinning a new cluster up.  To avoid
 /// needlessly compromising the experience until reconfiguration is fully implemented, derive
 /// replica ids for the initial cluster deterministically.
-pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
+pub fn root_members(cluster: u32) Members {
     const IdSeed = packed struct {
         cluster_config_checksum: u128 = config.configs.current.cluster.checksum(),
         cluster: u32,
@@ -1331,25 +1609,33 @@ pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
         result[replica] = checksum(std.mem.asBytes(&IdSeed{ .cluster = cluster, .replica = replica }));
     }
 
-    assert_valid_members(&result);
+    assert(valid_members(&result));
     return result;
 }
 
 /// Check that:
 ///  - all non-zero elements are different
 ///  - all zero elements are trailing
-pub fn assert_valid_members(members: *const [constants.nodes_max]u128) void {
+pub fn valid_members(members: *const Members) bool {
     for (members) |replica_i, i| {
         for (members[0..i]) |replica_j| {
-            if (replica_j == 0) assert(replica_i == 0);
-            if (replica_j != 0) assert(replica_j != replica_i);
+            if (replica_j == 0 and replica_i != 0) return false;
+            if (replica_j != 0 and replica_j == replica_i) return false;
         }
     }
+    return true;
 }
 
-pub fn assert_valid_member(members: *const [constants.nodes_max]u128, replica_id: u128) void {
+fn member_count(members: *const Members) u8 {
+    for (members) |member, index| {
+        if (member == 0) return @intCast(u8, index);
+    }
+    return constants.nodes_max;
+}
+
+pub fn assert_valid_member(members: *const Members, replica_id: u128) void {
     assert(replica_id != 0);
-    assert_valid_members(members);
+    assert(valid_members(members));
     for (members) |member| {
         if (member == replica_id) break;
     } else unreachable;

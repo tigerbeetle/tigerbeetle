@@ -225,6 +225,21 @@ pub inline fn hash_inline(value: anytype) u64 {
     });
 }
 
+/// Returns a copy of `base` with fields changed according to `diff`.
+///
+/// Intended exclusively for table-driven prototype-based tests. Write
+/// updates explicitly in production code.
+pub fn update(base: anytype, diff: anytype) @TypeOf(base) {
+    assert(builtin.is_test);
+    assert(@typeInfo(@TypeOf(base)) == .Struct);
+
+    var updated = base;
+    inline for (std.meta.fields(@TypeOf(diff))) |f| {
+        @field(updated, f.name) = @field(diff, f.name);
+    }
+    return updated;
+}
+
 /// Inline version of Google Abseil "LowLevelHash" (inspired by wyhash).
 /// https://github.com/abseil/abseil-cpp/blob/master/absl/hash/internal/low_level_hash.cc
 inline fn low_level_hash(seed: u64, input: anytype) u64 {
