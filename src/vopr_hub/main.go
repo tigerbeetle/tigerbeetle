@@ -30,6 +30,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"strconv"
 )
 
 const max_concurrent_connections = 4
@@ -334,28 +335,59 @@ func (limited_buffer *size_limited_buffer) Write(byte_array []byte) (int, error)
 	}
 }
 
+func do_github_request(method, path string, content, hash []byte) *http.Response {
+	for {
+		var body io.Reader = nil
+		if content != nil {
+			body = strings.NewReader(string(content))
+		}
+
+		req, err := http.NewRequest(method, path, body)
+		if err != nil {
+			log_error("Failed to create the HTTP request for the GitHub API", hash)
+			panic(err.Error())
+		}
+
+		req.Header.Set("Authorization", "token "+developer_token)
+
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log_error("Failed to send the HTTP request for the GitHub API", hash)
+			panic(err.Error())
+		}
+
+		if res.StatusCode == 403 && res.Header.Get("x-ratelimit-limit") == "0" {
+			res.Body.Close()
+
+			reset_at := res.Header.Get("x-ratelimit-reset")
+			expires, err := strconv.ParseInt(reset_at, 10, 64)
+			if err != nil {
+				log_error(fmt.Sprintf("Failed to parse rate limit reset %s", reset_at), hash)
+				panic(err.Error())
+			}
+			
+			deadline := time.Unix(expires, 0)
+			time.Sleep(deadline.Sub(time.Now()))
+			continue
+		}
+
+		return res
+	}
+}
+
 func get_branch_names(commit_sha string, message_hash []byte) string {
 	branches := []Branch{}
 	var branch_names string
 
-	get_request, err := http.NewRequest(
+	res := do_github_request(
 		"GET",
 		fmt.Sprintf("%s/commits/%s/branches-where-head", repository_url, commit_sha),
 		nil,
+		message_hash,
 	)
-	if err != nil {
-		log_error("unable to create get request to get branch names", message_hash)
-		panic(err.Error())
-	}
-	get_request.Header.Set("Authorization", "token "+developer_token)
-	res, err := http.DefaultClient.Do(get_request)
-	if err != nil {
-		log_error("Failed to send the HTTP request for the GitHub API", message_hash)
-		panic(err.Error())
-	}
-	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
+	res.Body.Close()
 
 	if res.StatusCode > 299 {
 		log_error(
@@ -544,8 +576,8 @@ func process(message vopr_message) {
 		return
 	}
 
-	// Get the number of issues with the `seed` label.
-	num_issues := get_issues()
+	// Get the number of issues opened by the vopr_hub already.
+	num_issues := get_open_issue_count()
 	// If there are 6 or more VOPR created issues on GitHub then don't continue message processing.
 	if num_issues >= 6 {
 		log_info("There are too many open GitHub issues.", message.hash[:])
@@ -625,26 +657,18 @@ func is_duplicate_bug_1_and_2(message vopr_message) bool {
 	}
 }
 
-func get_issues() int {
+func get_open_issue_count() int {
 	issues := []Issue{}
-	// All issues created by the VOPR Hub will contain the `seed` label.
-	get_request, err := http.NewRequest(
+
+	res := do_github_request(
 		"GET",
-		repository_url+"/issues?labels=seed",
+		repository_url+"/issues?filter=created",
+		nil,
 		nil,
 	)
-	if err != nil {
-		log_error("unable to create get request to get issues", nil)
-		panic(err.Error())
-	}
-	get_request.Header.Set("Authorization", "token "+developer_token)
-	res, err := http.DefaultClient.Do(get_request)
-	if err != nil {
-		log_error("Failed to send the HTTP request for the GitHub API", nil)
-		panic(err.Error())
-	}
-	defer res.Body.Close()
+
 	body, err := io.ReadAll(res.Body)
+	res.Body.Close()
 
 	if res.StatusCode > 299 {
 		log_error(fmt.Sprintf(
@@ -851,30 +875,19 @@ func create_github_issue(message vopr_message, output *vopr_output) error {
 	}{
 		Title:  title,
 		Body:   body,
-		Labels: []string{"seed", bug_string},
+		Labels: []string{},
 	})
 
 	if error != nil {
 		return error
 	}
 
-	issue := strings.NewReader(string(issue_contents))
-	post_request, error := http.NewRequest(
+	post_response := do_github_request(
 		"POST",
 		repository_url+"/issues",
-		issue,
+		issue_contents,
+		message.hash[:],
 	)
-	if error != nil {
-		log_error("Failed to create the HTTP request for the GitHub API", message.hash[:])
-		return error
-	}
-	post_request.Header.Set("Authorization", "token "+developer_token)
-
-	post_response, error := http.DefaultClient.Do(post_request)
-	if error != nil {
-		log_error("Failed to send the HTTP request for the GitHub API", message.hash[:])
-		return error
-	}
 
 	defer post_response.Body.Close()
 
