@@ -576,8 +576,8 @@ func process(message vopr_message) {
 		return
 	}
 
-	// Get the number of issues with the `seed` label.
-	num_issues := get_issues()
+	// Get the number of issues opened by the vopr_hub already.
+	num_issues := get_open_issue_count()
 	// If there are 6 or more VOPR created issues on GitHub then don't continue message processing.
 	if num_issues >= 6 {
 		log_info("There are too many open GitHub issues.", message.hash[:])
@@ -657,12 +657,12 @@ func is_duplicate_bug_1_and_2(message vopr_message) bool {
 	}
 }
 
-func get_issues() int {
+func get_open_issue_count() int {
 	issues := []Issue{}
 
 	res := do_github_request(
 		"GET",
-		repository_url+"/issues?labels=seed",
+		repository_url+"/issues?filter=created",
 		nil,
 		nil,
 	)
@@ -875,7 +875,7 @@ func create_github_issue(message vopr_message, output *vopr_output) error {
 	}{
 		Title:  title,
 		Body:   body,
-		Labels: []string{"seed", bug_string},
+		Labels: []string{},
 	})
 
 	if error != nil {
