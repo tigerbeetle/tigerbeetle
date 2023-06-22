@@ -165,6 +165,8 @@ jobs:
           NUGET_KEY: ${{ secrets.NUGET_KEY }}
 
   samples_integration_test:
+    if: inputs.version == ''
+
     needs: build
 
     # We use self hosted runners for M1 here. See macos.yml for an explaination
@@ -200,6 +202,7 @@ jobs:
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language dotnet --sample ${{ matrix.sample }}
 
   docs:
+    if: inputs.version == ''
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read
