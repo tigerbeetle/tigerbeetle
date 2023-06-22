@@ -4,6 +4,7 @@ test {
     _ = @import("io.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("stdx.zig");
+    _ = @import("hash_map.zig");
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client_header_test.zig");

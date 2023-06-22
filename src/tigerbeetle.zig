@@ -21,6 +21,7 @@ pub const Account = extern struct {
     comptime {
         assert(@sizeOf(Account) == 128);
         assert(@bitSizeOf(Account) == @sizeOf(Account) * 8);
+        assert(@alignOf(Account) == 16);
     }
 
     pub fn debits_exceed_credits(self: *const Account, amount: u64) bool {
@@ -76,6 +77,7 @@ pub const Transfer = extern struct {
     comptime {
         assert(@sizeOf(Transfer) == 128);
         assert(@bitSizeOf(Transfer) == @sizeOf(Transfer) * 8);
+        assert(@alignOf(Transfer) == 16);
     }
 };
 

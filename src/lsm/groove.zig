@@ -671,12 +671,31 @@ pub fn GrooveType(
         };
 
         pub const PrefetchWorker = struct {
+
+            // Since lookup contexts are used one at a time, it's safe to access
+            // the union's fields and reuse the same memory for all context instances.
+            const LookupContext = extern union {
+                id: if (has_id) IdTree.LookupContext else void,
+                object: ObjectTree.LookupContext,
+
+                // TODO(Zig): No need for this function once Zig is upgraded
+                // and @fieldParentPtr() can be used for unions.
+                // See: https://github.com/ziglang/zig/issues/6611.
+                pub inline fn parent(completion: anytype) *PrefetchWorker {
+                    const T = @TypeOf(completion);
+                    comptime assert((has_id and T == *IdTree.LookupContext) or
+                        T == *ObjectTree.LookupContext);
+
+                    return @fieldParentPtr(
+                        PrefetchWorker,
+                        "lookup",
+                        @ptrCast(*LookupContext, completion),
+                    );
+                }
+            };
+
             context: *PrefetchContext,
-            // TODO(ifreund): use a union for these to save memory, likely an extern union
-            // so that we can safetly @ptrCast() until @fieldParentPtr() is implemented
-            // for unions. See: https://github.com/ziglang/zig/issues/6611
-            lookup_id: if (has_id) IdTree.LookupContext else void = undefined,
-            lookup_object: ObjectTree.LookupContext = undefined,
+            lookup: LookupContext = undefined,
 
             fn lookup_start_next(worker: *PrefetchWorker) void {
                 const id = worker.context.id_iterator.next() orelse {
@@ -694,7 +713,7 @@ pub fn GrooveType(
                     id.*,
                 )) |id_tree_value| {
                     assert(!id_tree_value.tombstone());
-                    lookup_id_callback(&worker.lookup_id, id_tree_value);
+                    lookup_id_callback(&worker.lookup.id, id_tree_value);
 
                     if (constants.verify) {
                         // If the id is cached, then we must be prefetching it because the object
@@ -709,7 +728,7 @@ pub fn GrooveType(
                     // to the auxiliary prefetch_objects hash map.
                     worker.context.groove.ids.lookup_from_levels(
                         lookup_id_callback,
-                        &worker.lookup_id,
+                        &worker.lookup.id,
                         worker.context.snapshot,
                         id.*,
                     );
@@ -720,7 +739,9 @@ pub fn GrooveType(
                 completion: *IdTree.LookupContext,
                 result: ?*const IdTreeValue,
             ) void {
-                const worker = @fieldParentPtr(PrefetchWorker, "lookup_id", completion);
+                const worker = LookupContext.parent(completion);
+                const key_verify = if (constants.verify) worker.lookup.id.key else {};
+                worker.lookup = undefined;
 
                 if (result) |id_tree_value| {
                     if (constants.verify) {
@@ -728,7 +749,7 @@ pub fn GrooveType(
                         assert(
                             worker.context.groove.ids.lookup_from_memory(
                                 worker.context.snapshot,
-                                worker.lookup_id.key,
+                                key_verify,
                             ) == null or
                                 worker.context.groove.objects.lookup_from_memory(
                                 worker.context.snapshot,
@@ -761,7 +782,7 @@ pub fn GrooveType(
 
                 worker.context.groove.objects.lookup_from_levels(
                     lookup_object_callback,
-                    &worker.lookup_object,
+                    &worker.lookup.object,
                     worker.context.snapshot,
                     timestamp,
                 );
@@ -771,7 +792,8 @@ pub fn GrooveType(
                 completion: *ObjectTree.LookupContext,
                 result: ?*const Object,
             ) void {
-                const worker = @fieldParentPtr(PrefetchWorker, "lookup_object", completion);
+                const worker = LookupContext.parent(completion);
+                worker.lookup = undefined;
 
                 // The result must be non-null as we keep the ID (if any) and Object trees in sync.
                 const object = result.?;

@@ -221,7 +221,6 @@ pub fn decode_events(
         .create_transfers => try decode_events_from_array(env, array, Transfer, output),
         .lookup_accounts => try decode_events_from_array(env, array, u128, output),
         .lookup_transfers => try decode_events_from_array(env, array, u128, output),
-        else => unreachable,
     };
 }
 
@@ -688,9 +687,6 @@ fn on_result(user_data: u128, operation: Operation, results: Client.Error![]cons
 
     if (results) |value| {
         const napi_results = switch (operation) {
-            .reserved, .root, .register => {
-                translate.throw(env, "Reserved operation.") catch return;
-            },
             .create_accounts => encode_napi_results_array(
                 CreateAccountsResult,
                 env,

@@ -1,10 +1,28 @@
 name: "Release (latest)"
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+
+  workflow_call:
+    secrets:
+      TIGERBEETLE_NODE_PUBLISH_KEY:
+        required: true
+      NUGET_KEY:
+        required: true
+      MAVEN_GPG_SECRET_KEY:
+        required: true
+      MAVEN_CENTRAL_USERNAME:
+        required: true
+      MAVEN_CENTRAL_TOKEN:
+        required: true
+      MAVEN_GPG_SECRET_KEY_PASSWORD:
+        required: true
+      TIGERBEETLE_GO_DEPLOY_KEY:
+        required: true
+    inputs:
+      version:
+        required: false
+        type: string
 
 jobs:
   version:

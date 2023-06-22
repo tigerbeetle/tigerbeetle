@@ -4,7 +4,7 @@ on:
   workflow_call:
     secrets:
       TIGERBEETLE_GO_DEPLOY_KEY:
-        required: true
+        required: false
     inputs:
       version:
         required: false
@@ -21,7 +21,7 @@ jobs:
       - name: Upload binaries
         uses: actions/upload-artifact@v3
         with:
-          name: go-binaries-${{ github.sha }}
+          name: go-binaries-${{ github.sha }}-${{ inputs.version }}
           path: src/clients/go/pkg/native
 
   publish:
@@ -36,7 +36,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v3
         with:
-          name: go-binaries-${{ github.sha }}
+          name: go-binaries-${{ github.sha }}-${{ inputs.version }}
           path: src/clients/go/pkg/native
       - run: ./scripts/publish.sh
         env:
@@ -44,6 +44,8 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
 
   samples_integration_test:
+    timeout-minutes: 20
+
     if: inputs.version == ''
     needs: binaries
 
@@ -63,7 +65,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v3
         with:
-          name: go-binaries-${{ github.sha }}
+          name: go-binaries-${{ github.sha }}-${{ inputs.version }}
           path: src/clients/go/pkg/native
 
       # Grab Zig
@@ -86,6 +88,8 @@ jobs:
           ./zig-out/bin/client_integration.exe --language go --sample ${{ matrix.sample }}
 
   docs:
+    timeout-minutes: 20
+
     if: inputs.version == ''
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
@@ -115,6 +119,6 @@ jobs:
           $env:CC = "$(pwd)\zig\zig.exe cc"
           .\scripts\build.bat client_docs
           .\zig-out\bin\client_docs --language go
-      
+
       - if: matrix.os == 'ubuntu-latest'
         run: ./scripts/fail_on_diff.sh

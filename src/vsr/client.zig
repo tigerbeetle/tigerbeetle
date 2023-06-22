@@ -242,7 +242,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             callback: Request.Callback,
             message: *Message,
         ) void {
-            assert(@enumToInt(message.header.operation) >= constants.vsr_operations_reserved);
+            assert(!message.header.operation.reserved());
             const operation = message.header.operation.cast(StateMachine);
 
             self.register();
@@ -372,7 +372,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 inflight.user_data,
                 reply.header.request,
                 reply.header.size,
-                @tagName(reply.header.operation.cast(StateMachine)),
+                reply.header.operation.tag_name(StateMachine),
             });
 
             assert(reply.header.parent == self.parent);
@@ -413,7 +413,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
 
             if (inflight.callback) |callback| {
-                assert(inflight.message.header.operation != .register);
+                assert(!inflight.message.header.operation.reserved());
 
                 callback(
                     inflight.user_data,
