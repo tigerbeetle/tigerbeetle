@@ -191,7 +191,7 @@ jobs:
 
       - uses: actions/download-artifact@v3
         with:
-          name: nuget-artifact
+          name: nuget-artifact-${{ inputs.version }}
           path: ./nuget
 
       # Grab Zig
