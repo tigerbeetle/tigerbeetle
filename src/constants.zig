@@ -91,25 +91,18 @@ pub const memory_size_max_default = config.process.memory_size_max_default;
 ///   - low temporal locality
 ///   - negative expected result
 ///
-/// The maximum number of accounts to store in memory:
+/// The default size of the accounts in-memory cache:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_accounts_max = config.process.cache_accounts_max;
+pub const cache_accounts_size_default = config.process.cache_accounts_size_default;
 
-/// The maximum number of transfers to store in memory:
+/// The default size of the transfers in-memory cache:
 /// This impacts the amount of memory allocated at initialization by the server.
 /// We allocate more capacity than the number of transfers for a safe hash table load factor.
-pub const cache_transfers_max = config.process.cache_transfers_max;
+pub const cache_transfers_size_default = config.process.cache_transfers_size_default;
 
-/// The maximum number of two-phase transfers to store in memory:
+/// The default size of the two-phase transfers in-memory cache:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_transfers_posted_max = config.process.cache_transfers_posted_max;
-
-comptime {
-    // SetAssociativeCache requires a power-of-two cardinality.
-    assert(cache_accounts_max == 0 or std.math.isPowerOfTwo(cache_accounts_max));
-    assert(cache_transfers_max == 0 or std.math.isPowerOfTwo(cache_transfers_max));
-    assert(cache_transfers_posted_max == 0 or std.math.isPowerOfTwo(cache_transfers_posted_max));
-}
+pub const cache_transfers_posted_size_default = config.process.cache_transfers_posted_size_default;
 
 /// The size of the client replies zone.
 pub const client_replies_size = clients_max * message_size_max;
@@ -254,6 +247,16 @@ comptime {
     assert(view_change_headers_max > view_change_headers_suffix_max);
 }
 
+/// The maximum number of headers to include with a response to a command=request_headers message.
+pub const request_headers_max = std.math.min(
+    @divFloor(message_body_size_max, @sizeOf(vsr.Header)),
+    64,
+);
+
+comptime {
+    assert(request_headers_max > 0);
+}
+
 /// The maximum number of block addresses/checksums requested by a single command=request_blocks.
 pub const grid_repair_request_max = config.process.grid_repair_request_max;
 
@@ -262,6 +265,9 @@ pub const grid_repair_reads_max = config.process.grid_repair_reads_max;
 
 /// The number of grid writes allocated to handle incoming command=block messages.
 pub const grid_repair_writes_max = config.process.grid_repair_writes_max;
+
+/// The default sizing of the grid cache. It's expected for operators to override this on the CLI.
+pub const grid_cache_size_default = config.process.grid_cache_size_default;
 
 comptime {
     assert(grid_repair_request_max > 0);

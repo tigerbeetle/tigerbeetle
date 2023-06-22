@@ -226,11 +226,6 @@ pub fn StateMachineType(
         });
 
         pub const Operation = enum(u8) {
-            /// Operations reserved by VR protocol (for all state machines):
-            reserved = 0,
-            root = 1,
-            register = 2,
-
             /// Operations exported by TigerBeetle:
             create_accounts = config.vsr_operations_reserved + 0,
             create_transfers = config.vsr_operations_reserved + 1,
@@ -245,19 +240,39 @@ pub fn StateMachineType(
             cache_entries_posted: u32,
         };
 
+        // Since prefetch contexts are used one at a time, it's safe to access
+        // the union's fields and reuse the same memory for all context instances.
+        const PrefetchContext = extern union {
+            accounts_immutable: AccountsImmutableGroove.PrefetchContext,
+            accounts_mutable: AccountsMutableGroove.PrefetchContext,
+            transfers: TransfersGroove.PrefetchContext,
+            posted: PostedGroove.PrefetchContext,
+
+            // TODO(Zig): No need for this function once Zig is upgraded
+            // and @fieldParentPtr() can be used for unions.
+            // See: https://github.com/ziglang/zig/issues/6611.
+            pub inline fn parent(completion: anytype) *StateMachine {
+                const T = @TypeOf(completion);
+                comptime assert(T == *AccountsImmutableGroove.PrefetchContext or
+                    T == *AccountsMutableGroove.PrefetchContext or
+                    T == *TransfersGroove.PrefetchContext or
+                    T == *PostedGroove.PrefetchContext);
+
+                return @fieldParentPtr(
+                    StateMachine,
+                    "prefetch_context",
+                    @ptrCast(*PrefetchContext, completion),
+                );
+            }
+        };
+
         prepare_timestamp: u64,
         commit_timestamp: u64,
         forest: Forest,
 
         prefetch_input: ?[]align(16) const u8 = null,
         prefetch_callback: ?fn (*StateMachine) void = null,
-        // TODO(ifreund): use a union for these to save memory, likely an extern union
-        // so that we can safetly @ptrCast() until @fieldParentPtr() is implemented
-        // for unions. See: https://github.com/ziglang/zig/issues/6611
-        prefetch_accounts_immutable_context: AccountsImmutableGroove.PrefetchContext = undefined,
-        prefetch_accounts_mutable_context: AccountsMutableGroove.PrefetchContext = undefined,
-        prefetch_transfers_context: TransfersGroove.PrefetchContext = undefined,
-        prefetch_posted_context: PostedGroove.PrefetchContext = undefined,
+        prefetch_context: PrefetchContext = undefined,
 
         open_callback: ?fn (*StateMachine) void = null,
         compact_callback: ?fn (*StateMachine) void = null,
@@ -294,7 +309,6 @@ pub fn StateMachineType(
                 .create_transfers => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
-                else => unreachable,
             };
         }
 
@@ -304,7 +318,6 @@ pub fn StateMachineType(
                 .create_transfers => CreateTransfersResult,
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
-                else => unreachable,
             };
         }
 
@@ -324,18 +337,14 @@ pub fn StateMachineType(
             callback(self);
         }
 
-        /// Returns the header's timestamp.
-        pub fn prepare(self: *StateMachine, operation: Operation, input: []u8) u64 {
-            switch (operation) {
-                .reserved => unreachable,
-                .root => unreachable,
-                .register => {},
-                .create_accounts => self.prepare_timestamp += mem.bytesAsSlice(Account, input).len,
-                .create_transfers => self.prepare_timestamp += mem.bytesAsSlice(Transfer, input).len,
-                .lookup_accounts => {},
-                .lookup_transfers => {},
-            }
-            return self.prepare_timestamp;
+        /// Updates `prepare_timestamp` to the highest timestamp of the response.
+        pub fn prepare(self: *StateMachine, operation: Operation, input: []align(16) u8) void {
+            self.prepare_timestamp += switch (operation) {
+                .create_accounts => mem.bytesAsSlice(Account, input).len,
+                .create_transfers => mem.bytesAsSlice(Transfer, input).len,
+                .lookup_accounts => 0,
+                .lookup_transfers => 0,
+            };
         }
 
         pub fn prefetch(
@@ -348,13 +357,6 @@ pub fn StateMachineType(
             _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
-
-            // NOTE: prefetch(.register)'s callback should end up calling commit()
-            // (which is always async) instead of recursing, so this inline callback is fine.
-            if (operation == .register) {
-                callback(self);
-                return;
-            }
 
             tracer.start(
                 &self.tracer_slot,
@@ -372,7 +374,6 @@ pub fn StateMachineType(
             self.forest.grooves.posted.prefetch_setup(null);
 
             return switch (operation) {
-                .reserved, .root, .register => unreachable,
                 .create_accounts => {
                     self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
                 },
@@ -393,6 +394,7 @@ pub fn StateMachineType(
             const callback = self.prefetch_callback.?;
             self.prefetch_input = null;
             self.prefetch_callback = null;
+            self.prefetch_context = undefined;
 
             tracer.end(
                 &self.tracer_slot,
@@ -408,18 +410,14 @@ pub fn StateMachineType(
             }
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_create_accounts_immutable_callback,
-                &self.prefetch_accounts_immutable_context,
+                &self.prefetch_context.accounts_immutable,
             );
         }
 
         fn prefetch_create_accounts_immutable_callback(
             completion: *AccountsImmutableGroove.PrefetchContext,
         ) void {
-            const self = @fieldParentPtr(
-                StateMachine,
-                "prefetch_accounts_immutable_context",
-                completion,
-            );
+            const self = PrefetchContext.parent(completion);
 
             // Nothing to prefetch_enqueue() from accounts_mutable as accounts_immutable
             // is all that is needed to check for pre-existing accounts before creating one.
@@ -427,19 +425,14 @@ pub fn StateMachineType(
 
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_create_accounts_mutable_callback,
-                &self.prefetch_accounts_mutable_context,
+                &self.prefetch_context.accounts_mutable,
             );
         }
 
         fn prefetch_create_accounts_mutable_callback(
             completion: *AccountsMutableGroove.PrefetchContext,
         ) void {
-            const self = @fieldParentPtr(
-                StateMachine,
-                "prefetch_accounts_mutable_context",
-                completion,
-            );
-
+            const self = PrefetchContext.parent(completion);
             self.prefetch_finish();
         }
 
@@ -457,12 +450,12 @@ pub fn StateMachineType(
 
             self.forest.grooves.transfers.prefetch(
                 prefetch_create_transfers_callback_transfers,
-                &self.prefetch_transfers_context,
+                &self.prefetch_context.transfers,
             );
         }
 
         fn prefetch_create_transfers_callback_transfers(completion: *TransfersGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_transfers_context", completion);
+            const self = PrefetchContext.parent(completion);
 
             const transfers = mem.bytesAsSlice(Event(.create_transfers), self.prefetch_input.?);
             for (transfers) |*t| {
@@ -479,12 +472,12 @@ pub fn StateMachineType(
 
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_create_transfers_callback_accounts_immutable,
-                &self.prefetch_accounts_immutable_context,
+                &self.prefetch_context.accounts_immutable,
             );
         }
 
         fn prefetch_create_transfers_callback_accounts_immutable(completion: *AccountsImmutableGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_immutable_context", completion);
+            const self = PrefetchContext.parent(completion);
 
             const transfers = mem.bytesAsSlice(Event(.create_transfers), self.prefetch_input.?);
             for (transfers) |*t| {
@@ -509,21 +502,21 @@ pub fn StateMachineType(
 
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_create_transfers_callback_accounts_mutable,
-                &self.prefetch_accounts_mutable_context,
+                &self.prefetch_context.accounts_mutable,
             );
         }
 
         fn prefetch_create_transfers_callback_accounts_mutable(completion: *AccountsMutableGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_mutable_context", completion);
+            const self = PrefetchContext.parent(completion);
 
             self.forest.grooves.posted.prefetch(
                 prefetch_create_transfers_callback_posted,
-                &self.prefetch_posted_context,
+                &self.prefetch_context.posted,
             );
         }
 
         fn prefetch_create_transfers_callback_posted(completion: *PostedGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_posted_context", completion);
+            const self = PrefetchContext.parent(completion);
 
             self.prefetch_finish();
         }
@@ -535,12 +528,12 @@ pub fn StateMachineType(
 
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_lookup_accounts_immutable_callback,
-                &self.prefetch_accounts_immutable_context,
+                &self.prefetch_context.accounts_immutable,
             );
         }
 
         fn prefetch_lookup_accounts_immutable_callback(completion: *AccountsImmutableGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_immutable_context", completion);
+            const self = PrefetchContext.parent(completion);
 
             const ids = mem.bytesAsSlice(Event(.lookup_accounts), self.prefetch_input.?);
             for (ids) |id| {
@@ -551,12 +544,12 @@ pub fn StateMachineType(
 
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_lookup_accounts_mutable_callback,
-                &self.prefetch_accounts_mutable_context,
+                &self.prefetch_context.accounts_mutable,
             );
         }
 
         fn prefetch_lookup_accounts_mutable_callback(completion: *AccountsMutableGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_accounts_mutable_context", completion);
+            const self = PrefetchContext.parent(completion);
 
             self.prefetch_finish();
         }
@@ -568,13 +561,12 @@ pub fn StateMachineType(
 
             self.forest.grooves.transfers.prefetch(
                 prefetch_lookup_transfers_callback,
-                &self.prefetch_transfers_context,
+                &self.prefetch_context.transfers,
             );
         }
 
         fn prefetch_lookup_transfers_callback(completion: *TransfersGroove.PrefetchContext) void {
-            const self = @fieldParentPtr(StateMachine, "prefetch_transfers_context", completion);
-
+            const self = PrefetchContext.parent(completion);
             self.prefetch_finish();
         }
 
@@ -598,13 +590,10 @@ pub fn StateMachineType(
             );
 
             const result = switch (operation) {
-                .root => unreachable,
-                .register => 0,
                 .create_accounts => self.execute(.create_accounts, timestamp, input, output),
                 .create_transfers => self.execute(.create_transfers, timestamp, input, output),
                 .lookup_accounts => self.execute_lookup_accounts(input, output),
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
-                else => unreachable,
             };
 
             tracer.end(
@@ -1652,7 +1641,8 @@ fn check(comptime test_table: []const u8) !void {
                 assert(operation == null or operation.? == commit_operation);
 
                 context.state_machine.prepare_timestamp += 1;
-                const timestamp = context.state_machine.prepare(commit_operation, request.items);
+                context.state_machine.prepare(commit_operation, request.items);
+                const timestamp = context.state_machine.prepare_timestamp;
 
                 const reply_actual_buffer = try allocator.alignedAlloc(u8, 16, 4096);
                 defer allocator.free(reply_actual_buffer);

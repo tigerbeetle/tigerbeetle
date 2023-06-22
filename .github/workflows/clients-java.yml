@@ -6,13 +6,13 @@ on:
   workflow_call:
     secrets:
       MAVEN_GPG_SECRET_KEY:
-        required: true
+        required: false
       MAVEN_CENTRAL_USERNAME:
-        required: true
+        required: false
       MAVEN_CENTRAL_TOKEN:
-        required: true
+        required: false
       MAVEN_GPG_SECRET_KEY_PASSWORD:
-        required: true
+        required: false
     inputs:
       version:
         required: false
@@ -57,11 +57,12 @@ jobs:
     - name: Save local package
       uses: actions/upload-artifact@v3
       with:
-        name: jar-artifact
+        name: jar-artifact-${{ inputs.version }}
         path: |
           src/clients/java/target/*.jar
           !src/clients/java/target/*javadoc.jar
           !src/clients/java/target/*sources.jar
+
     - name: Publish to the Maven Central Repository
       if: inputs.version != ''
       working-directory: src/clients/java
@@ -90,7 +91,7 @@ jobs:
     - name: Restore local package
       uses: actions/download-artifact@v3
       with:
-        name: jar-artifact
+        name: jar-artifact-${{ inputs.version }}
         path: test/
 
     - name: Create a simple test program
@@ -175,6 +176,8 @@ jobs:
         docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java
 
   samples_integration_test:
+    timeout-minutes: 20
+
     if: inputs.version == ''
     needs: build_and_publish
 
@@ -201,7 +204,7 @@ jobs:
     - name: Download jar
       uses: actions/download-artifact@v3
       with:
-        name: jar-artifact
+        name: jar-artifact-${{ inputs.version }}
         path: src/clients/java/target/
 
     # Grab Zig
@@ -212,20 +215,22 @@ jobs:
     # self-hosted mac runner. So we grab it manually.
 
     # Grab Maven
-    - run: curl -o maven.zip https://dlcdn.apache.org/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.zip
+    - run: curl -o maven.zip https://dlcdn.apache.org/maven/maven-3/3.9.2/binaries/apache-maven-3.9.2-bin.zip
     - run: unzip maven.zip
 
     # Set up Maven PATH.
     - if: matrix.os != 'windows-latest'
-      run: echo "$(pwd)/apache-maven-3.9.1/bin" >> $GITHUB_PATH
+      run: echo "$(pwd)/apache-maven-3.9.2/bin" >> $GITHUB_PATH
     - if: matrix.os == 'windows-latest'
-      run: echo "$(pwd)/apache-maven-3.9.1/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      run: echo "$(pwd)/apache-maven-3.9.2/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     # Run the tests
     - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
     - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language java --sample ${{ matrix.sample }}
 
   docs:
+    timeout-minutes: 20
+
     if: inputs.version == ''
 
     # We use self hosted runners for M1 here. See macos.yml for an explaination
@@ -255,18 +260,18 @@ jobs:
     # self-hosted mac runner. So we grab it manually.
 
     # Grab Maven
-    - run: curl -o maven.zip https://dlcdn.apache.org/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.zip
+    - run: curl -o maven.zip https://dlcdn.apache.org/maven/maven-3/3.9.2/binaries/apache-maven-3.9.2-bin.zip
     - run: unzip maven.zip
 
     # Set up Maven PATH.
     - if: matrix.os != 'windows-latest'
       run: |
-        export PATH="$PATH:$(pwd)/apache-maven-3.9.1/bin"
+        export PATH="$PATH:$(pwd)/apache-maven-3.9.2/bin"
         ./scripts/build.sh client_docs -- --language java
-      
+
     - if: matrix.os == 'windows-latest'
       run: |
-        $env:PATH += "$(pwd)/apache-maven-3.9.1/bin"
+        $env:PATH += "$(pwd)/apache-maven-3.9.2/bin"
         .\scripts\build.bat client_docs
         .\zig-out\bin\client_docs --language java
 

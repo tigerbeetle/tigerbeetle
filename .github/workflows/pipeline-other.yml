@@ -1,0 +1,32 @@
+name: Other Pipeline
+
+concurrency:
+  group: other-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  # Run CI for any PRs that target 'main' when they are opened or updated.
+  pull_request:
+    branches:
+      - 'main'
+    types:
+      - opened
+      - synchronize
+
+  workflow_call:
+
+jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+  macos:
+    uses: ./.github/workflows/macos.yml
+  other-pipeline:
+    needs:
+      - windows
+      - macos
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: All Other CI Jobs Passed
+        working-directory: ./
+        run: exit 0

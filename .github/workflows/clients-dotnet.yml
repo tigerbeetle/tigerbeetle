@@ -4,7 +4,7 @@ on:
   workflow_call:
     secrets:
       NUGET_KEY:
-        required: true
+        required: false
     inputs:
       version:
         required: false
@@ -55,7 +55,7 @@ jobs:
       - name: Save nuget package
         uses: actions/upload-artifact@v3
         with:
-          name: nuget-artifact
+          name: nuget-artifact-${{ inputs.version }}
           path: src/clients/dotnet/TigerBeetle/bin/Release/*.nupkg
 
   prepare_validation_tests:
@@ -96,7 +96,7 @@ jobs:
           dotnet-version: ${{ matrix.dotnet }}
       - uses: actions/download-artifact@v3
         with:
-          name: nuget-artifact
+          name: nuget-artifact-${{ inputs.version }}
           path: ./nuget
       - name: Create test project
         run: |
@@ -130,7 +130,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v3
         with:
-          name: nuget-artifact
+          name: nuget-artifact-${{ inputs.version }}
           path: ./nuget
       - uses: actions/download-artifact@v3
         with:
@@ -155,7 +155,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v3
         with:
-          name: nuget-artifact
+          name: nuget-artifact-${{ inputs.version }}
           path: ./nuget
       - run: |
           dotnet nuget push ./nuget/*.nupkg \

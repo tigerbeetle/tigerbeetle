@@ -148,6 +148,14 @@ const Command = struct {
             aof = try AOF.from_absolute_path(aof_path);
         }
 
+        const grid_cache_size = args.cache_grid_blocks * constants.block_size;
+        const grid_cache_size_warn = 1024 * 1024 * 1024;
+        if (grid_cache_size <= grid_cache_size_warn) {
+            log_main.warn("Grid cache size of {}MB is small. See --cache-grid", .{
+                @divExact(grid_cache_size, 1024 * 1024),
+            });
+        }
+
         const nonce = while (true) {
             // `random.uintLessThan` does not work for u128 as of Zig 0.9.1.x.
             const nonce_or_zero = std.crypto.random.int(u128);
@@ -175,6 +183,7 @@ const Command = struct {
                 .configuration = args.addresses,
                 .io = &command.io,
             },
+            .grid_cache_blocks_count = args.cache_grid_blocks,
         }) catch |err| switch (err) {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => |e| return e,
@@ -192,10 +201,11 @@ const Command = struct {
                 node_maybe = node.next;
             }
         }
-        log_main.info("{}: Allocated {} bytes in {} regions during replica init", .{
+        log_main.info("{}: Allocated {}MB in {} regions during replica init (Grid Cache: {}MB)", .{
             replica.replica,
-            allocation_size,
+            @divFloor(allocation_size, 1024 * 1024),
             allocation_count,
+            @divFloor(grid_cache_size, 1024 * 1024),
         });
 
         log_main.info("{}: cluster={}: listening on {}", .{

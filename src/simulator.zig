@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("./stdx.zig");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
@@ -22,6 +23,7 @@ const StateMachine = Cluster.StateMachine;
 const Failure = @import("testing/cluster.zig").Failure;
 const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
 const PartitionSymmetry = @import("testing/packet_simulator.zig").PartitionSymmetry;
+const Core = @import("testing/cluster/network.zig").Network.Core;
 const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
 const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
@@ -237,26 +239,65 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, random, simulator_options);
     defer simulator.deinit(allocator);
 
-    const ticks_max = 50_000_000;
+    // Safety: replicas crash and restart; at any given point in time arbitrarily many replicas may
+    // be crashed, but each replica restarts eventually. The cluster must process all requests
+    // without split-brain.
+    const ticks_max_requests = 5_000_000;
+    var tick_total: u64 = 0;
     var tick: u64 = 0;
-    while (tick < ticks_max) : (tick += 1) {
+    while (tick < ticks_max_requests) : (tick += 1) {
+        const requests_replied_old = simulator.requests_replied;
         simulator.tick();
-        if (simulator.done()) break;
+        tick_total += 1;
+        if (simulator.requests_replied > requests_replied_old) {
+            tick = 0;
+        }
+        if (simulator.requests_replied == simulator.options.requests_max) {
+            break;
+        }
     } else {
         output.info("no liveness, final cluster state:", .{});
         simulator.cluster.log_cluster();
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
     }
+
+    simulator.transition_to_liveness_mode();
+
+    // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
+    // crashed or partitioned permanently. The core should converge to the same state.
+    const ticks_max_convergence = 5_000_000;
+    tick = 0;
+    while (tick < ticks_max_convergence) : (tick += 1) {
+        simulator.tick();
+        tick_total += 1;
+        if (simulator.done()) {
+            break;
+        }
+    } else {
+        if (simulator.primary_outside_of_core()) {
+            stdx.unimplemented("repair requires reachable primary");
+        }
+
+        output.info("no liveness, final cluster state (core={b})", .{simulator.core.mask});
+        simulator.cluster.log_cluster();
+        output.err("you can reproduce this failure with seed={}", .{seed});
+        fatal(.liveness, "no state convergence", .{});
+    }
+
     assert(simulator.done());
 
     const commits = simulator.cluster.state_checker.commits.items;
     const last_checksum = commits[commits.len - 1].header.checksum;
-    for (simulator.cluster.aofs) |*aof| {
-        try aof.validate(last_checksum);
+    for (simulator.cluster.aofs) |*aof, replica_index| {
+        if (simulator.core.isSet(replica_index)) {
+            try aof.validate(last_checksum);
+        } else {
+            try aof.validate(null);
+        }
     }
 
-    output.info("\n          PASSED ({} ticks)", .{tick});
+    output.info("\n          PASSED ({} ticks)", .{tick_total});
 }
 
 pub const Simulator = struct {
@@ -289,9 +330,13 @@ pub const Simulator = struct {
     replica_stability: []usize,
     reply_sequence: ReplySequence,
 
+    /// Fully-connected subgraph of replicas for liveness checking.
+    core: Core = Core.initEmpty(),
+
     /// Total number of requests sent, including those that have not been delivered.
     /// Does not include `register` messages.
     requests_sent: usize = 0,
+    requests_replied: usize = 0,
     requests_idle: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, random: std.rand.Random, options: Options) !Simulator {
@@ -337,19 +382,23 @@ pub const Simulator = struct {
     }
 
     pub fn done(simulator: *const Simulator) bool {
-        assert(simulator.requests_sent <= simulator.options.requests_max);
-
-        for (simulator.cluster.replica_health) |health| {
-            if (health == .down) return false;
-        }
-
-        if (!simulator.cluster.state_checker.convergence()) return false;
-        if (!simulator.reply_sequence.empty()) return false;
-        if (simulator.requests_sent < simulator.options.requests_max) return false;
-
+        assert(simulator.core.count() > 0);
+        assert(simulator.requests_sent == simulator.options.requests_max);
+        assert(simulator.reply_sequence.empty());
         for (simulator.cluster.clients) |*client| {
-            if (client.request_queue.count > 0) return false;
+            assert(client.request_queue.count == 0);
         }
+
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                if (!simulator.cluster.state_checker.replica_convergence(replica.replica)) {
+                    return false;
+                }
+            }
+        }
+
+        simulator.cluster.state_checker.assert_cluster_convergence();
+
         return true;
     }
 
@@ -360,6 +409,52 @@ pub const Simulator = struct {
         simulator.cluster.tick();
         simulator.tick_requests();
         simulator.tick_crash();
+    }
+
+    pub fn transition_to_liveness_mode(simulator: *Simulator) void {
+        simulator.core = random_core(
+            simulator.random,
+            simulator.options.cluster.replica_count,
+            simulator.options.cluster.standby_count,
+        );
+        log_simulator.debug("transition_to_liveness_mode: core={b}", .{simulator.core.mask});
+
+        var it = simulator.core.iterator(.{});
+        while (it.next()) |replica_index| {
+            const fault = false;
+            if (simulator.cluster.replica_health[replica_index] == .down) {
+                simulator.restart_replica(@intCast(u8, replica_index), fault);
+            }
+        }
+
+        simulator.cluster.network.transition_to_liveness_mode(simulator.core);
+        simulator.options.replica_crash_probability = 0;
+        simulator.options.replica_restart_probability = 0;
+    }
+
+    // If a primary ends up being outside of a core, and is only partially connected to the core,
+    // the core might fail to converge, as parts of the repair protocol rely on primary-sent
+    // `.start_view_change` messages. Until we fix this issue, we special-case this scenario in
+    // VOPR and don't treat it as a liveness failure.
+    pub fn primary_outside_of_core(simulator: *const Simulator) bool {
+        assert(simulator.core.count() > 0);
+
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.cluster.replica_health[replica.replica] == .up and
+                replica.status == .normal and replica.primary() and
+                !simulator.core.isSet(replica.replica))
+            {
+                // `replica` considers itself a primary, check that at least part of the core thinks
+                // so as well.
+                var it = simulator.core.iterator(.{});
+                while (it.next()) |replica_core_index| {
+                    if (simulator.cluster.replicas[replica_core_index].view == replica.view) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     fn on_cluster_reply(
@@ -393,10 +488,11 @@ pub const Simulator = struct {
                 commit.request.header.request,
             });
 
-            if (commit.request.header.operation != .register) {
+            if (!commit.request.header.operation.reserved()) {
+                simulator.requests_replied += 1;
                 simulator.workload.on_reply(
                     commit.client_index,
-                    commit.reply.header.operation,
+                    commit.reply.header.operation.cast(StateMachine),
                     commit.reply.header.timestamp,
                     commit.request.body(),
                     commit.reply.body(),
@@ -511,36 +607,44 @@ pub const Simulator = struct {
                     }
 
                     const fault = recoverable_count > recoverable_count_min or replica.standby();
-                    if (!fault) {
-                        // The journal writes redundant headers of faulty ops as zeroes to ensure
-                        // that they remain faulty after a crash/recover. Since that fault cannot
-                        // be disabled by `storage.faulty`, we must manually repair it here to
-                        // ensure a cluster cannot become stuck in status=recovering_head.
-                        // See recover_slots() for more detail.
-                        const offset = vsr.Zone.wal_headers.offset(0);
-                        const size = vsr.Zone.wal_headers.size().?;
-                        const headers_bytes = replica_storage.memory[offset..][0..size];
-                        const headers = mem.bytesAsSlice(vsr.Header, headers_bytes);
-                        for (headers) |*h, slot| {
-                            if (h.checksum == 0) h.* = replica_storage.wal_prepares()[slot].header;
-                        }
-                    }
-
-                    log_simulator.debug("{}: restart replica (faults={})", .{
-                        replica.replica,
-                        fault,
-                    });
-
-                    replica_storage.faulty = fault;
-                    simulator.cluster.restart_replica(replica.replica) catch unreachable;
-                    assert(replica.status != .recovering_head or fault);
-
-                    replica_storage.faulty = true;
-                    simulator.replica_stability[replica.replica] =
-                        simulator.options.replica_restart_stability;
+                    simulator.restart_replica(replica.replica, fault);
                 },
             }
         }
+    }
+
+    fn restart_replica(simulator: *Simulator, replica_index: u8, fault: bool) void {
+        assert(simulator.cluster.replica_health[replica_index] == .down);
+
+        const replica_storage = &simulator.cluster.storages[replica_index];
+
+        if (!fault) {
+            // The journal writes redundant headers of faulty ops as zeroes to ensure
+            // that they remain faulty after a crash/recover. Since that fault cannot
+            // be disabled by `storage.faulty`, we must manually repair it here to
+            // ensure a cluster cannot become stuck in status=recovering_head.
+            // See recover_slots() for more detail.
+            const offset = vsr.Zone.wal_headers.offset(0);
+            const size = vsr.Zone.wal_headers.size().?;
+            const headers_bytes = replica_storage.memory[offset..][0..size];
+            const headers = mem.bytesAsSlice(vsr.Header, headers_bytes);
+            for (headers) |*h, slot| {
+                if (h.checksum == 0) h.* = replica_storage.wal_prepares()[slot].header;
+            }
+        }
+
+        log_simulator.debug("{}: restart replica (faults={})", .{
+            replica_index,
+            fault,
+        });
+
+        replica_storage.faulty = fault;
+        simulator.cluster.restart_replica(replica_index) catch unreachable;
+        assert(simulator.cluster.replicas[replica_index].status != .recovering_head or fault);
+
+        replica_storage.faulty = true;
+        simulator.replica_stability[replica_index] =
+            simulator.options.replica_restart_stability;
     }
 };
 
@@ -579,6 +683,46 @@ fn random_partition_symmetry(random: std.rand.Random) PartitionSymmetry {
     const typeInfo = @typeInfo(PartitionSymmetry).Enum;
     var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @intToEnum(PartitionSymmetry, enumAsInt);
+}
+
+/// Returns a random fully-connected subgraph which includes at least view change
+/// quorum of active replicas.
+fn random_core(random: std.rand.Random, replica_count: u8, standby_count: u8) Core {
+    assert(replica_count > 0);
+    assert(replica_count <= constants.replicas_max);
+    assert(standby_count <= constants.standbys_max);
+
+    const quorum_view_change = vsr.quorums(replica_count).view_change;
+    const replica_core_count = random.intRangeAtMost(u8, quorum_view_change, replica_count);
+    const standby_core_count = random.intRangeAtMost(u8, 0, standby_count);
+
+    var result: Core = Core.initEmpty();
+
+    var need = replica_core_count;
+    var left = replica_count;
+    var replica: u8 = 0;
+    while (replica < replica_count + standby_count) : (replica += 1) {
+        if (random.uintLessThan(u8, left) < need) {
+            result.set(replica);
+            need -= 1;
+        }
+        left -= 1;
+
+        if (replica == replica_count - 1) {
+            // Having selected active replicas, switch to selection of standbys.
+            assert(left == 0);
+            assert(need == 0);
+            assert(result.count() == replica_core_count);
+            assert(result.count() >= quorum_view_change);
+            left = standby_count;
+            need = standby_core_count;
+        }
+    }
+    assert(left == 0);
+    assert(need == 0);
+    assert(result.count() == replica_core_count + standby_core_count);
+
+    return result;
 }
 
 pub fn parse_seed(bytes: []const u8) u64 {

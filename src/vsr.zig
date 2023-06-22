@@ -155,31 +155,51 @@ pub const Operation = enum(u8) {
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
         assert(self.valid(StateMachine));
+        assert(!self.reserved());
         return @intToEnum(StateMachine.Operation, @enumToInt(self));
     }
 
     pub fn valid(self: Operation, comptime StateMachine: type) bool {
         check_state_machine_operations(StateMachine.Operation);
-        const operations = comptime std.enums.values(StateMachine.Operation);
-        inline for (operations) |op| {
-            if (@enumToInt(self) == @enumToInt(op)) {
-                return true;
+
+        inline for (.{ Operation, StateMachine.Operation }) |Enum| {
+            const ops = comptime std.enums.values(Enum);
+            inline for (ops) |op| {
+                if (@enumToInt(self) == @enumToInt(op)) {
+                    return true;
+                }
             }
         }
+
         return false;
     }
 
+    pub fn reserved(self: Operation) bool {
+        return @enumToInt(self) < constants.vsr_operations_reserved;
+    }
+
+    pub fn tag_name(self: Operation, comptime StateMachine: type) []const u8 {
+        assert(self.valid(StateMachine));
+        inline for (.{ Operation, StateMachine.Operation }) |Enum| {
+            inline for (@typeInfo(Enum).Enum.fields) |field| {
+                const op = @field(Enum, field.name);
+                if (@enumToInt(self) == @enumToInt(op)) {
+                    return field.name;
+                }
+            }
+        }
+        unreachable;
+    }
+
     fn check_state_machine_operations(comptime Op: type) void {
-        // TODO(Zig) More rigorous assertions here once "unable to evaluate constant expression"
-        // issues are fixed. (Loop over Operation and Op variants).
-        if (!@hasField(Op, "reserved") or std.meta.fieldInfo(Op, .reserved).value != 0) {
-            @compileError("StateMachine.Operation must have a 'reserved' field with value 0");
-        }
-        if (!@hasField(Op, "root") or std.meta.fieldInfo(Op, .root).value != 1) {
-            @compileError("StateMachine.Operation must have a 'root' field with value 1");
-        }
-        if (!@hasField(Op, "register") or std.meta.fieldInfo(Op, .register).value != 2) {
-            @compileError("StateMachine.Operation must have a 'register' field with value 2");
+        comptime assert(@typeInfo(Op).Enum.is_exhaustive);
+        comptime assert(@sizeOf(Op) == @sizeOf(Operation));
+        comptime assert(@bitSizeOf(Op) == @bitSizeOf(Operation));
+        inline for (@typeInfo(Op).Enum.fields) |field| {
+            const op = @field(Op, field.name);
+            if (@enumToInt(op) < constants.vsr_operations_reserved) {
+                @compileError("StateMachine.Operation is reserved");
+            }
         }
     }
 };
@@ -188,17 +208,11 @@ pub const Operation = enum(u8) {
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
-    var checksum_empty_once = std.once(checksum_empty_init);
-    var checksum_empty: u128 = undefined;
-    fn checksum_empty_init() void {
-        checksum_empty = checksum(&.{});
-    }
-
     /// Aegis128 (used by checksum) uses hardware accelerated AES via inline asm which isn't
-    /// available at comptime. Instead of a constant, lazily initialize the empty block checksum.
-    fn checksum_body_empty() u128 {
-        checksum_empty_once.call();
-        return checksum_empty;
+    /// available at comptime. Use a hard-coded value instead and verify via a test.
+    const checksum_body_empty: u128 = 0x49F174618255402DE6E7E3C40D60CC83;
+    test "empty checksum" {
+        assert(checksum_body_empty == checksum(&.{}));
     }
 
     comptime {
@@ -417,7 +431,7 @@ pub const Header = extern struct {
         if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -432,7 +446,7 @@ pub const Header = extern struct {
         if (self.view != 0) return "view != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp == 0) return "timestamp == 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -448,7 +462,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.replica != 0) return "replica != 0";
         if (self.operation != .reserved) return "operation != .reserved";
@@ -464,7 +478,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -486,7 +500,7 @@ pub const Header = extern struct {
                 if (self.context != 0) return "register: context != 0";
                 if (self.request != 0) return "register: request != 0";
                 // The .register operation carries no payload:
-                if (self.checksum_body != checksum_body_empty()) return "register: checksum_body != expected";
+                if (self.checksum_body != checksum_body_empty) return "register: checksum_body != expected";
                 if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             },
             else => {
@@ -515,7 +529,7 @@ pub const Header = extern struct {
                 if (self.op != 0) return "root: op != 0";
                 if (self.commit != 0) return "root: commit != 0";
                 if (self.timestamp != 0) return "root: timestamp != 0";
-                if (self.checksum_body != checksum_body_empty()) return "root: checksum_body != expected";
+                if (self.checksum_body != checksum_body_empty) return "root: checksum_body != expected";
                 if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
                 if (self.replica != 0) return "root: replica != 0";
             },
@@ -538,7 +552,7 @@ pub const Header = extern struct {
 
     fn invalid_prepare_ok(self: *const Header) ?[]const u8 {
         assert(self.command == .prepare_ok);
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         switch (self.operation) {
             .reserved => return "operation == .reserved",
@@ -592,7 +606,7 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.op != 0) return "op != 0";
         if (self.timestamp == 0) return "timestamp == 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -607,7 +621,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -637,7 +651,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -651,7 +665,7 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit > self.op) return "op_min > op_max";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -664,7 +678,7 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -677,7 +691,7 @@ pub const Header = extern struct {
         if (self.request != 0) return "request != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
@@ -720,7 +734,7 @@ pub const Header = extern struct {
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty()) return "checksum_body != expected";
+        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
         if (self.operation != .reserved) return "operation != .reserved";
         return null;
