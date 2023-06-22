@@ -32,7 +32,7 @@ jobs:
 
       - name: Build dotnet
         working-directory: src/clients/dotnet
-        run: dotnet build --configuration Release
+        run: dotnet build --verbosity diag --configuration Release
 
       - name: Tests
         working-directory: src/clients/dotnet
