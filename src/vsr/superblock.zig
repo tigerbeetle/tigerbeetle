@@ -119,12 +119,7 @@ pub const SuperBlockHeader = extern struct {
         /// Globally unique identifier of the replica, must be non-zero.
         replica_id: u128,
 
-        /// Set of replica_ids of cluster members, where order of ids determines replica indexes.
-        ///
-        /// First replica_count elements are active replicas,
-        /// then standby_count standbys, the rest are zeros.
-        /// Order determines ring topology for replication.
-        members: [constants.nodes_max]u128,
+        members: vsr.Members,
 
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
@@ -152,7 +147,7 @@ pub const SuperBlockHeader = extern struct {
         pub fn root(options: struct {
             cluster: u32,
             replica_id: u128,
-            members: [constants.nodes_max]u128,
+            members: vsr.Members,
             replica_count: u8,
         }) VSRState {
             return .{

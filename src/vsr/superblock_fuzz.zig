@@ -171,7 +171,7 @@ const Environment = struct {
 
     sequence_states: SequenceStates,
 
-    members: [constants.nodes_max]u128,
+    members: vsr.Members,
 
     superblock: *SuperBlock,
     superblock_verify: *SuperBlock,

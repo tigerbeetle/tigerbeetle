@@ -175,6 +175,9 @@ comptime {
 
     // Ensure that DVC/SV messages can fit all necessary headers.
     assert(message_body_size_max >= view_change_headers_max * @sizeOf(vsr.Header));
+
+    assert(message_body_size_max >= @sizeOf(vsr.ReconfigurationRequest));
+    assert(message_body_size_max >= @sizeOf(vsr.BlockRequest));
 }
 
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
