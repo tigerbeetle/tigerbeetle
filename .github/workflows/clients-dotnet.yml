@@ -203,6 +203,7 @@ jobs:
 
   docs:
     if: inputs.version == ''
+    needs: build
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read
