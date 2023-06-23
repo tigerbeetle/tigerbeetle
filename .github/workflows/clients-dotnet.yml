@@ -23,6 +23,12 @@ jobs:
             3.1.x
             6.0.x
 
+      # Override Zig cache so jobs don't compete.
+      - if: matrix.os != 'windows-latest'
+        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $GITHUB_ENV
+      - if: matrix.os == 'windows-latest'
+        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $env:GITHUB_ENV
+
       - name: Install zig
         run: ./scripts/install_zig.sh
 
@@ -166,8 +172,6 @@ jobs:
   samples_integration_test:
     if: inputs.version == ''
 
-    needs: build
-
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read
@@ -192,6 +196,12 @@ jobs:
           name: nuget-artifact-${{ inputs.version }}
           path: ./nuget
 
+      # Override Zig cache so jobs don't compete.
+      - if: matrix.os != 'windows-latest'
+        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $GITHUB_ENV
+      - if: matrix.os == 'windows-latest'
+        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $env:GITHUB_ENV
+
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
@@ -201,7 +211,6 @@ jobs:
 
   docs:
     if: inputs.version == ''
-    needs: build
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read
@@ -220,12 +229,15 @@ jobs:
             3.1.x
             6.0.x
 
+      # Override Zig cache so jobs don't compete.
+      - if: matrix.os != 'windows-latest'
+        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $GITHUB_ENV
+      - if: matrix.os == 'windows-latest'
+        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $env:GITHUB_ENV
+
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
-
-      - if: matrix.os != 'windows-latest'
-        run: if [[ "$(uname)" == "Darwin" ]]; then echo "GLOBAL_CACHE_ROOT=./zig-global-cache" >> $GITHUB_ENV ; fi
-
+        
       - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_docs
       - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language dotnet
       
