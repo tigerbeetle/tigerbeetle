@@ -21,7 +21,7 @@ public class AsyncRequestTest {
     @Test
     public void testCreateAccountsRequestConstructor() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new AccountBatch(1);
         batch.add();
 
@@ -32,7 +32,7 @@ public class AsyncRequestTest {
     @Test
     public void testCreateTransfersRequestConstructor() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -43,7 +43,7 @@ public class AsyncRequestTest {
     @Test
     public void testLookupAccountsRequestConstructor() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(1);
         batch.add();
 
@@ -54,7 +54,7 @@ public class AsyncRequestTest {
     @Test
     public void testLookupTransfersRequestConstructor() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(1);
         batch.add();
 
@@ -75,7 +75,7 @@ public class AsyncRequestTest {
     @Test(expected = NullPointerException.class)
     public void testConstructorWithBatchNull() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         AsyncRequest.createAccounts(client, null);
         assert false;
     }
@@ -83,7 +83,7 @@ public class AsyncRequestTest {
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroCapacityBatch() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new AccountBatch(0);
 
         AsyncRequest.createAccounts(client, batch);
@@ -93,7 +93,7 @@ public class AsyncRequestTest {
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroItemsBatch() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new AccountBatch(1);
 
         AsyncRequest.createAccounts(client, batch);
@@ -103,7 +103,7 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithInvalidOperation() throws Throwable {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -130,7 +130,7 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithUnknownOperation() throws Throwable {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -159,7 +159,7 @@ public class AsyncRequestTest {
     @Test
     public void testEndRequestWithNullBuffer() throws Throwable {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -178,7 +178,7 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithInvalidBufferSize() throws Throwable {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -206,7 +206,7 @@ public class AsyncRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithInvalidPacket() throws Throwable {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -234,7 +234,7 @@ public class AsyncRequestTest {
     @Test
     public void testEndRequestWithRequestException() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -262,7 +262,7 @@ public class AsyncRequestTest {
 
     @Test(expected = AssertionError.class)
     public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests() throws Throwable {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
 
         // A batch with only 1 item
         var batch = new AccountBatch(1);
@@ -292,7 +292,7 @@ public class AsyncRequestTest {
 
     @Test
     public void testCreateAccountEndRequest() throws ExecutionException, InterruptedException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new AccountBatch(2);
         batch.add();
         batch.add();
@@ -328,7 +328,7 @@ public class AsyncRequestTest {
 
     @Test
     public void testCreateTransferEndRequest() throws InterruptedException, ExecutionException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(2);
         batch.add();
         batch.add();
@@ -364,7 +364,7 @@ public class AsyncRequestTest {
 
     @Test
     public void testLookupAccountEndRequest() throws InterruptedException, ExecutionException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -398,7 +398,7 @@ public class AsyncRequestTest {
 
     @Test
     public void testLookupTransferEndRequest() throws InterruptedException, ExecutionException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -433,7 +433,7 @@ public class AsyncRequestTest {
     @Test
     public void testSuccessFuture() throws InterruptedException, ExecutionException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -477,7 +477,7 @@ public class AsyncRequestTest {
     @Test
     public void testSuccessFutureWithTimeout() throws InterruptedException, ExecutionException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -517,7 +517,7 @@ public class AsyncRequestTest {
     @Test
     public void testFailedFuture() throws InterruptedException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(1);
         batch.add();
 
@@ -545,7 +545,7 @@ public class AsyncRequestTest {
     @Test
     public void testFailedFutureWithTimeout() throws InterruptedException, TimeoutException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(1);
         batch.add();
 
@@ -567,6 +567,22 @@ public class AsyncRequestTest {
             var requestException = (RequestException) exception.getCause();
             assertEquals(PacketStatus.InvalidDataSize.value, requestException.getStatus());
         }
+    }
+
+    private static NativeClient getDummyClient() {
+        var client = NativeClient.initEcho(0, "3000", 1);;
+
+        try {
+            // Calling close() to avoid the native client
+            // trying to release the dummy packet pointer.
+            client.close();
+        } catch (Exception any) {
+            // Converting into an unchecked exception
+            // to not have to use try..catch blocks.
+            throw new IllegalStateException(any);
+        }
+
+        return client;
     }
 
     private class CallbackSimulator<T extends Batch> extends Thread {

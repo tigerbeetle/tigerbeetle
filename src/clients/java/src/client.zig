@@ -145,7 +145,12 @@ const ReflectionHelper = struct {
         return @bitCast(u8, value);
     }
 
-    pub fn end_request(env: *jui.JNIEnv, this_obj: jui.jobject, result: ?[]const u8, packet: *tb.tb_packet_t) void {
+    pub fn end_request(
+        env: *jui.JNIEnv,
+        this_obj: jui.jobject,
+        result: ?[]const u8,
+        packet: *tb.tb_packet_t,
+    ) void {
         assert(this_obj != null);
         assert(request_class != null);
         assert(request_end_request_method_id != null);
@@ -312,13 +317,23 @@ const NativeClient = struct {
             packet.data_size = @intCast(u32, buffer.len);
             packet.next = null;
             packet.status = .ok;
-
+            
             tb.submit(context.client, packet);
         } else {
             assert(acquire_status != .ok);
         }
 
         return acquire_status;
+    }
+
+    /// JNI release implementation.
+    inline fn release(
+        env: *jui.JNIEnv,
+        context: *JNIContext,
+        packet: *tb.tb_packet_t,
+    ) void {
+        _ = env;
+        context.release_packet(packet);
     }
 
     /// Completion callback.
@@ -332,7 +347,6 @@ const NativeClient = struct {
         _ = client;
 
         var context = @intToPtr(*JNIContext, context_ptr);
-        defer context.release_packet(packet);
 
         var env = context.jvm.attachCurrentThreadAsDaemon() catch |err| {
             log.err("Unexpected error attaching the native thread as daemon {}", .{err});
@@ -425,6 +439,22 @@ const Exports = struct {
 
         return @intCast(jui.jint, @enumToInt(packet_acquire_status));
     }
+
+    pub fn release(
+        env: *jui.JNIEnv,
+        class: jui.jclass,
+        context_handle: jui.jlong,
+        packet: jui.jlong,
+    ) callconv(.C) void {
+        _ = class;
+        assert(context_handle != 0);
+        assert(packet != 0);
+        NativeClient.release(
+            env,
+            @intToPtr(*JNIContext, @bitCast(usize, context_handle)),
+            @intToPtr(*tb.tb_packet_t, @bitCast(usize, packet)),
+        );
+    }
 };
 
 comptime {
@@ -435,6 +465,7 @@ comptime {
         .clientInitEcho = Exports.client_init_echo,
         .clientDeinit = Exports.client_deinit,
         .submit = Exports.submit,
+        .release = Exports.release,
     });
 }
 
