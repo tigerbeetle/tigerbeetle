@@ -223,6 +223,9 @@ jobs:
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
+      - if: matrix.os != 'windows-latest'
+        run: if [[ "$(uname)" == "Darwin" ]]; then echo "GLOBAL_CACHE_ROOT=./zig-global-cache" >> $GITHUB_ENV fi
+
       - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_docs
       - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language dotnet
       
