@@ -11,6 +11,7 @@ simulator
 *_*.tigerbeetle
 zig/
 zig-cache/
+zig-global-cache/
 zig-out/
 
 docs_website
