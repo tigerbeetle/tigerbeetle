@@ -317,7 +317,6 @@ const NativeClient = struct {
             packet.data_size = @intCast(u32, buffer.len);
             packet.next = null;
             packet.status = .ok;
-            
             tb.submit(context.client, packet);
         } else {
             assert(acquire_status != .ok);
