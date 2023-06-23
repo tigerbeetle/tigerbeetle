@@ -23,12 +23,6 @@ jobs:
             3.1.x
             6.0.x
 
-      # Override Zig cache so jobs don't compete.
-      - if: matrix.os != 'windows-latest'
-        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $GITHUB_ENV
-      - if: matrix.os == 'windows-latest'
-        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $env:GITHUB_ENV
-
       - name: Install zig
         run: ./scripts/install_zig.sh
 
@@ -198,12 +192,6 @@ jobs:
           name: nuget-artifact-${{ inputs.version }}
           path: ./nuget
 
-      # Override Zig cache so jobs don't compete.
-      - if: matrix.os != 'windows-latest'
-        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $GITHUB_ENV
-      - if: matrix.os == 'windows-latest'
-        run: echo "ZIG_GLOBAL_CACHE_DIR=./zig-global-cache" >> $env:GITHUB_ENV
-
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
@@ -216,6 +204,8 @@ jobs:
     # We use self hosted runners for M1 here. See macos.yml for an explaination
     permissions:
       contents: read
+
+    needs: build
 
     strategy:
       matrix:
