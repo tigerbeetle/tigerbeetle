@@ -31,7 +31,7 @@ GLOBAL_CACHE_ROOT="$HOME/.cache/zig"
 
 TRACE=""
 if [ "$ZIG_OS" = "macos" ]; then
-    TRACE="dtruss"
+    TRACE="sudo dtruss"
 fi
 
 # This executes "zig/zig build {args}" using "-target native-{os}" for the build.zig executable.
