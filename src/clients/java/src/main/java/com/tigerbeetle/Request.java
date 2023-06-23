@@ -140,6 +140,8 @@ abstract class Request<TResponse extends Batch> {
             }
         } catch (Throwable any) {
             exception = any;
+        } finally {
+            nativeClient.release(packet);
         }
 
         if (exception != null) {
@@ -147,7 +149,6 @@ abstract class Request<TResponse extends Batch> {
         } else {
 
             if (result.getLength() > requestLen) {
-
                 setException(new AssertionError(
                         "Amount of results is greater than the amount of requests: resultLen=%d, requestLen=%d",
                         result.getLength(), requestLen));

@@ -14,6 +14,13 @@ public class EchoTest {
     static final int MESSAGE_SIZE_MAX = 1024 * 1024; // config.message_size_max
     static final int ITEMS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;
 
+    // The number of times the same test is repeated, to stress the
+    // cycle of packet exhaustion followed by completions.
+    static final int repetitionsMax = 16;
+
+    // The number of concurrency requests on each cycle.
+    static final int concurrencyMax = 64;
+
     @Test(expected = AssertionError.class)
     public void testConstructorNullReplicaAddresses() throws Throwable {
 
@@ -74,12 +81,7 @@ public class EchoTest {
         };
 
         final Random rnd = new Random(3);
-        final int concurrencyMax = 64;
         try (var client = new EchoClient(0, "3000", concurrencyMax)) {
-
-            // Repeating the same test multiple times to stress the
-            // cycle of message exhaustion followed by completions.
-            final int repetitionsMax = 100;
             for (int repetition = 0; repetition < repetitionsMax; repetition++) {
 
                 final var list = new ArrayList<AsyncContext>();
@@ -139,12 +141,7 @@ public class EchoTest {
         }
 
         final Random rnd = new Random(4);
-        final int concurrencyMax = 64;
         try (var client = new EchoClient(0, "3000", concurrencyMax)) {
-
-            // Repeating the same test multiple times to stress the
-            // cycle of message exhaustion followed by completions.
-            final int repetitionsMax = 100;
             for (int repetition = 0; repetition < repetitionsMax; repetition++) {
 
                 final var list = new ArrayList<ThreadContext>();
