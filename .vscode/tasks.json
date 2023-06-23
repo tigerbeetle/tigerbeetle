@@ -16,6 +16,6 @@
             "args": [ "build", "test:build" ],
             "problemMatcher": [],
             "group": "build",
-        },        
+        },
    ]
 }
