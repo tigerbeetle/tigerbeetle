@@ -220,6 +220,9 @@ jobs:
             3.1.x
             6.0.x
 
+      - if: matrix.os != 'windows-latest'
+        run: sudo ulimit -Sn 65536
+
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
