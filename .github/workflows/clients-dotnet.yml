@@ -31,7 +31,7 @@ jobs:
 
       - name: Build dotnet
         working-directory: src/clients/dotnet
-        run: dotnet build --verbosity diag --configuration Release
+        run: dotnet build --verbosity normal --configuration Release
 
       - name: Tests
         working-directory: src/clients/dotnet
