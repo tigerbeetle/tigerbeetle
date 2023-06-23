@@ -30,7 +30,7 @@ CACHE_ROOT="./zig-cache"
 GLOBAL_CACHE_ROOT="$HOME/.cache/zig"
 
 TRACE=""
-if [ "$ZIG_OS" ="macos" ]; then
+if [ "$ZIG_OS" = "macos" ]; then
     TRACE="dtruss"
 fi
 
