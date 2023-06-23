@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "debug server",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/tigerbeetle",
+            "args": [ "start", "--addresses=127.0.0.1", "0_0.tigerbeetle.debug" ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "format debug server",
+        },
+        {
+            "name": "debug tests",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/tests",
+            "args": [ "." ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "build tests",
+        },
+    ]
+}
