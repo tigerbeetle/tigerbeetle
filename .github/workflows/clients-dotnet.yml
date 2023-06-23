@@ -22,7 +22,6 @@ jobs:
           dotnet-version: |
             3.1.x
             6.0.x
-            7.0.x
 
       - name: Install zig
         run: ./scripts/install_zig.sh
@@ -187,7 +186,6 @@ jobs:
           dotnet-version: |
             3.1.x
             6.0.x
-            7.0.x
 
       - uses: actions/download-artifact@v3
         with:
@@ -221,7 +219,6 @@ jobs:
           dotnet-version: |
             3.1.x
             6.0.x
-            7.0.x
 
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
