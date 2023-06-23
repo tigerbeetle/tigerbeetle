@@ -147,7 +147,6 @@ abstract class Request<TResponse extends Batch> {
         if (exception != null) {
             setException(exception);
         } else {
-
             if (result.getLength() > requestLen) {
                 setException(new AssertionError(
                         "Amount of results is greater than the amount of requests: resultLen=%d, requestLen=%d",
