@@ -215,14 +215,14 @@ jobs:
     # self-hosted mac runner. So we grab it manually.
 
     # Grab Maven
-    - run: curl -o maven.zip https://dlcdn.apache.org/maven/maven-3/3.9.2/binaries/apache-maven-3.9.2-bin.zip
+    - run: curl -o maven.zip https://archive.apache.org/dist/maven/maven-3/3.9.3/binaries/apache-maven-3.9.3-bin.zip
     - run: unzip maven.zip
 
     # Set up Maven PATH.
     - if: matrix.os != 'windows-latest'
-      run: echo "$(pwd)/apache-maven-3.9.2/bin" >> $GITHUB_PATH
+      run: echo "$(pwd)/apache-maven-3.9.3/bin" >> $GITHUB_PATH
     - if: matrix.os == 'windows-latest'
-      run: echo "$(pwd)/apache-maven-3.9.2/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      run: echo "$(pwd)/apache-maven-3.9.3/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     # Run the tests
     - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
@@ -260,18 +260,18 @@ jobs:
     # self-hosted mac runner. So we grab it manually.
 
     # Grab Maven
-    - run: curl -o maven.zip https://dlcdn.apache.org/maven/maven-3/3.9.2/binaries/apache-maven-3.9.2-bin.zip
+    - run: curl -o maven.zip https://archive.apache.org/dist/maven/maven-3/3.9.3/binaries/apache-maven-3.9.3-bin.zip
     - run: unzip maven.zip
 
     # Set up Maven PATH.
     - if: matrix.os != 'windows-latest'
       run: |
-        export PATH="$PATH:$(pwd)/apache-maven-3.9.2/bin"
+        export PATH="$PATH:$(pwd)/apache-maven-3.9.3/bin"
         ./scripts/build.sh client_docs -- --language java
 
     - if: matrix.os == 'windows-latest'
       run: |
-        $env:PATH += "$(pwd)/apache-maven-3.9.2/bin"
+        $env:PATH += "$(pwd)/apache-maven-3.9.3/bin"
         .\scripts\build.bat client_docs
         .\zig-out\bin\client_docs --language java
 
