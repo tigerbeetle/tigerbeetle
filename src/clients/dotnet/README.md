@@ -461,6 +461,9 @@ $ cd src/clients/dotnet
 $ dotnet restore
 $ dotnet clean
 $ dotnet build
+$ ls TigerBeetle\runtimes
+$ ls TigerBeetle\runtimes\win-x64
+$ ls TigerBeetle\runtimes\win-x64\native
 $ if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
 ```
 
