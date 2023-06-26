@@ -3809,7 +3809,7 @@ pub fn ReplicaType(
             comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
 
             // Collect nack and presence bits for the headers, so that the new primary can run CTRL
-            // protocol to truncate uncomitted headers. When:
+            // protocol to truncate uncommitted headers. When:
             // - a header has quorum of nacks -- the header is truncated
             // - a header isn't truncated and is present -- the header gets into the next view
             // - a header is neither truncated nor present -- the primary waits for more
@@ -4771,7 +4771,7 @@ pub fn ReplicaType(
 
         /// Returns whether the replica is a single-replica cluster.
         ///
-        /// Single-replica clusters often are a special case (no viewchanges or
+        /// Single-replica clusters often are a special case (no view changes or
         /// repairs, prepares are written to WAL sequentially).
         ///
         /// Note that a solo cluster might still have standby nodes.
@@ -5250,7 +5250,7 @@ pub fn ReplicaType(
                 // Request and repair any dirty or faulty prepares.
                 self.repair_prepares();
             } else if (self.client_replies.faulty.findFirstSet()) |slot| {
-                // After we have all prepares, repair replys.
+                // After we have all prepares, repair replies.
                 const entry = &self.client_sessions().entries[slot];
                 assert(entry.session != 0);
                 assert(!self.client_sessions().entries_free.isSet(slot));
@@ -5270,7 +5270,7 @@ pub fn ReplicaType(
                 // Try to the commit prepares we already have, even if we don't have all of them.
                 // This helps when a replica is recovering from a crash and has a mostly intact
                 // journal, with just some prepares missing. We do have the headers and know
-                // that they form a valid hashcahin. Committing may discover more faulty prepares
+                // that they form a valid hashchain. Committing may discover more faulty prepares
                 // and drive further repairs.
                 assert(!self.solo());
                 self.commit_journal(self.commit_max);
