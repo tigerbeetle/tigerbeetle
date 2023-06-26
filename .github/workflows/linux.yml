@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        distro: [ubuntu, alpine]
+        distro: [ubuntu, alpine, fedora]
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/tests_on_${{ matrix.distro }}.sh
