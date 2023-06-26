@@ -242,7 +242,7 @@ pub fn main() !void {
     // Safety: replicas crash and restart; at any given point in time arbitrarily many replicas may
     // be crashed, but each replica restarts eventually. The cluster must process all requests
     // without split-brain.
-    const ticks_max_requests = 5_000_000;
+    const ticks_max_requests = 10_000_000;
     var tick_total: u64 = 0;
     var tick: u64 = 0;
     while (tick < ticks_max_requests) : (tick += 1) {
