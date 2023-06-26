@@ -1,3 +1,15 @@
+//! Store the latest reply to every active client session.
+//!
+//! This allows them to be resent to the corresponding client if the client missed the original
+//! reply message (e.g. dropped packet).
+//!
+//! - Client replies' headers are redundantly stored in the SuperBlock's ClientSessions trailer.
+//! - Client replies are only stored when `header.size ≠ sizeOf(Header)`
+//!   (the header is in ClientSessions).
+//! - Corrupt client replies can be repaired from other replicas.
+//!
+//! ClientReplies may defer writing the reply immediately – often the reply will be replaced
+//! quickly. But all writes must flush during a checkpoint.
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
