@@ -373,7 +373,7 @@ const NativeClient = struct {
         _ = client;
 
         var context = @intToPtr(*JNIContext, context_ptr);
-        
+
         var env = context.jvm.attachCurrentThreadAsDaemon() catch |err| {
             log.err("Unexpected error attaching the native thread as daemon {}", .{err});
             @panic("JNI: Unexpected error attaching the native thread as daemon");

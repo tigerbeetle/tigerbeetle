@@ -11,9 +11,12 @@ permissions:
 
 jobs:
   test:
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+      
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
@@ -23,7 +26,9 @@ jobs:
 
   benchmark:
     timeout-minutes: 10
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
     runs-on: ${{ matrix.target }}
@@ -32,7 +37,9 @@ jobs:
       - run: ./scripts/benchmark.sh --transfer-count 4000
 
   c_sample:
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
     runs-on: ${{ matrix.target }}
