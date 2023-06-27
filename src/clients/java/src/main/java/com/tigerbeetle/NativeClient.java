@@ -49,14 +49,7 @@ final class NativeClient {
         }
     }
 
-    public void release(final long packet) {
-        if (contextHandle == 0L)
-            return;
-        release(contextHandle, packet);
-    }
-
     public void close() throws Exception {
-
         if (contextHandle != 0L) {
             synchronized (this) {
                 if (contextHandle != 0L) {
@@ -69,8 +62,6 @@ final class NativeClient {
     }
 
     private static native int submit(long contextHandle, Request<?> request);
-
-    private static native void release(long contextHandle, long packet);
 
     private static native long clientInit(int clusterID, String addresses, int concurrencyMax);
 
