@@ -1,6 +1,6 @@
-[submodule "src/clients/java/src/zig/lib/jui"]
+[submodule "src/clients/java/lib/jui"]
 	path = src/clients/java/lib/jui
-	url = https://github.com/zig-java/jui.git
+	url = https://github.com/zig-java/jui
 [submodule "tools/tracy"]
 	path = tools/tracy
 	url = https://github.com/wolfpld/tracy.git
