@@ -83,7 +83,10 @@ pub fn build(b: *std.build.Builder) void {
 
     {
         // "zig build install" moves the server executable to the root folder:
-        const move_cmd = b.addInstallBinFile(tigerbeetle.getOutputSource(), b.pathJoin(&.{ "../../", tigerbeetle.out_filename }));
+        const move_cmd = b.addInstallBinFile(
+            tigerbeetle.getOutputSource(),
+            b.pathJoin(&.{ "../../", tigerbeetle.out_filename }),
+        );
         move_cmd.step.dependOn(&tigerbeetle.step);
 
         var install_step = b.getInstallStep();
@@ -217,6 +220,22 @@ pub fn build(b: *std.build.Builder) void {
                 test_step.dependOn(&demo_exe.step);
             }
         }
+
+        const unit_tests_exe = b.addTestExe("tests", "src/unit_tests.zig");
+        unit_tests_exe.setTarget(target);
+        unit_tests_exe.setBuildMode(mode);
+        unit_tests_exe.addOptions("vsr_options", options);
+        unit_tests_exe.step.dependOn(&tb_client_header_generate.step);
+        unit_tests_exe.setFilter(test_filter);
+        link_tracer_backend(unit_tests_exe, tracer_backend, target);
+
+        // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
+        unit_tests_exe.linkLibC();
+        unit_tests_exe.addIncludeDir("src/clients/c/");
+
+        const unit_tests_exe_step = b.step("test:build", "Build the unit tests");
+        const install_unit_tests_exe = b.addInstallArtifact(unit_tests_exe);
+        unit_tests_exe_step.dependOn(&install_unit_tests_exe.step);
     }
 
     // Clients build:
