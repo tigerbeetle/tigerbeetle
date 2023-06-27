@@ -274,26 +274,28 @@ pub fn main() !void {
         if (simulator.done()) {
             break;
         }
-    } else {
-        if (simulator.primary_outside_of_core()) {
-            stdx.unimplemented("repair requires reachable primary");
-        }
-
-        output.info("no liveness, final cluster state (core={b})", .{simulator.core.mask});
-        simulator.cluster.log_cluster();
-        output.err("you can reproduce this failure with seed={}", .{seed});
-        fatal(.liveness, "no state convergence", .{});
     }
 
-    assert(simulator.done());
-
-    const commits = simulator.cluster.state_checker.commits.items;
-    const last_checksum = commits[commits.len - 1].header.checksum;
-    for (simulator.cluster.aofs) |*aof, replica_index| {
-        if (simulator.core.isSet(replica_index)) {
-            try aof.validate(last_checksum);
+    if (simulator.done()) {
+        const commits = simulator.cluster.state_checker.commits.items;
+        const last_checksum = commits[commits.len - 1].header.checksum;
+        for (simulator.cluster.aofs) |*aof, replica_index| {
+            if (simulator.core.isSet(replica_index)) {
+                try aof.validate(last_checksum);
+            } else {
+                try aof.validate(null);
+            }
+        }
+    } else {
+        if (simulator.core_missing_primary()) {
+            stdx.unimplemented("repair requires reachable primary");
+        } else if (simulator.core_missing_prepare()) |header| {
+            output.warn("no liveness, op={} is not available in core", .{header.op});
         } else {
-            try aof.validate(null);
+            output.info("no liveness, final cluster state (core={b})", .{simulator.core.mask});
+            simulator.cluster.log_cluster();
+            output.err("you can reproduce this failure with seed={}", .{seed});
+            fatal(.liveness, "no state convergence", .{});
         }
     }
 
@@ -436,7 +438,7 @@ pub const Simulator = struct {
     // the core might fail to converge, as parts of the repair protocol rely on primary-sent
     // `.start_view_change` messages. Until we fix this issue, we special-case this scenario in
     // VOPR and don't treat it as a liveness failure.
-    pub fn primary_outside_of_core(simulator: *const Simulator) bool {
+    pub fn core_missing_primary(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
 
         for (simulator.cluster.replicas) |*replica| {
@@ -455,6 +457,43 @@ pub const Simulator = struct {
             }
         }
         return false;
+    }
+
+    // Returns a header for a prepare which can't be repaired by the core due to storage faults.
+    //
+    // When generating a FaultAtlas, we don't try to protect core from excessive errors. Instead,
+    // if the core gets stuck, we verify that this is indeed due to storage faults.
+    pub fn core_missing_prepare(simulator: *const Simulator) ?vsr.Header {
+        assert(simulator.core.count() > 0);
+
+        var missing_op: ?u64 = null;
+        for (simulator.cluster.replicas) |replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                assert(simulator.cluster.replica_health[replica.replica] == .up);
+                assert(replica.status == .normal);
+                if (replica.commit_min < replica.op) {
+                    if (missing_op == null or missing_op.? > replica.commit_min + 1) {
+                        missing_op = replica.commit_min + 1;
+                    }
+                }
+            }
+        }
+
+        if (missing_op == null) return null;
+
+        const missing_header = simulator.cluster.state_checker.header_with_op(missing_op.?);
+
+        for (simulator.cluster.replicas) |replica| {
+            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
+                if (replica.journal.has_clean(&missing_header)) {
+                    // Prepare *was* found on an active core replica, so the header isn't
+                    // actually missing.
+                    return null;
+                }
+            }
+        }
+
+        return missing_header;
     }
 
     fn on_cluster_reply(
