@@ -946,9 +946,10 @@ public class IntegrationTest {
     public void testConcurrentTasks() throws Throwable {
 
         try (var server = new Server()) {
-
-            final int tasks_qty = 32;
-            final int max_concurrency = 32;
+            // Defining the concurrency_max equals to tasks_qty
+            // The goal here is to allow to all requests being submitted at once.
+            final int max_concurrency = 100;
+            final int tasks_qty = max_concurrency;
             final var barrier = new CountDownLatch(tasks_qty);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
@@ -1159,37 +1160,35 @@ public class IntegrationTest {
      * This test asserts that submit a request after the client was closed will fail with
      * IllegalStateException.
      */
-    @Test(expected = IllegalStateException.class)
     public void testClose() throws Throwable {
-
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            // As we call client.close() explicitly,
+            // we don't need to use a try-with-resources block here.
+            var client = new Client(0, new String[] {Server.TB_PORT});
 
-                // Creating the accounts
-                var createAccountErrors = client.createAccounts(accounts);
-                assertTrue(createAccountErrors.getLength() == 0);
+            // Creating the accounts.
+            var createAccountErrors = client.createAccounts(accounts);
+            assertTrue(createAccountErrors.getLength() == 0);
 
-                client.close();
+            client.close();
 
-                // Creating a transfer
-                var transfers = new TransferBatch(2);
+            // Creating a transfer.
+            var transfers = new TransferBatch(2);
 
-                transfers.add();
-                transfers.setId(transfer1Id);
-                transfers.setCreditAccountId(account1Id);
-                transfers.setDebitAccountId(account2Id);
-                transfers.setLedger(720);
-                transfers.setCode((short) 1);
-                transfers.setFlags(TransferFlags.NONE);
-                transfers.setAmount(100);
+            transfers.add();
+            transfers.setId(transfer1Id);
+            transfers.setCreditAccountId(account1Id);
+            transfers.setDebitAccountId(account2Id);
+            transfers.setLedger(720);
+            transfers.setCode((short) 1);
+            transfers.setFlags(TransferFlags.NONE);
+            transfers.setAmount(100);
 
-                client.createTransfers(transfers);
-                assert false;
-            } catch (Throwable any) {
-                throw any;
-            }
+            client.createTransfers(transfers);
+            assert false;
+
         } catch (Throwable any) {
-            throw any;
+            assertEquals(IllegalStateException.class, any.getClass());
         }
     }
 
@@ -1201,12 +1200,11 @@ public class IntegrationTest {
     public void testAsyncTasks() throws Throwable {
 
         try (var server = new Server()) {
-
-            // Defining the concurrencyMax greater than tasks_qty
-            // The goal here is to allow to all requests being submitted at once simultaneously
-            final int tasks_qty = 100;
-
-            try (var client = new Client(0, new String[] {Server.TB_PORT}, tasks_qty)) {
+            // Defining the concurrency_max equals to tasks_qty
+            // The goal here is to allow to all requests being submitted at once.
+            final int max_concurrency = 100;
+            final int tasks_qty = max_concurrency;
+            try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
