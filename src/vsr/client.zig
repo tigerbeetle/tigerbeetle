@@ -194,6 +194,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message_body_size: usize,
         ) void {
             assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
+            assert(message_body_size <= constants.message_body_size_max);
 
             self.register();
             assert(self.request_number > 0);
@@ -235,7 +236,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         /// Sends a request, only setting request_number in the header. Currently only used by
-        /// AOF replay support to replay messages with timestamps.
+        /// AOF replay support to replay messages with timestamps and for reconfiguration by
+        /// the simulator.
         pub fn raw_request(
             self: *Self,
             user_data: u128,

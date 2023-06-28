@@ -843,7 +843,7 @@ pub const ReconfigurationRequest = extern struct {
     reserved: [42]u8 = [_]u8{0} ** 42,
     /// The result of this request. Set to zero by the client and filled-in by the primary when it
     /// accepts a reconfiguration request.
-    result: ReconfigurationResult,
+    result: ReconfigurationResult = .reserved,
 
     pub fn validate(
         request: *const ReconfigurationRequest,
