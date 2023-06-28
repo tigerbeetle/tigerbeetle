@@ -172,12 +172,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         pub fn reset(manifest_log: *ManifestLog) void {
             for (manifest_log.blocks.buffer) |block| std.mem.set(u8, block, 0);
-            manifest_log.blocks.clear();
+
             manifest_log.* = .{
                 .superblock = manifest_log.superblock,
                 .grid = manifest_log.grid,
                 .tree_hash = manifest_log.tree_hash,
-                .blocks = manifest_log.blocks,
+                .blocks = .{ .buffer = manifest_log.blocks.buffer },
             };
         }
 

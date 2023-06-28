@@ -70,14 +70,16 @@ pub const Storage = struct {
 
     pub const NextTick = struct {
         next: ?*NextTick = null,
+        source: NextTickSource,
         callback: fn (next_tick: *NextTick) void,
     };
+
+    pub const NextTickSource = enum { lsm, vsr };
 
     io: *IO,
     fd: os.fd_t,
 
-    next_tick_queue_lsm: FIFO(NextTick) = .{ .name = "storage_next_tick_lsm" },
-    next_tick_queue_vsr: FIFO(NextTick) = .{ .name = "storage_next_tick_vsr" },
+    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
     next_tick_completion_scheduled: bool = false,
     next_tick_completion: IO.Completion = undefined,
 
@@ -89,8 +91,7 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage) void {
-        assert(storage.next_tick_queue_lsm.empty());
-        assert(storage.next_tick_queue_vsr.empty());
+        assert(storage.next_tick_queue.empty());
         assert(storage.fd != IO.INVALID_FILE);
         storage.fd = IO.INVALID_FILE;
     }
@@ -104,15 +105,16 @@ pub const Storage = struct {
 
     pub fn on_next_tick(
         storage: *Storage,
-        source: enum { lsm, vsr },
+        source: NextTickSource,
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
-        next_tick.* = .{ .callback = callback };
-        switch (source) {
-            .lsm => storage.next_tick_queue_lsm.push(next_tick),
-            .vsr => storage.next_tick_queue_vsr.push(next_tick),
-        }
+        next_tick.* = .{
+            .source = source,
+            .callback = callback,
+        };
+
+        storage.next_tick_queue.push(next_tick);
 
         if (!storage.next_tick_completion_scheduled) {
             storage.next_tick_completion_scheduled = true;
@@ -127,7 +129,12 @@ pub const Storage = struct {
     }
 
     pub fn reset_next_tick_lsm(storage: *Storage) void {
-        storage.next_tick_queue_lsm.reset();
+        var next_tick_iterator = storage.next_tick_queue;
+        storage.next_tick_queue.reset();
+
+        while (next_tick_iterator.pop()) |next_tick| {
+            if (next_tick.source != .lsm) storage.next_tick_queue.push(next_tick);
+        }
     }
 
     fn timeout_callback(
@@ -148,17 +155,8 @@ pub const Storage = struct {
             storage.next_tick_completion_scheduled = false;
         }
 
-        // Process the queues in a single loop, since their callbacks may append to each other.
-        while (storage.next_tick_queue_lsm.count > 0 or
-            storage.next_tick_queue_vsr.count > 0)
-        {
-            if (storage.next_tick_queue_lsm.pop()) |next_tick| {
-                next_tick.callback(next_tick);
-            }
-
-            if (storage.next_tick_queue_vsr.pop()) |next_tick| {
-                next_tick.callback(next_tick);
-            }
+        while (storage.next_tick_queue.pop()) |next_tick| {
+            next_tick.callback(next_tick);
         }
     }
 

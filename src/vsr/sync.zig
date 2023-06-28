@@ -6,27 +6,27 @@ const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
-pub const SyncStage = union(enum) {
-    /// Not syncing.
-    none,
+pub const Stage = union(enum) {
+    not_syncing,
 
-    /// The commit lifecycle is in a stage that cannot be interrupted/cancelled.
-    /// We are waiting until that stage completes.
-    /// When it completes, we will terminate the commit and resume sync.
-    cancel_commit,
+    /// The commit lifecycle is in a stage that cannot be interrupted/canceled.
+    /// We are waiting until that uninterruptible stage completes.
+    /// When it completes, we will abort the commit chain and resume sync.
+    /// (State sync will replace any changes the commit made anyway.)
+    cancelling_commit,
 
     /// Waiting for `Grid.cancel()`.
-    cancel_grid,
+    cancelling_grid,
 
     /// We need to sync, but are waiting for a usable `sync_target_max`.
-    request_target,
+    requesting_target,
 
     request_trailers: struct {
-        target: SyncTarget,
-        manifest: SyncTrailer = .{},
-        free_set: SyncTrailer = .{},
-        client_sessions: SyncTrailer = .{},
-        /// Our new VSRState.previous_checkpoint_id.
+        target: Target,
+        manifest: Trailer = .{},
+        free_set: Trailer = .{},
+        client_sessions: Trailer = .{},
+        /// Our new superblock's `vsr_state.previous_checkpoint_id`.
         /// Arrives with command=sync_free_set.
         previous_checkpoint_id: ?u128 = null,
         /// The checksum of the prepare corresponding to checkpoint_op.
@@ -41,53 +41,49 @@ pub const SyncStage = union(enum) {
         }
     },
 
-    superblock_update: struct {
-        target: SyncTarget,
+    updating_superblock: struct {
+        target: Target,
         previous_checkpoint_id: u128,
         checkpoint_op_checksum: u128,
     },
 
-    done,
-
-    pub fn valid_transition(from: std.meta.Tag(SyncStage), to: std.meta.Tag(SyncStage)) bool {
+    pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
         return switch (from) {
-            .none => to == .cancel_commit or
-                to == .cancel_grid or
-                to == .request_target,
-            .cancel_commit => to == .cancel_grid,
-            .cancel_grid => to == .request_target,
-            .request_target => to == .request_target or
+            .not_syncing => to == .cancelling_commit or
+                to == .cancelling_grid or
+                to == .requesting_target,
+            .cancelling_commit => to == .cancelling_grid,
+            .cancelling_grid => to == .requesting_target,
+            .requesting_target => to == .requesting_target or
                 to == .request_trailers,
             .request_trailers => to == .request_trailers or
-                to == .superblock_update,
-            .superblock_update => to == .request_trailers or
-                to == .done,
-            .done => to == .request_trailers or
-                to == .none,
+                to == .updating_superblock,
+            .updating_superblock => to == .request_trailers or
+                to == .not_syncing,
         };
     }
 
-    pub fn target(stage: *const SyncStage) ?SyncTarget {
+    pub fn target(stage: *const Stage) ?Target {
         return switch (stage.*) {
-            .none,
-            .cancel_commit,
-            .cancel_grid,
-            .request_target,
-            .done,
+            .not_syncing,
+            .cancelling_commit,
+            .cancelling_grid,
+            .requesting_target,
             => null,
             .request_trailers => |s| s.target,
-            .superblock_update => |s| s.target,
+            .updating_superblock => |s| s.target,
         };
     }
 };
 
-pub const SyncTargetCandidate = struct {
+/// Uses a separate type from Target to make it hard to mix up canonical/candidate targets.
+pub const TargetCandidate = struct {
     /// The target's checkpoint identifier.
     checkpoint_id: u128,
     /// The op_checkpoint() that corresponds to the checkpoint id.
     checkpoint_op: u64,
 
-    pub fn canonical(target: SyncTargetCandidate) SyncTarget {
+    pub fn canonical(target: TargetCandidate) Target {
         return .{
             .checkpoint_id = target.checkpoint_id,
             .checkpoint_op = target.checkpoint_op,
@@ -95,23 +91,23 @@ pub const SyncTargetCandidate = struct {
     }
 };
 
-pub const SyncTarget = struct {
+pub const Target = struct {
     /// The target's checkpoint identifier.
     checkpoint_id: u128,
     /// The op_checkpoint() that corresponds to the checkpoint id.
     checkpoint_op: u64,
 };
 
-pub const SyncTargetQuorum = struct {
+pub const TargetQuorum = struct {
     /// The latest known checkpoint identifier from every *other* replica.
-    /// Unlike sync_target_max, these SyncTargets are *not* known to be canonical.
-    candidates: [constants.replicas_max]?SyncTargetCandidate =
-        [_]?SyncTargetCandidate{null} ** constants.replicas_max,
+    /// Unlike sync_target_max, these Targets are *not* known to be canonical.
+    candidates: [constants.replicas_max]?TargetCandidate =
+        [_]?TargetCandidate{null} ** constants.replicas_max,
 
     pub fn replace(
-        quorum: *SyncTargetQuorum,
+        quorum: *TargetQuorum,
         replica: u8,
-        candidate: *const SyncTargetCandidate,
+        candidate: *const TargetCandidate,
     ) bool {
         if (quorum.candidates[replica]) |candidate_existing| {
             // Ignore old candidate.
@@ -130,7 +126,7 @@ pub const SyncTargetQuorum = struct {
         return true;
     }
 
-    pub fn count(quorum: *const SyncTargetQuorum, candidate: *const SyncTargetCandidate) usize {
+    pub fn count(quorum: *const TargetQuorum, candidate: *const TargetCandidate) usize {
         var candidates_matching: usize = 0;
         for (quorum.candidates) |candidate_target| {
             if (candidate_target != null and
@@ -147,9 +143,9 @@ pub const SyncTargetQuorum = struct {
 };
 
 /// SuperBlock trailers may be too large to fit in a single message body.
-/// The SyncTrailer assembles the pieces of these trailers, tracking the progress so that
+/// The Trailer assembles the pieces of these trailers, tracking the progress so that
 /// the replica knows how much of the trailer still needs to be requested.
-pub const SyncTrailer = struct {
+pub const Trailer = struct {
     pub const chunk_size_max = constants.sync_trailer_message_body_size_max;
 
     /// The next offset to fetch.
@@ -158,7 +154,7 @@ pub const SyncTrailer = struct {
     final: ?struct { size: u32, checksum: u128 } = null,
 
     pub fn write_chunk(
-        trailer: *SyncTrailer,
+        trailer: *Trailer,
         destination: struct {
             buffer: []align(@alignOf(u128)) u8,
             size: u32,
@@ -212,13 +208,13 @@ pub const SyncTrailer = struct {
     }
 };
 
-test "SyncTrailer chunk sequence" {
+test "Trailer chunk sequence" {
     const total_want = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
 
     var chunk_step: usize = 1;
     while (chunk_step <= total_want.len) : (chunk_step += 1) {
         var total_got: [16]u8 align(@alignOf(u128)) = undefined;
-        var trailer = SyncTrailer{};
+        var trailer = Trailer{};
 
         var chunk_offset: usize = 0;
         while (chunk_offset < total_want.len) {
@@ -244,10 +240,10 @@ test "SyncTrailer chunk sequence" {
     }
 }
 
-test "SyncTrailer past/future chunk" {
+test "Trailer past/future chunk" {
     const total_want = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
     var total_got: [16]u8 align(@alignOf(u128)) = undefined;
-    var trailer = SyncTrailer{};
+    var trailer = Trailer{};
 
     // Ignore a repeated chunk.
     var i: usize = 0;

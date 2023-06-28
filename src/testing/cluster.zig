@@ -206,7 +206,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     .{ .network = network },
                 );
             }
-            errdefer for (clients) |*c| c.deinit(allocator);
+            errdefer for (clients) |*client| client.deinit(allocator);
 
             var state_checker = try StateChecker.init(allocator, .{
                 .cluster_id = options.cluster_id,
@@ -342,10 +342,10 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
         }
 
-        /// Cause the checkpoint identifier of each of the replica to diverge.
+        /// Causes the checkpoint identifier of each replica to diverge.
         /// This simulates a storage determinism bug.
         ///
-        /// (Replica must be running and between compaction beats for this to run.)
+        /// (Replica must be running and also between compaction beats for this to run.)
         pub fn diverge(cluster: *Self, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .up);
 
@@ -527,7 +527,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                         cluster.log_replica(.sync_start, replica.replica);
                         cluster.sync_checker.replica_sync_start(replica);
                     },
-                    .done => {
+                    .not_syncing => {
                         cluster.log_replica(.sync_done, replica.replica);
                         cluster.sync_checker.replica_sync_done(replica);
                         if (cluster.replica_diverged.isSet(replica.replica)) {
@@ -583,7 +583,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             const role: u8 = role: {
                 if (cluster.replica_health[replica_index] == .down) break :role '#';
-                if (replica.sync_stage != .none) break :role '~';
+                if (replica.sync_stage != .not_syncing) break :role '~';
                 if (replica.standby()) break :role '|';
                 if (replica.primary_index(replica.view) == replica.replica) break :role '/';
                 break :role '\\';

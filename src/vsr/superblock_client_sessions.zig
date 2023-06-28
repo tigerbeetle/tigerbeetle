@@ -69,7 +69,7 @@ pub const ClientSessions = struct {
         allocator.free(client_sessions.entries);
     }
 
-    pub fn clear(client_sessions: *ClientSessions) void {
+    pub fn reset(client_sessions: *ClientSessions) void {
         std.mem.set(Entry, client_sessions.entries, std.mem.zeroes(Entry));
         client_sessions.entries_by_client.clearRetainingCapacity();
         client_sessions.entries_free = EntriesFree.initFull();

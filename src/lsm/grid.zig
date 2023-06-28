@@ -267,14 +267,12 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.read_pending_queue.empty());
             assert(grid.read_faulty_queue.empty());
             assert(grid.write_queue.empty());
-            assert(grid.superblock.storage.next_tick_queue_lsm.empty());
 
             grid.cancel_join_callback();
         }
 
         fn cancel_join_callback(grid: *Grid) void {
             assert(grid.canceling != null);
-            assert(grid.superblock.storage.next_tick_queue_lsm.empty());
             assert(grid.read_queue.empty());
             assert(grid.read_pending_queue.empty());
             assert(grid.read_faulty_queue.empty());

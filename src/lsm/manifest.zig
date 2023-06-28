@@ -160,7 +160,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
                 level.* = try Level.init(allocator);
             }
-            errdefer for (levels) |*l| l.deinit(allocator, node_pool);
+            errdefer for (levels) |*level| level.deinit(allocator, node_pool);
 
             var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
             errdefer manifest_log.deinit(allocator);
@@ -173,14 +173,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
-            for (manifest.levels) |*l| l.deinit(allocator, manifest.node_pool);
+            for (manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
 
             manifest.manifest_log.deinit(allocator);
         }
 
         pub fn reset(manifest: *Manifest) void {
             for (manifest.levels) |*level| level.reset();
+
             manifest.manifest_log.reset();
+
             manifest.* = .{
                 .node_pool = manifest.node_pool,
                 .levels = manifest.levels,
@@ -573,8 +575,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         pub fn verify(manifest: *Manifest, snapshot: u64) void {
             // TODO: When state sync is proactive, re-enable this.
-            if (1 == 1) return;
+            if (true) return;
 
+            // TODO s/prev/previous; s/iter/iterator.
             for (manifest.levels) |*level| {
                 var key_max_prev: ?Key = null;
                 var table_info_iter = level.iterator(
